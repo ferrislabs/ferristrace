@@ -69,6 +69,15 @@ docker compose up --detach --no-build --pull always
 Without `COMETTRACE_IMAGE` the compose file builds from this checkout,
 which is what `--build` above does.
 
+Every published image is signed keyless with cosign, bound to the release
+workflow's identity and recorded in the Sigstore transparency log:
+
+```sh
+cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/ferrislabs/ferristrace/\.github/workflows/docker\.yaml@'
+```
+
 ## What to change before this faces anything real
 
 - **The passwords.** Postgres, ClickHouse and the server all default to

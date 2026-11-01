@@ -16,7 +16,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: the tag matches the version the workspace declares
         run: |
           set -eu
@@ -27,13 +29,13 @@ jobs:
             echo "Bump the workspace version in its own commit before tagging."
             exit 1
           }
-      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+          cache: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust-release
-          cache-on-failure: true
+          save-if: false
       - name: the tag is formatted, lint-clean and green
         run: |
           cargo fmt --all -- --check
@@ -43,71 +45,13 @@ jobs:
 
   images:
     needs: check
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-      attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: community
-            features: ""
-            suffix: ""
-          - variant: cloud
-            features: "ee"
-            suffix: "-ee"
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: what is being released
-        id: release
-        run: |
-          set -eu
-          version="${GITHUB_REF_NAME#v}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          case "$version" in
-            *-rc.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
-          esac
-      - name: the tags this variant carries
-        id: tags
-        run: |
-          set -eu
-          version="${{ steps.release.outputs.version }}"
-          suffix="${{ matrix.suffix }}"
-          tags="${IMAGE}:${version}${suffix}"
-          if [ "${{ matrix.variant }}" = "community" ] \
-            && [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
-            tags="$tags,${IMAGE}:latest"
-          fi
-          echo "tags=$tags" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: build and push for both architectures
-        id: push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          build-args: |
-            FEATURES=${{ matrix.features }}
-          tags: ${{ steps.tags.outputs.tags }}
-          push: true
-          provenance: mode=max
-          sbom: true
-          cache-from: type=gha,scope=release-${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=release-${{ matrix.variant }}
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+    uses: ./.github/workflows/docker.yaml
+    with:
+      push: true
 
   release:
     needs: images
@@ -116,16 +60,17 @@ jobs:
       contents: write
       packages: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: the changelog of this tag, from its commits
         id: cliff
         uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: --latest --strip header
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
