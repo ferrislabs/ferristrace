@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::catalogue_router;
-use comettrace_core::{
+use ferristrace_api::catalogue_router;
+use ferristrace_domain::{
     AccountId, Agent, Assigned, Catalogue, Created, Membership, Memberships, OrgRole, OwnerTeam,
     Project, ProjectId, ProjectName, Projects, ReadError, Renamed, Session, SessionError,
     SessionStore, SessionToken, TeamId, TenantId, UnixSeconds, Whoami, WhoamiError,

@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::explore_router;
-use comettrace_core::{
+use ferristrace_api::explore_router;
+use ferristrace_domain::{
     AccountId, Agent, Explore, Membership, Memberships, OrgRole, ProjectId, ReadError,
     ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanEvent, SpanId,
     SpanKind, SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
@@ -340,8 +340,8 @@ async fn an_empty_list_is_an_answer_rather_than_an_error() {
     assert_eq!(body, r#"{"traces":[]}"#);
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }
 
 #[tokio::test]

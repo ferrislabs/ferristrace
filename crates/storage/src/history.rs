@@ -1,4 +1,4 @@
-use comettrace_core::{Consumed, DecompressedBytes, ReadError, TenantId, UsageHistory, Window};
+use ferristrace_domain::{Consumed, DecompressedBytes, ReadError, TenantId, UsageHistory, Window};
 use sqlx::{PgPool, Row};
 
 use crate::postgres::gigabytes_to_bytes;

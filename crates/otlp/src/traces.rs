@@ -1,4 +1,4 @@
-use comettrace_core::{InvalidId, Span, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId};
+use ferristrace_domain::{InvalidId, Span, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::trace::v1::span::Event as ProtoEvent;
 use opentelemetry_proto::tonic::trace::v1::span::SpanKind as ProtoKind;
@@ -123,7 +123,7 @@ fn status_of(code: Option<i32>) -> SpanStatus {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{SpanKind, SpanStatus};
+    use ferristrace_domain::{SpanKind, SpanStatus};
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value::Value};
     use opentelemetry_proto::tonic::resource::v1::Resource;
     use opentelemetry_proto::tonic::trace::v1::{ScopeSpans, Status};
@@ -378,7 +378,7 @@ mod tests {
     }
 
     mod proptests {
-        use comettrace_core::{InvalidId, SpanId, TraceId};
+        use ferristrace_domain::{InvalidId, SpanId, TraceId};
         use proptest::prelude::*;
 
         use super::*;

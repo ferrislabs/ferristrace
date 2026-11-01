@@ -1,0 +1,17 @@
+[package]
+name = "ferristrace-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ferristrace-application.workspace = true
+ferristrace-domain.workspace = true
+ferristrace-macros.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[lints]
+workspace = true

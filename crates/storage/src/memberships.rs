@@ -1,4 +1,4 @@
-use comettrace_core::{AccountId, Membership, Memberships, OrgRole, TenantId, WhoamiError};
+use ferristrace_domain::{AccountId, Membership, Memberships, OrgRole, TenantId, WhoamiError};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -146,7 +146,7 @@ pub(crate) fn read_role(spelling: &str) -> Option<OrgRole> {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::OrgRole;
+    use ferristrace_domain::OrgRole;
 
     use super::read_role;
 

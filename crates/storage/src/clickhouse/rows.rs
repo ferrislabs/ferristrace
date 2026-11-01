@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use clickhouse::Row;
-use comettrace_core::{
+use ferristrace_domain::{
     EXCEPTION_EVENT, Fingerprint, PRINT_BYTES, ProjectId, Scope, SinkError, Span, SpanEvent,
     SpanKind, SpanStatus, UnixSeconds,
 };

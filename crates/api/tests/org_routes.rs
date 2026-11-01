@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::org_router;
-use comettrace_core::{
+use ferristrace_api::org_router;
+use ferristrace_domain::{
     AccountId, Agent, Membership, Memberships, NoPhotos, OrgName, OrgRole, OrgSettings,
     Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ReadError,
     Session, SessionError, SessionStore, SessionToken, TenantId, UnixSeconds, Whoami, WhoamiError,

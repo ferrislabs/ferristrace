@@ -8,7 +8,7 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use comettrace_core::{
+use ferristrace_domain::{
     BadName, BadPhoto, MAX_PHOTO_BYTES, Memberships, OrgName, OrgSettings, Organisation, Orgs,
     Photo, PhotoError, Photos, Portrait, SessionStore, SettingError, TenantId,
 };

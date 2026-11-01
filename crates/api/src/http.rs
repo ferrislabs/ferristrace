@@ -7,10 +7,10 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use bytes::Bytes;
-use comettrace_core::{
+use ferristrace_domain::{
     DecompressedBytes, Ingest, Payload, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter,
 };
-use comettrace_otlp::decode_traces;
+use ferristrace_otlp::decode_traces;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
 use tower_http::decompression::RequestDecompressionLayer;

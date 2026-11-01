@@ -1,12 +1,12 @@
 [package]
-name = "comettrace-storage"
+name = "ferristrace-storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-comettrace-core.workspace = true
+ferristrace-domain.workspace = true
 clickhouse.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -34,7 +34,7 @@ zeroize.workspace = true
 axum.workspace = true
 base64.workspace = true
 clickhouse = { workspace = true, features = ["test-util"] }
-comettrace-core = { workspace = true, features = ["testing"] }
+ferristrace-domain = { workspace = true, features = ["testing"] }
 jsonwebtoken.workspace = true
 rsa = { version = "0.9.10", features = ["getrandom"] }
 serde_json.workspace = true

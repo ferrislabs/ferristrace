@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Agent, Clock, Email, LiveSession, SESSION_PREFIX, Session, SessionError, SessionId,
     SessionLifetime, SessionRoll, SessionStore, SessionToken, TenantId, UnixSeconds,
 };
@@ -203,7 +203,7 @@ fn nanos_to_seconds(nanos: i64) -> UnixSeconds {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::SESSION_PREFIX;
+    use ferristrace_domain::SESSION_PREFIX;
 
     use super::mint;
 

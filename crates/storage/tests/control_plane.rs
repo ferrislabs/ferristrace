@@ -1,8 +1,8 @@
-use comettrace_core::{
+use ferristrace_domain::{
     DecompressedBytes, Email, IngestKey, Issuer, ProjectName, Projects, ProvisionPolicy,
     ResolvedIdentity, Scope, SecretHash, Subject, TenantDirectory, TenantId, UnknownKey, testing,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     AccountError, Allowance, CONTROL_PLANE, FixedClock, OVERAGE_FEATURE, PostgresAccounts,
     PostgresDirectory, PostgresProjects, ProjectError, SELF_HOSTED_PLAN,
 };
@@ -276,7 +276,7 @@ async fn plan_with(
     id
 }
 
-async fn org_on(pool: &PgPool, plan: uuid::Uuid) -> comettrace_core::TenantId {
+async fn org_on(pool: &PgPool, plan: uuid::Uuid) -> ferristrace_domain::TenantId {
     let org = uuid::Uuid::new_v4();
     sqlx::query("INSERT INTO orgs (id, name, plan_id) VALUES ($1, 'Acme', $2)")
         .bind(org)
@@ -284,7 +284,7 @@ async fn org_on(pool: &PgPool, plan: uuid::Uuid) -> comettrace_core::TenantId {
         .execute(pool)
         .await
         .expect("an org");
-    comettrace_core::TenantId::new(org)
+    ferristrace_domain::TenantId::new(org)
 }
 
 #[tokio::test]
@@ -295,7 +295,7 @@ async fn a_plan_without_an_ingest_limit_loads_as_unlimited() {
     let plan = plan_with(&pool, "generous", None, &[]).await;
     let tenant = org_on(&pool, plan).await;
 
-    let allowances = comettrace_storage::load_allowances(&pool)
+    let allowances = ferristrace_storage::load_allowances(&pool)
         .await
         .expect("the allowances load");
 
@@ -310,7 +310,7 @@ async fn a_plan_without_the_overage_feature_caps_hard() {
     let plan = plan_with(&pool, "free", Some(2), &[]).await;
     let tenant = org_on(&pool, plan).await;
 
-    let allowances = comettrace_storage::load_allowances(&pool)
+    let allowances = ferristrace_storage::load_allowances(&pool)
         .await
         .expect("the allowances load");
 
@@ -330,7 +330,7 @@ async fn a_plan_carrying_the_overage_feature_allows_the_overage() {
     let plan = plan_with(&pool, "pro", Some(1), &[OVERAGE_FEATURE, "sso"]).await;
     let tenant = org_on(&pool, plan).await;
 
-    let allowances = comettrace_storage::load_allowances(&pool)
+    let allowances = ferristrace_storage::load_allowances(&pool)
         .await
         .expect("the allowances load");
 
@@ -347,9 +347,9 @@ async fn an_org_on_the_default_plan_is_unlimited() {
     let Some(pool) = migrated("control_default_plan").await else {
         return;
     };
-    let tenant = comettrace_core::TenantId::new(seeded_org(&pool).await);
+    let tenant = ferristrace_domain::TenantId::new(seeded_org(&pool).await);
 
-    let allowances = comettrace_storage::load_allowances(&pool)
+    let allowances = ferristrace_storage::load_allowances(&pool)
         .await
         .expect("the allowances load");
 

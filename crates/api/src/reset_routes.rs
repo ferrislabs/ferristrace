@@ -7,7 +7,7 @@ use axum::http::header::HeaderName;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
+use ferristrace_domain::{
     Email, Mailer, Password, PasswordHasher, ResetError, ResetPassword, ResetStore, ResetToken,
     WeakPassword,
 };

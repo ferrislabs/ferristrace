@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AuthError, AuthProvider, Authorizer, CodeVerifier, Email, Issuer, PendingFlow,
     ResolvedIdentity, SignInProof, Subject,
 };

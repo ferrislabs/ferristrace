@@ -1,4 +1,4 @@
-use comettrace_core::{OrgName, Organisation, Orgs, Portrait, ReadError, TenantId};
+use ferristrace_domain::{OrgName, Organisation, Orgs, Portrait, ReadError, TenantId};
 use sqlx::{PgPool, Row};
 
 use crate::accounts::read_portrait;

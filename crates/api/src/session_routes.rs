@@ -6,7 +6,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
-use comettrace_core::{LiveSession, RollError, SessionId, SessionRoll, SessionStore, Sessions};
+use ferristrace_domain::{LiveSession, RollError, SessionId, SessionRoll, SessionStore, Sessions};
 use serde::Serialize;
 use uuid::Uuid;
 

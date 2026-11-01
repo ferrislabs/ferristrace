@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     Assigned, Created, OwnerTeam, Project, ProjectId, ProjectName, Projects, ReadError, Renamed,
     TeamId, TenantId,
 };

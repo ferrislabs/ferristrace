@@ -1,5 +1,5 @@
-use comettrace_core::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
-use comettrace_storage::{CONTROL_PLANE, FixedClock, RedisMeter, SELF_HOSTED_PLAN};
+use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
+use ferristrace_storage::{CONTROL_PLANE, FixedClock, RedisMeter, SELF_HOSTED_PLAN};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;

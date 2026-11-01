@@ -1,4 +1,4 @@
-use comettrace_core::UnixSeconds;
+use ferristrace_domain::UnixSeconds;
 use time::{Date, Month, OffsetDateTime};
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
@@ -71,7 +71,7 @@ impl BillingHour {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::UnixSeconds;
+    use ferristrace_domain::UnixSeconds;
 
     use super::{BillingHour, BillingMonth};
 

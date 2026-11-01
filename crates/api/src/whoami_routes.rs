@@ -8,7 +8,7 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, AccountName, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, Memberships,
     Photo, PhotoError, Photos, Portrait, Profile, ProfileError, SessionStore, SessionToken,
     TenantId, Who,

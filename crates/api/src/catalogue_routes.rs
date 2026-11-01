@@ -6,7 +6,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, put};
-use comettrace_core::{
+use ferristrace_domain::{
     BadProjectName, Catalogue, CatalogueError, Memberships, Project, ProjectId, ProjectName,
     Projects, SessionStore, TeamId, TenantId,
 };

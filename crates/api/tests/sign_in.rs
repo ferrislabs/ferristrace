@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
 use axum::http::{Request, StatusCode};
-use comettrace_api::{SessionCookie, auth_router};
-use comettrace_core::{
+use ferristrace_api::{SessionCookie, auth_router};
+use ferristrace_domain::{
     AccountDirectory, AccountId, Agent, AuthError, AuthProvider, AuthSources, FactorError,
     FactorKind, Gate, Issuer, NoProvider, NoSecondFactor, ProvisionPolicy, ResolvedIdentity,
     SecretHash, Session, SessionError, SessionStore, SessionToken, SignIn, SignInProof, Subject,
@@ -319,6 +319,6 @@ async fn a_wrong_password_opens_no_challenge_either() {
     assert!(!sessions.holds(TOKEN));
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }

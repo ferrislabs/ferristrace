@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Named, Owned, ProjectId, ReadError, Squads, Team, TeamId, TeamName, TenantId,
 };
 use sqlx::{PgPool, Row};

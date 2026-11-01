@@ -2,7 +2,7 @@ use core::fmt;
 
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use comettrace_core::{SECRET_BYTES, TotpSecret};
+use ferristrace_domain::{SECRET_BYTES, TotpSecret};
 use zeroize::Zeroize;
 
 const NONCE_BYTES: usize = 12;
@@ -57,7 +57,7 @@ impl fmt::Debug for SecretSeal {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{SECRET_BYTES, TotpSecret};
+    use ferristrace_domain::{SECRET_BYTES, TotpSecret};
 
     use super::{BadKey, SecretSeal};
 

@@ -2,7 +2,7 @@ use core::future::Future;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use comettrace_core::{Scope, SinkError, Span, SpanSink};
+use ferristrace_domain::{Scope, SinkError, Span, SpanSink};
 
 const DEFAULT_RETENTION: usize = 1024;
 
@@ -76,7 +76,7 @@ impl SpanSink for MemorySink {
 mod tests {
     use std::collections::BTreeMap;
 
-    use comettrace_core::{Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId};
+    use ferristrace_domain::{Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId};
     use uuid::Uuid;
 
     use super::MemorySink;

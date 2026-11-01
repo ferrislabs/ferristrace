@@ -8,7 +8,7 @@ use axum::http::header::HeaderName;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use comettrace_core::{
+use ferristrace_domain::{
     Explore, ExploreError, Memberships, ProjectId, ServiceSummary, SessionStore, SessionToken,
     Span, SpanKind, SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder,
     TraceSummary, Window,

@@ -1,13 +1,13 @@
 [package]
-name = "comettrace-api"
+name = "ferristrace-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-comettrace-core.workspace = true
-comettrace-otlp.workspace = true
+ferristrace-domain.workspace = true
+ferristrace-otlp.workspace = true
 axum.workspace = true
 bytes.workspace = true
 hex.workspace = true
@@ -22,8 +22,8 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-comettrace-core.workspace = true
-comettrace-storage.workspace = true
+ferristrace-domain.workspace = true
+ferristrace-storage.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
 serde = { workspace = true, features = ["derive"] }

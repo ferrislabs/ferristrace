@@ -1,5 +1,5 @@
-use comettrace_core::{AccountId, Admitted, Email, Member, OrgRole, Roll, SecretHash, TenantId};
-use comettrace_storage::{
+use ferristrace_domain::{AccountId, Admitted, Email, Member, OrgRole, Roll, SecretHash, TenantId};
+use ferristrace_storage::{
     Argon2Hasher, CONTROL_PLANE, FixedClock, PostgresMemberships, PostgresRoster,
 };
 use sqlx::postgres::PgPoolOptions;

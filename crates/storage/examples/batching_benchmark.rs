@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use clickhouse::Client;
-use comettrace_core::{Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId};
-use comettrace_storage::{BatchLimits, ClickhouseMigrator, ClickhouseSink, SystemClock};
+use ferristrace_domain::{Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId};
+use ferristrace_storage::{BatchLimits, ClickhouseMigrator, ClickhouseSink, SystemClock};
 use uuid::Uuid;
 
 const DATABASE: &str = "comettrace_benchmark";

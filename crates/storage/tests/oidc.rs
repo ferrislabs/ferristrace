@@ -6,8 +6,8 @@ use axum::extract::State;
 use axum::routing::{get, post};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use comettrace_core::{AuthError, AuthProvider, SignInProof};
-use comettrace_storage::{OidcProvider, OidcSettings};
+use ferristrace_domain::{AuthError, AuthProvider, SignInProof};
+use ferristrace_storage::{OidcProvider, OidcSettings};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use rsa::pkcs1::EncodeRsaPrivateKey;
 use rsa::traits::PublicKeyParts;
@@ -194,8 +194,8 @@ async fn a_password_proof_belongs_to_another_source() {
 
     let refused = provider
         .sign_in(SignInProof::Password {
-            email: comettrace_core::Email::try_from(ADDRESS).expect("an address"),
-            password: comettrace_core::Password::new("correct horse"),
+            email: ferristrace_domain::Email::try_from(ADDRESS).expect("an address"),
+            password: ferristrace_domain::Password::new("correct horse"),
         })
         .await;
 

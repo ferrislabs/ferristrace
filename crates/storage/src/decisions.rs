@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Decision, Fingerprint, IssueDecisions, ProjectId, ReadError, Recorded, Status,
 };
 use sqlx::{PgPool, Row};

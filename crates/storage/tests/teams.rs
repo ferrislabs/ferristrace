@@ -1,8 +1,8 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Named, OrgRole, ProjectId, ProjectName, Roll, Squads, Team, TeamId, TeamName,
     TenantId,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     CONTROL_PLANE, PostgresMemberships, PostgresProjects, PostgresRoster, PostgresTeams,
 };
 use sqlx::postgres::PgPoolOptions;
@@ -435,8 +435,8 @@ async fn a_member_removed_through_the_roster_is_off_the_teams_too() {
 
     let removed = PostgresRoster::new(
         pool.clone(),
-        comettrace_storage::Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"),
-        comettrace_storage::SystemClock,
+        ferristrace_storage::Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"),
+        ferristrace_storage::SystemClock,
     )
     .remove(org, leaver)
     .await

@@ -7,7 +7,7 @@ use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{get, post};
-use comettrace_core::{
+use ferristrace_domain::{
     Answer, Clock, Confirmed, FactorError, FactorKind, FactorStore, NotACode, RecoveryCode,
     SecondFactors, SecondStep, SessionStore, TotpCode, TotpSecret,
 };
@@ -281,7 +281,7 @@ impl IntoResponse for SecondFactorRefused {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{Answer, FactorKind, RecoveryCode};
+    use ferristrace_domain::{Answer, FactorKind, RecoveryCode};
 
     use super::{
         Answered, EnrolmentSaid, MintedSaid, SecondFactorRefused, StandingSaid, answer_of,

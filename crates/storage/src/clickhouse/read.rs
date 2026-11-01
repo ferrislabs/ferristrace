@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
-use comettrace_core::{
+use ferristrace_domain::{
     ProjectId, ReadError, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader,
     SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
@@ -333,7 +333,7 @@ pub(crate) fn refused(error: &clickhouse::error::Error) -> ReadError {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{SpanKind, SpanStatus, TraceOrder};
+    use ferristrace_domain::{SpanKind, SpanStatus, TraceOrder};
 
     use super::{ONE_TRACE, SUMMARIES, ordering, read_kind, read_status};
 

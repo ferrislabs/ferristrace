@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::me_router;
-use comettrace_core::{
+use ferristrace_api::me_router;
+use ferristrace_domain::{
     AccountId, AccountName, Accounts, Agent, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos,
     OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Profile, ReadError, Session,
     SessionError, SessionStore, SessionToken, TenantId, UnixSeconds, Whoami, WhoamiError,
@@ -621,6 +621,6 @@ async fn a_deployment_with_no_object_store_says_so() {
     assert_eq!(kept.portrait(), None);
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use comettrace_core::{Clock, CodeVerifier, FlowError, OidcFlows, PendingFlow, UnixSeconds};
+use ferristrace_domain::{Clock, CodeVerifier, FlowError, OidcFlows, PendingFlow, UnixSeconds};
 use sqlx::{PgPool, Row};
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;

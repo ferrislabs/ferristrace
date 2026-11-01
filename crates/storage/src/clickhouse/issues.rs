@@ -1,5 +1,5 @@
 use clickhouse::{Client, Row};
-use comettrace_core::{
+use ferristrace_domain::{
     Counted, Fingerprint, IssueFilter, IssueReader, Occurrence, ProjectId, ReadError, TenantId,
     Window,
 };
@@ -173,7 +173,7 @@ fn read_occurrence(row: OccurrenceRow) -> Result<Occurrence, ReadError> {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::EXCEPTION_EVENT;
+    use ferristrace_domain::EXCEPTION_EVENT;
 
     use super::{COUNTED, OCCURRENCES};
     use crate::clickhouse::rows::{EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE, EXCEPTION_TYPE};

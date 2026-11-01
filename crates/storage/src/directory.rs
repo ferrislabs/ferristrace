@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use comettrace_core::{IngestKey, Scope, TenantDirectory, TenantId, UnknownKey};
+use ferristrace_domain::{IngestKey, Scope, TenantDirectory, TenantId, UnknownKey};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -58,7 +58,7 @@ fn digest_of(plaintext: &str) -> Digest32 {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{IngestKey, Scope, TenantDirectory, TenantId, UnknownKey, testing};
+    use ferristrace_domain::{IngestKey, Scope, TenantDirectory, TenantId, UnknownKey, testing};
     use uuid::Uuid;
 
     use super::StaticDirectory;

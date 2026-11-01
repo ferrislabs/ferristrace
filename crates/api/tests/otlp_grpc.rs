@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use comettrace_api::trace_server;
-use comettrace_core::{DecompressedBytes, Ingest, QuotaPolicy, TenantId, Unmetered};
-use comettrace_storage::{Allowance, MemoryMeter, MemorySink, StaticDirectory, StaticQuota};
+use ferristrace_api::trace_server;
+use ferristrace_domain::{DecompressedBytes, Ingest, QuotaPolicy, TenantId, Unmetered};
+use ferristrace_storage::{Allowance, MemoryMeter, MemorySink, StaticDirectory, StaticQuota};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_client::TraceServiceClient;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value::Value};

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{Request, StatusCode};
-use comettrace_api::{SessionCookie, oidc_router};
-use comettrace_core::{
+use ferristrace_api::{SessionCookie, oidc_router};
+use ferristrace_domain::{
     AccountDirectory, AccountId, Agent, AuthError, AuthProvider, Authorizer, CodeVerifier,
     FederatedSignIn, FlowError, Issuer, OidcFlows, PendingFlow, ProvisionPolicy, ResolvedIdentity,
     Session, SessionError, SessionStore, SessionToken, SignInProof, Subject, TenantId,
@@ -43,7 +43,7 @@ impl AuthProvider for Provider {
         Ok(ResolvedIdentity {
             issuer: Issuer::federated("https://id.example").expect("a url"),
             subject: Subject::try_from("subject").expect("a subject"),
-            email: comettrace_core::Email::try_from("person@example.com").expect("an address"),
+            email: ferristrace_domain::Email::try_from("person@example.com").expect("an address"),
             email_verified: true,
         })
     }

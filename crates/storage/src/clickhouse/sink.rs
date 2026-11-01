@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clickhouse::inserter::Inserter;
 use clickhouse::{Client, error::Error as ClickhouseError};
-use comettrace_core::{Clock, Scope, SinkError, Span, SpanSink};
+use ferristrace_domain::{Clock, Scope, SinkError, Span, SpanSink};
 use tokio::sync::Mutex;
 
 use crate::clickhouse::rows::{EventRow, SpanRow};

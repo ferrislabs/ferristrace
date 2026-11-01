@@ -7,7 +7,7 @@ use axum::http::header::{HeaderName, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
+use ferristrace_domain::{
     AccountDirectory, AuthError, AuthProvider, Email, FactorError, Gate, Opened, Password,
     SessionError, SessionStore, SignIn, SignInError, SignInProof,
 };
@@ -170,7 +170,7 @@ impl IntoResponse for SignInRefused {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::FactorKind;
+    use ferristrace_domain::FactorKind;
 
     use super::SecondStepAsked;
 

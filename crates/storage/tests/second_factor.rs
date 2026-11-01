@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, ChallengeToken, FactorError, FactorKind, FactorStore, Gate, RecoveryCode,
     SECRET_BYTES, SecretHash, Step, TotpSecret,
 };
-use comettrace_storage::{CONTROL_PLANE, FixedClock, PostgresFactors, SecretSeal};
+use ferristrace_storage::{CONTROL_PLANE, FixedClock, PostgresFactors, SecretSeal};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;

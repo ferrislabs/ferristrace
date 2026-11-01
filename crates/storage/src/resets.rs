@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Clock, Email, PasswordHash, ResetError, ResetStore, SecretHash, UnixSeconds,
 };
 use sqlx::{PgPool, Row};

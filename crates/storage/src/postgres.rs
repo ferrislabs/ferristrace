@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use comettrace_core::{DecompressedBytes, TenantId};
+use ferristrace_domain::{DecompressedBytes, TenantId};
 use sqlx::migrate::Migrator;
 use sqlx::{PgPool, Row};
 
@@ -50,7 +50,7 @@ pub(crate) fn gigabytes_to_bytes(gigabytes: i32) -> Option<DecompressedBytes> {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::DecompressedBytes;
+    use ferristrace_domain::DecompressedBytes;
 
     use super::{BYTES_PER_GIGABYTE, gigabytes_to_bytes};
 

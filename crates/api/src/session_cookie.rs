@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
 use axum::http::header::{COOKIE, HeaderValue, USER_AGENT};
-use comettrace_core::{Agent, ChallengeToken, SessionToken};
+use ferristrace_domain::{Agent, ChallengeToken, SessionToken};
 
 const NAME: &str = "ct_session";
 const CHALLENGE: &str = "ct_second_step";
@@ -88,7 +88,7 @@ fn rendered(pair: &str, max_age: u32, secure: bool) -> Option<HeaderValue> {
 mod tests {
     use axum::http::HeaderMap;
     use axum::http::header::{COOKIE, HeaderValue};
-    use comettrace_core::{ChallengeToken, SessionToken};
+    use ferristrace_domain::{ChallengeToken, SessionToken};
 
     use super::{SessionCookie, answered, carried, challenged, challenging, cleared, opened};
 

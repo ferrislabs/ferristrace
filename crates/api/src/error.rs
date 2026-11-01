@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use comettrace_core::{IngestError, SinkError, UnknownKey};
-use comettrace_otlp::DecodeError;
+use ferristrace_domain::{IngestError, SinkError, UnknownKey};
+use ferristrace_otlp::DecodeError;
 use tonic::Status;
 
 #[derive(Debug, thiserror::Error)]

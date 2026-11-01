@@ -6,7 +6,7 @@ use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use comettrace_core::{
+use ferristrace_domain::{
     AccountDirectory, AuthError, AuthProvider, Authorizer, FederatedError, FederatedSignIn,
     FlowError, OidcFlows, SessionStore,
 };

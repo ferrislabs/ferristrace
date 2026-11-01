@@ -1,7 +1,7 @@
 use core::fmt;
 use core::fmt::Write as _;
 
-use comettrace_core::{Clock, Photo, PhotoError, Photos, Pictured, Portrait};
+use ferristrace_domain::{Clock, Photo, PhotoError, Photos, Pictured, Portrait};
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::{Client, Method, StatusCode, Url};
 use sha2::{Digest, Sha256};
@@ -284,7 +284,7 @@ fn string_to_sign(stamp: &str, scope: &str, canonical: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{AccountId, Photo, PhotoKind, Pictured, Portrait, TenantId};
+    use ferristrace_domain::{AccountId, Photo, PhotoKind, Pictured, Portrait, TenantId};
     use uuid::Uuid;
 
     use super::{

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use comettrace_core::{
+use ferristrace_domain::{
     DecompressedBytes, Ingest, Payload, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter,
 };
-use comettrace_otlp::spans_of;
+use ferristrace_otlp::spans_of;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
     TraceService, TraceServiceServer,
 };

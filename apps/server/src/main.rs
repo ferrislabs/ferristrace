@@ -10,13 +10,13 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
-use comettrace_api::{
+use ferristrace_api::{
     SessionCookie, SignInMethods, auth_router, catalogue_router, explore_router, health_router,
     issue_router, me_router, methods_router, oidc_router, org_router, password_router,
     reset_router, roster_router, router, second_factor_router, session_router, team_router,
     trace_server, usage_router, web_router,
 };
-use comettrace_core::{
+use ferristrace_domain::{
     AuthSources, Catalogue, ChangePassword, Clock, DecompressedBytes, Email, Explore,
     FederatedSignIn, Ingest, IngestKey, Issues, Mailer, Metering, NoPhotos, NoProvider,
     OrgSettings, Photo, PhotoError, Photos, Pictured, Portrait, Profile, ProvisionPolicy,
@@ -24,7 +24,7 @@ use comettrace_core::{
     SessionLifetime, Sessions, SignIn, SinkError, Span, SpanSink, Squad, TenantDirectory, TenantId,
     UnknownKey, UsageMeter, UsageReader, Whoami,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     Allowance, Argon2Hasher, CONTROL_PLANE, ClickhouseIssues, ClickhouseReader, ClickhouseSink,
     LocalPasswordProvider, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
     PhotoStoreSettings, PostgresAccounts, PostgresDecisions, PostgresDirectory, PostgresFactors,

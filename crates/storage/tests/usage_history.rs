@@ -1,5 +1,5 @@
-use comettrace_core::{DecompressedBytes, TenantId, UsageHistory, Window};
-use comettrace_storage::{CONTROL_PLANE, PostgresMemberships, PostgresUsage};
+use ferristrace_domain::{DecompressedBytes, TenantId, UsageHistory, Window};
+use ferristrace_storage::{CONTROL_PLANE, PostgresMemberships, PostgresUsage};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;

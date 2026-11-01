@@ -1,15 +1,19 @@
 [package]
-name = "comettrace"
+name = "ferristrace-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
+[[bin]]
+name = "comettrace"
+path = "src/main.rs"
+
 [dependencies]
-comettrace-api.workspace = true
-comettrace-core.workspace = true
-comettrace-storage.workspace = true
-comettrace-ee = { workspace = true, optional = true }
+ferristrace-api.workspace = true
+ferristrace-domain.workspace = true
+ferristrace-storage.workspace = true
+ferristrace-ee = { workspace = true, optional = true }
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
@@ -24,7 +28,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [features]
-ee = ["dep:comettrace-ee"]
+ee = ["dep:ferristrace-ee"]
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }

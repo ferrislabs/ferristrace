@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clickhouse::Client;
-use comettrace_core::Clock;
+use ferristrace_domain::Clock;
 
 use crate::clickhouse::{
     BatchLimits, ClickhouseIssues, ClickhouseMigrator, ClickhouseReader, ClickhouseSink,

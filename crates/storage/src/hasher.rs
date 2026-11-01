@@ -1,7 +1,7 @@
 use argon2::password_hash::Error as HashingError;
 use argon2::password_hash::phc::PasswordHash as EncodedHash;
 use argon2::{Algorithm, Argon2, Params, PasswordHasher as _, PasswordVerifier as _, Version};
-use comettrace_core::{HashError, Password, PasswordCheck, PasswordHash, PasswordHasher};
+use ferristrace_domain::{HashError, Password, PasswordCheck, PasswordHash, PasswordHasher};
 use tokio::task;
 
 const OWASP_MEMORY_KIB: u32 = 19 * 1024;

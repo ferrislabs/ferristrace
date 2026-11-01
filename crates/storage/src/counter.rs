@@ -1,6 +1,6 @@
 use core::fmt;
 
-use comettrace_core::{Clock, DecompressedBytes, TenantId, UsageMeter, UsageReader};
+use ferristrace_domain::{Clock, DecompressedBytes, TenantId, UsageMeter, UsageReader};
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use sqlx::{PgPool, Row};

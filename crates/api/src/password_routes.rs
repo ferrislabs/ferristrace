@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
+use ferristrace_domain::{
     AuthProvider, ChangeError, ChangePassword, Password, PasswordHasher, ResetStore, SessionStore,
 };
 use serde::Deserialize;

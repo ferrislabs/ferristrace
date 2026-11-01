@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
-use comettrace_core::{
+use ferristrace_domain::{
     Bootstrapped, ControlPlane, Email, OrgName, OrgRole, ProjectId, ProjectName, Provisioning,
     ResetToken, TenantId,
 };
-use comettrace_storage::{INVITE_WINDOW, PostgresControlPlane};
+use ferristrace_storage::{INVITE_WINDOW, PostgresControlPlane};
 use uuid::Uuid;
 
 use crate::config::Config;

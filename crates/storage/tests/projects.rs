@@ -1,8 +1,8 @@
-use comettrace_core::{
+use ferristrace_domain::{
     Assigned, Created, ProjectId, ProjectName, Projects, ReadError, Renamed, Squads, TeamId,
     TeamName, TenantId,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     CONTROL_PLANE, FixedClock, PostgresDirectory, PostgresMemberships, PostgresProjects,
     PostgresTeams,
 };

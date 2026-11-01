@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PasswordHash, PhotoKind,
     Portrait, ProvisionPolicy, ReadError, ResolvedIdentity,
 };

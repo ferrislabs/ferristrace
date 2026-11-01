@@ -2,7 +2,7 @@ use core::future::Future;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use comettrace_core::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
+use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
 
 #[derive(Debug, Default)]
 pub struct MemoryMeter {
@@ -54,7 +54,7 @@ impl UsageReader for MemoryMeter {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{DecompressedBytes, TenantId, UsageMeter};
+    use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter};
     use uuid::Uuid;
 
     use super::MemoryMeter;

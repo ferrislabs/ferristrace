@@ -1,4 +1,4 @@
-use comettrace_core::{
+use ferristrace_domain::{
     Clock, IngestKey, ProjectId, Scope, SecretHash, TenantDirectory, TenantId, UnixSeconds,
 };
 use sqlx::{PgPool, Row};
@@ -96,9 +96,9 @@ impl<C: Clock> PostgresDirectory<C> {
 }
 
 impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
-    async fn resolve(&self, key: &IngestKey) -> Result<Scope, comettrace_core::UnknownKey> {
+    async fn resolve(&self, key: &IngestKey) -> Result<Scope, ferristrace_domain::UnknownKey> {
         let Some((prefix, secret)) = key.split() else {
-            return Err(comettrace_core::UnknownKey);
+            return Err(ferristrace_domain::UnknownKey);
         };
 
         let found = sqlx::query(
@@ -111,21 +111,21 @@ impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused a key lookup");
-            comettrace_core::UnknownKey
+            ferristrace_domain::UnknownKey
         })?;
 
         let offered = SecretHash::of(secret);
         let Some(row) = found else {
-            return Err(comettrace_core::UnknownKey);
+            return Err(ferristrace_domain::UnknownKey);
         };
         let Some(stored) = row.get::<Option<Vec<u8>>, _>("secret_digest") else {
-            return Err(comettrace_core::UnknownKey);
+            return Err(ferristrace_domain::UnknownKey);
         };
         let Ok(stored) = <[u8; 32]>::try_from(stored.as_slice()) else {
-            return Err(comettrace_core::UnknownKey);
+            return Err(ferristrace_domain::UnknownKey);
         };
         if SecretHash::from_bytes(stored) != offered {
-            return Err(comettrace_core::UnknownKey);
+            return Err(ferristrace_domain::UnknownKey);
         }
 
         self.note_sighting(row.get("id"), row.get("last_used_at"))

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Admitted, Clock, Email, Member, OrgRole, ReadError, Roll, SecretHash, TenantId,
     UnixSeconds,
 };

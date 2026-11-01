@@ -1,11 +1,11 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, AuthSources, CodeVerifier,
     Email, FlowError, Issuer, Mailer, NoProvider, NoSecondFactor, OidcFlows, Opened, Password,
     PasswordCheck, PasswordHasher, PendingFlow, PhotoKind, Portrait, ProvisionPolicy, ResetError,
     ResetPassword, ResetStore, ResetToken, ResolvedIdentity, SessionError, SessionId,
     SessionLifetime, SessionRoll, SessionStore, SignIn, SignInProof, Subject,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     AccountError, Argon2Hasher, CONTROL_PLANE, FixedClock, LocalPasswordProvider, PostgresAccounts,
     PostgresFlows, PostgresResets, PostgresSessions,
 };

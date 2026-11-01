@@ -1,7 +1,7 @@
 use core::fmt;
 use std::time::Duration;
 
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, ControlPlane, Email, HashError, IngestKey, OrgName, OrgRole, ProjectId, ProjectName,
     ProvisionError, ResetStore, SecretHash, TenantId,
 };

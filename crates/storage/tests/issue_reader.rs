@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use clickhouse::Client;
-use comettrace_core::{
+use ferristrace_domain::{
     Fingerprint, IssueFilter, IssueReader, ProjectId, Scope, Span, SpanEvent, SpanId, SpanKind,
     SpanSink, SpanStatus, TenantId, TraceId, Window,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     BatchLimits, ClickhouseIssues, ClickhouseMigrator, ClickhouseSink, FixedClock,
 };
 use uuid::Uuid;

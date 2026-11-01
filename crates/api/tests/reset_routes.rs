@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::reset_router;
-use comettrace_core::{
+use ferristrace_api::reset_router;
+use ferristrace_domain::{
     AccountId, Email, HashError, Mailer, Password, PasswordCheck, PasswordHash, PasswordHasher,
     ResetError, ResetPassword, ResetStore, ResetToken, SecretHash,
 };

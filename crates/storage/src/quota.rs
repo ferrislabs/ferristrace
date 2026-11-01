@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use comettrace_core::{Admission, DecompressedBytes, QuotaPolicy, TenantId, UsageReader};
+use ferristrace_domain::{Admission, DecompressedBytes, QuotaPolicy, TenantId, UsageReader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Allowance {
@@ -62,7 +62,7 @@ impl<R: UsageReader + Send + Sync> QuotaPolicy for StaticQuota<R> {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{Admission, DecompressedBytes, QuotaPolicy, TenantId, UsageMeter};
+    use ferristrace_domain::{Admission, DecompressedBytes, QuotaPolicy, TenantId, UsageMeter};
     use uuid::Uuid;
 
     use super::{Allowance, StaticQuota};

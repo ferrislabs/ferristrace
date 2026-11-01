@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::roster_router;
-use comettrace_core::{
+use ferristrace_api::roster_router;
+use ferristrace_domain::{
     AccountId, Admitted, Agent, Email, Member, Membership, Memberships, OrgRole, RESET_PREFIX,
     ReadError, Roll, Roster, SecretHash, Session, SessionError, SessionStore, SessionToken,
     TenantId, UnixSeconds, Whoami, WhoamiError,

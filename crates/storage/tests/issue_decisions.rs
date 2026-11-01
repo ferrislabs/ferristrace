@@ -1,7 +1,7 @@
-use comettrace_core::{
+use ferristrace_domain::{
     AccountId, Counted, Decision, Fingerprint, Issue, IssueDecisions, ProjectId, Status,
 };
-use comettrace_storage::{CONTROL_PLANE, PostgresDecisions};
+use ferristrace_storage::{CONTROL_PLANE, PostgresDecisions};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;

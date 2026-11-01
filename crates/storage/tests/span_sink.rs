@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use clickhouse::Client;
-use comettrace_core::{
+use ferristrace_domain::{
     ProjectId, Scope, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanSink, SpanStatus,
     TenantId, TraceFilter, TraceId, Window,
 };
-use comettrace_storage::{
+use ferristrace_storage::{
     BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, FixedClock, MemorySink,
     SpanStoreSettings, open_span_store,
 };
@@ -309,7 +309,7 @@ async fn a_timestamp_the_store_cannot_hold_is_refused() {
 
     assert_eq!(
         outcome,
-        Err(comettrace_core::SinkError::TimestampOutOfRange)
+        Err(ferristrace_domain::SinkError::TimestampOutOfRange)
     );
 }
 

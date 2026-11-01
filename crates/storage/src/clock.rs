@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use comettrace_core::{Clock, UnixSeconds};
+use ferristrace_domain::{Clock, UnixSeconds};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
@@ -33,7 +33,7 @@ impl Clock for FixedClock {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{Clock, UnixSeconds};
+    use ferristrace_domain::{Clock, UnixSeconds};
 
     use super::{FixedClock, SystemClock};
 

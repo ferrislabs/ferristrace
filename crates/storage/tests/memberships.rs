@@ -1,5 +1,5 @@
-use comettrace_core::{AccountId, Membership, Memberships, OrgName, OrgRole, Orgs, TenantId};
-use comettrace_storage::{CONTROL_PLANE, MembershipError, PostgresMemberships, PostgresOrgs};
+use ferristrace_domain::{AccountId, Membership, Memberships, OrgName, OrgRole, Orgs, TenantId};
+use ferristrace_storage::{CONTROL_PLANE, MembershipError, PostgresMemberships, PostgresOrgs};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;

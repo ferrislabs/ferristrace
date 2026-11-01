@@ -75,18 +75,18 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: the default build excludes the ee crate
         run: |
-          if cargo tree -p comettrace -e normal --locked | grep -q comettrace-ee; then
-            echo "::error::comettrace-ee is in the default dependency graph"
+          if cargo tree -p ferristrace-server -e normal --locked | grep -q ferristrace-ee; then
+            echo "::error::ferristrace-ee is in the default dependency graph"
             exit 1
           fi
       - name: the ee feature pulls the ee crate in
         run: |
-          if ! cargo tree -p comettrace -e normal --features ee --locked | grep -q comettrace-ee; then
-            echo "::error::the ee feature does not pull comettrace-ee in"
+          if ! cargo tree -p ferristrace-server -e normal --features ee --locked | grep -q ferristrace-ee; then
+            echo "::error::the ee feature does not pull ferristrace-ee in"
             exit 1
           fi
       - name: the ee crate builds behind its feature
-        run: cargo build -p comettrace --features ee --locked
+        run: cargo build -p ferristrace-server --features ee --locked
 
   control-plane:
     runs-on: ubuntu-latest
@@ -129,7 +129,7 @@ jobs:
           shared-key: rust-postgres
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: the control plane schema and the usage counter
-        run: cargo test -p comettrace-storage --test control_plane --test usage_counter --test usage_history --test auth --test memberships --test roster --test teams --test projects --locked
+        run: cargo test -p ferristrace-storage --test control_plane --test usage_counter --test usage_history --test auth --test memberships --test roster --test teams --test projects --locked
 
   clickhouse:
     runs-on: ubuntu-latest
@@ -162,9 +162,9 @@ jobs:
           shared-key: rust-clickhouse
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: migrations up, down and up again against a real server
-        run: cargo test -p comettrace-storage --test clickhouse_migrations --test span_sink --locked
+        run: cargo test -p ferristrace-storage --test clickhouse_migrations --test span_sink --locked
       - name: small versus large batches
-        run: cargo run -p comettrace-storage --example batching_benchmark --release --locked
+        run: cargo run -p ferristrace-storage --example batching_benchmark --release --locked
 
   self-hosting:
     runs-on: ubuntu-latest

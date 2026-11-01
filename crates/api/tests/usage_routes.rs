@@ -3,8 +3,8 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::usage_router;
-use comettrace_core::{
+use ferristrace_api::usage_router;
+use ferristrace_domain::{
     AccountId, Agent, Consumed, DecompressedBytes, Membership, Memberships, Metering, OrgRole,
     ReadError, Session, SessionError, SessionStore, SessionToken, TenantId, UnixSeconds,
     UsageHistory, UsageReader, Whoami, WhoamiError, Window,

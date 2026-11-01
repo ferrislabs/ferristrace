@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
-use comettrace_core::DecompressedBytes;
-use comettrace_storage::{Allowance, PhotoStoreSettings, SpanStoreSettings};
+use ferristrace_domain::DecompressedBytes;
+use ferristrace_storage::{Allowance, PhotoStoreSettings, SpanStoreSettings};
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
 use serde::{Deserialize, Serialize};

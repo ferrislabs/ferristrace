@@ -1,4 +1,4 @@
-use comettrace_core::{Email, Mailer, ResetError, ResetToken};
+use ferristrace_domain::{Email, Mailer, ResetError, ResetToken};
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -77,7 +77,7 @@ impl Mailer for SmtpMailer {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::{Email, ResetToken};
+    use ferristrace_domain::{Email, ResetToken};
 
     use super::{MailSettings, SmtpMailer};
 

@@ -1,12 +1,12 @@
 [package]
-name = "comettrace-otlp"
+name = "ferristrace-otlp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-comettrace-core.workspace = true
+ferristrace-domain.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
 thiserror.workspace = true

@@ -1,5 +1,5 @@
 use clickhouse::{Client, Row};
-use comettrace_storage::{ClickhouseMigrator, MIGRATIONS};
+use ferristrace_storage::{ClickhouseMigrator, MIGRATIONS};
 use serde::Deserialize;
 
 mod backend;
