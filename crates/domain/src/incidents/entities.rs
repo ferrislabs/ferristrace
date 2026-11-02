@@ -6,6 +6,7 @@ use crate::access::KeyId;
 use crate::alerts::{AlertStatus, Labels, RuleId};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
+use crate::oncall::{PageId, ScheduleId};
 use crate::telemetry::TenantId;
 
 pub const FORMER_MEMBER: &str = "a former member";
@@ -23,6 +24,7 @@ pub struct Incident {
     pub opened_ms: u64,
     pub resolved_ms: Option<u64>,
     pub opened_from_alert: Option<RuleId>,
+    pub paged_schedule: Option<ScheduleId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +99,14 @@ pub enum Change {
         labels: Labels,
     },
     Attachment(Attachment),
+    Paged {
+        page: PageId,
+        step: u32,
+        target: Option<AccountId>,
+    },
+    Acknowledged {
+        page: PageId,
+    },
 }
 
 impl Change {
@@ -111,6 +121,8 @@ impl Change {
             Self::Comment { .. } => EntryKind::Comment,
             Self::Alert { .. } => EntryKind::Alert,
             Self::Attachment(_) => EntryKind::Attachment,
+            Self::Paged { .. } => EntryKind::Paged,
+            Self::Acknowledged { .. } => EntryKind::Acknowledged,
         }
     }
 }
@@ -132,6 +144,7 @@ pub struct IncidentDraft {
     pub project: Option<ProjectId>,
     pub alert: Option<RuleId>,
     pub public: bool,
+    pub page: Option<ScheduleId>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

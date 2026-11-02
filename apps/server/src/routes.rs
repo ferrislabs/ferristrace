@@ -2,8 +2,9 @@ use axum::Router;
 use ferristrace_api::{
     AppState, SessionCookie, SignInMethods, alert_router, audit_router, auth_router,
     catalogue_router, explore_router, export_router, incident_router, issue_router, key_router,
-    log_router, me_router, methods_router, metric_router, oidc_router, org_router, password_router,
-    reset_router, roster_router, second_factor_router, session_router, team_router, usage_router,
+    log_router, me_router, methods_router, metric_router, oidc_router, oncall_router, org_router,
+    password_router, reset_router, roster_router, second_factor_router, session_router,
+    team_router, usage_router,
 };
 
 use crate::adapters::Production;
@@ -34,6 +35,7 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
         .merge(audit_routes(state))
         .merge(alert_routes(state))
         .merge(incident_routes(state))
+        .merge(oncall_routes(state))
         .merge(export_routes(state))
         .merge(roster_routes(state))
         .merge(team_routes(state))
@@ -131,6 +133,10 @@ fn alert_routes(state: Option<&State>) -> Router {
 
 fn incident_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| incident_router(state.clone()))
+}
+
+fn oncall_routes(state: Option<&State>) -> Router {
+    state.map_or_else(Router::new, |state| oncall_router(state.clone()))
 }
 
 fn export_routes(state: Option<&State>) -> Router {

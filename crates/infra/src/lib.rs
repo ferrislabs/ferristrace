@@ -12,10 +12,12 @@ mod webhook;
 pub use clock::{FixedClock, SystemClock};
 pub use directory::StaticDirectory;
 pub use hasher::Argon2Hasher;
-pub use mail::{MailError, MailSettings, SmtpMailer, alert_subject, alert_text};
+pub use mail::{
+    MailError, MailSettings, SmtpMailer, alert_subject, alert_text, page_subject, page_text,
+};
 pub use oidc::{OidcError, OidcProvider, OidcSettings};
 pub use photos::{PhotoStoreError, PhotoStoreSettings, S3Photos};
-pub use seal::{BadKey, SecretSeal};
+pub use seal::{BadKey, SecretSeal, ack_key_from_hex};
 pub use sink::MemorySink;
 pub use usage::MemoryMeter;
 pub use webhook::{

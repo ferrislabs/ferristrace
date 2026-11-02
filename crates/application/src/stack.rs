@@ -1,7 +1,8 @@
 use ferristrace_domain::{
-    AlertMailer, AuthProvider, Authorizer, Clock, IssueReader, LogReader, LogSink, Mailer,
-    MetricReader, MetricSink, PasswordHasher, Photos, ProvisionPolicy, QuotaPolicy, SpanPages,
-    SpanReader, SpanSink, TenantDirectory, UsageMeter, UsageReader, WebhookSender,
+    AckKey, AlertMailer, AuthProvider, Authorizer, Clock, ESCALATE_AFTER_SECS, IssueReader,
+    LogReader, LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos, ProvisionPolicy,
+    QuotaPolicy, SpanPages, SpanReader, SpanSink, TenantDirectory, UsageMeter, UsageReader,
+    WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -55,9 +56,23 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) metric_store: Option<S::MetricStore>,
     pub(crate) oidc: Option<S::Oidc>,
     pub(crate) provision: ProvisionPolicy,
+    pub(crate) ack_key: Option<AckKey>,
+    pub(crate) escalate_after_secs: u64,
 }
 
 impl<S: Stack> Ferristrace<S> {
+    #[must_use]
+    pub fn with_ack_key(mut self, key: Option<AckKey>) -> Self {
+        self.ack_key = key;
+        self
+    }
+
+    #[must_use]
+    pub fn escalating_after(mut self, secs: u64) -> Self {
+        self.escalate_after_secs = secs;
+        self
+    }
+
     pub fn new(repos: S::Repos, adapters: Adapters<S>) -> Self {
         Self {
             repos,
@@ -73,6 +88,8 @@ impl<S: Stack> Ferristrace<S> {
             metric_store: adapters.metric_store,
             oidc: adapters.oidc,
             provision: adapters.provision,
+            ack_key: None,
+            escalate_after_secs: ESCALATE_AFTER_SECS,
         }
     }
 }

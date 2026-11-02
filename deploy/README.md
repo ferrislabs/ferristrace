@@ -328,6 +328,38 @@ An incident declared from a firing alert follows it: each later state change
 of that rule appends an `alert` entry, written by the system in the same
 transaction as the alert's history event, until the incident is resolved.
 
+## On-call
+
+A team keeps on-call schedules: an IANA timezone, a rotation of the team's
+members in order, a handoff weekday and time, and a shift length of 1 to 28
+days from a start date. Handoffs keep their local time across daylight
+saving changes. An override hands the schedule to any member of the
+organisation between two instants, and wins over the rotation. Owners and
+administrators write schedules and overrides; members and read keys read
+them, and `GET /api/orgs/{org}/schedules/{id}/now` names who holds the pager.
+
+A rule whose definition carries `"page": {"schedule": "…"}` pages the person
+on call when it starts firing, and an incident declared with
+`"page": {"schedule": "…"}` pages them at once. A rule that fires again while
+its page is open raises no second page; the rule returning to ok, or the
+incident being resolved, resolves the page. Each page is mailed through the
+same relay as the alerts. Left unacknowledged for 15 minutes, a page moves to
+the next person in the rotation and, once everyone in it was paged, to every
+administrator of the organisation. Every 30 seconds one replica, holding a
+Postgres advisory lock and claiming the slot in `alert_duties`, escalates the
+due pages and drains `page_outbox` with the alert retry schedule.
+
+A page is acknowledged in the app (`POST /api/orgs/{org}/pages/{id}/ack`, by
+its target or an administrator) or through the link in its email
+(`GET /api/pages/ack?token=…`, no session needed, valid 24 hours, `403` when
+altered, `410` once expired). The link is signed with HMAC-SHA256 under a key
+derived from `secrets.at_rest_key`; without that key, emails carry no link and
+pages are acknowledged in the app. Links point at the mail `base_url`.
+Acknowledging a page of an incident appends an entry to its timeline. Writes
+are audited as `schedule.created`, `schedule.updated`, `schedule.deleted`,
+`override.created`, `override.deleted`, `page.acknowledged`, and
+`page.escalated` by the system.
+
 ## Profile photos
 
 Without a bucket, everybody is shown under their initials, taken from the

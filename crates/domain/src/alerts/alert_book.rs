@@ -18,6 +18,7 @@ use crate::catalogue::{ProjectId, Projects};
 use crate::clock::UnixSeconds;
 use crate::explore::Window;
 use crate::identity::{AccountId, SessionStore};
+use crate::oncall::{ScheduleId, Schedules};
 use crate::organisation::{Memberships, OrgRole};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
@@ -29,17 +30,18 @@ const NANOS_PER_MILLI: u64 = 1_000_000;
 const MILLIS_PER_DAY: u64 = 86_400_000;
 
 #[derive(Debug)]
-pub struct AlertBook<S, G, K, P, R, T, E, C, A> {
+pub struct AlertBook<S, G, K, P, R, T, E, C, Sc, A> {
     readers: Readers<S, G, K>,
     projects: P,
     rules: R,
     states: T,
     events: E,
     channels: C,
+    schedules: Sc,
     trail: A,
 }
 
-impl<S, G, K, P, R, T, E, C, A> AlertBook<S, G, K, P, R, T, E, C, A>
+impl<S, G, K, P, R, T, E, C, Sc, A> AlertBook<S, G, K, P, R, T, E, C, Sc, A>
 where
     S: SessionStore,
     G: Memberships,
@@ -49,6 +51,7 @@ where
     T: AlertStates,
     E: AlertEvents,
     C: AlertChannels,
+    Sc: Schedules,
     A: AuditTrail,
 {
     #[allow(clippy::too_many_arguments)]
@@ -59,6 +62,7 @@ where
         states: T,
         events: E,
         channels: C,
+        schedules: Sc,
         trail: A,
     ) -> Self {
         Self {
@@ -68,6 +72,7 @@ where
             states,
             events,
             channels,
+            schedules,
             trail,
         }
     }
@@ -133,6 +138,7 @@ where
         self.check_project(org, draft.project).await?;
         self.check_channels(org, draft.definition.channels())
             .await?;
+        self.check_schedule(org, draft.definition.page()).await?;
         let rule = self
             .rules
             .create(org, draft, by)
@@ -175,6 +181,9 @@ where
         if changed.definition.channels() != held.definition.channels() {
             self.check_channels(org, changed.definition.channels())
                 .await?;
+        }
+        if changed.definition.page() != held.definition.page() {
+            self.check_schedule(org, changed.definition.page()).await?;
         }
         if changed.name != held.name
             && self
@@ -391,6 +400,21 @@ where
         }
     }
 
+    async fn check_schedule(
+        &self,
+        org: TenantId,
+        page: Option<ScheduleId>,
+    ) -> Result<(), AlertError> {
+        let Some(schedule) = page else {
+            return Ok(());
+        };
+        self.schedules
+            .get(org, schedule)
+            .await?
+            .map(|_| ())
+            .ok_or(AlertError::UnknownSchedule)
+    }
+
     async fn standing(&self, token: &SessionToken, org: TenantId) -> Result<AccountId, AlertError> {
         standing(self.readers.whoami(), token, org).await
     }
@@ -443,6 +467,7 @@ fn merged(held: &Rule, patch: RulePatch) -> Result<Rule, AlertError> {
         severity: patch.severity.unwrap_or(base.severity),
         no_data: patch.no_data.unwrap_or(base.no_data),
         channels: patch.channels.unwrap_or_else(|| base.channels.clone()),
+        page: patch.page.unwrap_or(base.page),
     };
     Ok(Rule {
         id: held.id,

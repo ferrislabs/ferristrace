@@ -11,7 +11,8 @@ use super::value_objects::{
 };
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
-use crate::identity::AccountId;
+use crate::identity::{AccountId, Email};
+use crate::oncall::PageDispatch;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
@@ -192,6 +193,12 @@ pub trait AlertMailer {
         to: &EmailList,
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
+
+    fn send_page(
+        &self,
+        to: &Email,
+        dispatch: &PageDispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
 }
 
 impl<T: AlertMailer + Sync> AlertMailer for &T {
@@ -202,6 +209,14 @@ impl<T: AlertMailer + Sync> AlertMailer for &T {
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
         (*self).send_alert(to, dispatch)
     }
+
+    fn send_page(
+        &self,
+        to: &Email,
+        dispatch: &PageDispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        (*self).send_page(to, dispatch)
+    }
 }
 
 impl<T: AlertMailer + Send + Sync> AlertMailer for std::sync::Arc<T> {
@@ -211,5 +226,13 @@ impl<T: AlertMailer + Send + Sync> AlertMailer for std::sync::Arc<T> {
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
         self.as_ref().send_alert(to, dispatch)
+    }
+
+    fn send_page(
+        &self,
+        to: &Email,
+        dispatch: &PageDispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        self.as_ref().send_page(to, dispatch)
     }
 }

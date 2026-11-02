@@ -3,16 +3,19 @@ use super::entities::{AlertEvent, Notification, Observation, Rule, SeriesState, 
 use super::errors::AlertError;
 use super::ports::{AlertDuty, AlertEvents, AlertOutbox, AlertRules, AlertStates, SignalProbe};
 use super::state_machine::next_state;
-use super::value_objects::{DeliveryStatus, Duty, EventId, HISTORY_DAYS, NotificationId};
+use super::value_objects::{
+    AlertStatus, DeliveryStatus, Duty, EventId, HISTORY_DAYS, NotificationId,
+};
 use crate::clock::UnixSeconds;
 use crate::incidents::{Followers, IncidentTimeline, Incidents};
+use crate::oncall::{Origin, PageSource, Pages, Paging, Schedules};
 
 pub const TICK_SECS: u64 = 60;
 const MILLIS_PER_SECOND: u64 = 1_000;
 const MILLIS_PER_DAY: u64 = 86_400_000;
 
 #[derive(Debug)]
-pub struct Evaluator<R, T, E, O, D, P, I, L> {
+pub struct Evaluator<R, T, E, O, D, P, I, L, Sc, Pg> {
     rules: R,
     states: T,
     events: E,
@@ -20,9 +23,10 @@ pub struct Evaluator<R, T, E, O, D, P, I, L> {
     duty: D,
     probe: P,
     followers: Followers<I, L>,
+    paging: Paging<Sc, Pg>,
 }
 
-impl<R, T, E, O, D, P, I, L> Evaluator<R, T, E, O, D, P, I, L>
+impl<R, T, E, O, D, P, I, L, Sc, Pg> Evaluator<R, T, E, O, D, P, I, L, Sc, Pg>
 where
     R: AlertRules,
     T: AlertStates,
@@ -32,7 +36,10 @@ where
     P: SignalProbe,
     I: Incidents,
     L: IncidentTimeline,
+    Sc: Schedules,
+    Pg: Pages,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rules: R,
         states: T,
@@ -41,6 +48,7 @@ where
         duty: D,
         probe: P,
         followers: Followers<I, L>,
+        paging: Paging<Sc, Pg>,
     ) -> Self {
         Self {
             rules,
@@ -50,6 +58,7 @@ where
             duty,
             probe,
             followers,
+            paging,
         }
     }
 
@@ -94,6 +103,7 @@ where
         };
         let previous = self.states.of(rule.id).await?;
         let mut moved = 0;
+        let (mut firing, mut left_firing) = (false, false);
         for observation in alongside(observed, &previous) {
             let held = previous
                 .iter()
@@ -116,9 +126,11 @@ where
                     },
                 )
                 .await?;
+            firing |= state.status == AlertStatus::Firing;
             let Some(transition) = transition else {
                 continue;
             };
+            left_firing |= transition.from == AlertStatus::Firing;
             moved += 1;
             let event = AlertEvent {
                 id: EventId::fresh(),
@@ -132,6 +144,20 @@ where
             };
             self.events.record(&event).await?;
             self.followers.tell(&event).await?;
+            if let (AlertStatus::Firing, Some(schedule)) = (transition.to, definition.page()) {
+                self.paging
+                    .raise(
+                        rule.org,
+                        schedule,
+                        PageSource::Alert {
+                            rule: rule.id,
+                            event: event.id,
+                        },
+                        rule.name.as_str(),
+                        now_ms,
+                    )
+                    .await?;
+            }
             if !transition.notifies() {
                 continue;
             }
@@ -150,6 +176,11 @@ where
                     })
                     .await?;
             }
+        }
+        if left_firing && !firing {
+            self.paging
+                .resolve(rule.org, Origin::Rule(rule.id), now_ms)
+                .await?;
         }
         Ok(Some(moved))
     }

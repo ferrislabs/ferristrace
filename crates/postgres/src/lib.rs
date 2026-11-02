@@ -15,6 +15,7 @@ mod incidents;
 mod keys;
 mod local;
 mod memberships;
+mod oncall;
 mod orgs;
 mod postgres;
 mod projects;
@@ -27,8 +28,8 @@ mod unit_of_work;
 
 pub use accounts::{AccountError, PostgresAccounts};
 pub use alerts::{
-    DELIVER_LOCK, EVALUATE_LOCK, PostgresAlertChannels, PostgresAlertDuty, PostgresAlertEvents,
-    PostgresAlertOutbox, PostgresAlertRules, PostgresAlertStates,
+    DELIVER_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels, PostgresAlertDuty,
+    PostgresAlertEvents, PostgresAlertOutbox, PostgresAlertRules, PostgresAlertStates,
 };
 pub use api_keys::PostgresApiKeys;
 pub use audit::PostgresAuditTrail;
@@ -41,6 +42,7 @@ pub use incidents::{PostgresIncidentAttachments, PostgresIncidentTimeline, Postg
 pub use keys::{KeyError, PostgresDirectory};
 pub use local::LocalPasswordProvider;
 pub use memberships::{MembershipError, PostgresMemberships};
+pub use oncall::{PostgresPages, PostgresSchedules};
 pub use orgs::PostgresOrgs;
 pub use postgres::{CONTROL_PLANE, OVERAGE_FEATURE, SELF_HOSTED_PLAN, load_allowances};
 pub use projects::{PostgresProjects, ProjectError};

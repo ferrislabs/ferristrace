@@ -5,9 +5,9 @@ use ferristrace_domain::{
     Aggregation, AlertBook, AlertError, AlertEvent, Buckets, ChannelBook, ChannelId, ChannelName,
     ChannelView, Clock, Courier, Definition, Delivery, Destination, Drained, Evaluator, Followers,
     IssuedChannel, Labels, LogQuery, LogReader, LogSignal, MetricQuery, MetricReader, MetricSignal,
-    Observation, Preview, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId, RulePatch,
-    ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, TenantId, Tick, TraceMeasure,
-    TraceSignal, Watched, Whoami, Window,
+    Observation, Paging, Preview, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId,
+    RulePatch, ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, TenantId, Tick,
+    TraceMeasure, TraceSignal, Watched, Whoami, Window,
 };
 
 use crate::registry::AlertRepos;
@@ -241,7 +241,7 @@ where
         )
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn list_alerts(
         &self,
         who: &Reader,
@@ -254,13 +254,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .list(who, org)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn alert(
         &self,
         who: &Reader,
@@ -274,13 +275,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .get(who, org, id)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn alert_history(
         &self,
         who: &Reader,
@@ -296,13 +298,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .history(who, org, id, from_ms, to_ms, self.clock.now())
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn create_alert(
         &self,
         token: &SessionToken,
@@ -316,13 +319,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .create(token, org, draft)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn update_alert(
         &self,
         token: &SessionToken,
@@ -337,13 +341,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .update(token, org, id, patch)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn delete_alert(
         &self,
         token: &SessionToken,
@@ -357,13 +362,14 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .delete(token, org, id)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn preview_alert(
         &self,
         who: &Reader,
@@ -378,6 +384,7 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .preview(
@@ -391,7 +398,7 @@ where
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
     pub async fn test_alert(
         &self,
         token: &SessionToken,
@@ -405,6 +412,7 @@ where
             alert_states,
             alert_events,
             alert_channels,
+            schedules,
             audit,
         )
         .rehearse(
@@ -494,7 +502,7 @@ where
         async move { self.deliver_once().await }
     }
 
-    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, incidents, incident_timeline, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, incidents, incident_timeline, schedules, pages, unavailable = AlertError::StoreUnreachable)]
     async fn evaluate_once(&self) -> Result<Tick, AlertError> {
         Evaluator::new(
             alert_rules,
@@ -504,6 +512,7 @@ where
             alert_duty,
             self.signal_readers(),
             Followers::new(incidents, incident_timeline),
+            Paging::new(schedules, pages).escalating_after(self.escalate_after_secs),
         )
         .tick(self.clock.now())
         .await

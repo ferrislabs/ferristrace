@@ -21,11 +21,13 @@ use ferristrace_clickhouse::{
     SpanStoreSettings, open_span_store,
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
-use ferristrace_domain::{Clock, Drained, ProvisionPolicy, TenantId, Tick};
+use ferristrace_domain::{
+    AckKey, Clock, Drained, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
+};
 use ferristrace_infra::{
     Argon2Hasher, HttpWebhooks, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
     PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
-    WebhookSettings,
+    WebhookSettings, ack_key_from_hex,
 };
 use ferristrace_postgres::{
     CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
@@ -50,6 +52,7 @@ const FLUSH_FALLBACK: Duration = Duration::from_secs(5);
 const MIN_FLUSH_WAIT: Duration = Duration::from_millis(100);
 const EVALUATE_EVERY: Duration = Duration::from_secs(60);
 const DELIVER_EVERY: Duration = Duration::from_secs(10);
+const ESCALATE_EVERY: Duration = Duration::from_secs(PAGE_TICK_SECS);
 
 #[derive(Default)]
 struct Optional {
@@ -120,7 +123,8 @@ async fn main() -> anyhow::Result<()> {
     };
     let identity = control_routes(&config, state.as_ref(), held);
     let (stop, stopped) = watch::channel(false);
-    let watching = watch_alerts(state.as_ref(), held.explore, &stopped);
+    let mut watching = watch_alerts(state.as_ref(), held.explore, &stopped);
+    watching.extend(watch_pages(state.as_ref(), &stopped));
     let gateway = Arc::new(gateway_of(
         directory_of(pool.as_ref(), default_retention_days(config.spans.as_ref())),
         allowances,
@@ -185,6 +189,7 @@ fn control_plane(
 ) -> anyhow::Result<State> {
     let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
     let seal = seal_of(config)?;
+    let ack = ack_key_of(config)?;
     let mailer = relay_of(config)?;
     let repos = Postgres::new(pool.clone(), SystemClock)
         .with_hasher(hasher.clone())
@@ -198,7 +203,7 @@ fn control_plane(
         meter,
         optional,
     );
-    let app = Arc::new(Ferristrace::<Production>::new(repos, adapters));
+    let app = Arc::new(Ferristrace::<Production>::new(repos, adapters).with_ack_key(ack));
     Ok(AppState::new(app, cookie_of(config))
         .with_default_retention_days(default_retention_days(config.spans.as_ref())))
 }
@@ -460,6 +465,18 @@ fn seal_of(config: &Config) -> anyhow::Result<Option<SecretSeal>> {
     Ok(Some(seal))
 }
 
+fn ack_key_of(config: &Config) -> anyhow::Result<Option<AckKey>> {
+    let Some(secrets) = &config.secrets else {
+        tracing::warn!(
+            "no secrets.at_rest_key is configured, so page emails carry no acknowledgement link; \
+             pages are acknowledged in the app"
+        );
+        return Ok(None);
+    };
+    let key = ack_key_from_hex(&secrets.at_rest_key).context("reading secrets.at_rest_key")?;
+    Ok(Some(key))
+}
+
 fn relay_of(config: &Config) -> anyhow::Result<Relay> {
     let Some(mail) = &config.mail else {
         tracing::warn!(
@@ -521,6 +538,47 @@ fn watch_alerts(
         tokio::spawn(evaluate_alerts(Arc::clone(&state.app), stopped.clone())),
         tokio::spawn(deliver_alerts(Arc::clone(&state.app), stopped.clone())),
     ]
+}
+
+fn watch_pages(state: Option<&State>, stopped: &watch::Receiver<bool>) -> Option<JoinHandle<()>> {
+    let state = state?;
+    tracing::info!("pages are escalated and mailed every thirty seconds");
+    Some(tokio::spawn(escalate_pages(
+        Arc::clone(&state.app),
+        stopped.clone(),
+    )))
+}
+
+async fn escalate_pages(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(ESCALATE_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.escalate_pages().await {
+            Ok(Paged::Skipped) => tracing::debug!("another replica is escalating pages"),
+            Ok(Paged::Worked {
+                escalated: 0,
+                sent: 0,
+                retried: 0,
+                abandoned: 0,
+            }) => {}
+            Ok(Paged::Worked {
+                escalated,
+                sent,
+                retried,
+                abandoned,
+            }) => tracing::info!(
+                escalated,
+                sent,
+                retried,
+                abandoned,
+                "pages were escalated and mailed"
+            ),
+            Err(error) => tracing::error!(%error, "the pages could not be escalated"),
+        }
+    }
 }
 
 fn ticking(period: Duration) -> tokio::time::Interval {

@@ -1,7 +1,7 @@
 use ferristrace_domain::{
     AccountId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
     Change, CommentBody, EntryKind, IncidentId, IncidentSeverity, IncidentStatus, IncidentTitle,
-    KeyId, Reference, RuleId,
+    KeyId, PageId, Reference, RuleId,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -52,6 +52,12 @@ pub(crate) fn encode_change(change: &Change) -> (Option<&str>, String) {
             "label": attachment.label.as_str(),
             "at_ms": attachment.at_ms,
         }),
+        Change::Paged { page, step, target } => json!({
+            "page": page.to_string(),
+            "step": step,
+            "target": id_of(target.map(AccountId::as_uuid)),
+        }),
+        Change::Acknowledged { page } => json!({"page": page.to_string()}),
     };
     let body = match change {
         Change::Comment { body } => Some(body.as_str()),
@@ -134,6 +140,14 @@ pub(crate) fn decode_change(
                 at_ms: detail.get("at_ms")?.as_u64()?,
             })
         }
+        EntryKind::Paged => Change::Paged {
+            page: PageId::new(uuid_at(&detail, "page").ok()??),
+            step: u32::try_from(detail.get("step")?.as_u64()?).ok()?,
+            target: uuid_at(&detail, "target").ok()?.map(AccountId::new),
+        },
+        EntryKind::Acknowledged => Change::Acknowledged {
+            page: PageId::new(uuid_at(&detail, "page").ok()??),
+        },
     })
 }
 
@@ -163,7 +177,7 @@ mod tests {
     use ferristrace_domain::{
         AccountId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
         Change, CommentBody, IncidentId, IncidentSeverity, IncidentStatus, IncidentTitle, KeyId,
-        Labels, Reference, RuleId,
+        Labels, PageId, Reference, RuleId,
     };
     use uuid::Uuid;
 
@@ -222,6 +236,19 @@ mod tests {
                 label: AttachmentLabel::try_from("depth").expect("a label"),
                 at_ms: 42,
             }),
+            Change::Paged {
+                page: PageId::new(Uuid::from_u128(5)),
+                step: 2,
+                target: Some(AccountId::new(Uuid::from_u128(6))),
+            },
+            Change::Paged {
+                page: PageId::new(Uuid::from_u128(5)),
+                step: 3,
+                target: None,
+            },
+            Change::Acknowledged {
+                page: PageId::new(Uuid::from_u128(5)),
+            },
         ];
 
         for change in changes {

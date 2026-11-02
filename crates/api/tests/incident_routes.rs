@@ -7,7 +7,7 @@ use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, incident_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Crew, IncidentLedger, Inert, Notebook, Untransacted,
+    AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -196,6 +196,7 @@ struct Fakes {
     incidents: IncidentLedger,
     crew: Crew,
     notebook: Notebook,
+    oncall: OncallLedger,
 }
 
 impl Untransacted for Fakes {}
@@ -241,6 +242,8 @@ repo!(IncidentTimeline, IncidentLedger, |fakes| fakes
 repo!(IncidentAttachments, IncidentLedger, |fakes| fakes
     .incidents
     .clone());
+repo!(Schedules, OncallLedger, |fakes| fakes.oncall.clone());
+repo!(Pages, OncallLedger, |fakes| fakes.oncall.clone());
 
 struct TestStack;
 
@@ -267,6 +270,7 @@ struct Harness {
     incidents: IncidentLedger,
     crew: Crew,
     notebook: Notebook,
+    oncall: OncallLedger,
 }
 
 impl Harness {
@@ -280,6 +284,7 @@ impl Harness {
             incidents: IncidentLedger::default(),
             crew,
             notebook: Notebook::default(),
+            oncall: OncallLedger::default(),
         }
     }
 
@@ -306,6 +311,7 @@ impl Harness {
                     incidents: self.incidents.clone(),
                     crew: self.crew.clone(),
                     notebook: self.notebook.clone(),
+                    oncall: self.oncall.clone(),
                 },
                 adapters,
             )),
@@ -358,6 +364,7 @@ impl Harness {
                     severity: AlertSeverity::Critical,
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
+                    page: None,
                 })
                 .expect("a definition"),
             },
@@ -846,4 +853,58 @@ async fn spec_l2_8_every_incident_write_is_audited() {
         entry.target.kind == TargetKind::Incident
             && entry.target.id.as_deref() == incident["id"].as_str()
     }));
+}
+
+#[tokio::test]
+async fn spec_l2_5_declaring_with_paging_pages_the_on_call_and_says_so() {
+    let harness = Harness::new();
+    harness.oncall.put(ferristrace_domain::Schedule {
+        id: ferristrace_domain::ScheduleId::new(Uuid::from_u128(400)),
+        org: org(MINE),
+        team: TeamId::new(Uuid::from_u128(300)),
+        name: ferristrace_domain::ScheduleName::try_from("Primary").expect("a name"),
+        timezone: ferristrace_domain::Timezone::utc(),
+        rotation: ferristrace_domain::Rotation::new(vec![account(COLLEAGUE), account(ME)])
+            .expect("a rotation"),
+        handoff: ferristrace_domain::Handoff {
+            weekday: ferristrace_domain::Weekday::Monday,
+            time: ferristrace_domain::TimeOfDay::try_from("00:00").expect("a time"),
+        },
+        length: ferristrace_domain::RotationLength::try_from(1).expect("a length"),
+        starts_on: ferristrace_domain::Day::try_from("2023-01-02").expect("a day"),
+    });
+
+    let incident = harness
+        .declared(json!({"title": "Checkout down", "page": {"schedule": id(400)}}))
+        .await;
+    let (refused, _) = harness
+        .member(
+            Method::POST,
+            &incidents(MINE),
+            Some(json!({"title": "Nowhere", "page": {"schedule": id(999)}})),
+        )
+        .await;
+    let incident_id = incident["id"].as_str().expect("an id").to_owned();
+    let (_, timeline) = harness
+        .member(
+            Method::GET,
+            &format!("{}/{incident_id}/timeline", incidents(MINE)),
+            None,
+        )
+        .await;
+
+    assert_eq!(incident["paged_schedule"], json!(id(400)));
+    assert_eq!(refused, StatusCode::UNPROCESSABLE_ENTITY);
+    let pages = harness.oncall.pages();
+    assert_eq!(pages.len(), 1);
+    let entries = timeline["timeline"].as_array().expect("entries");
+    assert_eq!(entries.len(), 2, "{timeline}");
+    assert_eq!(entries[1]["kind"], "paged");
+    assert_eq!(entries[1]["author"]["kind"], "system");
+    assert_eq!(entries[1]["detail"]["page"], json!(pages[0].id.to_string()));
+    assert_eq!(entries[1]["detail"]["step"], 0);
+    assert_eq!(
+        entries[1]["detail"]["target"]["id"],
+        json!(pages[0].target.as_uuid().to_string())
+    );
 }

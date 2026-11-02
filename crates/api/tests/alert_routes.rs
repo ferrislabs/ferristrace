@@ -7,7 +7,7 @@ use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, alert_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, IncidentLedger, Inert, Notebook, Untransacted,
+    AlertLedger, Couriered, IncidentLedger, Inert, Notebook, OncallLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -250,6 +250,7 @@ struct Fakes {
     role: OrgRole,
     ledger: AlertLedger,
     notebook: Notebook,
+    oncall: OncallLedger,
 }
 
 impl Untransacted for Fakes {}
@@ -295,6 +296,8 @@ repo!(IncidentTimeline, IncidentLedger, |fakes| {
     let _ = fakes;
     IncidentLedger::default()
 });
+repo!(Schedules, OncallLedger, |fakes| fakes.oncall.clone());
+repo!(Pages, OncallLedger, |fakes| fakes.oncall.clone());
 
 struct TestStack;
 
@@ -321,6 +324,7 @@ struct Harness {
     notebook: Notebook,
     mailer: Couriered,
     hooks: Couriered,
+    oncall: OncallLedger,
 }
 
 impl Harness {
@@ -330,6 +334,7 @@ impl Harness {
             notebook: Notebook::default(),
             mailer: Couriered::default(),
             hooks: Couriered::default(),
+            oncall: OncallLedger::default(),
         }
     }
 
@@ -361,6 +366,7 @@ impl Harness {
                     role,
                     ledger: self.ledger.clone(),
                     notebook: self.notebook.clone(),
+                    oncall: self.oncall.clone(),
                 },
                 adapters,
             )),
@@ -876,4 +882,64 @@ async fn spec_l2_8_every_rule_and_channel_write_is_audited() {
             .all(|entry| entry.org == TenantId::new(Uuid::from_u128(MINE)))
     );
     assert_eq!(Action::parse("alert.disabled"), Some(Action::AlertDisabled));
+}
+
+fn a_schedule(harness: &Harness) -> String {
+    let schedule = ferristrace_domain::Schedule {
+        id: ferristrace_domain::ScheduleId::new(Uuid::from_u128(400)),
+        org: TenantId::new(Uuid::from_u128(MINE)),
+        team: ferristrace_domain::TeamId::new(Uuid::from_u128(300)),
+        name: ferristrace_domain::ScheduleName::try_from("Primary").expect("a name"),
+        timezone: ferristrace_domain::Timezone::utc(),
+        rotation: ferristrace_domain::Rotation::new(Vec::new()).expect("a rotation"),
+        handoff: ferristrace_domain::Handoff {
+            weekday: ferristrace_domain::Weekday::Monday,
+            time: ferristrace_domain::TimeOfDay::try_from("09:00").expect("a time"),
+        },
+        length: ferristrace_domain::RotationLength::try_from(7).expect("a length"),
+        starts_on: ferristrace_domain::Day::try_from("2026-11-02").expect("a day"),
+    };
+    harness.oncall.put(schedule.clone());
+    schedule.id.to_string()
+}
+
+#[tokio::test]
+async fn a_rule_pages_the_on_call_of_a_schedule_in_the_frozen_shape() {
+    let harness = Harness::new();
+    let schedule = a_schedule(&harness);
+    let mut paging = checkout("Paging", None, &[]);
+    paging["page"] = json!({"schedule": schedule});
+    let mut unknown = checkout("Unknown", None, &[]);
+    unknown["page"] = json!({"schedule": id(999)});
+
+    let silent = created(&harness, checkout("Silent", None, &[])).await;
+    let rule = created(&harness, paging).await;
+    let (refused, _) = harness
+        .admin(Method::POST, &alerts(MINE), Some(unknown))
+        .await;
+    let rule_id = rule["id"].as_str().expect("an id").to_owned();
+    let (_, kept) = harness
+        .admin(
+            Method::PATCH,
+            &format!("{}/{rule_id}", alerts(MINE)),
+            Some(json!({"enabled": false})),
+        )
+        .await;
+    let (_, cleared) = harness
+        .admin(
+            Method::PATCH,
+            &format!("{}/{rule_id}", alerts(MINE)),
+            Some(json!({"page": null})),
+        )
+        .await;
+
+    assert_eq!(silent["page"], Value::Null);
+    assert_eq!(rule["page"], json!({"schedule": schedule}));
+    assert_eq!(refused, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        kept["page"],
+        json!({"schedule": schedule}),
+        "a patch keeps the page"
+    );
+    assert_eq!(cleared["page"], Value::Null);
 }

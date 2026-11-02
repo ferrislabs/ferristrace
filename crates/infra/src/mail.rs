@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use ferristrace_domain::{
-    AlertMailer, AlertStatus, DeliveryError, Dispatch, Email, EmailList, Mailer, ResetError,
-    ResetToken,
+    AlertMailer, AlertStatus, DeliveryError, Dispatch, Email, EmailList, Mailer, PageDispatch,
+    PageSource, ResetError, ResetToken,
 };
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
@@ -119,7 +119,91 @@ impl SmtpMailer {
     }
 }
 
+pub fn page_subject(dispatch: &PageDispatch) -> String {
+    if dispatch.step == 0 {
+        format!("[FerrisTrace] PAGE: {}", dispatch.headline)
+    } else {
+        format!(
+            "[FerrisTrace] ESCALATED PAGE (step {}): {}",
+            dispatch.step, dispatch.headline
+        )
+    }
+}
+
+pub fn page_text(dispatch: &PageDispatch, source: &str, ack: Option<&str>) -> String {
+    let mut text = match dispatch.source {
+        PageSource::Alert { .. } => format!(
+            "You are paged because the alert \"{}\" is firing.\n\n",
+            dispatch.headline
+        ),
+        PageSource::Incident(_) => format!(
+            "You are paged for the incident \"{}\".\n\n",
+            dispatch.headline
+        ),
+    };
+    if dispatch.step > 0 {
+        let _ = writeln!(
+            text,
+            "Nobody acknowledged it in time, so it was escalated to you (step {}).\n",
+            dispatch.step
+        );
+    }
+    let _ = writeln!(text, "Paged at: {} ms since the epoch", dispatch.at_ms);
+    let _ = writeln!(text, "Open it: {source}");
+    match ack {
+        Some(ack) => {
+            let _ = write!(
+                text,
+                "\nAcknowledge it, which stops the escalation:\n{ack}\n"
+            );
+        }
+        None => text.push_str("\nAcknowledge it in the app to stop the escalation.\n"),
+    }
+    text
+}
+
+impl SmtpMailer {
+    pub fn page_link(&self, dispatch: &PageDispatch) -> String {
+        match dispatch.source {
+            PageSource::Alert { rule, .. } => format!("{}/alerts?rule={rule}", self.base_url),
+            PageSource::Incident(incident) => format!("{}/incidents/{incident}", self.base_url),
+        }
+    }
+
+    pub fn ack_link(&self, token: &str) -> String {
+        format!("{}/api/pages/ack?token={token}", self.base_url)
+    }
+
+    fn compose_page(&self, to: &Email, dispatch: &PageDispatch) -> Result<Message, MailError> {
+        let recipient: Mailbox = to.as_str().parse().map_err(|_| MailError::Settings)?;
+        let ack = dispatch.ack.as_deref().map(|token| self.ack_link(token));
+        Message::builder()
+            .from(self.from.clone())
+            .to(recipient)
+            .subject(page_subject(dispatch))
+            .header(ContentType::TEXT_PLAIN)
+            .body(page_text(
+                dispatch,
+                &self.page_link(dispatch),
+                ack.as_deref(),
+            ))
+            .map_err(|_| MailError::Settings)
+    }
+}
+
 impl AlertMailer for SmtpMailer {
+    async fn send_page(&self, to: &Email, dispatch: &PageDispatch) -> Result<(), DeliveryError> {
+        let message = self.compose_page(to, dispatch).map_err(|error| {
+            tracing::error!(%error, "a page message could not be composed");
+            DeliveryError::new("the page message could not be composed")
+        })?;
+        self.transport.send(message).await.map_err(|error| {
+            tracing::warn!(%error, "a page message was not accepted by the relay");
+            DeliveryError::new("the mail relay did not accept the message")
+        })?;
+        Ok(())
+    }
+
     async fn send_alert(&self, to: &EmailList, dispatch: &Dispatch) -> Result<(), DeliveryError> {
         let message = self.compose_alert(to, dispatch).map_err(|error| {
             tracing::error!(%error, "an alert message could not be composed");
@@ -230,6 +314,90 @@ mod tests {
                 && rendered.contains("00000000-0000-0000-0000-000000000007"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn a_page_message_names_the_incident_its_step_and_carries_both_links() {
+        use ferristrace_domain::{IncidentId, PageDispatch, PageId, PageSource, TenantId};
+        use uuid::Uuid;
+
+        let dispatch = PageDispatch {
+            page: PageId::new(Uuid::from_u128(5)),
+            org: TenantId::new(Uuid::from_u128(1)),
+            source: PageSource::Incident(IncidentId::new(Uuid::from_u128(9))),
+            headline: "Checkout down".into(),
+            step: 1,
+            at_ms: 1_700_000_000_000,
+            ack: Some("v1.abc.def".into()),
+        };
+
+        let message = mailer()
+            .compose_page(
+                &Email::try_from("ada@example.com").expect("an address"),
+                &dispatch,
+            )
+            .expect("it composes");
+        let rendered = String::from_utf8(message.formatted()).expect("text");
+
+        assert!(
+            rendered.contains("[FerrisTrace] ESCALATED PAGE (step 1): Checkout down"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("ada@example.com"), "{rendered}");
+        let held = mailer();
+        let text = super::page_text(
+            &dispatch,
+            &held.page_link(&dispatch),
+            dispatch
+                .ack
+                .as_deref()
+                .map(|token| held.ack_link(token))
+                .as_deref(),
+        );
+        assert!(
+            text.contains("https://app.example.com/incidents/00000000-0000-0000-0000-000000000009"),
+            "{text}"
+        );
+        assert!(
+            text.contains("https://app.example.com/api/pages/ack?token=v1.abc.def"),
+            "{text}"
+        );
+        assert!(text.contains("escalated to you (step 1)"), "{text}");
+    }
+
+    #[test]
+    fn an_alert_page_without_a_key_points_to_the_app_to_acknowledge() {
+        use ferristrace_domain::{EventId, PageDispatch, PageId, PageSource, RuleId, TenantId};
+        use uuid::Uuid;
+
+        let dispatch = PageDispatch {
+            page: PageId::new(Uuid::from_u128(5)),
+            org: TenantId::new(Uuid::from_u128(1)),
+            source: PageSource::Alert {
+                rule: RuleId::new(Uuid::from_u128(7)),
+                event: EventId::new(Uuid::from_u128(8)),
+            },
+            headline: "Checkout errors".into(),
+            step: 0,
+            at_ms: 1,
+            ack: None,
+        };
+
+        let text = super::page_text(&dispatch, &mailer().page_link(&dispatch), None);
+
+        assert_eq!(
+            super::page_subject(&dispatch),
+            "[FerrisTrace] PAGE: Checkout errors"
+        );
+        assert!(
+            text.contains("the alert \"Checkout errors\" is firing"),
+            "{text}"
+        );
+        assert!(
+            text.contains("/alerts?rule=00000000-0000-0000-0000-000000000007"),
+            "{text}"
+        );
+        assert!(text.contains("in the app"), "{text}");
     }
 
     #[test]

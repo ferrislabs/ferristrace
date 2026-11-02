@@ -1,18 +1,21 @@
 use core::future::Future;
 
-pub use ferristrace_domain::testing::{AlertLedger, Couriered, Crew, IncidentLedger, Notebook};
+pub use ferristrace_domain::testing::{
+    AlertLedger, Bench, Couriered, Crew, IncidentLedger, Notebook, OncallLedger,
+};
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
     AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,
     Counted, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, Fingerprint, HashError,
     IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LogBucket, LogPage,
     LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
-    MetricQuery, MetricReader, MetricSink, Occurrence, PageSize, Password, PasswordCheck,
-    PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError,
-    ResetToken, ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries, ServiceSummary,
-    SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink,
-    StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
-    UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl, Window,
+    MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, Password,
+    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant,
+    ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries,
+    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
+    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
+    UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl,
+    Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -83,6 +86,10 @@ impl Mailer for Inert {
 
 impl AlertMailer for Inert {
     async fn send_alert(&self, _to: &EmailList, _dispatch: &Dispatch) -> Result<(), DeliveryError> {
+        Err(DeliveryError::new("no mail relay is configured"))
+    }
+
+    async fn send_page(&self, _to: &Email, _dispatch: &PageDispatch) -> Result<(), DeliveryError> {
         Err(DeliveryError::new("no mail relay is configured"))
     }
 }

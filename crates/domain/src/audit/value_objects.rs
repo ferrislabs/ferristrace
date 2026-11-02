@@ -38,6 +38,7 @@ pub enum Actor {
     Account(AccountId),
     ApiKey(KeyId),
     Operator,
+    System,
 }
 
 impl Actor {
@@ -46,6 +47,7 @@ impl Actor {
             Self::Account(_) => "account",
             Self::ApiKey(_) => "api_key",
             Self::Operator => "operator",
+            Self::System => "system",
         }
     }
 
@@ -53,7 +55,7 @@ impl Actor {
         match self {
             Self::Account(account) => Some(account.as_uuid()),
             Self::ApiKey(key) => Some(key.as_uuid()),
-            Self::Operator => None,
+            Self::Operator | Self::System => None,
         }
     }
 
@@ -62,6 +64,7 @@ impl Actor {
             ("account", Some(id)) => Some(Self::Account(AccountId::new(id))),
             ("api_key", Some(id)) => Some(Self::ApiKey(KeyId::new(id))),
             ("operator", None) => Some(Self::Operator),
+            ("system", None) => Some(Self::System),
             _ => None,
         }
     }
@@ -107,10 +110,17 @@ pub enum Action {
     IncidentAttached,
     IncidentResolved,
     IncidentReopened,
+    ScheduleCreated,
+    ScheduleUpdated,
+    ScheduleDeleted,
+    OverrideCreated,
+    OverrideDeleted,
+    PageAcknowledged,
+    PageEscalated,
 }
 
 impl Action {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 45] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -149,6 +159,13 @@ impl Action {
         Self::IncidentAttached,
         Self::IncidentResolved,
         Self::IncidentReopened,
+        Self::ScheduleCreated,
+        Self::ScheduleUpdated,
+        Self::ScheduleDeleted,
+        Self::OverrideCreated,
+        Self::OverrideDeleted,
+        Self::PageAcknowledged,
+        Self::PageEscalated,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -191,6 +208,13 @@ impl Action {
             Self::IncidentAttached => "incident.attached",
             Self::IncidentResolved => "incident.resolved",
             Self::IncidentReopened => "incident.reopened",
+            Self::ScheduleCreated => "schedule.created",
+            Self::ScheduleUpdated => "schedule.updated",
+            Self::ScheduleDeleted => "schedule.deleted",
+            Self::OverrideCreated => "override.created",
+            Self::OverrideDeleted => "override.deleted",
+            Self::PageAcknowledged => "page.acknowledged",
+            Self::PageEscalated => "page.escalated",
         }
     }
 
@@ -217,10 +241,12 @@ pub enum TargetKind {
     Alert,
     Channel,
     Incident,
+    Schedule,
+    Page,
 }
 
 impl TargetKind {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 12] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -231,6 +257,8 @@ impl TargetKind {
         Self::Alert,
         Self::Channel,
         Self::Incident,
+        Self::Schedule,
+        Self::Page,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -245,6 +273,8 @@ impl TargetKind {
             Self::Alert => "alert",
             Self::Channel => "channel",
             Self::Incident => "incident",
+            Self::Schedule => "schedule",
+            Self::Page => "page",
         }
     }
 

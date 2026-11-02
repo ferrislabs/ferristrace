@@ -23,7 +23,7 @@ use crate::explore::Window;
 use crate::identity::AccountId;
 use crate::organisation::{OrgRole, Whoami};
 use crate::telemetry::TenantId;
-use crate::testing::{AlertLedger, Couriered, Notebook};
+use crate::testing::{AlertLedger, Couriered, Notebook, OncallLedger};
 
 const NOW: u64 = 1_700_000_000;
 
@@ -36,10 +36,21 @@ type Book<'a> = AlertBook<
     AlertLedger,
     AlertLedger,
     AlertLedger,
+    OncallLedger,
     Notebook,
 >;
 
 fn book<'a>(role: OrgRole, ledger: &AlertLedger, notebook: &Notebook, keys: &'a Ring) -> Book<'a> {
+    scheduled(role, ledger, notebook, keys, &OncallLedger::default())
+}
+
+fn scheduled<'a>(
+    role: OrgRole,
+    ledger: &AlertLedger,
+    notebook: &Notebook,
+    keys: &'a Ring,
+    oncall: &OncallLedger,
+) -> Book<'a> {
     AlertBook::new(
         Readers::new(Whoami::new(OneSession, MemberOfMine(role)), keys),
         OneProject,
@@ -47,6 +58,7 @@ fn book<'a>(role: OrgRole, ledger: &AlertLedger, notebook: &Notebook, keys: &'a 
         ledger.clone(),
         ledger.clone(),
         ledger.clone(),
+        oncall.clone(),
         notebook.clone(),
     )
 }
@@ -65,6 +77,7 @@ fn definition(channels: Vec<ChannelId>) -> Definition {
         severity: AlertSeverity::Critical,
         no_data: NoDataPolicy::Ok,
         channels,
+        page: None,
     })
     .expect("a definition")
 }
@@ -475,4 +488,43 @@ async fn a_test_sends_to_every_channel_of_the_rule_and_reports_each() {
     assert_eq!(mailer.sent().len(), 1);
     assert_eq!(&*mailer.sent()[0].0, "ops@example.com");
     assert_eq!(refused.err(), Some(AlertError::NotYoursToChange));
+}
+
+#[tokio::test]
+async fn a_rule_pages_only_a_schedule_of_its_organisation() {
+    let ledger = AlertLedger::default();
+    let notebook = Notebook::default();
+    let keys = Ring::default();
+    let oncall = crate::oncall::fixtures::oncall();
+    let book = scheduled(OrgRole::Admin, &ledger, &notebook, &keys, &oncall);
+    let paging = |schedule| {
+        let mut parts = definition(Vec::new()).into_parts();
+        parts.page = Some(schedule);
+        RuleDraft {
+            definition: Definition::new(parts).expect("a definition"),
+            ..draft("Paging", None, Vec::new())
+        }
+    };
+
+    let unknown = book
+        .create(
+            &token(),
+            an_org(MINE),
+            &paging(crate::oncall::ScheduleId::fresh()),
+        )
+        .await;
+    let kept = book
+        .create(
+            &token(),
+            an_org(MINE),
+            &paging(crate::oncall::fixtures::weekly().id),
+        )
+        .await
+        .expect("a rule paging a schedule of its organisation");
+
+    assert_eq!(unknown.map(|_| ()), Err(AlertError::UnknownSchedule));
+    assert_eq!(
+        kept.rule.definition.page(),
+        Some(crate::oncall::fixtures::weekly().id)
+    );
 }

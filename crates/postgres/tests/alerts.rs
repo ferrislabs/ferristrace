@@ -6,7 +6,7 @@ use ferristrace_domain::{
     AccountId, AlertChannels, AlertError, AlertEvent, AlertEvents, AlertOutbox, AlertRules,
     AlertSeverity, AlertStates, AlertStatus, ChannelKind, ChannelName, Comparison, Condition,
     Definition, DefinitionParts, DeliveryStatus, Destination, Duty, Evaluator, EventId, Followers,
-    Labels, NoDataPolicy, Notification, NotificationId, Observation, ProbeError, ProjectId,
+    Labels, NoDataPolicy, Notification, NotificationId, Observation, Paging, ProbeError, ProjectId,
     RuleDraft, RuleName, RuleState, SeriesState, Settlement, Signal, SignalProbe, TenantId, Tick,
     TraceMeasure, TraceSignal, UnixSeconds, WebhookSecret, Window,
 };
@@ -97,6 +97,7 @@ fn checkout(channels: Vec<ferristrace_domain::ChannelId>) -> Definition {
         severity: AlertSeverity::Critical,
         no_data: NoDataPolicy::Ok,
         channels,
+        page: None,
     })
     .expect("a definition")
 }
@@ -484,6 +485,10 @@ async fn tick(pg: &Postgres<FixedClock>, at: u64) -> Tick {
                 Followers::new(
                     <Postgres<FixedClock> as RepoFor<domain::Incidents>>::build(pg, &tx),
                     <Postgres<FixedClock> as RepoFor<domain::IncidentTimeline>>::build(pg, &tx),
+                ),
+                Paging::new(
+                    <Postgres<FixedClock> as RepoFor<domain::Schedules>>::build(pg, &tx),
+                    <Postgres<FixedClock> as RepoFor<domain::Pages>>::build(pg, &tx),
                 ),
             )
             .tick(UnixSeconds::new(at))

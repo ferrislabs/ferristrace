@@ -147,6 +147,8 @@ pub enum EntryKind {
     Attachment,
     Title,
     Public,
+    Paged,
+    Acknowledged,
 }
 
 spelled!(EntryKind {
@@ -159,6 +161,8 @@ spelled!(EntryKind {
     Attachment => "attachment",
     Title => "title",
     Public => "public",
+    Paged => "paged",
+    Acknowledged => "acknowledged",
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

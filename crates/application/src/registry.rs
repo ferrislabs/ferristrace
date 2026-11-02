@@ -4,7 +4,7 @@ use ferristrace_domain::{
     AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
     AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
     IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships, OidcFlows, Orgs,
-    Projects, ResetStore, Roll, SessionRoll, SessionStore, Squads, UsageHistory,
+    Pages, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,11 +77,15 @@ pub mod domain {
     #[derive(Debug)]
     pub struct Orgs;
     #[derive(Debug)]
+    pub struct Pages;
+    #[derive(Debug)]
     pub struct Projects;
     #[derive(Debug)]
     pub struct Resets;
     #[derive(Debug)]
     pub struct Roster;
+    #[derive(Debug)]
+    pub struct Schedules;
     #[derive(Debug)]
     pub struct Sessions;
     #[derive(Debug)]
@@ -237,6 +241,8 @@ pub trait WatchRepos:
     + RepoFor<domain::AlertDuty, Repo: AlertDuty>
     + RepoFor<domain::Incidents, Repo: Incidents>
     + RepoFor<domain::IncidentTimeline, Repo: IncidentTimeline>
+    + RepoFor<domain::Schedules, Repo: Schedules>
+    + RepoFor<domain::Pages, Repo: Pages>
 {
 }
 
@@ -249,6 +255,8 @@ impl<R> WatchRepos for R where
         + RepoFor<domain::AlertDuty, Repo: AlertDuty>
         + RepoFor<domain::Incidents, Repo: Incidents>
         + RepoFor<domain::IncidentTimeline, Repo: IncidentTimeline>
+        + RepoFor<domain::Schedules, Repo: Schedules>
+        + RepoFor<domain::Pages, Repo: Pages>
 {
 }
 
@@ -276,10 +284,15 @@ impl<R> IncidentRepos for R where
 {
 }
 
+pub trait OncallRepos: IncidentRepos + RepoFor<domain::Teams, Repo: Squads> {}
+
+impl<R> OncallRepos for R where R: IncidentRepos + RepoFor<domain::Teams, Repo: Squads> {}
+
 pub trait Repositories:
     ReadRepos
     + AlertRepos
     + IncidentRepos
+    + OncallRepos
     + AuditRepos
     + ExportRepos
     + AccessRepos
@@ -298,6 +311,7 @@ impl<R> Repositories for R where
     R: ReadRepos
         + AlertRepos
         + IncidentRepos
+        + OncallRepos
         + AuditRepos
         + ExportRepos
         + AccessRepos

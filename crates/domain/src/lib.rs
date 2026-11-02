@@ -13,6 +13,7 @@ pub mod incidents;
 pub mod issue;
 pub mod logs;
 pub mod metrics;
+pub mod oncall;
 pub mod organisation;
 pub mod profile;
 pub mod provisioning;
@@ -86,6 +87,14 @@ pub use metrics::{
     MAX_EXEMPLARS, MAX_GROUP_BY, MIN_STEP_NANOS, Metric, MetricData, MetricDescriptor, MetricError,
     MetricKind, MetricPayload, MetricPoint, MetricQuery, MetricReader, MetricSearch, MetricSink,
     STEPS, Series, SeriesSet, Temporality,
+};
+pub use oncall::{
+    ACK_LIFETIME_SECS, AckClaim, AckKey, AckRefused, BadSchedule, ClaimedNotice, Day,
+    ESCALATE_AFTER_SECS, Escalation, Handoff, Notice, NoticeId, OnCallNow, OncallError, Origin,
+    Override, OverrideId, PAGE_TICK_SECS, Page, PageDesk, PageDispatch, PageId, PageScope,
+    PageSource, PageState, PageView, Paged, Pager, Pages, Paging, Rostered, Rota, Rotation,
+    RotationLength, Schedule, ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch, Schedules,
+    Shift, TimeOfDay, Timezone, Weekday, escalated, next, on_call, shift,
 };
 pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,

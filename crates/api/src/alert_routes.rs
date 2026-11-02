@@ -12,8 +12,8 @@ use ferristrace_domain::{
     Aggregation, AlertError, AlertEvent, AlertSeverity, BadChannel, BadRule, ChannelId,
     ChannelKind, ChannelName, ChannelView, Comparison, Condition, Definition, DefinitionParts,
     Delivery, Destination, IssuedChannel, Labels, LogSignal, MetricSignal, NoDataPolicy, Preview,
-    ProjectId, RuleDraft, RuleId, RuleName, RulePatch, SeriesState, Severity, Signal, TenantId,
-    TraceMeasure, TraceSignal, Watched,
+    ProjectId, RuleDraft, RuleId, RuleName, RulePatch, ScheduleId, SeriesState, Severity, Signal,
+    TenantId, TraceMeasure, TraceSignal, Watched,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
@@ -236,6 +236,19 @@ pub struct RuleBody {
     no_data: String,
     #[serde(default)]
     channels: Vec<Uuid>,
+    #[serde(default)]
+    page: Option<PageBody>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PageBody {
+    schedule: Uuid,
+}
+
+impl PageBody {
+    fn schedule(self) -> ScheduleId {
+        ScheduleId::new(self.schedule)
+    }
 }
 
 fn severity_of(text: &str) -> Result<AlertSeverity, AlertRefused> {
@@ -262,6 +275,7 @@ impl RuleBody {
             severity: severity_of(&self.severity)?,
             no_data: no_data_of(&self.no_data)?,
             channels: channels_of(self.channels),
+            page: self.page.map(PageBody::schedule),
         };
         Ok((
             self.name,
@@ -318,6 +332,8 @@ pub struct RulePatchBody {
     no_data: Option<String>,
     #[serde(default)]
     channels: Option<Vec<Uuid>>,
+    #[serde(default)]
+    page: Given<PageBody>,
 }
 
 impl RulePatchBody {
@@ -341,6 +357,11 @@ impl RulePatchBody {
             severity: self.severity.as_deref().map(severity_of).transpose()?,
             no_data: self.no_data.as_deref().map(no_data_of).transpose()?,
             channels: self.channels.map(channels_of),
+            page: match self.page {
+                Given::Absent => None,
+                Given::Cleared => Some(None),
+                Given::Set(page) => Some(Some(page.schedule())),
+            },
         })
     }
 }
@@ -382,6 +403,7 @@ pub struct RuleView {
     severity: &'static str,
     no_data: &'static str,
     channels: Vec<Uuid>,
+    page: Option<PageBody>,
     state: StateBody,
 }
 
@@ -419,6 +441,9 @@ impl From<Watched> for RuleView {
                 .iter()
                 .map(|channel| channel.as_uuid())
                 .collect(),
+            page: definition.page().map(|schedule| PageBody {
+                schedule: schedule.as_uuid(),
+            }),
             state: StateBody {
                 status: overall.status.as_str(),
                 value: overall.value,
@@ -830,6 +855,7 @@ fn status_of(error: AlertError) -> StatusCode {
         | AlertError::NoSuchProject => StatusCode::NOT_FOUND,
         AlertError::NotYoursToChange => StatusCode::FORBIDDEN,
         AlertError::UnknownChannel
+        | AlertError::UnknownSchedule
         | AlertError::NameTaken
         | AlertError::NoSecretKeeper
         | AlertError::PrivateTarget

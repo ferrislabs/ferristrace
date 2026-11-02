@@ -7,9 +7,9 @@ use ferristrace_domain::{
     AttachmentKind, AttachmentLabel, Author, Change, CommentBody, Comparison, Condition,
     Definition, DefinitionParts, Evaluator, Followers, Incident, IncidentAttachments,
     IncidentFilter, IncidentId, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
-    IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy, Observation, ProbeError, ProjectId,
-    ProjectName, Reference, RuleDraft, RuleId, RuleName, Signal, SignalProbe, TenantId, Tick,
-    TimelineEntry, TimelineId, TraceMeasure, TraceSignal, UnixSeconds, Window,
+    IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy, Observation, Paging, ProbeError,
+    ProjectId, ProjectName, Reference, RuleDraft, RuleId, RuleName, Signal, SignalProbe, TenantId,
+    Tick, TimelineEntry, TimelineId, TraceMeasure, TraceSignal, UnixSeconds, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -103,6 +103,7 @@ async fn a_rule(pg: &Postgres<FixedClock>, org: TenantId, by: AccountId) -> Rule
                     severity: AlertSeverity::Critical,
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
+                    page: None,
                 })
                 .expect("a definition"),
             },
@@ -132,6 +133,7 @@ fn an_incident(
         opened_ms,
         resolved_ms: None,
         opened_from_alert: alert,
+        paged_schedule: None,
     }
 }
 
@@ -425,6 +427,10 @@ async fn evaluated(pg: &Postgres<FixedClock>, tx: ferristrace_postgres::SharedTx
         Followers::new(
             <Postgres<FixedClock> as RepoFor<domain::Incidents>>::build(pg, &tx),
             <Postgres<FixedClock> as RepoFor<domain::IncidentTimeline>>::build(pg, &tx),
+        ),
+        Paging::new(
+            <Postgres<FixedClock> as RepoFor<domain::Schedules>>::build(pg, &tx),
+            <Postgres<FixedClock> as RepoFor<domain::Pages>>::build(pg, &tx),
         ),
     )
     .tick(UnixSeconds::new(NOW))
