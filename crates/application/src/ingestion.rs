@@ -1,0 +1,20 @@
+use ferristrace_domain::{Ingest, IngestError, IngestKey, Payload, TenantId};
+
+use crate::Stack;
+
+#[derive(Debug)]
+pub struct Ingestion<S: Stack> {
+    ingest: Ingest<S::Directory, S::Quota, S::Sink, S::Meter>,
+}
+
+impl<S: Stack> Ingestion<S> {
+    pub fn new(directory: S::Directory, quota: S::Quota, sink: S::Sink, meter: S::Meter) -> Self {
+        Self {
+            ingest: Ingest::new(directory, quota, sink, meter),
+        }
+    }
+
+    pub async fn accept(&self, key: &IngestKey, payload: Payload) -> Result<TenantId, IngestError> {
+        self.ingest.accept(key, payload).await
+    }
+}

@@ -5,12 +5,16 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+testing = []
+
 [dependencies]
 ferristrace-domain.workspace = true
 ferristrace-macros.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true
