@@ -21,6 +21,12 @@ pub enum BadCallQuery {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BadSpendQuery {
+    #[error("spend is grouped by feature, model, customer, environment or provider")]
+    GroupBy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LlmError {
     #[error("neither a live session nor a live read key carries this credential")]
     NoSession,

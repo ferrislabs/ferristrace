@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use super::entities::{CallPage, Price, PricedCall, Unpriced};
+use super::entities::{CallPage, Price, PricedCall, Spend, Unpriced};
 use super::errors::LlmError;
 use super::ports::{LlmReader, ModelPrices};
 use super::pricing::PriceBook;
-use super::value_objects::{CallQuery, PriceDraft, PriceId};
+use super::value_objects::{CallQuery, PriceDraft, PriceId, SpendQuery};
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::explore::Window;
@@ -64,6 +64,29 @@ where
                 .collect(),
             next: page.next,
         })
+    }
+
+    pub async fn spend<R: LlmReader>(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        query: &SpendQuery,
+        reader: &R,
+    ) -> Result<Spend, LlmError> {
+        let project = self
+            .readers
+            .grant(who, org)
+            .await?
+            .narrow(query.filter.project)?;
+        let prices = self.prices.list(org).await?;
+        let read = if project == query.filter.project {
+            reader.spend(org, query).await?
+        } else {
+            let mut narrowed = query.clone();
+            narrowed.filter.project = project;
+            reader.spend(org, &narrowed).await?
+        };
+        Ok(Spend::priced(read, &PriceBook::new(&prices), query))
     }
 
     pub async fn unpriced<R: LlmReader>(

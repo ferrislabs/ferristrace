@@ -10,13 +10,13 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Notebook, PriceLedger, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Action, Agent, ApiKey, ApiKeys, ApiSecret, Call, CallCursor, CallPage, CallQuery,
-    Counted, Deploy, DeployFeed, Deployed, Fingerprint, IssueFilter, IssueReader, IssuedKey, KeyId,
-    KeyName, KeyScopes, LiveSession, LlmReader, Membership, Memberships, NoPhotos, Occurrence,
-    OrgRole, PricedCall, ProjectId, ProvisionPolicy, ReadGrant, Release, ReleaseDetail,
-    ReleaseFilter, ReleaseReader, SeenModel, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, SpanId, StoreError, TargetKind, TenantId, TraceId, UnixSeconds,
-    WhoamiError, Window,
+    AccountId, Action, Agent, ApiKey, ApiKeys, ApiSecret, BucketTotals, Call, CallCursor, CallPage,
+    CallQuery, Counted, Deploy, DeployFeed, Deployed, Fingerprint, GroupBy, GroupLatency,
+    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, LlmReader,
+    Membership, Memberships, NoPhotos, Occurrence, OrgRole, PricedCall, ProjectId, PromptMarker,
+    ProvisionPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, SeenModel,
+    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SpanId, SpendQuery,
+    SpendRead, StoreError, TargetKind, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -187,12 +187,17 @@ type Asked = (TenantId, Option<ProjectId>);
 struct Shelf {
     asked: Mutex<Vec<Asked>>,
     queries: Mutex<Vec<CallQuery>>,
+    spends: Mutex<Vec<SpendQuery>>,
     broken: bool,
 }
 
 impl Shelf {
     fn asked(&self) -> Vec<Asked> {
         self.asked.lock().expect("the lock").clone()
+    }
+
+    fn spends(&self) -> Vec<SpendQuery> {
+        self.spends.lock().expect("the lock").clone()
     }
 
     fn queries(&self) -> Vec<CallQuery> {
@@ -253,6 +258,47 @@ impl LlmReader for Store {
                 time_unix_nanos: CALL_AT_NANOS,
                 tiebreak: 77,
             }),
+        })
+    }
+
+    async fn spend(&self, org: TenantId, query: &SpendQuery) -> Result<SpendRead, StoreError> {
+        self.0
+            .asked
+            .lock()
+            .expect("the lock")
+            .push((org, query.filter.project));
+        self.0.spends.lock().expect("the lock").push(query.clone());
+        if self.0.broken {
+            return Err(StoreError::Unreachable);
+        }
+        let bucket = |key: &str, model: &str, slot: u64| BucketTotals {
+            key: key.into(),
+            provider: "openai".into(),
+            request_model: model.into(),
+            response_model: String::new().into(),
+            slot,
+            calls: 2,
+            errors: 1,
+            input_tokens: 1_000_000,
+            output_tokens: 500_000,
+            cached_input_tokens: 0,
+        };
+        Ok(SpendRead {
+            buckets: vec![
+                bucket("ticket-summary", "gpt-4o", 3),
+                bucket("ticket-summary", "mystery-1", 4),
+                bucket("search", "gpt-4o", 3),
+            ],
+            latencies: vec![GroupLatency {
+                key: "ticket-summary".into(),
+                p50_nanos: 1_500_000_000,
+                p95_nanos: 2_500_000_000,
+            }],
+            markers: vec![PromptMarker {
+                time_unix_nanos: CALL_AT_NANOS,
+                feature: "ticket-summary".into(),
+                prompt_version: "v3".into(),
+            }],
         })
     }
 
@@ -477,6 +523,13 @@ fn project_id(seed: u128) -> ProjectId {
 fn calls_of(seed: u128, rest: &str) -> String {
     format!(
         "/api/orgs/{}/llm/calls?from=1700000000000&to=1700001000000{rest}",
+        Uuid::from_u128(seed)
+    )
+}
+
+fn spend_of(seed: u128, rest: &str) -> String {
+    format!(
+        "/api/orgs/{}/llm/spend?from=1700000000000&to=1700000600000{rest}",
         Uuid::from_u128(seed)
     )
 }
@@ -737,7 +790,7 @@ async fn spec_l4_1_the_filters_reach_the_reader() {
     let harness = Harness::new();
     let trace = "ab".repeat(16);
     let rest = format!(
-        "&feature=ticket-summary&model=gpt-4o&customer=acme&user=user-7&prompt=v3&provider=openai&trace={trace}&project={}&limit=25&before=5.9",
+        "&feature=ticket-summary&model=gpt-4o&customer=acme&user=user-7&prompt=v3&provider=openai&environment=prod&trace={trace}&project={}&limit=25&before=5.9",
         Uuid::from_u128(OURS)
     );
 
@@ -753,6 +806,7 @@ async fn spec_l4_1_the_filters_reach_the_reader() {
     assert_eq!(query.user.as_deref(), Some("user-7"));
     assert_eq!(query.prompt_version.as_deref(), Some("v3"));
     assert_eq!(query.provider.as_deref(), Some("openai"));
+    assert_eq!(query.environment.as_deref(), Some("prod"));
     assert_eq!(
         query.trace,
         Some(TraceId::try_from([0xab; 16].as_slice()).expect("a trace"))
@@ -880,4 +934,128 @@ async fn spec_l4_1_an_unauthenticated_request_and_a_dead_store_are_refused() {
     assert_eq!(unauthorised, StatusCode::UNAUTHORIZED);
     assert_eq!(unavailable, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(unconfigured, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn spec_l4_3_spend_comes_in_the_agreed_shape_priced_per_group() {
+    let harness = Harness::new();
+    harness
+        .admin(Method::POST, &prices_of(MINE), Some(a_price("gpt-4o", 0)))
+        .await;
+
+    let (status, body) = harness
+        .session(OrgRole::Member, Method::GET, &spend_of(MINE, ""), None)
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["step_ms"], 10_000);
+    let groups = body["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 2);
+    let first = &groups[0];
+    assert_eq!(first["key"], "ticket-summary");
+    let each = 2.0 + 0.5 * 8.0;
+    assert!((first["cost"].as_f64().expect("a cost") - each).abs() < 1e-9);
+    assert_eq!(first["unpriced"], 2);
+    assert_eq!(first["calls"], 4);
+    assert_eq!(first["input_tokens"], 2_000_000);
+    assert_eq!(first["output_tokens"], 1_000_000);
+    assert_eq!(first["p50_ms"], 1500.0);
+    assert_eq!(first["p95_ms"], 2500.0);
+    assert_eq!(first["errors"], 2);
+    let points = first["points"].as_array().expect("points");
+    assert_eq!(points.len(), 60);
+    assert_eq!(points[3][0], 1_700_000_000_000_u64 + 3 * 10_000);
+    assert!((points[3][1].as_f64().expect("a cost") - each).abs() < 1e-9);
+    assert_eq!(points[4][1], 0.0);
+    assert_eq!(groups[1]["key"], "search");
+    assert_eq!(groups[1]["p95_ms"], 0.0);
+    assert_eq!(body["markers"][0]["time_ms"], 1_700_000_100_123_u64);
+    assert_eq!(body["markers"][0]["feature"], "ticket-summary");
+    assert_eq!(body["markers"][0]["prompt_version"], "v3");
+}
+
+#[tokio::test]
+async fn spec_l4_3_group_by_and_filters_reach_the_reader_and_default_to_feature() {
+    let harness = Harness::new();
+    let rest = format!(
+        "&group_by=customer&feature=f&model=m&customer=c&user=u&prompt=v3&project={}",
+        Uuid::from_u128(OURS)
+    );
+
+    let (status, _) = harness
+        .session(OrgRole::Member, Method::GET, &spend_of(MINE, &rest), None)
+        .await;
+    harness
+        .session(OrgRole::Member, Method::GET, &spend_of(MINE, ""), None)
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let queries = harness.shelf.spends();
+    assert_eq!(queries[0].group_by, GroupBy::Customer);
+    assert_eq!(queries[0].filter.feature.as_deref(), Some("f"));
+    assert_eq!(queries[0].filter.model.as_deref(), Some("m"));
+    assert_eq!(queries[0].filter.customer.as_deref(), Some("c"));
+    assert_eq!(queries[0].filter.user.as_deref(), Some("u"));
+    assert_eq!(queries[0].filter.prompt_version.as_deref(), Some("v3"));
+    assert_eq!(queries[0].filter.project, Some(project_id(OURS)));
+    assert_eq!(queries[1].group_by, GroupBy::Feature);
+}
+
+#[tokio::test]
+async fn spec_l4_3_an_unknown_group_by_or_window_is_a_bad_request() {
+    let harness = Harness::new();
+
+    let (user, _) = harness
+        .session(
+            OrgRole::Member,
+            Method::GET,
+            &spend_of(MINE, "&group_by=user"),
+            None,
+        )
+        .await;
+    let (backwards, _) = harness
+        .session(
+            OrgRole::Member,
+            Method::GET,
+            &format!("/api/orgs/{}/llm/spend?from=5&to=5", Uuid::from_u128(MINE)),
+            None,
+        )
+        .await;
+
+    assert_eq!(user, StatusCode::BAD_REQUEST);
+    assert_eq!(backwards, StatusCode::BAD_REQUEST);
+    assert!(harness.shelf.asked().is_empty());
+}
+
+#[tokio::test]
+async fn spec_l4_3_a_project_key_is_narrowed_and_other_organisations_are_hidden() {
+    let harness = Harness::new();
+
+    let (narrowed, _) = harness.key(PROJECT_KEY, &spend_of(MINE, "")).await;
+    let (widened, _) = harness
+        .key(
+            PROJECT_KEY,
+            &spend_of(MINE, &format!("&project={}", Uuid::from_u128(OTHER))),
+        )
+        .await;
+    let (theirs, _) = harness.key(ORG_KEY, &spend_of(THEIRS, "")).await;
+    let (session, _) = harness
+        .session(OrgRole::Admin, Method::GET, &spend_of(THEIRS, ""), None)
+        .await;
+    let (dead, _) = Harness::over(Shelf {
+        broken: true,
+        ..Shelf::default()
+    })
+    .session(OrgRole::Member, Method::GET, &spend_of(MINE, ""), None)
+    .await;
+
+    assert_eq!(narrowed, StatusCode::OK);
+    assert_eq!(widened, StatusCode::NOT_FOUND);
+    assert_eq!(theirs, StatusCode::NOT_FOUND);
+    assert_eq!(session, StatusCode::NOT_FOUND);
+    assert_eq!(dead, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        harness.shelf.asked(),
+        vec![(org_id(MINE), Some(project_id(OURS)))]
+    );
 }

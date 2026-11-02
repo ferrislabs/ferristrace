@@ -16,9 +16,9 @@ use ferristrace_domain::{
     QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, ResetError,
     ResetToken, ResolvedIdentity, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
     ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
-    SpanSink, StatusMailer, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender,
-    WebhookUrl, Window,
+    SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory, TenantId,
+    TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader,
+    WebhookSecret, WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -313,6 +313,10 @@ impl ReleaseReader for Inert {
 impl LlmReader for Inert {
     async fn calls(&self, _org: TenantId, _query: &CallQuery) -> Result<CallPage, StoreError> {
         Ok(CallPage::default())
+    }
+
+    async fn spend(&self, _org: TenantId, _query: &SpendQuery) -> Result<SpendRead, StoreError> {
+        Ok(SpendRead::default())
     }
 
     async fn models(

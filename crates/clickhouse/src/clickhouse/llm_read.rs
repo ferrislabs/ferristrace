@@ -1,8 +1,9 @@
 use clickhouse::Row;
 use clickhouse::query::Query;
 use ferristrace_domain::{
-    Call, CallCursor, CallPage, CallQuery, LlmReader, MODEL_LIMIT, PricedCall, ProjectId,
-    SeenModel, StoreError, TenantId, Window,
+    BucketTotals, Call, CallCursor, CallPage, CallQuery, GroupBy, GroupLatency, LlmReader,
+    MODEL_LIMIT, PricedCall, ProjectId, PromptMarker, SPEND_GROUP_LIMIT, SeenModel, SpendQuery,
+    SpendRead, StoreError, TenantId, Window,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -52,6 +53,90 @@ const MODELS: &str = "SELECT \
    ORDER BY calls DESC, request_model, response_model \
    LIMIT {limit}";
 
+const TOP_GROUPS: &str = "SELECT {key} AS group_key \
+   FROM llm_calls FINAL \
+   WHERE {filters} \
+   GROUP BY group_key \
+   ORDER BY count() DESC, group_key \
+   LIMIT {limit}";
+
+const LATENCIES: &str = "SELECT \
+     {key} AS group_key, \
+     quantileExact(0.5)(duration_ns) AS p50_ns, \
+     quantileExact(0.95)(duration_ns) AS p95_ns \
+   FROM llm_calls FINAL \
+   WHERE {filters} AND group_key IN ({top}) \
+   GROUP BY group_key";
+
+const BUCKETS: &str = "SELECT \
+     {key} AS group_key, \
+     provider AS provider, \
+     request_model AS request_model, \
+     response_model AS response_model, \
+     toInt64(intDiv(toUnixTimestamp64Nano(time) - {from}, {step})) AS slot, \
+     count() AS calls, \
+     countIf(status_error != 0) AS errors, \
+     sum(input_tokens) AS input_tokens, \
+     sum(output_tokens) AS output_tokens, \
+     sum(cached_input_tokens) AS cached_input_tokens \
+   FROM llm_calls FINAL \
+   WHERE {filters} AND group_key IN ({top}) \
+   GROUP BY group_key, provider, request_model, response_model, slot";
+
+const MARKERS: &str = "SELECT \
+     feature AS feature, \
+     prompt_version AS prompt_version, \
+     toUnixTimestamp64Nano(min(time)) AS first_nanos \
+   FROM llm_calls FINAL \
+   WHERE tenant_id = ? \
+     AND time < fromUnixTimestamp64Nano(?) \
+     AND prompt_version != '' \
+     AND (? = 0 OR project_id = ?) \
+   GROUP BY feature, prompt_version \
+   HAVING min(time) >= fromUnixTimestamp64Nano(?) \
+   ORDER BY first_nanos, feature, prompt_version \
+   LIMIT {limit}";
+
+const MARKER_LIMIT: u32 = 500;
+
+#[derive(Debug, Row, Deserialize)]
+struct LatencyRow {
+    group_key: String,
+    p50_ns: u64,
+    p95_ns: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct BucketRow {
+    group_key: String,
+    provider: String,
+    request_model: String,
+    response_model: String,
+    slot: i64,
+    calls: u64,
+    errors: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_input_tokens: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct MarkerRow {
+    feature: String,
+    prompt_version: String,
+    first_nanos: i64,
+}
+
+fn key_of(group_by: GroupBy) -> &'static str {
+    match group_by {
+        GroupBy::Feature => "feature",
+        GroupBy::Model => "if(response_model != '', response_model, request_model)",
+        GroupBy::Customer => "customer",
+        GroupBy::Environment => "environment",
+        GroupBy::Provider => "provider",
+    }
+}
+
 #[derive(Debug, Row, Deserialize)]
 struct CallRow {
     trace_hex: String,
@@ -84,6 +169,7 @@ struct ModelRow {
     last_nanos: i64,
 }
 
+#[derive(Clone)]
 enum Bound<'a> {
     Tenant(Uuid),
     Nanos(i64),
@@ -135,6 +221,9 @@ impl<'a> Filters<'a> {
         if let Some(provider) = query.provider.as_deref() {
             filters.push("provider = ?", [Bound::Text(provider)]);
         }
+        if let Some(environment) = query.environment.as_deref() {
+            filters.push("environment = ?", [Bound::Text(environment)]);
+        }
         if let Some(trace) = query.trace {
             filters.push(
                 "trace_id = unhex(?)",
@@ -158,14 +247,18 @@ impl<'a> Filters<'a> {
         self.bound.extend(bound);
     }
 
+    fn clause(&self) -> String {
+        self.clauses.join(" AND ")
+    }
+
     fn sql(&self) -> String {
         CALLS
             .replace("{tiebreak}", TIEBREAK)
-            .replace("{filters}", &self.clauses.join(" AND "))
+            .replace("{filters}", &self.clause())
     }
 
-    fn bind(self, mut query: Query) -> Query {
-        for bound in self.bound {
+    fn bind(&self, mut query: Query) -> Query {
+        for bound in self.bound.iter().cloned() {
             query = match bound {
                 Bound::Tenant(id) => query.bind(id),
                 Bound::Nanos(at) => query.bind(at),
@@ -201,6 +294,10 @@ fn read_call(row: CallRow) -> Result<Call, StoreError> {
     })
 }
 
+fn bind_twice(filters: &Filters<'_>, query: Query) -> Query {
+    filters.bind(filters.bind(query))
+}
+
 impl LlmReader for ClickhouseIssues {
     async fn calls(&self, org: TenantId, query: &CallQuery) -> Result<CallPage, StoreError> {
         let filters = Filters::of(org, query);
@@ -229,6 +326,84 @@ impl LlmReader for ClickhouseIssues {
         Ok(CallPage {
             calls,
             next: next.filter(|_| more),
+        })
+    }
+
+    async fn spend(&self, org: TenantId, query: &SpendQuery) -> Result<SpendRead, StoreError> {
+        let filters = Filters::of(org, &query.filter);
+        let key = key_of(query.group_by);
+        let clause = filters.clause();
+        let top = TOP_GROUPS
+            .replace("{key}", key)
+            .replace("{filters}", &clause)
+            .replace("{limit}", &SPEND_GROUP_LIMIT.to_string());
+        let latency_sql = LATENCIES
+            .replace("{key}", key)
+            .replace("{filters}", &clause)
+            .replace("{top}", &top);
+        let bucket_sql = BUCKETS
+            .replace("{key}", key)
+            .replace(
+                "{from}",
+                &nanos(query.filter.window.from_unix_nanos()).to_string(),
+            )
+            .replace("{step}", &nanos(query.step_nanos()).to_string())
+            .replace("{filters}", &clause)
+            .replace("{top}", &top);
+
+        let latencies: Vec<LatencyRow> = bind_twice(&filters, self.client().query(&latency_sql))
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        let buckets: Vec<BucketRow> = bind_twice(&filters, self.client().query(&bucket_sql))
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        let project = query.filter.project;
+        let window = query.filter.window;
+        let markers: Vec<MarkerRow> = self
+            .client()
+            .query(&MARKERS.replace("{limit}", &MARKER_LIMIT.to_string()))
+            .bind(org.as_uuid())
+            .bind(nanos(window.to_unix_nanos()))
+            .bind(u8::from(project.is_some()))
+            .bind(project.map(ProjectId::as_uuid).unwrap_or_default())
+            .bind(nanos(window.from_unix_nanos()))
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(SpendRead {
+            buckets: buckets
+                .into_iter()
+                .map(|row| BucketTotals {
+                    key: row.group_key.into(),
+                    provider: row.provider.into(),
+                    request_model: row.request_model.into(),
+                    response_model: row.response_model.into(),
+                    slot: unsigned(row.slot),
+                    calls: row.calls,
+                    errors: row.errors,
+                    input_tokens: row.input_tokens,
+                    output_tokens: row.output_tokens,
+                    cached_input_tokens: row.cached_input_tokens,
+                })
+                .collect(),
+            latencies: latencies
+                .into_iter()
+                .map(|row| GroupLatency {
+                    key: row.group_key.into(),
+                    p50_nanos: row.p50_ns,
+                    p95_nanos: row.p95_ns,
+                })
+                .collect(),
+            markers: markers
+                .into_iter()
+                .map(|row| PromptMarker {
+                    time_unix_nanos: unsigned(row.first_nanos),
+                    feature: row.feature.into(),
+                    prompt_version: row.prompt_version.into(),
+                })
+                .collect(),
         })
     }
 
@@ -264,18 +439,25 @@ impl LlmReader for ClickhouseIssues {
 
 #[cfg(test)]
 mod tests {
-    use super::{CALLS, MODELS};
+    use super::{BUCKETS, CALLS, LATENCIES, MARKERS, MODELS, TOP_GROUPS};
 
     #[test]
     fn every_read_filters_on_the_tenant_and_narrows_the_project() {
         assert!(MODELS.contains("WHERE tenant_id = ?"));
         assert!(MODELS.contains("(? = 0 OR project_id = ?)"));
         assert!(CALLS.contains("{filters}"));
+        assert!(BUCKETS.contains("{filters}") && TOP_GROUPS.contains("{filters}"));
+        assert!(LATENCIES.contains("{filters}"));
+        assert!(MARKERS.contains("WHERE tenant_id = ?"));
+        assert!(MARKERS.contains("(? = 0 OR project_id = ?)"));
     }
 
     #[test]
     fn reads_deduplicate_replayed_spans() {
         assert!(CALLS.contains("FROM llm_calls FINAL"));
         assert!(MODELS.contains("FROM llm_calls FINAL"));
+        for sql in [BUCKETS, LATENCIES, MARKERS, TOP_GROUPS] {
+            assert!(sql.contains("FROM llm_calls FINAL"));
+        }
     }
 }

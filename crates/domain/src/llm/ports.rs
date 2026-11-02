@@ -1,7 +1,7 @@
 use core::future::Future;
 
-use super::entities::{CallPage, Price, SeenModel};
-use super::value_objects::{CallQuery, PriceDraft, PriceId};
+use super::entities::{CallPage, Price, SeenModel, SpendRead};
+use super::value_objects::{CallQuery, PriceDraft, PriceId, SpendQuery};
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
 use crate::identity::AccountId;
@@ -14,6 +14,12 @@ pub trait LlmReader {
         org: TenantId,
         query: &CallQuery,
     ) -> impl Future<Output = Result<CallPage, StoreError>> + Send;
+
+    fn spend(
+        &self,
+        org: TenantId,
+        query: &SpendQuery,
+    ) -> impl Future<Output = Result<SpendRead, StoreError>> + Send;
 
     fn models(
         &self,

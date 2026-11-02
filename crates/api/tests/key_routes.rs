@@ -276,6 +276,14 @@ impl ferristrace_domain::LlmReader for Looked {
         Ok(ferristrace_domain::CallPage::default())
     }
 
+    async fn spend(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _query: &ferristrace_domain::SpendQuery,
+    ) -> Result<ferristrace_domain::SpendRead, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::SpendRead::default())
+    }
+
     async fn models(
         &self,
         _org: ferristrace_domain::TenantId,

@@ -25,12 +25,26 @@ impl<'a> PriceBook<'a> {
             .map(|(_, price)| price)
     }
 
-    pub fn of_call(&self, call: &Call) -> Option<&'a Price> {
-        let at_ms = call.time_unix_nanos / NANOS_PER_MILLI;
-        [&call.response_model, &call.request_model]
+    pub fn of_models(
+        &self,
+        provider: &str,
+        response_model: &str,
+        request_model: &str,
+        at_ms: u64,
+    ) -> Option<&'a Price> {
+        [response_model, request_model]
             .into_iter()
             .filter(|model| !model.is_empty())
-            .find_map(|model| self.find(&call.provider, model, at_ms))
+            .find_map(|model| self.find(provider, model, at_ms))
+    }
+
+    pub fn of_call(&self, call: &Call) -> Option<&'a Price> {
+        self.of_models(
+            &call.provider,
+            &call.response_model,
+            &call.request_model,
+            call.time_unix_nanos / NANOS_PER_MILLI,
+        )
     }
 
     pub fn cost(&self, call: &Call) -> Option<Cost> {
