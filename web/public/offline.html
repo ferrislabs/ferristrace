@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>FerrisTrace is offline</title>
+    <style>
+      :root { color-scheme: light dark; --fg: #09090b; --muted: #52525b; --bg: #ffffff; --accent: #4f46e5; }
+      @media (prefers-color-scheme: dark) { :root { --fg: #fafafa; --muted: #a1a1aa; --bg: #0c0c0e; --accent: #8b93ff; } }
+      body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, sans-serif; padding: 24px; box-sizing: border-box; }
+      main { max-width: 340px; display: flex; flex-direction: column; gap: 12px; }
+      h1 { margin: 0; font-size: 20px; line-height: 28px; }
+      p { margin: 0; color: var(--muted); }
+      button { margin-top: 8px; min-height: 44px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icon-192.png" width="48" height="48" alt="" />
+      <h1>FerrisTrace is out of reach</h1>
+      <p>Your device is offline, or the server did not answer. Nothing on screen would be current, so nothing is shown.</p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

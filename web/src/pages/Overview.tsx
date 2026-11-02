@@ -78,7 +78,7 @@ export function Overview() {
       <PageHeader title="Overview" meta={`${scope} · last ${label}`}>
         <Segmented label="Window" value={range} onChange={setRange} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
       </PageHeader>
-      <PlacementPicker placement={placement} onChange={place} windowMs={windowMs} />
+      <PlacementPicker collapsible placement={placement} onChange={place} windowMs={windowMs} />
       {troubled ? (
         <section className="flex flex-wrap items-center gap-3 rounded-lg border border-warning-border bg-card px-4 py-3" aria-label="Needs attention">
           <TriangleAlert className="size-5 text-warning-text" aria-hidden />

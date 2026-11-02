@@ -146,7 +146,7 @@ export function Stat({ label, value, suffix, tone = 'plain' }: { label: string; 
 
 function Attention({ problems, prefix, onPick }: { problems: Problem[]; prefix: string; onPick: (q: string) => void }) {
   return (
-    <section aria-labelledby="attention" className="flex min-w-0 flex-col rounded-lg border bg-card">
+    <section aria-labelledby="attention" className="order-first flex min-w-0 flex-col rounded-lg border bg-card lg:order-none">
       <div className="flex items-center gap-2 px-4 pt-4 pb-2">
         <h2 id="attention" className="text-heading flex-1">Needs attention</h2>
         {problems.length ? <span className="tabular rounded-full bg-destructive-subtle px-2 py-0.5 text-caption font-semibold text-destructive-text">{problems.length}</span> : null}

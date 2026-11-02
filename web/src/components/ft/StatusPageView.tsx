@@ -59,7 +59,7 @@ export function StatusPageView({ view, compact, subscribe }: { view: PublicStatu
         ) : null}
         {!compact && subscribe ? <SubscribeForm subscribe={subscribe} /> : null}
       </main>
-      <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1" /><Logo className="size-3.5" />Powered by FerrisTrace</div></footer>
+      <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1" /><Logo className="size-4" />Powered by FerrisTrace</div></footer>
     </div>
   )
 }
