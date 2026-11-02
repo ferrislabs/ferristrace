@@ -14,6 +14,10 @@ web/.vite/
 
 .DS_Store
 
+# Written by the ferriskey-init service on every `docker compose up`: it holds
+# the client secret FerrisKey generated for this deployment.
+deploy/ferriskey/
+
 deploy/*.log
 deploy/*.txt
 deploy/*.html
