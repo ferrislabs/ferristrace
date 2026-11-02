@@ -107,7 +107,7 @@ function Opened({ incident }: { incident: Dossier }) {
           <ol className="m-0 flex list-none flex-col gap-0 border-l pl-0">
             {incident.timeline.map((entry, index) => <Entry key={`${entry.at_ms}-${index}`} entry={entry} />)}
           </ol>
-          <CommentBox id={incident.id} />
+          <CommentBox id={incident.id} shown={incident.public} />
         </section>
         <section aria-label="Attachments" className="flex flex-col gap-2">
           <h2 className="text-control font-semibold">Attachments</h2>
@@ -137,16 +137,29 @@ function AttachmentLink({ attachment }: { attachment: Attachment }) {
   )
 }
 
-function CommentBox({ id }: { id: string }) {
+function CommentBox({ id, shown }: { id: string; shown: boolean }) {
   const comment = useCommentIncident()
   const [body, setBody] = useState('')
+  const [outward, setOutward] = useState(false)
+  const announced = outward && shown
   return (
     <form className="flex flex-col gap-2" onSubmit={(e) => {
       e.preventDefault()
-      comment.mutate({ id, body }, { onSuccess: () => setBody(''), onError: (error) => toast.error(because(error, 'The comment was not posted')) })
+      comment.mutate({ id, body, public: announced }, {
+        onSuccess: () => {
+          setBody('')
+          setOutward(false)
+          if (announced) toast.success('Posted on the status page', { description: 'Confirmed subscribers are emailed.' })
+        },
+        onError: (error) => toast.error(because(error, 'The comment was not posted')),
+      })
     }}>
-      <Textarea aria-label="Comment" placeholder="What was seen, tried or decided" value={body} onChange={(e) => setBody(e.target.value)} rows={3} />
-      <Button type="submit" size="sm" variant="primary" className="self-end" disabled={comment.isPending || !body.trim()}><MessageSquare />Comment</Button>
+      <Textarea aria-label="Comment" placeholder={announced ? 'What your users notice and what you are doing. No trace ids or hostnames.' : 'What was seen, tried or decided'} value={body} onChange={(e) => setBody(e.target.value)} rows={3} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Switch checked={announced} disabled={!shown} onCheckedChange={setOutward} label={shown ? 'Post publicly on the status page' : 'Post publicly on the status page (make the incident public first)'} />
+        <span className="flex-1" />
+        <Button type="submit" size="sm" variant="primary" disabled={comment.isPending || !body.trim()}><MessageSquare />{announced ? 'Post publicly' : 'Comment'}</Button>
+      </div>
     </form>
   )
 }
@@ -179,7 +192,12 @@ function Told({ entry }: { entry: TimelineEntry }) {
     case 'public':
       return <span>{entry.detail.to ? 'Made the incident public' : 'Made the incident private'}</span>
     case 'comment':
-      return <Alert className="whitespace-pre-wrap">{entry.detail.body}</Alert>
+      return (
+        <div className="flex flex-col gap-1">
+          {entry.detail.public ? <Badge variant="accent" size="xs" className="self-start">On the status page</Badge> : null}
+          <Alert className="whitespace-pre-wrap">{entry.detail.body}</Alert>
+        </div>
+      )
     case 'alert':
       return (
         <span className="inline-flex flex-wrap items-center gap-1.5">

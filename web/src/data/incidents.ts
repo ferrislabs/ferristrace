@@ -41,7 +41,7 @@ export type TimelineEntry = { at_ms: number; author: Author } & (
   | { kind: 'owner'; detail: Pair<Person | null> }
   | { kind: 'title'; detail: Pair<string> }
   | { kind: 'public'; detail: Pair<boolean> }
-  | { kind: 'comment'; detail: { body: string } }
+  | { kind: 'comment'; detail: { body: string; public: boolean } }
   | { kind: 'alert'; detail: { alert: { id: string; name: string | null }; from: AlertStatus; to: AlertStatus; value: number | null; labels: Record<string, string> } }
   | { kind: 'attachment'; detail: Attachment }
   | { kind: 'paged'; detail: { page: string; step: number; target: Person | null } }
@@ -120,8 +120,8 @@ export const useChangeIncident = () =>
   )
 
 export const useCommentIncident = () =>
-  useRefreshing<{ id: string; body: string }, TimelineEntry>(async (org, asked) =>
-    json(await post(`/api/orgs/${org}/incidents/${asked.id}/comments`, { body: asked.body })),
+  useRefreshing<{ id: string; body: string; public?: boolean }, TimelineEntry>(async (org, asked) =>
+    json(await post(`/api/orgs/${org}/incidents/${asked.id}/comments`, { body: asked.body, public: asked.public ?? false })),
   )
 
 export const useAttachToIncident = () =>
