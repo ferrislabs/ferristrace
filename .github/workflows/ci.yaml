@@ -88,6 +88,40 @@ jobs:
       - name: the ee crate builds behind its feature
         run: cargo build -p ferristrace-server --features ee --locked
 
+  layers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
+        with:
+          cache: false
+      - name: the domain and the application depend on nothing that does I/O
+        run: |
+          set -eu
+          for crate in ferristrace-domain ferristrace-application; do
+            found=$(cargo tree -p "$crate" -e normal --prefix none --locked \
+              | awk '{print $1}' \
+              | grep -xE 'sqlx|axum|tonic|tokio|clickhouse|redis|reqwest|lettre' \
+              | sort -u || true)
+            if [ -n "$found" ]; then
+              echo "::error::$crate depends on $(echo "$found" | tr '\n' ' ')"
+              exit 1
+            fi
+          done
+      - name: the api names no adapter crate
+        run: |
+          set -eu
+          found=$(cargo tree -p ferristrace-api -e normal --prefix none --locked \
+            | awk '{print $1}' \
+            | grep -xE 'ferristrace-(postgres|clickhouse|redis|infra)' \
+            | sort -u || true)
+          if [ -n "$found" ]; then
+            echo "::error::ferristrace-api depends on $(echo "$found" | tr '\n' ' ')"
+            exit 1
+          fi
+
   control-plane:
     runs-on: ubuntu-latest
     needs: check
