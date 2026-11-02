@@ -286,7 +286,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -309,7 +308,6 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
     };
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,

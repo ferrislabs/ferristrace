@@ -1,17 +1,21 @@
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
+use axum::http::header::{HeaderName, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::IdentityRepos;
-use ferristrace_domain::{LiveSession, RollError, SessionId};
+use ferristrace_domain::{LiveSession, RollError, SessionError, SessionId};
 use serde::Serialize;
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried};
+use crate::session_cookie;
 use crate::state::AppState;
+
+const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 
@@ -36,7 +40,27 @@ where
     Router::new()
         .route("/auth/sessions", get(live::<S>).delete(end_others::<S>))
         .route("/auth/sessions/{id}", delete(end_one::<S>))
+        .route("/auth/sign-out", post(sign_out::<S>))
         .with_state(state)
+}
+
+async fn sign_out<S: Stack>(
+    State(state): State<AppState<S>>,
+    headers: HeaderMap,
+) -> Result<Response, SessionsRefused>
+where
+    S::Repos: IdentityRepos,
+{
+    if !headers.contains_key(&REQUESTED_WITH) {
+        return Err(SessionsRefused::NotFromOurOrigin);
+    }
+    if let Some(token) = session_cookie::carried(&headers) {
+        state.app.sign_out(&token).await?;
+    }
+    let Some(cookie) = session_cookie::cleared(state.cookie) else {
+        return Err(SessionsRefused::Refused(RollError::Unavailable));
+    };
+    Ok(([(SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response())
 }
 
 async fn live<S: Stack>(
@@ -90,6 +114,8 @@ fn said(session: &LiveSession) -> SessionSaid {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionsRefused {
+    #[error("the request carries no x-requested-with header")]
+    NotFromOurOrigin,
     #[error(transparent)]
     Reaching(NotCarried),
     #[error(transparent)]
@@ -102,6 +128,12 @@ impl From<NotCarried> for SessionsRefused {
     }
 }
 
+impl From<SessionError> for SessionsRefused {
+    fn from(error: SessionError) -> Self {
+        Self::Refused(RollError::from(error))
+    }
+}
+
 impl From<RollError> for SessionsRefused {
     fn from(error: RollError) -> Self {
         Self::Refused(error)
@@ -111,6 +143,7 @@ impl From<RollError> for SessionsRefused {
 impl IntoResponse for SessionsRefused {
     fn into_response(self) -> Response {
         let (status, message) = match self {
+            Self::NotFromOurOrigin => (StatusCode::FORBIDDEN, self.to_string()),
             Self::Reaching(refused) => return refused.into_response(),
             Self::Refused(error @ RollError::NoSession) => {
                 (StatusCode::UNAUTHORIZED, error.to_string())

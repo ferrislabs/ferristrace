@@ -10,7 +10,7 @@ use super::whoami::Whoami;
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
-use crate::secret::{SecretHash, SessionToken};
+use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
 use crate::testing::Notebook;
@@ -94,8 +94,7 @@ struct Written {
     granted: Vec<(AccountId, OrgRole)>,
     removed: Vec<AccountId>,
     admitted: Vec<(String, OrgRole)>,
-    locked: usize,
-    way_ins: usize,
+    accounts: usize,
 }
 
 #[derive(Debug)]
@@ -188,8 +187,8 @@ impl Roll for &Held {
         Ok(self.holder.clone())
     }
 
-    async fn create_locked(&self, _email: &Email) -> Result<AccountId, StoreError> {
-        self.written.lock().expect("the lock").locked += 1;
+    async fn create_account(&self, _email: &Email) -> Result<AccountId, StoreError> {
+        self.written.lock().expect("the lock").accounts += 1;
         Ok(an_account(SOMEBODY))
     }
 
@@ -214,15 +213,6 @@ impl Roll for &Held {
             role,
             joined_at_unix_nanos: JOINED,
         }))
-    }
-
-    async fn open_way_in(
-        &self,
-        _account: AccountId,
-        _digest: SecretHash,
-    ) -> Result<(), StoreError> {
-        self.written.lock().expect("the lock").way_ins += 1;
-        Ok(())
     }
 }
 
@@ -474,17 +464,16 @@ async fn the_last_owner_cannot_leave_either() {
 }
 
 #[tokio::test]
-async fn an_unknown_address_is_admitted_with_a_way_in_of_its_own() {
+async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
     let held = Held::awaiting();
 
-    let Invitation { member, way_in } = roster(OrgRole::Admin, &held)
+    let Invitation { member, created } = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
         .await
         .expect("an administrator may invite");
 
     assert_eq!(member.role, OrgRole::Member);
-    let way_in = way_in.expect("a new account cannot sign in without one");
-    assert!(way_in.looks_like_one(), "{way_in:?}");
+    assert!(created);
     assert_eq!(
         held.written().admitted,
         vec![("new@example.com".to_owned(), OrgRole::Member)]
@@ -492,16 +481,16 @@ async fn an_unknown_address_is_admitted_with_a_way_in_of_its_own() {
 }
 
 #[tokio::test]
-async fn an_address_that_already_has_an_account_joins_without_a_new_way_in() {
+async fn an_address_that_already_has_an_account_joins_without_a_new_account() {
     let held = Held::standing(an_account(SOMEBODY));
 
-    let Invitation { member, way_in } = roster(OrgRole::Owner, &held)
+    let Invitation { member, created } = roster(OrgRole::Owner, &held)
         .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
         .await
         .expect("an owner may invite");
 
     assert_eq!(member.role, OrgRole::Admin);
-    assert!(way_in.is_none());
+    assert!(!created);
 }
 
 #[tokio::test]
@@ -556,7 +545,7 @@ async fn inviting_into_an_organisation_this_session_is_no_part_of_says_no_such_t
 async fn inviting_an_address_with_an_account_adds_a_membership_and_creates_nothing() {
     let held = Held::standing(an_account(SOMEBODY));
 
-    let Invitation { member, way_in } = roster(OrgRole::Owner, &held)
+    let Invitation { member, created } = roster(OrgRole::Owner, &held)
         .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
         .await
         .expect("an owner may invite");
@@ -565,31 +554,29 @@ async fn inviting_an_address_with_an_account_adds_a_membership_and_creates_nothi
     assert_eq!(member.email, an_address("known"));
     assert_eq!(member.role, OrgRole::Admin);
     assert_eq!(member.joined_at_unix_nanos, JOINED);
-    assert!(way_in.is_none());
+    assert!(!created);
     let written = held.written();
     assert_eq!(
         written.admitted,
         vec![("known@example.com".to_owned(), OrgRole::Admin)]
     );
-    assert_eq!(written.locked, 0, "no account may be created");
-    assert_eq!(written.way_ins, 0, "no way in may be opened");
+    assert_eq!(written.accounts, 0, "no account may be created");
 }
 
 #[tokio::test]
-async fn inviting_a_new_address_creates_one_locked_account_and_opens_one_way_in() {
+async fn inviting_a_new_address_creates_one_account() {
     let held = Held::awaiting();
 
-    let Invitation { member, way_in } = roster(OrgRole::Admin, &held)
+    let Invitation { member, created } = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
         .await
         .expect("an administrator may invite");
 
     assert_eq!(member.account, an_account(SOMEBODY));
     assert_eq!(member.name, None);
-    assert!(way_in.is_some());
+    assert!(created);
     let written = held.written();
-    assert_eq!(written.locked, 1);
-    assert_eq!(written.way_ins, 1);
+    assert_eq!(written.accounts, 1);
     assert_eq!(
         written.admitted,
         vec![("new@example.com".to_owned(), OrgRole::Member)]
@@ -597,7 +584,7 @@ async fn inviting_a_new_address_creates_one_locked_account_and_opens_one_way_in(
 }
 
 #[tokio::test]
-async fn an_address_already_on_the_roll_opens_no_way_in_and_creates_no_account() {
+async fn an_address_already_on_the_roll_creates_no_account() {
     let held = Held::already_in(an_account(SOMEBODY));
 
     let refused = roster(OrgRole::Owner, &held)
@@ -611,8 +598,7 @@ async fn an_address_already_on_the_roll_opens_no_way_in_and_creates_no_account()
 
     assert_eq!(refused.err(), Some(RosterError::AlreadyAMember));
     let written = held.written();
-    assert_eq!(written.locked, 0);
-    assert_eq!(written.way_ins, 0);
+    assert_eq!(written.accounts, 0);
 }
 
 #[tokio::test]
@@ -665,7 +651,7 @@ async fn removing_a_member_records_the_role_it_held() {
 }
 
 #[tokio::test]
-async fn inviting_records_the_address_and_role_but_never_the_way_in() {
+async fn inviting_records_the_address_and_the_role() {
     let held = Held::awaiting();
     let notebook = Notebook::default();
 
@@ -683,12 +669,4 @@ async fn inviting_records_the_address_and_role_but_never_the_way_in() {
         Some(Some("new@example.com"))
     );
     assert_eq!(entries[0].detail.get("role"), Some(Some("member")));
-    let way_in = invitation.way_in.expect("a way in");
-    assert!(
-        entries[0]
-            .detail
-            .pairs()
-            .iter()
-            .all(|(_, value)| value.as_deref() != Some(way_in.exposed()))
-    );
 }

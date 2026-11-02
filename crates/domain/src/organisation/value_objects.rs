@@ -6,7 +6,6 @@ use super::errors::{BadName, BadTeamName};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
-use crate::secret::ResetToken;
 use crate::telemetry::TenantId;
 
 pub(super) const MAX_ORG_NAME_BYTES: usize = 128;
@@ -88,7 +87,7 @@ impl Who {
 #[derive(Debug)]
 pub struct Invitation {
     pub member: Member,
-    pub way_in: Option<ResetToken>,
+    pub created: bool,
 }
 
 pub(super) const MAX_TEAM_NAME_BYTES: usize = 64;

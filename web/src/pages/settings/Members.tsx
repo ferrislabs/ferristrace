@@ -1,4 +1,4 @@
-import { AlertTriangle, Copy, Lock, Plus, ShieldCheck } from 'lucide-react'
+import { Lock, Plus, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@/lib/router'
@@ -79,7 +79,7 @@ export function Members() {
         </Table>
         {roll.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{members ? 'Nobody belongs to this organisation.' : nothing}</p> : null}
       </Card>
-      <p className="m-0 text-caption text-muted-foreground">Only an owner hands out the owner role or changes somebody who holds it, and an organisation keeps at least one owner — so the last one stays until it has handed the role on. Somebody who has lost their password asks for a link on the sign-in screen.</p>
+      <p className="m-0 text-caption text-muted-foreground">Only an owner hands out the owner role or changes somebody who holds it, and an organisation keeps at least one owner — so the last one stays until it has handed the role on.</p>
       <InviteMember open={invite} onOpenChange={setInvite} mine={mine} />
       <Dialog open={leaving} onOpenChange={setLeaving}>
         <DialogContent role="alertdialog" title={`Leave ${active?.name ?? 'the organisation'}?`} description="You lose every screen of it at once. Somebody who stays has to invite you back.">
@@ -95,7 +95,6 @@ function InviteMember({ open, onOpenChange, mine }: { open: boolean; onOpenChang
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('member')
   const [welcomed, setWelcomed] = useState<Welcomed | null>(null)
-  const link = welcomed?.invite_token ? `${window.location.origin}/reset?token=${welcomed.invite_token}` : null
 
   const close = (o: boolean) => {
     onOpenChange(o)
@@ -111,18 +110,11 @@ function InviteMember({ open, onOpenChange, mine }: { open: boolean; onOpenChang
     <Dialog open={open} onOpenChange={close}>
       <DialogContent
         title={welcomed ? `${welcomed.member.email} belongs to the organisation` : 'Invite member'}
-        description={welcomed ? (link ? `Role: ${welcomed.member.role}. Send the link through your own channel.` : `Role: ${welcomed.member.role}. It signs in with the password it already has.`) : 'An address that has no account here gets one, and a link that sets its password once.'}
+        description={welcomed ? `Role: ${welcomed.member.role}.` : 'Somebody signs in through FerrisKey with the address you invite. An address that has no account here gets one.'}
       >
         {welcomed ? (
           <>
-            {link ? (
-              <>
-                <Alert variant="warning" icon={<AlertTriangle />}>This link is shown once and can be spent once. Copy it before closing.</Alert>
-                <div className="flex gap-2"><Input readOnly mono value={link} className="bg-muted text-[12px]" aria-label="Invitation link" /><Button variant="primary" onClick={() => { void navigator.clipboard?.writeText(link); toast.success('Copied') }}><Copy />Copy</Button></div>
-              </>
-            ) : (
-              <Alert variant="info" icon={<ShieldCheck />}>An account already carried this address, so nothing here can set a password for it.</Alert>
-            )}
+            <Alert variant="info" icon={<ShieldCheck />}>{welcomed.created ? 'An account now carries this address. It signs in through FerrisKey, which has to report the address as verified.' : 'An account already carried this address, so it joins as it is.'}</Alert>
             <DialogFooter><Button onClick={() => close(false)}>Done</Button></DialogFooter>
           </>
         ) : (

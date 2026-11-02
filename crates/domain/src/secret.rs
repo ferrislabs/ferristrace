@@ -72,42 +72,6 @@ impl fmt::Debug for SessionToken {
     }
 }
 
-pub const RESET_PREFIX: &str = "ft_pr_";
-
-const TOKEN_BYTES: usize = 32;
-
-#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-pub struct ResetToken(String);
-
-impl ResetToken {
-    pub fn random() -> Self {
-        let bytes: [u8; TOKEN_BYTES] = rand::random();
-        Self(format!("{RESET_PREFIX}{}", hex::encode(bytes)))
-    }
-
-    pub fn from_plaintext(plaintext: &str) -> Self {
-        Self(plaintext.to_owned())
-    }
-
-    pub fn exposed(&self) -> &str {
-        &self.0
-    }
-
-    pub fn hash(&self) -> SecretHash {
-        SecretHash::of(&self.0)
-    }
-
-    pub fn looks_like_one(&self) -> bool {
-        self.0.starts_with(RESET_PREFIX) && self.0.len() > RESET_PREFIX.len()
-    }
-}
-
-impl fmt::Debug for ResetToken {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ResetToken(redacted)")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{SESSION_PREFIX, SecretHash, SessionToken};
@@ -138,34 +102,5 @@ mod tests {
         let token = SessionToken::from_plaintext("ft_ss_abcdef");
 
         assert_eq!(token.hash(), SecretHash::of("ft_ss_abcdef"));
-    }
-}
-
-#[cfg(test)]
-mod reset_tests {
-    use super::{RESET_PREFIX, ResetToken};
-
-    #[test]
-    fn a_minted_reset_token_carries_its_prefix_and_enough_randomness() {
-        let token = ResetToken::random();
-
-        assert!(token.looks_like_one());
-        assert_eq!(token.exposed().len(), RESET_PREFIX.len() + 64);
-    }
-
-    #[test]
-    fn two_minted_reset_tokens_differ() {
-        assert_ne!(
-            ResetToken::random().exposed(),
-            ResetToken::random().exposed()
-        );
-    }
-
-    #[test]
-    fn a_reset_token_never_renders_itself() {
-        assert_eq!(
-            format!("{:?}", ResetToken::random()),
-            "ResetToken(redacted)"
-        );
     }
 }

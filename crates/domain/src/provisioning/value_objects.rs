@@ -1,6 +1,5 @@
 use crate::access::KeyId;
 use crate::catalogue::{ProjectId, ProjectName};
-use crate::secret::ResetToken;
 use crate::telemetry::{IngestKey, TenantId};
 
 pub const DEFAULT_PROJECT: &str = "default";
@@ -10,7 +9,6 @@ pub struct Founded {
     pub org: TenantId,
     pub project: ProjectId,
     pub project_name: ProjectName,
-    pub invitation: Option<ResetToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

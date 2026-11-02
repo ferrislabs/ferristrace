@@ -1,9 +1,8 @@
 use ferristrace_domain::{
-    Agent, Answer, AuthError, AuthSources, ChallengeToken, ChangeError, ChangePassword, Confirmed,
-    Email, Enrolment, FactorError, FactorKind, FederatedError, FederatedSignIn, FlowError,
-    LiveSession, NoProvider, Opened, Password, RecoveryCode, ResetError, ResetPassword, ResetToken,
-    RollError, SecondFactors, SecondStep, Session, SessionError, SessionId, SessionToken, Sessions,
-    SignIn, SignInError, SignInProof, Standing, TotpCode, TotpSecret,
+    Agent, Answer, AuthError, ChallengeToken, Confirmed, Enrolment, FactorError, FactorKind,
+    FederatedError, FederatedSignIn, FlowError, LiveSession, RecoveryCode, RollError,
+    SecondFactors, SecondStep, Session, SessionError, SessionId, SessionStore, SessionToken,
+    Sessions, Standing, TotpCode, TotpSecret,
 };
 
 use crate::borrowed::Borrowed;
@@ -14,56 +13,14 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: IdentityRepos,
 {
-    #[transactional(
-        local_passwords, accounts, sessions, factors,
-        unavailable = SignInError::Session(SessionError::StoreUnreachable)
-    )]
-    pub async fn sign_in(
-        &self,
-        proof: SignInProof,
-        from: Option<&Agent>,
-    ) -> Result<Opened, SignInError> {
-        SignIn::new(
-            AuthSources::new(Some(local_passwords), None::<NoProvider>),
-            accounts,
-            sessions,
-            factors,
-            self.provision,
-        )
-        .begin(proof, from)
-        .await
+    #[transactional(sessions, unavailable = SessionError::StoreUnreachable)]
+    pub async fn resolve_session(&self, token: &SessionToken) -> Result<Session, SessionError> {
+        sessions.resolve(token).await
     }
 
-    #[transactional(
-        local_passwords, accounts, sessions, factors,
-        unavailable = SignInError::Session(SessionError::StoreUnreachable)
-    )]
-    pub async fn resolve_session(&self, token: &SessionToken) -> Result<Session, SignInError> {
-        SignIn::new(
-            AuthSources::new(Some(local_passwords), None::<NoProvider>),
-            accounts,
-            sessions,
-            factors,
-            self.provision,
-        )
-        .resolve(token)
-        .await
-    }
-
-    #[transactional(
-        local_passwords, accounts, sessions, factors,
-        unavailable = SignInError::Session(SessionError::StoreUnreachable)
-    )]
-    pub async fn sign_out(&self, token: &SessionToken) -> Result<(), SignInError> {
-        SignIn::new(
-            AuthSources::new(Some(local_passwords), None::<NoProvider>),
-            accounts,
-            sessions,
-            factors,
-            self.provision,
-        )
-        .end(token)
-        .await
+    #[transactional(sessions, unavailable = SessionError::StoreUnreachable)]
+    pub async fn sign_out(&self, token: &SessionToken) -> Result<(), SessionError> {
+        sessions.revoke(token).await
     }
 
     #[transactional(sessions, factors, unavailable = FactorError::StoreUnreachable)]
@@ -132,40 +89,6 @@ where
     ) -> Result<SessionToken, FactorError> {
         SecondStep::new(factors, sessions, &self.clock)
             .verify(challenge, answer, from)
-            .await
-    }
-
-    #[transactional(resets, unavailable = ResetError::StoreUnreachable)]
-    pub async fn request_reset(
-        &self,
-        email: &Email,
-        token: ResetToken,
-    ) -> Result<bool, ResetError> {
-        ResetPassword::new(resets, Borrowed(&self.hasher), Borrowed(&self.mailer))
-            .request(email, token)
-            .await
-    }
-
-    #[transactional(resets, unavailable = ResetError::StoreUnreachable)]
-    pub async fn confirm_reset(
-        &self,
-        token: &ResetToken,
-        chosen: &Password,
-    ) -> Result<u64, ResetError> {
-        ResetPassword::new(resets, Borrowed(&self.hasher), Borrowed(&self.mailer))
-            .confirm(token, chosen)
-            .await
-    }
-
-    #[transactional(sessions, local_passwords, resets, unavailable = ChangeError::Unavailable)]
-    pub async fn change_password(
-        &self,
-        token: &SessionToken,
-        current: &Password,
-        chosen: &Password,
-    ) -> Result<u64, ChangeError> {
-        ChangePassword::new(sessions, local_passwords, resets, Borrowed(&self.hasher))
-            .change(token, current, chosen)
             .await
     }
 

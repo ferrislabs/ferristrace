@@ -1,6 +1,5 @@
 mod clock;
 mod directory;
-mod hasher;
 mod jwks;
 mod mail;
 mod oidc;
@@ -12,7 +11,6 @@ mod webhook;
 
 pub use clock::{FixedClock, SystemClock};
 pub use directory::StaticDirectory;
-pub use hasher::Argon2Hasher;
 pub use jwks::{JwksError, JwksSettings, JwksVerifier};
 pub use mail::{
     MailError, MailSettings, SmtpMailer, StatusLinks, alert_subject, alert_text, page_subject,

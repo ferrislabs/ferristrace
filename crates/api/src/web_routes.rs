@@ -2,14 +2,15 @@ use std::path::Path;
 
 use axum::Router;
 use axum::extract::Request;
-use axum::http::HeaderValue;
 use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{Next, from_fn};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use tower_http::services::{ServeDir, ServeFile};
 
 const HASHED: &str = "public, max-age=31536000, immutable";
 const REVALIDATED: &str = "no-cache";
+const SERVER_PREFIXES: [&str; 2] = ["/auth/", "/api/"];
 
 pub fn web_router(root: &Path) -> Router {
     let index = root.join("index.html");
@@ -23,7 +24,14 @@ pub fn web_router(root: &Path) -> Router {
 }
 
 async fn cached(request: Request, next: Next) -> Response {
-    let hashed = request.uri().path().starts_with("/assets/");
+    let path = request.uri().path();
+    if SERVER_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let hashed = path.starts_with("/assets/");
     let mut response = next.run(request).await;
     if response.status().is_success() {
         let policy = if hashed { HASHED } else { REVALIDATED };
@@ -123,10 +131,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reset_link_reaches_the_app_rather_than_the_api() {
-        let (status, body) = asked("reset", "/reset?token=ft_pr_abc").await;
+    async fn a_server_path_nobody_answers_is_not_found_rather_than_the_page() {
+        for gone in [
+            "/auth/sign-in",
+            "/auth/reset/confirm",
+            "/auth/2fa/verify",
+            "/api/nothing",
+        ] {
+            let (status, body) = asked("server", gone).await;
 
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("the app"));
+            assert_eq!(status, StatusCode::NOT_FOUND, "{gone}");
+            assert!(!body.contains("the app"), "{gone} served {body}");
+        }
     }
 }

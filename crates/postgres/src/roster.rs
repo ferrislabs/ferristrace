@@ -1,57 +1,26 @@
-use std::time::Duration;
-
 use ferristrace_application::repository;
 use ferristrace_domain::organisation::{Holder, Joined};
-use ferristrace_domain::{
-    AccountId, Clock, Email, Member, OrgRole, Roll, SecretHash, StoreError, TenantId, UnixSeconds,
-};
+use ferristrace_domain::{AccountId, Email, Member, OrgRole, Roll, StoreError, TenantId};
 use sqlx::{Row, postgres::PgRow};
-use tokio::task;
 use uuid::Uuid;
 
 use crate::accounts::read_portrait;
 use crate::memberships::read_role;
 use crate::unit_of_work::{Postgres, SharedTx};
-use ferristrace_infra::Argon2Hasher;
 
-const NANOS_PER_SECOND: i64 = 1_000_000_000;
-
-const WAY_IN_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
-
-#[repository(domain = Roster, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[repository(domain = Roster, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
 #[derive(Debug)]
-pub struct PostgresRoster<C> {
+pub struct PostgresRoster {
     tx: SharedTx,
-    hasher: Argon2Hasher,
-    clock: C,
 }
 
-impl<C: Clock> PostgresRoster<C> {
-    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
-    where
-        C: Clone,
-    {
-        Self {
-            tx: tx.clone(),
-            hasher: backend.hasher.clone(),
-            clock: backend.clock().clone(),
-        }
-    }
-
-    async fn locked(&self) -> Result<String, StoreError> {
-        let hasher = self.hasher.clone();
-        task::spawn_blocking(move || hasher.locked())
-            .await
-            .map_err(|_| StoreError::Unreachable)?
-            .map(|hash| hash.encoded().to_owned())
-            .map_err(|error| {
-                tracing::error!(%error, "a new account could not be locked");
-                StoreError::Unreachable
-            })
+impl PostgresRoster {
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 }
 
-impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
+impl Roll for PostgresRoster {
     async fn of(&self, org: TenantId) -> Result<Vec<Member>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
@@ -131,14 +100,12 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         }))
     }
 
-    async fn create_locked(&self, email: &Email) -> Result<AccountId, StoreError> {
-        let locked = self.locked().await?;
+    async fn create_account(&self, email: &Email) -> Result<AccountId, StoreError> {
         let account = Uuid::new_v4();
         let mut tx = self.tx.lock().await;
-        sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
+        sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
             .bind(account)
             .bind(email.as_str())
-            .bind(&locked)
             .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error))?;
@@ -174,28 +141,6 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
             })
             .transpose()
     }
-
-    async fn open_way_in(&self, account: AccountId, digest: SecretHash) -> Result<(), StoreError> {
-        let now = to_nanos(self.clock.now());
-        let expires = to_nanos(
-            self.clock
-                .now()
-                .saturating_add_secs(WAY_IN_WINDOW.as_secs()),
-        );
-        let mut tx = self.tx.lock().await;
-        sqlx::query(
-            "INSERT INTO password_resets (digest, account_id, created_at, expires_at) \
-             VALUES ($1, $2, $3, $4)",
-        )
-        .bind(digest.as_bytes().as_slice())
-        .bind(account.as_uuid())
-        .bind(now)
-        .bind(expires)
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| unreachable(&error))?;
-        Ok(())
-    }
 }
 
 fn read_member(row: &PgRow) -> Result<Member, StoreError> {
@@ -222,12 +167,6 @@ fn known_role(row: &PgRow) -> Result<OrgRole, StoreError> {
 
 fn read_nanos(row: &PgRow) -> u64 {
     u64::try_from(row.get::<i64, _>("created_at")).unwrap_or_default()
-}
-
-fn to_nanos(instant: UnixSeconds) -> i64 {
-    i64::try_from(instant.get())
-        .unwrap_or(i64::MAX / NANOS_PER_SECOND)
-        .saturating_mul(NANOS_PER_SECOND)
 }
 
 fn unreachable(error: &sqlx::Error) -> StoreError {

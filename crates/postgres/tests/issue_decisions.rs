@@ -55,7 +55,7 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
 
 async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'x')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(id)
         .bind(email)
         .execute(pool)

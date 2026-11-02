@@ -4,7 +4,6 @@ use ferristrace_domain::{Agent, ChallengeToken, SessionToken};
 
 const NAME: &str = "ft_session";
 const CHALLENGE: &str = "ft_second_step";
-const CHALLENGE_SECONDS: u32 = 300;
 const FLAGS: &str = "Path=/; HttpOnly; SameSite=Lax";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,14 +37,6 @@ pub(crate) fn opened(token: &SessionToken, cookie: SessionCookie) -> Option<Head
 
 pub(crate) fn cleared(cookie: SessionCookie) -> Option<HeaderValue> {
     rendered(&format!("{NAME}="), 0, cookie.secure)
-}
-
-pub(crate) fn challenging(token: &ChallengeToken, cookie: SessionCookie) -> Option<HeaderValue> {
-    rendered(
-        &format!("{CHALLENGE}={}", token.exposed()),
-        CHALLENGE_SECONDS,
-        cookie.secure,
-    )
 }
 
 pub(crate) fn challenged(headers: &HeaderMap) -> Option<ChallengeToken> {
@@ -90,7 +81,7 @@ mod tests {
     use axum::http::header::{COOKIE, HeaderValue};
     use ferristrace_domain::{ChallengeToken, SessionToken};
 
-    use super::{SessionCookie, answered, carried, challenged, challenging, cleared, opened};
+    use super::{SessionCookie, answered, carried, challenged, cleared, opened};
 
     fn headers(values: &[&str]) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -157,18 +148,6 @@ mod tests {
 
         assert!(text.starts_with("ft_session=;"));
         assert!(text.contains("Max-Age=0"));
-    }
-
-    #[test]
-    fn a_challenge_hides_from_scripts_and_outlives_only_five_minutes() {
-        let token = ChallengeToken::from_plaintext("ft_2f_abc");
-
-        let rendered = challenging(&token, SessionCookie::default()).expect("a header");
-
-        assert_eq!(
-            rendered.to_str().expect("text"),
-            "ft_second_step=ft_2f_abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=300; Secure"
-        );
     }
 
     #[test]

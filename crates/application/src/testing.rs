@@ -9,17 +9,15 @@ use ferristrace_domain::{
     ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer,
     Buckets, CallPage, CallQuery, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted,
     DecompressedBytes, DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList,
-    Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
-    KeyScopes, Letter, LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink,
-    Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink,
-    Occurrence, PageDispatch, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher,
-    PendingFlow, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
-    ReleaseReader, ResetError, ResetToken, ResolvedIdentity, Scope, SeenModel, SeriesSet,
-    ServiceFilter, ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor,
-    SpanPage, SpanPages, SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError,
-    TenantDirectory, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds,
-    UnknownKey, UsageMeter, UsageReader, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl,
-    Window,
+    Fingerprint, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
+    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
+    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
+    PageSize, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail,
+    ReleaseFilter, ReleaseReader, ResolvedIdentity, Scope, SeenModel, SeriesSet, ServiceFilter,
+    ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages,
+    SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory,
+    TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
+    UsageMeter, UsageReader, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -45,46 +43,12 @@ impl<T: Untransacted> UnitOfWork for T {
     }
 }
 
-#[derive(Debug)]
-pub struct Inert(PasswordHash);
-
-impl Default for Inert {
-    fn default() -> Self {
-        Self(PasswordHash::from_encoded("decoy"))
-    }
-}
+#[derive(Debug, Default)]
+pub struct Inert(());
 
 impl Clock for Inert {
     fn now(&self) -> UnixSeconds {
         UnixSeconds::new(0)
-    }
-}
-
-impl PasswordHasher for Inert {
-    async fn hash(&self, _password: &Password) -> Result<PasswordHash, HashError> {
-        Ok(self.0.clone())
-    }
-
-    async fn check(
-        &self,
-        _password: &Password,
-        _against: &PasswordHash,
-    ) -> Result<PasswordCheck, HashError> {
-        Ok(PasswordCheck::Rejected)
-    }
-
-    fn decoy(&self) -> &PasswordHash {
-        &self.0
-    }
-}
-
-impl Mailer for Inert {
-    async fn send_password_reset(
-        &self,
-        _to: &Email,
-        _token: &ResetToken,
-    ) -> Result<(), ResetError> {
-        Ok(())
     }
 }
 

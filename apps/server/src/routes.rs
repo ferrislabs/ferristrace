@@ -1,11 +1,10 @@
 use axum::Router;
 use ferristrace_api::{
-    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router, auth_router,
+    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router,
     catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
     key_router, llm_router, log_router, mark_routes, me_router, methods_router, metric_router,
-    oidc_router, oncall_router, org_router, password_router, postmortem_router, release_router,
-    reset_router, roster_router, second_factor_router, session_router, status_router, team_router,
-    usage_router, workspace_router,
+    oidc_router, oncall_router, org_router, postmortem_router, release_router, roster_router,
+    session_router, status_router, team_router, usage_router, workspace_router,
 };
 
 use crate::adapters::Production;
@@ -50,11 +49,10 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
 
 fn identity_routes(config: &Config, state: Option<&State>) -> Router {
     let offered = methods_router(SignInMethods {
-        local_password: config.local_password && state.is_some(),
         oidc: config.oidc.is_some() && state.is_some(),
     });
     let Some(state) = state else {
-        if config.local_password || config.oidc.is_some() {
+        if config.oidc.is_some() {
             tracing::warn!("no control plane is configured, so nobody can sign in");
         }
         return offered;
@@ -63,35 +61,16 @@ fn identity_routes(config: &Config, state: Option<&State>) -> Router {
         .merge(me_router(state.clone()))
         .merge(session_router(state.clone()))
         .merge(workspace_router(state.clone()))
-        .merge(password_routes(config, state))
         .merge(federated_routes(config, state))
-        .merge(reset_routes(config, state))
-}
-
-fn password_routes(config: &Config, state: &State) -> Router {
-    if !config.local_password {
-        return Router::new();
-    }
-    tracing::info!("local passwords accepted");
-    auth_router(state.clone()).merge(second_factor_router(state.clone()))
 }
 
 fn federated_routes(config: &Config, state: &State) -> Router {
     let Some(settings) = &config.oidc else {
+        tracing::warn!("no identity provider is configured, so nobody can sign in");
         return Router::new();
     };
     tracing::info!(issuer = %settings.issuer, "federated sign in accepted");
     oidc_router(state.clone(), config.after_sign_in.clone())
-}
-
-fn reset_routes(config: &Config, state: &State) -> Router {
-    if !config.local_password {
-        if config.mail.is_some() {
-            tracing::warn!("a mail relay is configured but local passwords are off");
-        }
-        return Router::new();
-    }
-    reset_router(state.clone()).merge(password_router(state.clone()))
 }
 
 fn explore_routes(state: Option<&State>, held: bool) -> Router {
@@ -175,4 +154,84 @@ fn team_routes(state: Option<&State>) -> Router {
 
 fn usage_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| usage_router(state.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    use super::{Held, control_routes};
+    use crate::config::{Config, OidcConfig};
+
+    fn with_provider() -> Config {
+        Config {
+            oidc: Some(OidcConfig {
+                issuer: "https://id.example/realms/ferristrace".to_owned(),
+                client_id: "ferristrace".to_owned(),
+                client_secret: "secret".to_owned(),
+                redirect_uri: "https://app.example/auth/oidc/callback".to_owned(),
+            }),
+            ..Config::default()
+        }
+    }
+
+    async fn answer(config: &Config, method: Method, uri: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Body::empty())
+            .expect("a request");
+        let response = control_routes(
+            config,
+            None,
+            Held {
+                explore: false,
+                issues: false,
+            },
+        )
+        .oneshot(request)
+        .await
+        .expect("a response");
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    #[tokio::test]
+    async fn without_a_provider_the_server_says_nobody_can_sign_in() {
+        let (status, body) = answer(&Config::default(), Method::GET, "/auth/methods").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"oidc":false}"#);
+    }
+
+    #[tokio::test]
+    async fn a_provider_without_a_control_plane_offers_no_way_in_either() {
+        let (status, body) = answer(&with_provider(), Method::GET, "/auth/methods").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"oidc":false}"#);
+    }
+
+    #[tokio::test]
+    async fn the_removed_routes_answer_not_found_whatever_the_configuration() {
+        for config in [Config::default(), with_provider()] {
+            for (method, uri) in [
+                (Method::POST, "/auth/sign-in"),
+                (Method::POST, "/auth/password"),
+                (Method::POST, "/auth/reset/request"),
+                (Method::POST, "/auth/reset/confirm"),
+                (Method::GET, "/auth/2fa"),
+                (Method::POST, "/auth/2fa/verify"),
+            ] {
+                let (status, _) = answer(&config, method.clone(), uri).await;
+
+                assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
+            }
+        }
+    }
 }

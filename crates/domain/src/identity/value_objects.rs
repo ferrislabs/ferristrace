@@ -5,7 +5,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::errors::{InvalidCredential, NotACode, WeakPassword};
+use super::errors::{InvalidCredential, NotACode};
 use crate::clock::UnixSeconds;
 use crate::secret::{SecretHash, SessionToken};
 
@@ -61,83 +61,19 @@ impl TryFrom<&str> for Subject {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Issuer {
-    Local,
-    Federated(Box<str>),
-}
+pub struct Issuer(Box<str>);
 
 impl Issuer {
-    pub fn federated(url: &str) -> Result<Self, InvalidCredential> {
+    pub fn new(url: &str) -> Result<Self, InvalidCredential> {
         let trimmed = url.trim();
         if trimmed.is_empty() {
             return Err(InvalidCredential::Issuer);
         }
-        Ok(Self::Federated(trimmed.into()))
-    }
-
-    pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local)
+        Ok(Self(trimmed.into()))
     }
 
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Local => "local",
-            Self::Federated(url) => url,
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-pub struct Password(String);
-
-impl Password {
-    pub fn new(plaintext: &str) -> Self {
-        Self(plaintext.to_owned())
-    }
-
-    pub fn exposed(&self) -> &str {
         &self.0
-    }
-}
-
-impl fmt::Debug for Password {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Password(redacted)")
-    }
-}
-
-pub(super) const MIN_PASSWORD_CHARS: usize = 12;
-
-pub(super) const MAX_PASSWORD_BYTES: usize = 128;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PasswordPolicy {
-    pub min_chars: usize,
-    pub max_bytes: usize,
-}
-
-impl Default for PasswordPolicy {
-    fn default() -> Self {
-        Self {
-            min_chars: MIN_PASSWORD_CHARS,
-            max_bytes: MAX_PASSWORD_BYTES,
-        }
-    }
-}
-
-impl PasswordPolicy {
-    pub fn admits(self, password: &Password) -> Result<(), WeakPassword> {
-        let chosen = password.exposed();
-        if chosen.len() > self.max_bytes {
-            return Err(WeakPassword::TooLong(self.max_bytes));
-        }
-        if chosen.chars().count() < self.min_chars {
-            return Err(WeakPassword::TooShort(self.min_chars));
-        }
-        if chosen.trim().is_empty() {
-            return Err(WeakPassword::Blank);
-        }
-        Ok(())
     }
 }
 
@@ -161,25 +97,16 @@ impl fmt::Display for AccountId {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum SignInProof {
-    Password {
-        email: Email,
-        password: Password,
-    },
-    Federated {
-        code: String,
-        code_verifier: String,
-        nonce: String,
-        redirect_uri: String,
-    },
+pub struct SignInProof {
+    pub code: String,
+    pub code_verifier: String,
+    pub nonce: String,
+    pub redirect_uri: String,
 }
 
 impl fmt::Debug for SignInProof {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Password { .. } => formatter.write_str("SignInProof::Password(redacted)"),
-            Self::Federated { .. } => formatter.write_str("SignInProof::Federated(redacted)"),
-        }
+        formatter.write_str("SignInProof(redacted)")
     }
 }
 
@@ -458,26 +385,6 @@ pub struct LiveSession {
     pub created_at: UnixSeconds,
     pub last_seen_at: UnixSeconds,
     pub current: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PasswordCheck {
-    Rejected,
-    Accepted,
-    AcceptedBehindCost(PasswordHash),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PasswordHash(Box<str>);
-
-impl PasswordHash {
-    pub fn from_encoded(encoded: &str) -> Self {
-        Self(encoded.into())
-    }
-
-    pub fn encoded(&self) -> &str {
-        &self.0
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

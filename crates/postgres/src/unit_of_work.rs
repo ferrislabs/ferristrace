@@ -4,14 +4,12 @@ use std::time::Duration;
 
 use ferristrace_application::registry::{Settle, UnitOfWork};
 use ferristrace_domain::SessionLifetime;
-use ferristrace_infra::{Argon2Hasher, SecretSeal};
+use ferristrace_infra::SecretSeal;
 use sqlx::{PgPool, Transaction};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::factors::DEFAULT_WINDOW as FACTOR_WINDOW;
 use crate::flows::DEFAULT_WINDOW as FLOW_WINDOW;
-use crate::provisioning::INVITE_WINDOW;
-use crate::resets::DEFAULT_WINDOW as RESET_WINDOW;
 
 #[derive(Debug, Clone)]
 pub struct SharedTx(Arc<Mutex<Transaction<'static, sqlx::Postgres>>>);
@@ -31,10 +29,7 @@ pub struct Postgres<C> {
     pool: PgPool,
     clock: C,
     pub(crate) lifetime: SessionLifetime,
-    pub(crate) hasher: Argon2Hasher,
     pub(crate) seal: Option<SecretSeal>,
-    pub(crate) invite_window: Duration,
-    pub(crate) reset_window: Duration,
     pub(crate) flow_window: Duration,
     pub(crate) factor_window: Duration,
 }
@@ -45,10 +40,7 @@ impl<C> Postgres<C> {
             pool,
             clock,
             lifetime: SessionLifetime::default(),
-            hasher: Argon2Hasher::new().expect("the default argon2 cost is valid"),
             seal: None,
-            invite_window: INVITE_WINDOW,
-            reset_window: RESET_WINDOW,
             flow_window: FLOW_WINDOW,
             factor_window: FACTOR_WINDOW,
         }
@@ -61,26 +53,8 @@ impl<C> Postgres<C> {
     }
 
     #[must_use]
-    pub fn with_hasher(mut self, hasher: Argon2Hasher) -> Self {
-        self.hasher = hasher;
-        self
-    }
-
-    #[must_use]
     pub fn with_seal(mut self, seal: Option<SecretSeal>) -> Self {
         self.seal = seal;
-        self
-    }
-
-    #[must_use]
-    pub fn with_invite_window(mut self, window: Duration) -> Self {
-        self.invite_window = window;
-        self
-    }
-
-    #[must_use]
-    pub fn with_reset_window(mut self, window: Duration) -> Self {
-        self.reset_window = window;
         self
     }
 

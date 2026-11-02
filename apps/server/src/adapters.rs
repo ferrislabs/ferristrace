@@ -11,13 +11,13 @@ use ferristrace_domain::telemetry::{
 };
 use ferristrace_domain::{
     AlertMailer, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey, Letter,
-    LogRecord, LogSink, Mailer, Metric, MetricSink, NoPhotos, PageDispatch, Photo, PhotoError,
-    Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink,
-    StatusMailer, TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
+    LogRecord, LogSink, Metric, MetricSink, NoPhotos, PageDispatch, Photo, PhotoError, Photos,
+    Pictured, Portrait, Scope, SinkError, Span, SpanSink, StatusMailer, TenantDirectory, TenantId,
+    UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
-    Argon2Hasher, HttpWebhooks, JwksVerifier, MemoryMeter, MemorySink, OidcProvider, S3Photos,
-    SmtpMailer, StaticDirectory, SystemClock,
+    HttpWebhooks, JwksVerifier, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer,
+    StaticDirectory, SystemClock,
 };
 use ferristrace_postgres::{Postgres, PostgresDirectory};
 use ferristrace_redis::RedisMeter;
@@ -28,7 +28,6 @@ pub(crate) struct Production;
 impl Stack for Production {
     type Repos = Postgres<SystemClock>;
     type Clock = SystemClock;
-    type Hasher = Argon2Hasher;
     type Mailer = Relay;
     type Photos = Gallery;
     type SpanStore = ClickhouseReader;
@@ -93,18 +92,6 @@ impl MetricSink for Sink {
 pub(crate) enum Relay {
     Smtp(Box<SmtpMailer>),
     Unreachable,
-}
-
-impl Mailer for Relay {
-    async fn send_password_reset(&self, to: &Email, token: &ResetToken) -> Result<(), ResetError> {
-        match self {
-            Self::Smtp(mailer) => mailer.send_password_reset(to, token).await,
-            Self::Unreachable => {
-                tracing::warn!("a reset link was asked for but no mail relay is configured");
-                Err(ResetError::Undeliverable)
-            }
-        }
-    }
 }
 
 impl AlertMailer for Relay {

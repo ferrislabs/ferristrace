@@ -6,7 +6,7 @@ import { nothingYet } from './orgs'
 
 export type Member = { account: string; email: string; name: string | null; photo: string | null; role: Role; joined_at_ms: number }
 
-export type Welcomed = { member: Member; invite_token: string | null }
+export type Welcomed = { member: Member; created: boolean }
 
 const key = (org: string | undefined) => ['org', org, 'members']
 

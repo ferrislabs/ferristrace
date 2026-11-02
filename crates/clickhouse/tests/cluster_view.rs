@@ -877,7 +877,6 @@ struct Clustered;
 impl Stack for Clustered {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -896,7 +895,6 @@ impl Stack for Clustered {
 fn routes(client: &Client) -> Router {
     let adapters = Adapters {
         clock: FixedClock::at(NOW_SECS),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,

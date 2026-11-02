@@ -44,7 +44,6 @@ ferristrace-api = { path = "crates/api" }
 ferristrace-ee = { path = "crates/ee" }
 
 anyhow = "1.0.104"
-argon2 = "0.6.0"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 base64 = "0.23.1"

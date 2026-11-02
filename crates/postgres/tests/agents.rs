@@ -63,7 +63,7 @@ fn backend_of(pool: &PgPool) -> Postgres<FixedClock> {
 
 async fn an_org(pool: &PgPool, owner: &str) -> (TenantId, AccountId) {
     let account = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(account)
         .bind(owner)
         .execute(pool)
@@ -162,7 +162,7 @@ async fn a_client_id_is_unique_per_organisation_among_live_agents() {
     let (org, owner) = an_org(&pool, "owner@example.com").await;
     let (other, other_owner) = {
         let account = Uuid::new_v4();
-        sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+        sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
             .bind(account)
             .bind("other@example.com")
             .execute(&pool)

@@ -35,7 +35,6 @@ struct Wired;
 impl Stack for Wired {
     type Repos = Postgres<FixedClock>;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -57,7 +56,6 @@ async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristr
         Postgres::new(pool.clone(), FixedClock::at(seconds)),
         Adapters {
             clock: FixedClock::at(seconds),
-            hasher: Inert::default(),
             mailer: Inert::default(),
             webhooks: Inert::default(),
             photos: NoPhotos,

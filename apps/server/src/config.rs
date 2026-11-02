@@ -39,8 +39,6 @@ pub struct Config {
     #[serde(default)]
     pub alerts: AlertsConfig,
     #[serde(default = "yes")]
-    pub local_password: bool,
-    #[serde(default = "yes")]
     pub cookie_secure: bool,
     #[serde(default = "landing")]
     pub after_sign_in: String,
@@ -245,7 +243,6 @@ impl Default for Config {
             objects: None,
             secrets: None,
             alerts: AlertsConfig::default(),
-            local_password: true,
             cookie_secure: true,
             after_sign_in: landing(),
         }

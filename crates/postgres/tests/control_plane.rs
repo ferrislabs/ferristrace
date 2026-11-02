@@ -84,29 +84,14 @@ async fn the_self_hosted_plan_leaves_every_limit_open() {
 }
 
 #[tokio::test]
-async fn an_account_may_hold_only_a_password() {
-    let Some(pool) = migrated("control_password_only").await else {
-        return;
-    };
-
-    sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'local@example.com', '$argon2id$hash')",
-    )
-    .execute(&pool)
-    .await
-    .expect("a password is a way in on its own");
-}
-
-#[tokio::test]
 async fn an_account_may_now_exist_before_any_way_in_is_linked() {
     let Some(pool) = migrated("control_no_way_in").await else {
         return;
     };
 
     sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'nobody@example.com', NULL)",
+        "INSERT INTO accounts (id, email) \
+         VALUES (gen_random_uuid(), 'nobody@example.com')",
     )
     .execute(&pool)
     .await
@@ -370,7 +355,7 @@ fn an_identity(issuer: Issuer, subject: &str, email: &str) -> ResolvedIdentity {
 }
 
 fn a_federated_identity(issuer: &str, subject: &str, email: &str) -> ResolvedIdentity {
-    an_identity(Issuer::federated(issuer).expect("a url"), subject, email)
+    an_identity(Issuer::new(issuer).expect("a url"), subject, email)
 }
 
 async fn account_count(pool: &PgPool) -> i64 {
@@ -533,7 +518,7 @@ async fn an_unverified_email_that_somebody_else_holds_is_refused() {
         .expect("the first provider");
 
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://other.example").expect("a url"),
+        issuer: Issuer::new("https://other.example").expect("a url"),
         subject: Subject::try_from("sub-2").expect("a subject"),
         email: Email::try_from("person@example.com").expect("an address"),
         email_verified: false,
@@ -576,7 +561,7 @@ async fn an_unverified_email_nobody_holds_still_provisions_its_own_account() {
     let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let accounts = backend::accounts(&pg);
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://id.example").expect("a url"),
+        issuer: Issuer::new("https://id.example").expect("a url"),
         subject: Subject::try_from("sub-1").expect("a subject"),
         email: Email::try_from("nobody@example.com").expect("an address"),
         email_verified: false,
@@ -603,6 +588,50 @@ async fn an_unverified_email_nobody_holds_still_provisions_its_own_account() {
         .expect("the account exists")
         .get("email");
     assert_eq!(kept_email, "nobody@example.com");
+}
+
+#[tokio::test]
+async fn a_bootstrapped_address_is_adopted_by_its_first_federated_sign_in() {
+    let Some(pool) = migrated("identity_bootstrap_first").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let plane = backend::control_plane_of(&pg);
+    let owner = Email::try_from("operator@example.com").expect("an address");
+    let created = plane.create_account(&owner).await.expect("the account");
+    let org = plane
+        .found(&OrgName::try_from("Acme").expect("a name"), &owner)
+        .await
+        .expect("the organisation");
+    let identity = a_federated_identity("https://id.example", "sub-1", "operator@example.com");
+
+    let signed_in = backend::accounts(&pg)
+        .provision(
+            &identity,
+            ProvisionPolicy {
+                auto_provision: true,
+                link_by_email: true,
+            },
+        )
+        .await
+        .expect("the first sign in");
+
+    assert_eq!(
+        signed_in, created,
+        "the sign in lands on the bootstrapped account"
+    );
+    assert_eq!(account_count(&pool).await, 1);
+    let owners: i64 = sqlx::query(
+        "SELECT count(*) AS n FROM org_members WHERE org_id = $1 AND account_id = $2 \
+         AND role = 'owner'",
+    )
+    .bind(org.as_uuid())
+    .bind(signed_in.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .expect("counting owners")
+    .get("n");
+    assert_eq!(owners, 1);
 }
 
 #[tokio::test]
@@ -656,7 +685,7 @@ async fn a_takeover_attempt_reaches_the_account_directory_as_rejected_not_unavai
         .expect("the first provider");
 
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://other.example").expect("a url"),
+        issuer: Issuer::new("https://other.example").expect("a url"),
         subject: Subject::try_from("sub-2").expect("a subject"),
         email: Email::try_from("person@example.com").expect("an address"),
         email_verified: false,
@@ -674,54 +703,6 @@ async fn a_takeover_attempt_reaches_the_account_directory_as_rejected_not_unavai
 
     assert_eq!(outcome, Err(AuthError::Rejected));
     assert_eq!(account_count(&pool).await, 1, "no second account appears");
-}
-
-#[tokio::test]
-async fn a_local_identity_is_the_account_it_names_and_needs_no_link() {
-    let Some(pool) = migrated("identity_local").await else {
-        return;
-    };
-    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
-    let accounts = backend::accounts(&pg);
-    let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'x')")
-        .bind(id)
-        .bind("person@example.com")
-        .execute(&pool)
-        .await
-        .expect("an account");
-    let local = an_identity(Issuer::Local, &id.to_string(), "person@example.com");
-
-    let resolved = accounts
-        .provision(&local, ProvisionPolicy::default())
-        .await
-        .expect("the local identity");
-
-    assert_eq!(resolved.as_uuid(), id);
-    assert_eq!(account_count(&pool).await, 1);
-    assert_eq!(
-        link_count(&pool).await,
-        0,
-        "a local account is its own identity, so it needs no link row"
-    );
-}
-
-#[tokio::test]
-async fn a_local_subject_that_is_not_an_account_id_is_refused() {
-    let Some(pool) = migrated("identity_local_nonsense").await else {
-        return;
-    };
-    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
-
-    let refused = backend::accounts(&pg)
-        .provision(
-            &an_identity(Issuer::Local, "not-a-uuid", "person@example.com"),
-            ProvisionPolicy::default(),
-        )
-        .await;
-
-    assert!(matches!(refused, Err(AccountError::NotProvisioned)));
-    assert_eq!(account_count(&pool).await, 0);
 }
 
 #[tokio::test]
@@ -1124,8 +1105,8 @@ async fn an_organisation_founded_in_a_transaction_that_fails_does_not_exist() {
         return;
     };
     sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'founder@example.com', 'x')",
+        "INSERT INTO accounts (id, email) \
+         VALUES (gen_random_uuid(), 'founder@example.com')",
     )
     .execute(&pool)
     .await

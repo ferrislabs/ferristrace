@@ -56,7 +56,7 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
 
 async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(id)
         .bind(email)
         .execute(pool)
@@ -448,8 +448,7 @@ async fn a_member_removed_through_the_roster_is_off_the_teams_too() {
         .await
         .expect("the seating");
 
-    let roster_backend = Postgres::new(pool.clone(), ferristrace_infra::SystemClock)
-        .with_hasher(ferristrace_infra::Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"));
+    let roster_backend = Postgres::new(pool.clone(), ferristrace_infra::SystemClock);
     let removed = backend::roster(&roster_backend)
         .remove(org, leaver)
         .await

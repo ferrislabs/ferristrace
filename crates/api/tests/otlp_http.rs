@@ -34,7 +34,6 @@ struct TestStack<Q>(std::marker::PhantomData<Q>);
 impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;

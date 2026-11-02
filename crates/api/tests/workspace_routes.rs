@@ -10,9 +10,9 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, ControlPlane, Email, LiveSession, Membership, Memberships, Minted, NoPhotos,
-    OrgName, OrgRole, ProjectId, ProjectName, ProvisionError, ProvisionPolicy, Revoked, SecretHash,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch, SessionToken,
-    TenantId, UnixSeconds, WhoamiError,
+    OrgName, OrgRole, ProjectId, ProjectName, ProvisionError, ProvisionPolicy, Revoked, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch, SessionToken, TenantId,
+    UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -162,11 +162,7 @@ impl ControlPlane for Founder {
         Err(ProvisionError::Unreachable)
     }
 
-    async fn create_locked_account(&self, _: &Email) -> Result<AccountId, ProvisionError> {
-        Err(ProvisionError::Unreachable)
-    }
-
-    async fn invite(&self, _: AccountId, _: SecretHash) -> Result<(), ProvisionError> {
+    async fn create_account(&self, _: &Email) -> Result<AccountId, ProvisionError> {
         Err(ProvisionError::Unreachable)
     }
 
@@ -188,10 +184,6 @@ impl ControlPlane for Founder {
     }
 
     async fn revoke_key(&self, _: &str) -> Result<Option<Revoked>, ProvisionError> {
-        Err(ProvisionError::Unreachable)
-    }
-
-    async fn memberships_of(&self, _: AccountId) -> Result<Vec<TenantId>, ProvisionError> {
         Err(ProvisionError::Unreachable)
     }
 }
@@ -245,7 +237,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -264,7 +255,6 @@ impl Stack for TestStack {
 fn app(world: &Arc<Mutex<World>>) -> Router {
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,

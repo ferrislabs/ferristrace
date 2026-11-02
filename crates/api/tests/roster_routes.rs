@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -10,8 +11,8 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::organisation::{Holder, Joined};
 use ferristrace_domain::{
     AccountId, Agent, Email, LiveSession, Member, Membership, Memberships, NoPhotos, OrgRole,
-    ProvisionPolicy, RESET_PREFIX, Roll, SecretHash, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    ProvisionPolicy, Roll, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -113,7 +114,7 @@ struct Kept {
     roll: Mutex<Vec<Member>>,
     holder: Option<Holder>,
     already_in: bool,
-    digests: Mutex<Vec<SecretHash>>,
+    created: AtomicUsize,
 }
 
 impl Kept {
@@ -122,7 +123,7 @@ impl Kept {
             roll: Mutex::new(roll),
             holder: None,
             already_in: false,
-            digests: Mutex::default(),
+            created: AtomicUsize::new(0),
         })
     }
 
@@ -139,7 +140,7 @@ impl Kept {
                 photo: None,
             }),
             already_in: false,
-            digests: Mutex::default(),
+            created: AtomicUsize::new(0),
         })
     }
 
@@ -152,7 +153,7 @@ impl Kept {
                 photo: None,
             }),
             already_in: true,
-            digests: Mutex::default(),
+            created: AtomicUsize::new(0),
         })
     }
 
@@ -160,8 +161,8 @@ impl Kept {
         self.roll.lock().expect("the lock").clone()
     }
 
-    fn digests(&self) -> usize {
-        self.digests.lock().expect("the lock").len()
+    fn created(&self) -> usize {
+        self.created.load(Ordering::SeqCst)
     }
 }
 
@@ -197,7 +198,8 @@ impl Roll for Kept {
         Ok(self.holder.clone())
     }
 
-    async fn create_locked(&self, _email: &Email) -> Result<AccountId, StoreError> {
+    async fn create_account(&self, _email: &Email) -> Result<AccountId, StoreError> {
+        self.created.fetch_add(1, Ordering::SeqCst);
         Ok(an_account(SOMEBODY))
     }
 
@@ -211,11 +213,6 @@ impl Roll for Kept {
             role,
             joined_at_unix_nanos: JOINED,
         }))
-    }
-
-    async fn open_way_in(&self, _account: AccountId, digest: SecretHash) -> Result<(), StoreError> {
-        self.digests.lock().expect("the lock").push(digest);
-        Ok(())
     }
 }
 
@@ -283,7 +280,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -306,7 +302,6 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
     };
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,
@@ -589,7 +584,7 @@ async fn an_account_this_organisation_never_held_is_no_member_to_remove() {
 }
 
 #[tokio::test]
-async fn an_unknown_address_is_admitted_with_the_one_token_that_sets_its_password() {
+async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
     let kept = Kept::awaiting();
 
     let (status, body) = served(
@@ -607,19 +602,13 @@ async fn an_unknown_address_is_admitted_with_the_one_token_that_sets_its_passwor
     assert_eq!(status, StatusCode::CREATED);
     let welcomed = read(&body);
     assert_eq!(welcomed["member"]["role"], "member");
-    let token = welcomed["invite_token"]
-        .as_str()
-        .expect("a new account cannot sign in without one");
-    assert!(token.starts_with(RESET_PREFIX), "{token}");
-    assert_eq!(
-        kept.digests(),
-        1,
-        "the control plane is handed the digest, never the token"
-    );
+    assert_eq!(welcomed["created"], true);
+    assert!(welcomed.get("invite_token").is_none());
+    assert_eq!(kept.created(), 1);
 }
 
 #[tokio::test]
-async fn an_address_that_already_has_an_account_joins_without_a_token() {
+async fn an_address_that_already_has_an_account_joins_the_account_it_holds() {
     let kept = Kept::standing(an_account(SOMEBODY));
 
     let (status, body) = served(
@@ -637,7 +626,8 @@ async fn an_address_that_already_has_an_account_joins_without_a_token() {
     assert_eq!(status, StatusCode::CREATED);
     let welcomed = read(&body);
     assert_eq!(welcomed["member"]["role"], "admin");
-    assert!(welcomed["invite_token"].is_null());
+    assert_eq!(welcomed["created"], false);
+    assert_eq!(kept.created(), 0);
 }
 
 #[tokio::test]
@@ -677,7 +667,7 @@ async fn an_administrator_cannot_invite_an_owner_and_no_account_is_made_for_one(
     .await;
 
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(kept.digests(), 0);
+    assert_eq!(kept.created(), 0);
 }
 
 #[tokio::test]
@@ -698,5 +688,5 @@ async fn something_that_is_not_an_address_is_refused_before_anybody_is_admitted(
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body.contains("address"), "{body}");
-    assert_eq!(kept.digests(), 0);
+    assert_eq!(kept.created(), 0);
 }

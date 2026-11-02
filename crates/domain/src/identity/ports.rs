@@ -1,13 +1,12 @@
 use core::future::Future;
 
 use super::entities::Session;
-use super::errors::{AuthError, FactorError, FlowError, HashError, ResetError, SessionError};
+use super::errors::{AuthError, FactorError, FlowError, SessionError};
 use super::value_objects::{
-    AccountId, Agent, Email, FactorKind, Kept, LiveSession, Password, PasswordCheck, PasswordHash,
-    Pending, PendingFlow, ProvisionPolicy, ResolvedIdentity, SessionId, SignInProof, Step,
-    TotpSecret,
+    AccountId, Agent, FactorKind, Kept, LiveSession, Pending, PendingFlow, ProvisionPolicy,
+    ResolvedIdentity, SessionId, SignInProof, Step, TotpSecret,
 };
-use crate::secret::{ResetToken, SecretHash, SessionToken};
+use crate::secret::{SecretHash, SessionToken};
 use crate::telemetry::TenantId;
 
 pub trait AuthProvider {
@@ -24,52 +23,6 @@ impl<T: AuthProvider + Sync> AuthProvider for &T {
     ) -> impl Future<Output = Result<ResolvedIdentity, AuthError>> + Send {
         (*self).sign_in(proof)
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct NoProvider;
-
-impl AuthProvider for NoProvider {
-    async fn sign_in(&self, _proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
-        Err(AuthError::SourceDisabled)
-    }
-}
-
-pub trait ResetStore {
-    fn account_for(
-        &self,
-        email: &Email,
-    ) -> impl Future<Output = Result<Option<AccountId>, ResetError>> + Send;
-
-    fn begin(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), ResetError>> + Send;
-
-    fn take(
-        &self,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<AccountId, ResetError>> + Send;
-
-    fn set_password(
-        &self,
-        account: AccountId,
-        hash: &PasswordHash,
-    ) -> impl Future<Output = Result<(), ResetError>> + Send;
-
-    fn revoke_sessions(
-        &self,
-        account: AccountId,
-    ) -> impl Future<Output = Result<u64, ResetError>> + Send;
-}
-
-pub trait Mailer {
-    fn send_password_reset(
-        &self,
-        to: &Email,
-        token: &ResetToken,
-    ) -> impl Future<Output = Result<(), ResetError>> + Send;
 }
 
 pub trait Gate {
@@ -254,21 +207,6 @@ pub trait SessionRoll {
         account: AccountId,
         current: &SessionToken,
     ) -> impl Future<Output = Result<u64, SessionError>> + Send;
-}
-
-pub trait PasswordHasher {
-    fn hash(
-        &self,
-        password: &Password,
-    ) -> impl Future<Output = Result<PasswordHash, HashError>> + Send;
-
-    fn check(
-        &self,
-        password: &Password,
-        against: &PasswordHash,
-    ) -> impl Future<Output = Result<PasswordCheck, HashError>> + Send;
-
-    fn decoy(&self) -> &PasswordHash;
 }
 
 pub trait AccountDirectory {

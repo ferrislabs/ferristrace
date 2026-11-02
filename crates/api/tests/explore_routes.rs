@@ -390,7 +390,6 @@ impl<
 {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = R;
@@ -419,7 +418,6 @@ fn state<
 ) -> AppState<TestStack<R>> {
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,

@@ -738,7 +738,6 @@ struct Placing;
 impl Stack for Placing {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = ClickhouseReader;
@@ -757,7 +756,6 @@ impl Stack for Placing {
 fn routes(client: &Client) -> Router {
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,
