@@ -87,6 +87,7 @@ fn chronicle(entries: Vec<TimelineEntry>) -> Chronicle {
         alerts: vec![AlertRef {
             id: rule(),
             name: "Checkout errors".into(),
+            services: vec!["checkout".into()],
         }],
     }
 }

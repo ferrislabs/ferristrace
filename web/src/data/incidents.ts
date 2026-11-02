@@ -23,6 +23,7 @@ export type Incident = {
   opened_ms: number
   resolved_ms: number | null
   alert: { id: string; name: string } | null
+  services: string[]
   paged_schedule: string | null
 }
 

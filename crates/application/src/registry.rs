@@ -141,6 +141,10 @@ pub trait ReadRepos: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
 
 impl<R> ReadRepos for R where R: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
 
+pub trait SiteRepos: ReadRepos + RepoFor<domain::Projects, Repo: Projects> {}
+
+impl<R> SiteRepos for R where R: ReadRepos + RepoFor<domain::Projects, Repo: Projects> {}
+
 pub trait AccessRepos:
     StandingRepos
     + RecordingRepos

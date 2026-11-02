@@ -1,8 +1,8 @@
 use clickhouse::query::Query;
 use clickhouse::{Client, Row, RowOwned, RowRead};
 use ferristrace_domain::{
-    Placement, PlacementReader, Placements, ProjectId, SeenPod, SeenWorkload, StoreError, TenantId,
-    Window, WorkloadKind,
+    Placement, PlacementReader, Placements, ProjectId, SeenPod, SeenWorkload, Sighting, StoreError,
+    TenantId, Window, WorkloadKind,
 };
 use serde::Deserialize;
 
@@ -47,6 +47,26 @@ const SPANS_PLACED: &str = "SELECT {columns} FROM spans \
    WHERE tenant_id = ? \
      AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?) \
      AND (? = 0 OR project_id = ?){placed}";
+
+const SIGHTED_ENVIRONMENTS: &str = "SELECT DISTINCT environment FROM ( \
+     SELECT if(attributes['deployment.environment.name'] != '', \
+               attributes['deployment.environment.name'], \
+               attributes['deployment.environment']) AS environment \
+     FROM spans \
+     WHERE tenant_id = ? AND service_name = ? \
+       AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?) \
+       AND (? = 0 OR project_id = ?) \
+   ) \
+   WHERE environment != '' \
+   ORDER BY environment \
+   LIMIT 50";
+
+const SIGHTED_PROJECT: &str = "SELECT project_id FROM spans \
+   WHERE tenant_id = ? AND service_name = ? \
+     AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?) \
+     AND (? = 0 OR project_id = ?) \
+   ORDER BY start_time DESC \
+   LIMIT 1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Held {
@@ -186,6 +206,17 @@ fn scoped(mut query: Query, tenant: TenantId, window: Window, project: Option<Pr
 }
 
 #[derive(Debug, Row, Deserialize)]
+struct EnvironmentRow {
+    environment: String,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct ProjectRow {
+    #[serde(with = "clickhouse::serde::uuid")]
+    project_id: uuid::Uuid,
+}
+
+#[derive(Debug, Row, Deserialize)]
 struct FacetRow {
     facet: String,
     value: String,
@@ -222,6 +253,44 @@ where
 }
 
 impl PlacementReader for ClickhouseReader {
+    async fn sighting(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Sighting, StoreError> {
+        let client = self.client();
+        let bound = |sql: &str| {
+            client
+                .query(sql)
+                .bind(tenant.as_uuid())
+                .bind(service)
+                .bind(nanos(window.from_unix_nanos()))
+                .bind(nanos(window.to_unix_nanos()))
+                .bind(u8::from(project.is_some()))
+                .bind(uuid_of(project))
+        };
+        let environments: Vec<EnvironmentRow> = bound(SIGHTED_ENVIRONMENTS)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        let latest: Option<ProjectRow> = bound(SIGHTED_PROJECT)
+            .fetch_optional()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(Sighting {
+            project: latest
+                .map(|row| row.project_id)
+                .filter(|id| !id.is_nil())
+                .map(ProjectId::new),
+            environments: environments
+                .into_iter()
+                .map(|row| row.environment.into())
+                .collect(),
+        })
+    }
+
     async fn placements(
         &self,
         tenant: TenantId,

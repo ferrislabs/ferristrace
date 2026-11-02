@@ -4,7 +4,7 @@ use super::value_objects::{
 };
 use crate::access::KeyId;
 use crate::agents::AgentId;
-use crate::alerts::{AlertStatus, Culprits, Labels, RuleId};
+use crate::alerts::{AlertStatus, Culprits, Labels, Rule, RuleId};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::oncall::{PageId, ScheduleId};
@@ -196,6 +196,17 @@ impl Person {
 pub struct AlertRef {
     pub id: RuleId,
     pub name: Box<str>,
+    pub services: Vec<Box<str>>,
+}
+
+impl AlertRef {
+    pub fn of(rule: &Rule) -> Self {
+        Self {
+            id: rule.id,
+            name: rule.name.as_str().into(),
+            services: rule.definition.signal().services(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

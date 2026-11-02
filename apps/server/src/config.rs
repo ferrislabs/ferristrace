@@ -31,6 +31,8 @@ pub struct Config {
     #[serde(default)]
     pub agents: AgentsConfig,
     #[serde(default)]
+    pub mcp: McpConfig,
+    #[serde(default)]
     pub mail: Option<MailConfig>,
     #[serde(default)]
     pub objects: Option<ObjectsConfig>,
@@ -137,6 +139,14 @@ pub struct AgentsConfig {
     pub audience: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpConfig {
+    #[serde(default)]
+    pub gateway_client_id: Option<String>,
+    #[serde(default)]
+    pub public_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSetup {
     NoIssuer,
@@ -239,6 +249,7 @@ impl Default for Config {
             tenants: Vec::new(),
             oidc: None,
             agents: AgentsConfig::default(),
+            mcp: McpConfig::default(),
             mail: None,
             objects: None,
             secrets: None,
@@ -262,7 +273,7 @@ pub fn load() -> anyhow::Result<Config> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{AgentSetup, Config, FILE, TenantAllowance, figment};
+    use super::{AgentSetup, Config, FILE, McpConfig, TenantAllowance, figment};
 
     #[test]
     fn the_default_ports_are_the_otlp_ones() {
@@ -511,6 +522,24 @@ mod tests {
 
             assert_eq!(mail.relay, "mail.example.com");
             assert_eq!(mail.base_url, "https://app.example.com");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn mcp_is_unconfigured_until_the_environment_names_the_gateway_and_its_url() {
+        figment::Jail::expect_with(|jail| {
+            assert_eq!(figment().extract::<Config>()?.mcp, McpConfig::default());
+
+            jail.set_env("FERRISTRACE_MCP__GATEWAY_CLIENT_ID", "mcp-gateway");
+            jail.set_env("FERRISTRACE_MCP__PUBLIC_URL", "https://mcp.example.com");
+            let config: Config = figment().extract()?;
+
+            assert_eq!(config.mcp.gateway_client_id.as_deref(), Some("mcp-gateway"));
+            assert_eq!(
+                config.mcp.public_url.as_deref(),
+                Some("https://mcp.example.com")
+            );
             Ok(())
         });
     }

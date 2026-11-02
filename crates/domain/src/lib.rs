@@ -109,11 +109,11 @@ pub use metrics::{
 };
 pub use oncall::{
     ACK_LIFETIME_SECS, AckClaim, AckKey, AckRefused, BadSchedule, ClaimedNotice, Day,
-    ESCALATE_AFTER_SECS, Escalation, Handoff, Notice, NoticeId, OnCallNow, OncallError, Origin,
-    Override, OverrideId, PAGE_TICK_SECS, Page, PageDesk, PageDispatch, PageId, PageScope,
-    PageSource, PageState, PageView, Paged, Pager, Pages, Paging, Rostered, Rota, Rotation,
-    RotationLength, Schedule, ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch, Schedules,
-    Shift, TimeOfDay, Timezone, Weekday, escalated, next, on_call, shift,
+    ESCALATE_AFTER_SECS, Escalation, Handoff, Notice, NoticeId, OnCallNow, OnCallStatus,
+    OncallError, Origin, Override, OverrideId, PAGE_TICK_SECS, Page, PageDesk, PageDispatch,
+    PageId, PageScope, PageSource, PageState, PageView, Paged, Pager, Pages, Paging, Rostered,
+    Rota, Rotation, RotationLength, Schedule, ScheduleDraft, ScheduleId, ScheduleName,
+    SchedulePatch, Schedules, Shift, TimeOfDay, Timezone, Weekday, escalated, next, on_call, shift,
 };
 pub use organisation::{
     BadName, BadTeamName, BadTimezone, Holder, Invitation, Joined, Member, Membership, Memberships,
@@ -124,7 +124,7 @@ pub use organisation::{
 pub use placement::{
     BadPlacement, CLUSTER_KEY, MAX_PLACEMENT_BYTES, MAX_PLACEMENTS, NAMESPACE_KEY, NODE_KEY,
     POD_KEY, Placement, PlacementName, PlacementReader, Placements, SeenPod, SeenWorkload,
-    Workload, WorkloadKind,
+    ServiceSite, Sighting, Workload, WorkloadKind,
 };
 pub use postmortems::{
     BadPostmortem, MAX_BODY_BYTES, Postmortem, PostmortemBody, PostmortemDesk, PostmortemError,

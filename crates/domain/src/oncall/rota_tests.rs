@@ -406,3 +406,158 @@ async fn nobody_is_on_call_before_the_rotation_starts() {
     assert_eq!(now.person, None);
     assert_eq!(now.until_ms, None);
 }
+
+fn override_for(account: u128, from_s: u64, to_s: u64) -> super::entities::Override {
+    super::entities::Override {
+        id: OverrideId::fresh(),
+        schedule: primary(),
+        account: person(account),
+        from_ms: ms(from_s),
+        to_ms: ms(to_s),
+    }
+}
+
+#[tokio::test]
+async fn a_person_on_the_rotation_now_is_on_call_with_the_names_of_their_schedules() {
+    let world = World::new();
+
+    let status = world
+        .rota(OrgRole::Member)
+        .whether_on_call(
+            &Reader::Session(token()),
+            an_org(MINE),
+            "me@example.com",
+            at(0),
+        )
+        .await
+        .expect("a member reads");
+
+    assert!(status.on_call);
+    assert_eq!(
+        status.schedules,
+        vec![ScheduleName::try_from("Primary").expect("a name")]
+    );
+}
+
+#[tokio::test]
+async fn a_person_whose_turn_is_not_now_is_not_on_call() {
+    let world = World::new();
+
+    let status = world
+        .rota(OrgRole::Member)
+        .whether_on_call(
+            &Reader::Session(token()),
+            an_org(MINE),
+            "ada@example.com",
+            at(0),
+        )
+        .await
+        .expect("a member reads");
+
+    assert!(!status.on_call);
+    assert!(status.schedules.is_empty());
+}
+
+#[tokio::test]
+async fn an_override_puts_its_person_on_call_for_its_window_only() {
+    let world = World::new();
+    crate::oncall::Schedules::add_override(
+        &world.oncall,
+        an_org(MINE),
+        &override_for(BOB, 100, 200),
+    )
+    .await
+    .expect("kept");
+    let rota = world.rota(OrgRole::Member);
+    let who = Reader::Session(token());
+
+    let during = rota
+        .whether_on_call(&who, an_org(MINE), "bob@example.com", at(150))
+        .await
+        .expect("read");
+    let after = rota
+        .whether_on_call(&who, an_org(MINE), "bob@example.com", at(250))
+        .await
+        .expect("read");
+    let displaced = rota
+        .whether_on_call(&who, an_org(MINE), "me@example.com", at(150))
+        .await
+        .expect("read");
+
+    assert!(during.on_call);
+    assert!(!after.on_call);
+    assert!(!displaced.on_call);
+}
+
+#[tokio::test]
+async fn an_unknown_or_malformed_address_is_not_on_call_and_the_case_does_not_matter() {
+    let world = World::new();
+    let rota = world.rota(OrgRole::Member);
+    let who = Reader::Session(token());
+
+    let unknown = rota
+        .whether_on_call(&who, an_org(MINE), "nobody@example.com", at(0))
+        .await
+        .expect("read");
+    let malformed = rota
+        .whether_on_call(&who, an_org(MINE), "not an address", at(0))
+        .await
+        .expect("read");
+    let shouted = rota
+        .whether_on_call(&who, an_org(MINE), " ME@Example.COM ", at(0))
+        .await
+        .expect("read");
+
+    assert_eq!(unknown, super::entities::OnCallStatus::default());
+    assert_eq!(malformed, super::entities::OnCallStatus::default());
+    assert!(shouted.on_call);
+}
+
+#[tokio::test]
+async fn the_lookup_is_scoped_to_the_organisation_and_open_to_keys_and_agents() {
+    use crate::agents::{AgentScope, VerifiedToken};
+
+    let world = World::new();
+    let rota = world.rota(OrgRole::Member);
+    let key = Reader::Key(
+        world
+            .keys
+            .holding(an_org(MINE), None, scopes(&[KeyScope::Read])),
+    );
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "gateway", &[AgentScope::TelemetryRead], None);
+    let agent = Reader::Agent(crate::agents::AgentCall {
+        token: VerifiedToken {
+            client_id: "gateway".into(),
+            scopes: vec!["telemetry:read".into()],
+            jti: "jti-1".into(),
+            expires_at_unix_secs: 4_000_000_000,
+            delegated: None,
+        },
+        route: "/api/orgs/{org}/oncall/now".into(),
+    });
+
+    let foreign = rota
+        .whether_on_call(
+            &Reader::Session(token()),
+            an_org(THEIRS),
+            "me@example.com",
+            at(0),
+        )
+        .await;
+    let by_key = rota
+        .whether_on_call(&key, an_org(MINE), "me@example.com", at(0))
+        .await
+        .expect("a read key reads");
+    let by_agent = rota
+        .whether_on_call(&agent, an_org(MINE), "me@example.com", at(0))
+        .await
+        .expect("an agent reads");
+
+    assert_eq!(foreign.map(|_| ()), Err(OncallError::NotYours));
+    assert!(by_key.on_call);
+    assert!(by_agent.on_call);
+    assert_eq!(world.keys.book.uses().len(), 1);
+}

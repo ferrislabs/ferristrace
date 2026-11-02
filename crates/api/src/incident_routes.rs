@@ -102,6 +102,7 @@ pub struct IncidentBody {
     opened_ms: u64,
     resolved_ms: Option<u64>,
     alert: Option<AlertBody>,
+    services: Vec<String>,
     paged_schedule: Option<Uuid>,
 }
 
@@ -119,6 +120,11 @@ impl From<&Briefed> for IncidentBody {
             opened_ms: incident.opened_ms,
             resolved_ms: incident.resolved_ms,
             alert: briefed.alert.as_ref().map(AlertBody::from),
+            services: briefed
+                .alert
+                .as_ref()
+                .map(|alert| alert.services.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
             paged_schedule: incident.paged_schedule.map(ScheduleId::as_uuid),
         }
     }

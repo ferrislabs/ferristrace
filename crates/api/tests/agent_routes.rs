@@ -6,7 +6,8 @@ use axum::body::Body;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{
-    AppState, SessionCookie, agent_router, explore_router, key_router, mark_routes,
+    AppState, McpSettings, SessionCookie, agent_router, explore_router, key_router, mark_routes,
+    mcp_router, site_router,
 };
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Notebook, Untransacted};
@@ -14,13 +15,13 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, Actor, Agent, AgentEnrolment, AgentId, AgentScope, AgentScopes, AgentToken,
     AgentTokens, Agents, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Counted,
-    Created, Fingerprint, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes,
-    LiveSession, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
-    ProjectName, Projects, ProvisionPolicy, ReadGrant, RegisteredAgent, Renamed, ServiceFilter,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TeamId, TenantId,
-    TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, VerifiedToken, WhoamiError,
-    Window,
+    Created, Delegation, Fingerprint, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
+    KeyScopes, LiveSession, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project,
+    ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant, RegisteredAgent, Renamed,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionId, SessionRoll,
+    SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, StoreError,
+    TeamId, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, VerifiedToken,
+    WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -246,6 +247,20 @@ impl ferristrace_domain::PlacementReader for Looked {
     ) -> Result<ferristrace_domain::Placements, StoreError> {
         self.note(project);
         Ok(ferristrace_domain::Placements::default())
+    }
+
+    async fn sighting(
+        &self,
+        _tenant: TenantId,
+        service: &str,
+        _window: ferristrace_domain::Window,
+        project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Sighting, StoreError> {
+        self.note(project);
+        Ok(ferristrace_domain::Sighting {
+            project: project.or(Some(a_project(STOREFRONT))),
+            environments: vec![service.into(), "prod".into()],
+        })
     }
 }
 
@@ -490,6 +505,17 @@ impl Tokens {
         token
     }
 
+    fn delegate(&self, token: &str, subject: &str, email: Option<&str>) {
+        if let Some(Ok(held)) = self.known.lock().expect("the lock").get_mut(token) {
+            held.delegated = Some(Delegation {
+                subject: subject.into(),
+                email: email.map(Into::into),
+                act_sub: None,
+                act_client_id: Some("mcp-gateway".into()),
+            });
+        }
+    }
+
     fn refuse(&self, name: &str, refusal: TokenRefusal) -> String {
         let token = format!("head.{name}.sig");
         self.known
@@ -592,6 +618,7 @@ struct Harness {
     looked: Looked,
     agents_on: bool,
     reason: Option<String>,
+    mcp: McpSettings,
 }
 
 impl Harness {
@@ -602,6 +629,17 @@ impl Harness {
             looked: Looked::default(),
             agents_on: true,
             reason: None,
+            mcp: McpSettings {
+                gateway_client_id: Some("mcp-gateway".to_owned()),
+                public_url: Some("https://mcp.example.com/".to_owned()),
+            },
+        }
+    }
+
+    fn without_mcp() -> Self {
+        Self {
+            mcp: McpSettings::default(),
+            ..Self::new()
         }
     }
 
@@ -636,10 +674,13 @@ impl Harness {
         )
         .with_agent_tokens(self.agents_on.then(|| Arc::clone(&self.tokens)));
         let state = AppState::new(Arc::new(app), SessionCookie::default())
-            .with_agent_policy(self.reason.clone(), Some("ui-client".to_owned()));
+            .with_agent_policy(self.reason.clone(), Some("ui-client".to_owned()))
+            .with_mcp(self.mcp.clone());
         mark_routes(
             agent_router(state.clone())
                 .merge(key_router(state.clone()))
+                .merge(mcp_router(state.clone()))
+                .merge(site_router(state.clone()))
                 .merge(explore_router(state)),
         )
     }
@@ -1314,4 +1355,356 @@ async fn the_client_people_sign_in_with_cannot_be_registered_as_an_agent() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(harness.book.agents.lock().expect("the lock").is_empty());
+}
+
+fn mcp_of(org: u128) -> String {
+    format!("/api/orgs/{}/mcp", id(org))
+}
+
+fn placement_of(org: u128, service: &str) -> String {
+    format!("/api/orgs/{}/services/{service}/placement", id(org))
+}
+
+#[tokio::test]
+async fn spec_l7_4_a_delegated_read_is_audited_with_the_person_it_was_made_for() {
+    let harness = Harness::new();
+    harness.registered("mcp-gateway", &["telemetry:read"]).await;
+    let token = harness
+        .tokens
+        .mint("dana", "mcp-gateway", &["telemetry:read"], "jti-d");
+    harness
+        .tokens
+        .delegate(&token, "sub-dana", Some("dana@example.com"));
+    let direct = harness
+        .tokens
+        .mint("direct", "mcp-gateway", &["telemetry:read"], "jti-x");
+
+    let (status, body) = harness.read_as(&token, &traces_of(MINE)).await;
+    let (plain, _) = harness.read_as(&direct, &traces_of(MINE)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(plain, StatusCode::OK);
+    let reads = reads_of(&harness.book);
+    assert_eq!(reads.len(), 2);
+    assert_eq!(reads[0].detail.get("jti"), Some(Some("jti-d")));
+    assert_eq!(reads[0].detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(
+        reads[0].detail.get("on_behalf_of_email"),
+        Some(Some("dana@example.com"))
+    );
+    assert_eq!(reads[1].detail.get("on_behalf_of"), None);
+}
+
+#[tokio::test]
+async fn a_service_placement_answers_the_project_and_environments_to_an_agent() {
+    let harness = Harness::new();
+    harness.registered("mcp-gateway", &["telemetry:read"]).await;
+    let token = harness
+        .tokens
+        .mint("gw", "mcp-gateway", &["telemetry:read"], "jti-1");
+
+    let (status, body) = harness
+        .read_as(&token, &placement_of(MINE, "checkout"))
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        read(&body),
+        serde_json::json!({"project": "storefront", "environments": ["checkout", "prod"]})
+    );
+    let reads = reads_of(&harness.book);
+    assert_eq!(
+        reads[0].detail.get("route"),
+        Some(Some("/api/orgs/{org}/services/{name}/placement"))
+    );
+}
+
+#[tokio::test]
+async fn spec_l7_6_a_placement_is_refused_to_an_organisation_with_no_such_agent_and_narrowed_for_a_bound_one()
+ {
+    let harness = Harness::new();
+    let bound = serde_json::json!({
+        "name": "bound gateway",
+        "client_id": "bound-gateway",
+        "scopes": ["telemetry:read"],
+        "project": id(STOREFRONT),
+    })
+    .to_string();
+    let (created, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(Method::POST, &agents_of(MINE), Some(&bound)),
+        )
+        .await;
+    let token = harness
+        .tokens
+        .mint("bound", "bound-gateway", &["telemetry:read"], "jti-b");
+    let stranger = harness
+        .tokens
+        .mint("stranger", "bound-gateway", &["telemetry:read"], "jti-s");
+
+    let (elsewhere, _) = harness
+        .read_as(&stranger, &placement_of(THEIRS, "checkout"))
+        .await;
+    let (ours, _) = harness
+        .read_as(&token, &placement_of(MINE, "checkout"))
+        .await;
+
+    assert_eq!(created, StatusCode::CREATED);
+    assert_eq!(elsewhere, StatusCode::UNAUTHORIZED);
+    assert_eq!(ours, StatusCode::OK);
+    assert_eq!(
+        harness.looked.asked().last(),
+        Some(&Some(a_project(STOREFRONT)))
+    );
+}
+
+#[tokio::test]
+async fn an_unregistered_or_unscoped_agent_gets_no_placement() {
+    let harness = Harness::new();
+    harness
+        .registered("commenter", &["incidents:comment"])
+        .await;
+    let unregistered = harness
+        .tokens
+        .mint("nobody", "never-registered", &["telemetry:read"], "j1");
+    let commenter = harness
+        .tokens
+        .mint("commenter", "commenter", &["telemetry:read"], "j2");
+
+    let (first, _) = harness
+        .read_as(&unregistered, &placement_of(MINE, "checkout"))
+        .await;
+    let (second, _) = harness
+        .read_as(&commenter, &placement_of(MINE, "checkout"))
+        .await;
+
+    assert_eq!(first, StatusCode::UNAUTHORIZED);
+    assert_eq!(second, StatusCode::FORBIDDEN);
+}
+
+fn turning_on(scopes: &[&str]) -> String {
+    serde_json::json!({ "scopes": scopes }).to_string()
+}
+
+#[tokio::test]
+async fn an_administrator_turns_mcp_on_sees_its_url_and_turns_it_off_by_revoking_the_agent() {
+    let harness = Harness::new();
+
+    let (_, before) = harness
+        .served(OrgRole::Admin, as_session(Method::GET, &mcp_of(MINE), None))
+        .await;
+    let (on, registered) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["telemetry:read", "incidents:comment"])),
+            ),
+        )
+        .await;
+    let (_, after) = harness
+        .served(OrgRole::Admin, as_session(Method::GET, &mcp_of(MINE), None))
+        .await;
+    let (off, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(Method::DELETE, &mcp_of(MINE), None),
+        )
+        .await;
+    let (_, closed) = harness
+        .served(OrgRole::Admin, as_session(Method::GET, &mcp_of(MINE), None))
+        .await;
+
+    assert_eq!(on, StatusCode::CREATED, "{registered}");
+    let before = read(&before);
+    assert_eq!(before["configured"], true);
+    assert_eq!(before["enabled"], false);
+    assert_eq!(
+        before["url"],
+        format!("https://mcp.example.com/orgs/{}/mcp", id(MINE))
+    );
+    assert_eq!(before["gateway_client_id"], "mcp-gateway");
+    let after = read(&after);
+    assert_eq!(after["enabled"], true);
+    assert_eq!(after["agent"]["client_id"], "mcp-gateway");
+    assert_eq!(
+        after["agent"]["scopes"],
+        serde_json::json!(["telemetry:read", "incidents:comment"])
+    );
+    assert_eq!(off, StatusCode::NO_CONTENT);
+    assert_eq!(read(&closed)["enabled"], false);
+    let audited: Vec<_> = harness
+        .book
+        .notebook
+        .entries()
+        .into_iter()
+        .map(|entry| entry.action)
+        .collect();
+    assert_eq!(audited, [Action::AgentRegistered, Action::AgentRevoked]);
+}
+
+#[tokio::test]
+async fn the_gateway_token_reads_once_mcp_is_on_and_stops_when_it_is_off() {
+    let harness = Harness::new();
+    let token = harness
+        .tokens
+        .mint("gw", "mcp-gateway", &["telemetry:read"], "jti-1");
+
+    let (before, _) = harness.read_as(&token, &traces_of(MINE)).await;
+    harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["telemetry:read"])),
+            ),
+        )
+        .await;
+    let (during, _) = harness.read_as(&token, &traces_of(MINE)).await;
+    harness
+        .served(
+            OrgRole::Admin,
+            as_session(Method::DELETE, &mcp_of(MINE), None),
+        )
+        .await;
+    let (after, _) = harness.read_as(&token, &traces_of(MINE)).await;
+
+    assert_eq!(before, StatusCode::UNAUTHORIZED);
+    assert_eq!(during, StatusCode::OK);
+    assert_eq!(after, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn turning_mcp_on_again_keeps_the_agent_or_replaces_it_when_the_scopes_change() {
+    let harness = Harness::new();
+    let put = |scopes: &[&str]| as_session(Method::PUT, &mcp_of(MINE), Some(&turning_on(scopes)));
+
+    let (first, one) = harness
+        .served(OrgRole::Admin, put(&["telemetry:read"]))
+        .await;
+    let (same, two) = harness
+        .served(OrgRole::Admin, put(&["telemetry:read"]))
+        .await;
+    let (changed, three) = harness
+        .served(
+            OrgRole::Admin,
+            put(&["telemetry:read", "incidents:resolve"]),
+        )
+        .await;
+
+    assert_eq!(first, StatusCode::CREATED);
+    assert_eq!(same, StatusCode::OK);
+    assert_eq!(read(&one)["id"], read(&two)["id"]);
+    assert_eq!(changed, StatusCode::CREATED);
+    assert_ne!(read(&two)["id"], read(&three)["id"]);
+    let live: Vec<_> = harness
+        .book
+        .agents
+        .lock()
+        .expect("the lock")
+        .iter()
+        .filter(|agent| !agent.is_revoked())
+        .map(|agent| agent.scopes.as_slice().to_vec())
+        .collect();
+    assert_eq!(
+        live,
+        vec![vec![
+            AgentScope::TelemetryRead,
+            AgentScope::IncidentsResolve
+        ]]
+    );
+}
+
+#[tokio::test]
+async fn mcp_is_an_administrators_and_needs_the_read_scope_the_gateway_uses() {
+    let harness = Harness::new();
+
+    for method in [Method::GET, Method::DELETE] {
+        let (status, _) = harness
+            .served(OrgRole::Member, as_session(method, &mcp_of(MINE), None))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    let (member, _) = harness
+        .served(
+            OrgRole::Member,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["telemetry:read"])),
+            ),
+        )
+        .await;
+    let (stranger, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(Method::GET, &mcp_of(THEIRS), None),
+        )
+        .await;
+    let (no_read, body) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["incidents:comment"])),
+            ),
+        )
+        .await;
+    let (unknown, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["telemetry:read", "root"])),
+            ),
+        )
+        .await;
+    let (off, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(Method::DELETE, &mcp_of(MINE), None),
+        )
+        .await;
+
+    assert_eq!(member, StatusCode::FORBIDDEN);
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
+    assert_eq!(no_read, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(unknown, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(off, StatusCode::NOT_FOUND);
+    assert!(harness.book.agents.lock().expect("the lock").is_empty());
+}
+
+#[tokio::test]
+async fn without_the_gateway_client_and_the_public_url_mcp_says_it_is_not_configured() {
+    let harness = Harness::without_mcp();
+
+    let (status, body) = harness
+        .served(OrgRole::Admin, as_session(Method::GET, &mcp_of(MINE), None))
+        .await;
+    let (put, refusal) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::PUT,
+                &mcp_of(MINE),
+                Some(&turning_on(&["telemetry:read"])),
+            ),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let state = read(&body);
+    assert_eq!(state["configured"], false);
+    assert_eq!(state["enabled"], false);
+    assert_eq!(state["url"], serde_json::Value::Null);
+    assert_eq!(put, StatusCode::CONFLICT);
+    assert!(
+        refusal.contains("FERRISTRACE_MCP__GATEWAY_CLIENT_ID"),
+        "{refusal}"
+    );
 }

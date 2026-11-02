@@ -1,9 +1,9 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountId, Clock, OnCallNow, OncallError, Override, OverrideId, Page, PageDesk, PageId,
-    PageScope, PageView, Paged, Pager, Paging, Reader, Readers, Rostered, Rota, ScheduleDraft,
-    ScheduleId, SchedulePatch, SessionToken, TeamId, TenantId, Whoami,
+    AccountId, Clock, OnCallNow, OnCallStatus, OncallError, Override, OverrideId, Page, PageDesk,
+    PageId, PageScope, PageView, Paged, Pager, Paging, Reader, Readers, Rostered, Rota,
+    ScheduleDraft, ScheduleId, SchedulePatch, SessionToken, TeamId, TenantId, Whoami,
 };
 
 use crate::registry::OncallRepos;
@@ -64,6 +64,24 @@ where
             audit,
         )
         .now(who, org, id, self.clock.now())
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, teams, roster, schedules, audit, unavailable = OncallError::StoreUnreachable)]
+    pub async fn whether_on_call(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        email: &str,
+    ) -> Result<OnCallStatus, OncallError> {
+        Rota::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            teams,
+            roster,
+            schedules,
+            audit,
+        )
+        .whether_on_call(who, org, email, self.clock.now())
         .await
     }
 

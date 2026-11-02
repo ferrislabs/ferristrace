@@ -224,10 +224,7 @@ where
         .await?;
         let people = self.people(org).await?;
         let alerts = rule
-            .map(|rule| AlertRef {
-                id: rule.id,
-                name: rule.name.as_str().into(),
-            })
+            .map(|rule| AlertRef::of(&rule))
             .into_iter()
             .collect::<Vec<_>>();
         Ok(brief(incident, &people, &alerts))
@@ -567,10 +564,7 @@ where
             .list(org)
             .await?
             .into_iter()
-            .map(|rule| AlertRef {
-                id: rule.id,
-                name: rule.name.as_str().into(),
-            })
+            .map(|rule| AlertRef::of(&rule))
             .collect())
     }
 

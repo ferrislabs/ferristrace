@@ -1501,3 +1501,28 @@ async fn spec_l7_4_a_delegated_resolve_names_the_person_in_the_timeline_and_the_
         );
     }
 }
+
+#[tokio::test]
+async fn an_incident_tells_its_severity_status_and_the_services_its_alert_concerns() {
+    let harness = Harness::new();
+    let firing = harness.a_rule(AlertStatus::Firing).await;
+    let from_alert = harness.declared(json!({"alert": firing.to_string()})).await;
+    let by_hand = harness.declared(json!({"title": "Disk full"})).await;
+    harness.enrol("bot", &[AgentScope::TelemetryRead], None);
+    let token = harness
+        .tokens
+        .mint("reader", "bot", &["telemetry:read"], "jti-1");
+
+    let (status, read) = harness
+        .agent_call(&token, Method::GET, &one(MINE, &from_alert), None)
+        .await;
+    let (_, manual) = harness
+        .agent_call(&token, Method::GET, &one(MINE, &by_hand), None)
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["severity"], "sev2");
+    assert_eq!(read["status"], "investigating");
+    assert_eq!(read["services"], json!(["checkout"]));
+    assert_eq!(manual["services"], json!([]));
+}

@@ -1204,6 +1204,10 @@ fn as_agent(method: Method, uri: &str, token: &str, body: Option<Value>) -> Requ
     .expect("a request")
 }
 
+fn now_of(email: &str) -> String {
+    format!("/api/orgs/{}/oncall/now?email={email}", id(MINE))
+}
+
 #[tokio::test]
 async fn spec_l7_4_an_agent_with_the_scope_acknowledges_a_page_for_the_person_and_it_is_told() {
     let harness = Harness::new();
@@ -1324,4 +1328,75 @@ async fn every_other_oncall_write_stays_refused_to_an_agent_that_may_acknowledge
         );
     }
     assert!(harness.actions().is_empty());
+}
+
+#[tokio::test]
+async fn the_oncall_lookup_by_email_answers_sessions_keys_and_agents() {
+    let harness = Harness::new();
+
+    let (session, mine) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &now_of("me@example.com"),
+            None,
+        )
+        .await;
+    let (ada, theirs) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &now_of("ADA@example.com"),
+            None,
+        )
+        .await;
+    let (unknown, nobody) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &now_of("who@example.com"),
+            None,
+        )
+        .await;
+    let (keyed, by_key) = harness
+        .served(
+            OrgRole::Member,
+            as_key(Method::GET, &now_of("me@example.com"), None),
+        )
+        .await;
+    let (agent, by_agent) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(Method::GET, &now_of("me@example.com"), "reader", None),
+        )
+        .await;
+    let (missing, _) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &format!("/api/orgs/{}/oncall/now", id(MINE)),
+            None,
+        )
+        .await;
+    let (foreign, _) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &format!("/api/orgs/{}/oncall/now?email=me@example.com", id(THEIRS)),
+            None,
+        )
+        .await;
+
+    assert_eq!(session, StatusCode::OK);
+    assert_eq!(mine, json!({"on_call": true, "schedules": ["Primary"]}));
+    assert_eq!((ada, unknown), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(theirs, json!({"on_call": false, "schedules": []}));
+    assert_eq!(nobody, json!({"on_call": false, "schedules": []}));
+    assert_eq!(keyed, StatusCode::OK);
+    assert_eq!(by_key, mine);
+    assert_eq!(agent, StatusCode::OK);
+    assert_eq!(by_agent, mine);
+    assert_eq!(missing, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(foreign, StatusCode::NOT_FOUND);
+    assert!(harness.actions().contains(&Action::AgentRead));
 }

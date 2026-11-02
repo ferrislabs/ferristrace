@@ -1612,3 +1612,40 @@ async fn spec_l7_4_a_delegated_resolve_without_an_email_names_the_subject() {
     assert_eq!(uses[0].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
     assert_eq!(uses[0].1.detail.get("on_behalf_of_email"), None);
 }
+
+#[tokio::test]
+async fn spec_l7_an_incident_from_an_alert_tells_the_services_the_alert_concerns() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let rule = world
+        .a_rule(an_org(MINE), AlertSeverity::Critical, AlertStatus::Firing)
+        .await;
+    let from_alert = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                alert: Some(rule),
+                ..IncidentDraft::default()
+            },
+            at(0),
+        )
+        .await
+        .expect("declared");
+    let by_hand = an_open_incident(&world, None).await;
+
+    let dossier = desk
+        .get(&session(), an_org(MINE), from_alert.incident.id)
+        .await
+        .expect("read");
+    let manual = desk
+        .get(&session(), an_org(MINE), by_hand)
+        .await
+        .expect("read");
+
+    assert_eq!(
+        dossier.briefed.alert.map(|alert| alert.services),
+        Some(vec![Box::<str>::from("checkout")])
+    );
+    assert_eq!(manual.briefed.alert, None);
+}

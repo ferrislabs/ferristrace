@@ -10,7 +10,7 @@ use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::identity::SessionStore;
 use crate::organisation::Memberships;
-use crate::placement::{PlacementReader, Placements};
+use crate::placement::{PlacementReader, Placements, Sighting};
 use crate::telemetry::{Span, TenantId, TraceId};
 
 #[derive(Debug)]
@@ -123,5 +123,16 @@ where
     ) -> Result<Placements, ExploreError> {
         let project = self.readers.grant(who, org).await?.narrow(project)?;
         Ok(self.reader.placements(org, window, project).await?.capped())
+    }
+
+    pub async fn sighting(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        service: &str,
+        window: Window,
+    ) -> Result<Sighting, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(None)?;
+        Ok(self.reader.sighting(org, service, window, project).await?)
     }
 }

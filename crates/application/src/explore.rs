@@ -1,9 +1,13 @@
 use ferristrace_domain::{
-    Explore, ExploreError, Placements, ProjectId, Reader, Readers, ServiceFilter, ServiceSeries,
-    ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary, Whoami, Window,
+    Clock, Explore, ExploreError, Placements, ProjectId, Reader, Readers, ServiceFilter,
+    ServiceSeries, ServiceSite, ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary,
+    Whoami, Window,
 };
 
-use crate::registry::ReadRepos;
+use crate::registry::{ReadRepos, SiteRepos};
+
+const SIGHTING_SECS: u64 = 86_400;
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 use crate::{Ferristrace, Stack, transactional};
 
 impl<S: Stack> Ferristrace<S>
@@ -119,5 +123,34 @@ where
         )
         .placements(who, org, window, project)
         .await
+    }
+}
+
+impl<S: Stack> Ferristrace<S>
+where
+    S::Repos: SiteRepos,
+{
+    #[transactional(sessions, memberships, api_keys, projects, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn service_site(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        service: &str,
+    ) -> Result<ServiceSite, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        let to = self.clock.now().get().saturating_mul(NANOS_PER_SECOND);
+        let from = to.saturating_sub(SIGHTING_SECS * NANOS_PER_SECOND);
+        let window =
+            Window::new(from, to.max(from + 1)).map_err(|_| ExploreError::StoreUnreachable)?;
+        let seen = Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .sighting(who, org, service, window)
+        .await?;
+        let held = ferristrace_domain::Projects::of(&projects, org).await?;
+        Ok(ServiceSite::named(seen, &held))
     }
 }

@@ -2,6 +2,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 
 use super::errors::BadPlacement;
+use crate::catalogue::{Project, ProjectId};
 
 pub const MAX_PLACEMENT_BYTES: usize = 253;
 pub const MAX_PLACEMENTS: usize = 500;
@@ -225,5 +226,31 @@ impl Placements {
         self.pods.truncate(MAX_PLACEMENTS);
         self.nodes.truncate(MAX_PLACEMENTS);
         self
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sighting {
+    pub project: Option<ProjectId>,
+    pub environments: Vec<Box<str>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceSite {
+    pub project: Option<Box<str>>,
+    pub environments: Vec<Box<str>>,
+}
+
+impl ServiceSite {
+    pub fn named(seen: Sighting, projects: &[Project]) -> Self {
+        Self {
+            project: seen.project.and_then(|id| {
+                projects
+                    .iter()
+                    .find(|project| project.id == id)
+                    .map(|project| project.name.clone())
+            }),
+            environments: seen.environments,
+        }
     }
 }

@@ -7,10 +7,10 @@ use axum::routing::{delete, get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::OncallRepos;
 use ferristrace_domain::{
-    AccountId, AckRefused, BadSchedule, Day, Handoff, OnCallNow, OncallError, Override, OverrideId,
-    Page, PageId, PageScope, PageSource, PageView, Person, Rostered, Rotation, RotationLength,
-    ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch, TeamId, TenantId, TimeOfDay, Timezone,
-    Weekday,
+    AccountId, AckRefused, BadSchedule, Day, Handoff, OnCallNow, OnCallStatus, OncallError,
+    Override, OverrideId, Page, PageId, PageScope, PageSource, PageView, Person, Rostered,
+    Rotation, RotationLength, ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch, TeamId,
+    TenantId, TimeOfDay, Timezone, Weekday,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -41,6 +41,7 @@ where
             "/api/orgs/{org}/schedules/{id}/overrides/{cover}",
             delete(remove_override::<S>),
         )
+        .route("/api/orgs/{org}/oncall/now", get(whether::<S>))
         .route("/api/orgs/{org}/pages", get(pages::<S>))
         .route("/api/orgs/{org}/pages/{id}/ack", post(acknowledge::<S>))
         .route("/api/pages/ack", get(acknowledge_link::<S>))
@@ -305,6 +306,31 @@ pub struct PageListing {
     state: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct WhetherBody {
+    on_call: bool,
+    schedules: Vec<String>,
+}
+
+impl From<&OnCallStatus> for WhetherBody {
+    fn from(status: &OnCallStatus) -> Self {
+        Self {
+            on_call: status.on_call,
+            schedules: status
+                .schedules
+                .iter()
+                .map(|name| name.as_str().to_owned())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Whether {
+    #[serde(default)]
+    email: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AckLink {
     #[serde(default)]
@@ -412,6 +438,24 @@ where
         .on_call_now(&who, TenantId::new(org), ScheduleId::new(id))
         .await?;
     Ok(Json(NowBody::from(&now)))
+}
+
+async fn whether<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(asked): Query<Whether>,
+    headers: HeaderMap,
+) -> Result<Json<WhetherBody>, OncallRefused>
+where
+    S::Repos: OncallRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let email = asked.email.ok_or(OncallRefused::Malformed("email"))?;
+    let status = state
+        .app
+        .whether_on_call(&who, TenantId::new(org), &email)
+        .await?;
+    Ok(Json(WhetherBody::from(&status)))
 }
 
 async fn add_override<S: Stack>(

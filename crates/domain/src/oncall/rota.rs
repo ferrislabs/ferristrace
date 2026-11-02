@@ -1,12 +1,14 @@
-use super::entities::{OnCallNow, Override, Rostered, Schedule, ScheduleDraft, SchedulePatch};
+use super::entities::{
+    OnCallNow, OnCallStatus, Override, Rostered, Schedule, ScheduleDraft, SchedulePatch,
+};
 use super::errors::{BadSchedule, OncallError};
 use super::ports::Schedules;
-use super::rotation::shift;
+use super::rotation::{on_call, shift};
 use super::value_objects::{OverrideId, ScheduleId};
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, SessionStore};
+use crate::identity::{AccountId, Email, SessionStore};
 use crate::incidents::Person;
 use crate::organisation::{Memberships, OrgRole, Roll, Squads, Team, TeamId};
 use crate::secret::SessionToken;
@@ -108,6 +110,40 @@ where
         Ok(OnCallNow {
             person: Some(person),
             until_ms: held.until_ms,
+        })
+    }
+
+    pub async fn whether_on_call(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        email: &str,
+        now: UnixSeconds,
+    ) -> Result<OnCallStatus, OncallError> {
+        self.readers.grant(who, org).await?;
+        let Ok(email) = Email::try_from(email) else {
+            return Ok(OnCallStatus::default());
+        };
+        let Some(account) = self
+            .roster
+            .of(org)
+            .await?
+            .into_iter()
+            .find(|member| member.email == email)
+            .map(|member| member.account)
+        else {
+            return Ok(OnCallStatus::default());
+        };
+        let mut schedules = Vec::new();
+        for schedule in self.schedules.of_org(org).await? {
+            let overrides = self.schedules.overrides(org, schedule.id).await?;
+            if on_call(&schedule, &overrides, now) == Some(account) {
+                schedules.push(schedule.name);
+            }
+        }
+        Ok(OnCallStatus {
+            on_call: !schedules.is_empty(),
+            schedules,
         })
     }
 
