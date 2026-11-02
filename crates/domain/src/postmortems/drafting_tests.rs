@@ -130,6 +130,15 @@ fn the_resolved_story() -> (Incident, Chronicle, Vec<Attachment>) {
             BASE_MS + 1_000,
         ),
         entry(
+            Author::System,
+            Change::Deploy {
+                service: "checkout".into(),
+                version: "2.4.1".into(),
+                environment: "prod".into(),
+            },
+            BASE_MS + 90_000,
+        ),
+        entry(
             Author::Account(account(10)),
             Change::Acknowledged { page: page() },
             BASE_MS + 2 * MINUTE,
@@ -189,6 +198,7 @@ _Write what happened in two sentences._
 | 2023-11-14 22:13:20 UTC | Ada | opened \"Checkout down\" as sev2 from the alert Checkout errors |
 | 2023-11-14 22:13:20 UTC | FerrisTrace | alert Checkout errors pending \u{2192} firing (value 9.5) |
 | 2023-11-14 22:13:21 UTC | FerrisTrace | paged grace@example.com (step 0) |
+| 2023-11-14 22:14:50 UTC | FerrisTrace | deployed checkout 2.4.1 to prod |
 | 2023-11-14 22:15:20 UTC | grace@example.com | acknowledged the page |
 | 2023-11-14 22:16:20 UTC | Ada | commented: \"rolled back the \\| release\" |
 | 2023-11-14 22:17:20 UTC | Ada | attached trace \"the failing payment\" |
@@ -197,6 +207,10 @@ _Write what happened in two sentences._
 ## Contributing alerts
 
 - Checkout errors, first firing 2023-11-14 22:13:20 UTC
+
+## Deploys
+
+- 2023-11-14 22:14:50 UTC deployed checkout 2.4.1 to prod
 
 ## Paging
 
@@ -245,6 +259,7 @@ fn an_open_incident_says_it_is_still_open() {
     assert!(body.contains("- Window: 2023-11-14 22:13:20 UTC \u{2192} still open\n"));
     assert!(body.contains("- Owner: nobody\n"));
     assert!(body.contains("## Contributing alerts\n\n_No alert contributed._\n"));
+    assert!(body.contains("## Deploys\n\n_Nothing was deployed._\n"));
     assert!(body.contains("## Paging\n\n_Nobody was paged._\n"));
     assert!(body.contains("## Attachments\n\n_Nothing was attached._\n"));
     assert!(body.ends_with("## Action items\n\n- [ ] \n"));
@@ -289,4 +304,34 @@ fn a_one_minute_window_is_singular() {
     let body = draft(&one, &chronicle(Vec::new()), &[]);
 
     assert!(body.contains("(1 minute)\n"));
+}
+
+#[test]
+fn every_deploy_entry_is_listed_in_order_and_an_unnamed_environment_is_left_out() {
+    let entries = vec![
+        entry(
+            Author::System,
+            Change::Deploy {
+                service: "checkout".into(),
+                version: "2.4.1".into(),
+                environment: "prod".into(),
+            },
+            BASE_MS + MINUTE,
+        ),
+        entry(
+            Author::System,
+            Change::Deploy {
+                service: "mailer".into(),
+                version: "7".into(),
+                environment: "".into(),
+            },
+            BASE_MS + 2 * MINUTE,
+        ),
+    ];
+
+    let body = draft(&incident(None), &chronicle(entries), &[]);
+
+    assert!(body.contains(
+        "## Deploys\n\n- 2023-11-14 22:14:20 UTC deployed checkout 2.4.1 to prod\n- 2023-11-14 22:15:20 UTC deployed mailer 7\n"
+    ));
 }

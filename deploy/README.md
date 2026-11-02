@@ -103,6 +103,18 @@ attribute matches. A span carries its resource attributes merged into its
 own at ingest, its own value winning, so an environment set on the
 resource is enough.
 
+Releases come from `service.version`: the first span of a service carrying a
+new version makes one release and one deploy marker per environment, whatever
+the number of pods. A deploy from CI can also be sent as a log record with
+the attribute `event.name` set to `deploy` (or `deployment.event`) and
+`service.version`, `deployment.environment.name` in its attributes or
+resource, on the service's `service.name`. They are read back through
+`GET /api/orgs/<org>/releases`, `GET /api/orgs/<org>/releases/<service>/<version>`
+and `GET /api/orgs/<org>/deploys`, all taking `from` and `to` in milliseconds.
+A deploy of a service an open incident's alert names, or of any service when
+the incident has no alert, is added to the incident's timeline within a
+minute and to its postmortem draft.
+
 ## Coming from a Comettrace deployment
 
 The product was called Comettrace before. A stack started under that name

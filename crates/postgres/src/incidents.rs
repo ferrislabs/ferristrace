@@ -259,6 +259,33 @@ impl IncidentTimeline for PostgresIncidentTimeline {
         Ok(())
     }
 
+    async fn append_once(&self, entry: &TimelineEntry) -> Result<bool, StoreError> {
+        let (author_kind, author_id, author_label) = author_parts(&entry.author);
+        let (body, detail) = encode_change(&entry.change);
+        let mut tx = self.tx.lock().await;
+        let done = sqlx::query(
+            "INSERT INTO incident_events \
+             (id, incident_id, org_id, kind, author_kind, author_id, author_label, body, detail, at_ms) \
+             SELECT $1, i.id, i.org_id, $4, $5, $6, $7, $8, $9::jsonb, $10 \
+             FROM incidents i WHERE i.id = $2 AND i.org_id = $3 \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(entry.id.as_uuid())
+        .bind(entry.incident.as_uuid())
+        .bind(entry.org.as_uuid())
+        .bind(entry.change.kind().as_str())
+        .bind(author_kind)
+        .bind(author_id)
+        .bind(author_label)
+        .bind(body)
+        .bind(detail)
+        .bind(signed(entry.at_ms))
+        .execute(&mut **tx)
+        .await
+        .map_err(unreachable("append once to an incident timeline"))?;
+        Ok(done.rows_affected() == 1)
+    }
+
     async fn of(
         &self,
         org: TenantId,

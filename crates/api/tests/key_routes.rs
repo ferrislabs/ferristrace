@@ -267,6 +267,46 @@ impl SpanPages for Looked {
     }
 }
 
+impl ferristrace_domain::ReleaseReader for Looked {
+    async fn releases(
+        &self,
+        _org: TenantId,
+        filter: &ferristrace_domain::ReleaseFilter,
+    ) -> Result<Vec<ferristrace_domain::Release>, StoreError> {
+        self.note(filter.project);
+        Ok(Vec::new())
+    }
+
+    async fn release(
+        &self,
+        _org: TenantId,
+        _service: &str,
+        _version: &str,
+        project: Option<ProjectId>,
+    ) -> Result<Option<ferristrace_domain::ReleaseDetail>, StoreError> {
+        self.note(project);
+        Ok(None)
+    }
+
+    async fn deploys(
+        &self,
+        _org: TenantId,
+        filter: &ferristrace_domain::ReleaseFilter,
+    ) -> Result<Vec<ferristrace_domain::Deploy>, StoreError> {
+        self.note(filter.project);
+        Ok(Vec::new())
+    }
+}
+
+impl ferristrace_domain::DeployFeed for Looked {
+    async fn deployed(
+        &self,
+        _window: Window,
+    ) -> Result<Vec<ferristrace_domain::Deployed>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
 impl ferristrace_domain::PlacementReader for Looked {
     async fn placements(
         &self,

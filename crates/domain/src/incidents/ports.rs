@@ -33,6 +33,11 @@ pub trait Incidents {
 pub trait IncidentTimeline {
     fn append(&self, entry: &TimelineEntry) -> impl Future<Output = Result<(), StoreError>> + Send;
 
+    fn append_once(
+        &self,
+        entry: &TimelineEntry,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
     fn of(
         &self,
         org: TenantId,

@@ -2,10 +2,10 @@ use core::future::Future;
 
 use ferristrace_domain::{
     AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
-    AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
-    IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships, OidcFlows, Orgs,
-    Pages, Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads,
-    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
+    AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, DeployMarks, ExportSource,
+    FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions,
+    Memberships, OidcFlows, Orgs, Pages, Postmortems, Projects, ResetStore, Roll, Schedules,
+    SessionRoll, SessionStore, Squads, StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +59,8 @@ pub mod domain {
     pub struct ControlPlane;
     #[derive(Debug)]
     pub struct Decisions;
+    #[derive(Debug)]
+    pub struct DeployMarks;
     #[derive(Debug)]
     pub struct Export;
     #[derive(Debug)]
@@ -269,6 +271,10 @@ impl<R> WatchRepos for R where
 {
 }
 
+pub trait DeployRepos: WatchRepos + RepoFor<domain::DeployMarks, Repo: DeployMarks> {}
+
+impl<R> DeployRepos for R where R: WatchRepos + RepoFor<domain::DeployMarks, Repo: DeployMarks> {}
+
 pub trait AlertRepos:
     ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
 {
@@ -338,6 +344,7 @@ pub trait Repositories:
     + IssueRepos
     + IdentityRepos
     + ProvisioningRepos
+    + DeployRepos
 {
 }
 
@@ -359,5 +366,6 @@ impl<R> Repositories for R where
         + IssueRepos
         + IdentityRepos
         + ProvisioningRepos
+        + DeployRepos
 {
 }

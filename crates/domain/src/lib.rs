@@ -20,6 +20,7 @@ pub mod placement;
 pub mod postmortems;
 pub mod profile;
 pub mod provisioning;
+pub mod releases;
 pub mod status;
 pub mod telemetry;
 
@@ -125,6 +126,11 @@ pub use profile::{
 pub use provisioning::{
     Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, Minted, ProvisionError,
     Provisioning, Revoked,
+};
+pub use releases::{
+    DEPLOY_FEED_LIMIT, DEPLOY_WATCH_TICK_SECS, Deploy, DeployFeed, DeployMarks, Deployed, Followed,
+    LATE_SECS, RELEASE_LIMIT, Release, ReleaseDetail, ReleaseError, ReleaseFilter, ReleaseReader,
+    Releases, TRAFFIC_HOUR_NANOS, Traffic, Watch,
 };
 pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use status::{

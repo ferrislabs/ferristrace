@@ -33,6 +33,11 @@ pub fn draft(incident: &Incident, chronicle: &Chronicle, attachments: &[Attachme
         alerts(incident, chronicle),
         "_No alert contributed._",
     ));
+    lines.extend(section(
+        "Deploys",
+        deploys(chronicle),
+        "_Nothing was deployed._",
+    ));
     lines.extend(section("Paging", paging(chronicle), "_Nobody was paged._"));
     lines.extend(section(
         "Attachments",
@@ -176,7 +181,40 @@ fn told(chronicle: &Chronicle, change: &Change) -> String {
             target.map_or("every administrator", |target| person(chronicle, target))
         ),
         Change::Acknowledged { .. } => "acknowledged the page".to_owned(),
+        Change::Deploy {
+            service,
+            version,
+            environment,
+        } => deployed(service, version, environment),
     }
+}
+
+fn deployed(service: &str, version: &str, environment: &str) -> String {
+    let place = if environment.is_empty() {
+        String::new()
+    } else {
+        format!(" to {environment}")
+    };
+    format!("deployed {service} {version}{place}")
+}
+
+fn deploys(chronicle: &Chronicle) -> Vec<String> {
+    chronicle
+        .entries
+        .iter()
+        .filter_map(|entry| match &entry.change {
+            Change::Deploy {
+                service,
+                version,
+                environment,
+            } => Some(format!(
+                "- {} {}",
+                stamp(entry.at_ms),
+                cell(&deployed(service, version, environment))
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 fn alerts(incident: &Incident, chronicle: &Chronicle) -> Vec<String> {

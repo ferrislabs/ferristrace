@@ -66,6 +66,12 @@ pub const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../migrations/clickhouse/0009_placement.up.sql"),
         down: include_str!("../../migrations/clickhouse/0009_placement.down.sql"),
     },
+    Migration {
+        version: 10,
+        name: "releases",
+        up: include_str!("../../migrations/clickhouse/0010_releases.up.sql"),
+        down: include_str!("../../migrations/clickhouse/0010_releases.down.sql"),
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -289,6 +295,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_release_is_one_aggregated_row_per_tenant_project_service_version_and_environment() {
+        let up = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "releases")
+            .expect("a releases migration")
+            .up;
+        let parts: Vec<&str> = statements(up).collect();
+
+        assert_eq!(parts.len(), 4, "{up}");
+        assert!(parts[0].contains("ENGINE = AggregatingMergeTree"), "{up}");
+        assert!(
+            parts[0]
+                .contains("ORDER BY (tenant_id, project_id, service_name, version, environment)"),
+            "{up}"
+        );
+        assert!(parts[0].contains("first_seen   SimpleAggregateFunction(min,"));
+        assert!(parts[0].contains("last_seen    SimpleAggregateFunction(max,"));
+        assert!(parts[0].contains("requests     SimpleAggregateFunction(sum,"));
+        assert!(
+            parts[2].contains("attributes['service.version'] != ''"),
+            "{up}"
+        );
+        assert!(parts[3].contains("'deploy', 'deployment.event'"), "{up}");
+        assert!(parts[3].contains("toUInt64(0) AS requests"), "{up}");
     }
 
     #[test]

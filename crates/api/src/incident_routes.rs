@@ -221,6 +221,15 @@ fn detail_of(chronicle: &Chronicle, change: &Change) -> Value {
             "target": owner_of(chronicle, *target),
         }),
         Change::Acknowledged { page } => json!({"page": page.as_uuid()}),
+        Change::Deploy {
+            service,
+            version,
+            environment,
+        } => json!({
+            "service": service,
+            "version": version,
+            "environment": environment,
+        }),
     }
 }
 
