@@ -2,12 +2,17 @@ use super::errors::{BadAgentName, BadAgentScopes, BadClientId};
 use super::value_objects::{AgentName, AgentScope, AgentScopes, AgentToken, ClientId};
 
 #[test]
-fn there_are_three_agent_scopes_and_no_admin_one() {
+fn there_are_four_agent_scopes_and_no_admin_one() {
     let spelled: Vec<_> = AgentScope::ALL.iter().map(|scope| scope.as_str()).collect();
 
     assert_eq!(
         spelled,
-        ["telemetry:read", "incidents:comment", "incidents:resolve"]
+        [
+            "telemetry:read",
+            "incidents:comment",
+            "incidents:resolve",
+            "oncall:acknowledge"
+        ]
     );
     for refused in [
         "admin",

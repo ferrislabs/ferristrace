@@ -4,7 +4,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, LOCATION};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, oncall_router};
+use ferristrace_api::{AppState, SessionCookie, mark_routes, oncall_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
     AlertLedger, Bench, Couriered, Crew, IncidentLedger, Inert, Notebook, OncallLedger,
@@ -12,13 +12,14 @@ use ferristrace_application::testing::{
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, AckClaim, AckKey, Action, Actor, Agent, ApiKey, ApiKeys, ApiSecret, Assigned,
-    Created, Day, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession,
+    AccountId, AckClaim, AckKey, Action, Actor, Agent, AgentId, AgentScope, AgentScopes,
+    AgentToken, AgentTokens, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Created,
+    Day, Delegation, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession,
     Membership, Memberships, NoPhotos, OrgRole, PageSource, Paging, Project, ProjectId,
-    ProjectName, Projects, ProvisionPolicy, ReadGrant, Renamed, Rotation, RotationLength, Schedule,
-    ScheduleId, ScheduleName, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, StoreError, TargetKind, TeamId, TenantId, TimeOfDay, Timezone, UnixSeconds,
-    Weekday, WhoamiError,
+    ProjectName, Projects, ProvisionPolicy, ReadGrant, RegisteredAgent, Renamed, Rotation,
+    RotationLength, Schedule, ScheduleId, ScheduleName, Session, SessionError, SessionId,
+    SessionRoll, SessionStore, SessionToken, StoreError, TargetKind, TeamId, TenantId, TimeOfDay,
+    Timezone, TokenRefusal, UnixSeconds, VerifiedToken, Weekday, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -116,9 +117,78 @@ impl Memberships for MemberOfMine {
     }
 }
 
-struct OneKey;
+struct OneKey(Notebook);
+
+fn gateway_agent(client_id: &str) -> Option<RegisteredAgent> {
+    let scopes: &[AgentScope] = match client_id {
+        "gateway" => &[AgentScope::TelemetryRead, AgentScope::OncallAcknowledge],
+        "reader" => &[AgentScope::TelemetryRead],
+        _ => return None,
+    };
+    Some(RegisteredAgent {
+        id: AgentId::new(Uuid::from_u128(if client_id == "gateway" {
+            600
+        } else {
+            601
+        })),
+        org: org(MINE),
+        name: "mcp gateway".into(),
+        client_id: client_id.into(),
+        scopes: AgentScopes::new(scopes).expect("scopes"),
+        project: None,
+        created_by: None,
+        created_at_unix_nanos: 1,
+        last_used_at_unix_nanos: None,
+        revoked_at_unix_nanos: None,
+    })
+}
+
+struct Gateway;
+
+impl AgentTokens for Gateway {
+    async fn verify(&self, token: &AgentToken) -> Result<VerifiedToken, TokenRefusal> {
+        let (client_id, scopes, delegated) = match token.exposed() {
+            "head.gateway.sig" => (
+                "gateway",
+                vec!["telemetry:read", "oncall:acknowledge"],
+                Some(Delegation {
+                    subject: "sub-dana".into(),
+                    email: Some("dana@example.com".into()),
+                    act_sub: None,
+                    act_client_id: Some("mcp-gateway".into()),
+                }),
+            ),
+            "head.reader.sig" => ("reader", vec!["telemetry:read"], None),
+            _ => return Err(TokenRefusal::Invalid),
+        };
+        Ok(VerifiedToken {
+            client_id: client_id.into(),
+            scopes: scopes.into_iter().map(Into::into).collect(),
+            jti: "jti-ack".into(),
+            expires_at_unix_secs: 4_000_000_000,
+            delegated,
+        })
+    }
+}
 
 impl ApiKeys for OneKey {
+    async fn agent_standing(
+        &self,
+        tenant: TenantId,
+        client_id: &str,
+    ) -> Result<Option<RegisteredAgent>, StoreError> {
+        Ok(gateway_agent(client_id).filter(|agent| agent.org == tenant))
+    }
+
+    async fn agent_used(
+        &self,
+        _org: TenantId,
+        _agent: AgentId,
+        entry: &AuditEntry,
+    ) -> Result<(), StoreError> {
+        self.0.record(entry).await
+    }
+
     async fn list(&self, _org: TenantId) -> Result<Vec<ApiKey>, StoreError> {
         Ok(Vec::new())
     }
@@ -212,10 +282,9 @@ repo!(Sessions, OneSession, |fakes| {
     OneSession
 });
 repo!(Memberships, MemberOfMine, |fakes| MemberOfMine(fakes.role));
-repo!(ApiKeys, OneKey, |fakes| {
-    let _ = fakes;
-    OneKey
-});
+repo!(ApiKeys, OneKey, |fakes| OneKey(
+    fakes.harness.notebook.clone()
+));
 repo!(Projects, NoProject, |fakes| {
     let _ = fakes;
     NoProject
@@ -283,7 +352,7 @@ impl Stack for TestStack {
     type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
-    type Agents = Inert;
+    type Agents = Gateway;
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
@@ -353,7 +422,7 @@ impl Harness {
             oidc: None,
             provision: ProvisionPolicy::default(),
         };
-        oncall_router(AppState::new(
+        mark_routes(oncall_router(AppState::new(
             Arc::new(
                 Ferristrace::<TestStack>::new(
                     Fakes {
@@ -362,10 +431,11 @@ impl Harness {
                     },
                     adapters,
                 )
-                .with_ack_key(Some(ack_key())),
+                .with_ack_key(Some(ack_key()))
+                .with_agent_tokens(Some(Gateway)),
             ),
             SessionCookie::default(),
-        ))
+        )))
     }
 
     async fn served(&self, role: OrgRole, request: Request<Body>) -> (StatusCode, Value) {
@@ -1117,4 +1187,141 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
         .filter(|action| *action == Action::PageEscalated)
         .count();
     assert_eq!(escalations, 1);
+}
+
+fn as_agent(method: Method, uri: &str, token: &str, body: Option<Value>) -> Request<Body> {
+    let builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("x-requested-with", "fetch")
+        .header(AUTHORIZATION, format!("Bearer head.{token}.sig"));
+    match body {
+        Some(body) => builder
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string())),
+        None => builder.body(Body::empty()),
+    }
+    .expect("a request")
+}
+
+#[tokio::test]
+async fn spec_l7_4_an_agent_with_the_scope_acknowledges_a_page_for_the_person_and_it_is_told() {
+    let harness = Harness::new();
+    let (incident, page) = harness.page(0).await;
+    let ack = format!("/api/orgs/{}/pages/{}/ack", id(MINE), page.id);
+
+    let (status, acknowledged) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(Method::POST, &ack, "gateway", None),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{acknowledged}");
+    assert_eq!(acknowledged["state"], "acknowledged");
+    assert_eq!(acknowledged["acknowledged_by"], Value::Null);
+    let logged: Vec<AuditEntry> = harness
+        .0
+        .notebook
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.action == Action::PageAcknowledged)
+        .collect();
+    assert_eq!(logged.len(), 1);
+    assert_eq!(
+        logged[0].actor,
+        Actor::Agent(AgentId::new(Uuid::from_u128(600)))
+    );
+    assert_eq!(logged[0].detail.get("jti"), Some(Some("jti-ack")));
+    assert_eq!(logged[0].detail.get("via"), Some(Some("agent")));
+    assert_eq!(logged[0].detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(
+        logged[0].detail.get("on_behalf_of_email"),
+        Some(Some("dana@example.com"))
+    );
+    let told = harness.0.incidents.timeline();
+    assert_eq!(told.len(), 1);
+    assert_eq!(told[0].incident, incident);
+    assert!(matches!(
+        &told[0].author,
+        ferristrace_domain::Author::Agent { on_behalf_of: Some(person), .. }
+            if &**person == "dana@example.com"
+    ));
+}
+
+#[tokio::test]
+async fn an_agent_without_the_acknowledge_scope_reads_pages_but_never_acknowledges() {
+    let harness = Harness::new();
+    let (_, page) = harness.page(0).await;
+    let ack = format!("/api/orgs/{}/pages/{}/ack", id(MINE), page.id);
+
+    let (refused, _) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(Method::POST, &ack, "reader", None),
+        )
+        .await;
+    let (listed, _) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(
+                Method::GET,
+                &format!("/api/orgs/{}/pages", id(MINE)),
+                "reader",
+                None,
+            ),
+        )
+        .await;
+    let (stranger, _) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(
+                Method::POST,
+                &format!("/api/orgs/{}/pages/{}/ack", id(THEIRS), page.id),
+                "gateway",
+                None,
+            ),
+        )
+        .await;
+
+    assert_eq!(refused, StatusCode::FORBIDDEN);
+    assert_eq!(listed, StatusCode::OK);
+    assert_eq!(stranger, StatusCode::UNAUTHORIZED);
+    assert!(!harness.actions().contains(&Action::PageAcknowledged));
+}
+
+#[tokio::test]
+async fn every_other_oncall_write_stays_refused_to_an_agent_that_may_acknowledge() {
+    let harness = Harness::new();
+    let cover = json!({"account": id(ADA), "from_ms": 1, "to_ms": 2});
+    let patch = json!({"name": "Renamed"});
+    let draft = json!({
+        "name": "Secondary", "timezone": "UTC", "rotation": [id(ME)],
+        "handoff": {"weekday": "monday", "time": "09:00"},
+        "length_days": 7, "starts_on": "2026-11-02",
+    });
+
+    for (method, uri, body) in [
+        (Method::POST, team_schedules(), Some(draft)),
+        (Method::PATCH, schedule(SCHEDULE), Some(patch)),
+        (Method::DELETE, schedule(SCHEDULE), None),
+        (
+            Method::POST,
+            format!("{}/overrides", schedule(SCHEDULE)),
+            Some(cover),
+        ),
+    ] {
+        let (status, _) = harness
+            .served(
+                OrgRole::Owner,
+                as_agent(method.clone(), &uri, "gateway", body),
+            )
+            .await;
+
+        assert!(
+            status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN,
+            "{method} {uri}: {status}"
+        );
+    }
+    assert!(harness.actions().is_empty());
 }

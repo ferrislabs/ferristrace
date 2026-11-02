@@ -14,13 +14,15 @@ pub enum AgentScope {
     TelemetryRead,
     IncidentsComment,
     IncidentsResolve,
+    OncallAcknowledge,
 }
 
 impl AgentScope {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::TelemetryRead,
         Self::IncidentsComment,
         Self::IncidentsResolve,
+        Self::OncallAcknowledge,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -28,6 +30,7 @@ impl AgentScope {
             Self::TelemetryRead => "telemetry:read",
             Self::IncidentsComment => "incidents:comment",
             Self::IncidentsResolve => "incidents:resolve",
+            Self::OncallAcknowledge => "oncall:acknowledge",
         }
     }
 

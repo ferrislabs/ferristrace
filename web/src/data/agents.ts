@@ -3,9 +3,9 @@ import { del, get, json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { nothingYet } from './orgs'
 
-export type AgentScope = 'telemetry:read' | 'incidents:comment' | 'incidents:resolve'
+export type AgentScope = 'telemetry:read' | 'incidents:comment' | 'incidents:resolve' | 'oncall:acknowledge'
 
-export const AGENT_SCOPES: AgentScope[] = ['telemetry:read', 'incidents:comment', 'incidents:resolve']
+export const AGENT_SCOPES: AgentScope[] = ['telemetry:read', 'incidents:comment', 'incidents:resolve', 'oncall:acknowledge']
 
 export type Agent = {
   id: string

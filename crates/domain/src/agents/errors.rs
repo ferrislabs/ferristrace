@@ -25,7 +25,9 @@ pub enum BadAgentScopes {
     Empty,
     #[error("an agent carries each scope once")]
     Repeated,
-    #[error("a scope is telemetry:read, incidents:comment or incidents:resolve")]
+    #[error(
+        "a scope is telemetry:read, incidents:comment, incidents:resolve or oncall:acknowledge"
+    )]
     Unknown,
 }
 

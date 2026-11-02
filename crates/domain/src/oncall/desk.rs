@@ -4,6 +4,7 @@ use super::errors::OncallError;
 use super::ports::{Pages, Schedules};
 use super::value_objects::{PageId, PageScope, PageState};
 use crate::access::{ApiKeys, Reader, Readers};
+use crate::agents::{AgentGrant, AgentScope};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, SessionStore};
@@ -17,6 +18,7 @@ const MILLIS_PER_SECOND: u64 = 1_000;
 enum Via {
     App,
     Link,
+    Agent,
 }
 
 impl Via {
@@ -24,6 +26,35 @@ impl Via {
         match self {
             Self::App => "app",
             Self::Link => "link",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+enum Acker<'a> {
+    Account(AccountId),
+    Agent(&'a AgentGrant),
+}
+
+impl Acker<'_> {
+    fn account(&self) -> Option<AccountId> {
+        match self {
+            Self::Account(account) => Some(*account),
+            Self::Agent(_) => None,
+        }
+    }
+
+    fn author(&self) -> Author {
+        match self {
+            Self::Account(account) => Author::Account(*account),
+            Self::Agent(grant) => Author::Agent {
+                id: Some(grant.agent),
+                name: grant.name.clone(),
+                on_behalf_of: grant
+                    .delegated
+                    .as_ref()
+                    .map(|delegation| delegation.label().into()),
+            },
         }
     }
 }
@@ -85,26 +116,46 @@ where
         id: PageId,
         now: UnixSeconds,
     ) -> Result<PageView, OncallError> {
-        let token = match who {
-            Reader::Key(_) | Reader::Agent(_) => {
+        match who {
+            Reader::Key(_) => {
                 self.readers.grant(who, org).await?;
-                return Err(OncallError::ReadOnly);
+                Err(OncallError::ReadOnly)
             }
-            Reader::Session(token) => token,
-        };
-        let me = self.readers.whoami().of(token).await?;
-        let role = me.role_in(org).ok_or(OncallError::NotYours)?;
-        let page = self
-            .pages
-            .get(org, id)
-            .await?
-            .ok_or(OncallError::NoSuchPage)?;
-        if page.target != me.account && !role.at_least(OrgRole::Admin) {
-            return Err(OncallError::NotYourPage);
+            Reader::Agent(call) => {
+                let grant = self
+                    .readers
+                    .standing(call, org, Some(AgentScope::OncallAcknowledge))
+                    .await?;
+                if grant.project.is_some() {
+                    return Err(OncallError::OutOfScope);
+                }
+                let page = self
+                    .pages
+                    .get(org, id)
+                    .await?
+                    .ok_or(OncallError::NoSuchPage)?;
+                let page = self
+                    .acknowledged(page, &Acker::Agent(&grant), Via::Agent, now)
+                    .await?;
+                self.viewed_one(org, page).await
+            }
+            Reader::Session(token) => {
+                let me = self.readers.whoami().of(token).await?;
+                let role = me.role_in(org).ok_or(OncallError::NotYours)?;
+                let page = self
+                    .pages
+                    .get(org, id)
+                    .await?
+                    .ok_or(OncallError::NoSuchPage)?;
+                if page.target != me.account && !role.at_least(OrgRole::Admin) {
+                    return Err(OncallError::NotYourPage);
+                }
+                let page = self
+                    .acknowledged(page, &Acker::Account(me.account), Via::App, now)
+                    .await?;
+                self.viewed_one(org, page).await
+            }
         }
-        let page = self.acknowledged(page, me.account, Via::App, now).await?;
-        let mut viewed = self.viewed(org, vec![page]).await?;
-        viewed.pop().ok_or(OncallError::NoSuchPage)
     }
 
     pub async fn acknowledge_link(
@@ -120,46 +171,86 @@ where
             .get(claim.org, claim.page)
             .await?
             .ok_or(OncallError::NoSuchPage)?;
-        self.acknowledged(page, claim.account, Via::Link, now).await
+        self.acknowledged(page, &Acker::Account(claim.account), Via::Link, now)
+            .await
+    }
+
+    async fn viewed_one(&self, org: TenantId, page: Page) -> Result<PageView, OncallError> {
+        let mut viewed = self.viewed(org, vec![page]).await?;
+        viewed.pop().ok_or(OncallError::NoSuchPage)
     }
 
     async fn acknowledged(
         &self,
         page: Page,
-        by: AccountId,
+        by: &Acker<'_>,
         via: Via,
         now: UnixSeconds,
     ) -> Result<Page, OncallError> {
         if !page.state.awaits() {
+            if let Acker::Agent(grant) = by {
+                self.readers
+                    .record(
+                        grant,
+                        &AuditEntry {
+                            org: page.org,
+                            actor: Actor::Agent(grant.agent),
+                            action: Action::AgentRead,
+                            target: Target::of(TargetKind::Page, Some(page.id.to_string().into())),
+                            detail: grant.stamp(Detail::default()),
+                        },
+                    )
+                    .await?;
+            }
             return Ok(page);
         }
         let now_ms = now.get().saturating_mul(MILLIS_PER_SECOND);
         let mut moved = page;
         moved.state = PageState::Acknowledged;
-        moved.acknowledged_by = Some(by);
+        moved.acknowledged_by = by.account();
         moved.acknowledged_ms = Some(now_ms);
         moved.escalate_at_ms = None;
         if !self.pages.keep(&moved).await? {
             return Err(OncallError::NoSuchPage);
         }
-        self.trail
-            .record(&AuditEntry {
-                org: moved.org,
-                actor: Actor::Account(by),
-                action: Action::PageAcknowledged,
-                target: Target::of(TargetKind::Page, Some(moved.id.to_string().into())),
-                detail: Detail::default()
-                    .with("via", via.as_str())
-                    .with("step", moved.step),
-            })
-            .await?;
+        let target = Target::of(TargetKind::Page, Some(moved.id.to_string().into()));
+        let detail = Detail::default()
+            .with("via", via.as_str())
+            .with("step", moved.step);
+        match by {
+            Acker::Account(account) => {
+                self.trail
+                    .record(&AuditEntry {
+                        org: moved.org,
+                        actor: Actor::Account(*account),
+                        action: Action::PageAcknowledged,
+                        target,
+                        detail,
+                    })
+                    .await?;
+            }
+            Acker::Agent(grant) => {
+                self.readers
+                    .record(
+                        grant,
+                        &AuditEntry {
+                            org: moved.org,
+                            actor: Actor::Agent(grant.agent),
+                            action: Action::PageAcknowledged,
+                            target,
+                            detail: grant.stamp(detail),
+                        },
+                    )
+                    .await?;
+            }
+        }
         if let PageSource::Incident(incident) = moved.source {
             self.timeline
                 .append(&TimelineEntry {
                     id: TimelineId::fresh(),
                     incident,
                     org: moved.org,
-                    author: Author::Account(by),
+                    author: by.author(),
                     change: Change::Acknowledged { page: moved.id },
                     at_ms: now_ms,
                 })

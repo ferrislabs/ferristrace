@@ -14,10 +14,11 @@ import { useProjects } from '@/data/projects'
 import { stamp } from '@/lib/format'
 import { H } from './parts'
 
-const SCOPE_HINT: Record<AgentScope, string> = {
+export const SCOPE_HINT: Record<AgentScope, string> = {
   'telemetry:read': 'Read services, traces, logs, metrics, issues and incidents.',
   'incidents:comment': 'Comment on an incident.',
   'incidents:resolve': 'Mark an incident resolved.',
+  'oncall:acknowledge': 'Acknowledge a page.',
 }
 
 export function Agents() {
