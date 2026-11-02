@@ -60,8 +60,26 @@ Invariants
   - A FerrisKey identity whose subject is already linked resolves to that
     account and to no other.  [test]
   - An unlinked identity is adopted by the account holding the same
-    address only when the token says that address is verified; otherwise
-    a new account is provisioned and linked.  [test]
+    address only when the token says that address is verified.  [test]
+  - An unlinked identity carrying an address another account already
+    holds, unverified, is refused. It gets no account at all: `accounts.
+    email` is `NOT NULL UNIQUE` (20261024000001_control_plane.up.sql:25),
+    so there is no second account to give it, and dropping that
+    constraint would make every address-keyed command ambiguous —
+    `bootstrap --email`, `grant-role --member`, `standing_of`. The
+    refusal is `AccountError::Taken`, the same one `create` already
+    raises on that constraint, never a raw database error. The person
+    verifies their address in FerrisKey, or an administrator links
+    them.  [test]
+  - That refusal reaches the caller as a refusal, not as an outage: it
+    answers 401, and it is logged at `warn` with the address. A
+    deterministic refusal answering 503 from the `ProviderUnreachable`
+    arm, logged at `error`, would be indistinguishable from FerrisKey
+    being down and would wake somebody for a working deployment. It
+    maps to the existing `AuthError::Rejected` rather than earning a new
+    variant, because 6B reshapes `AuthError` when the local arm goes and
+    a variant added now would be rewritten before it was ever read.
+    [test]
   - A missing `email_verified` is never read as verified. FerrisKey
     sends it on the id token today; an identity arriving without it is
     refused adoption and gets its own account.  [test]
@@ -247,8 +265,9 @@ Acceptance
               the same account.
   @spec-l6-3  An unlinked identity carrying a verified address adopts the
               account holding that address; carrying an unverified one it
-              provisions a new account instead, and the first account is
-              left alone.
+              is refused with `Taken` and the held account keeps its id,
+              its address and its rows. An unverified address nobody
+              holds still provisions its own account.
   @spec-l6-4  `bootstrap --email a@b` then a first FerrisKey sign-in as
               `a@b` yields one account, owning the organisation, and
               `bootstrap` printed no token.
