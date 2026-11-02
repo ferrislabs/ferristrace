@@ -76,6 +76,8 @@ fn the_spellings_are_stable_and_dotted() {
             "status_component.created",
             "status_component.updated",
             "status_component.deleted",
+            "price.created",
+            "price.deleted",
         ]
     );
 }

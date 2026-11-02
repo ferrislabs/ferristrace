@@ -12,6 +12,7 @@ pub mod export;
 pub mod identity;
 pub mod incidents;
 pub mod issue;
+pub mod llm;
 pub mod logs;
 pub mod metrics;
 pub mod oncall;
@@ -87,6 +88,12 @@ pub use issue::{
     BadFingerprint, Counted, Decision, EXCEPTION_EVENT, Fingerprint, Issue, IssueDecisions,
     IssueError, IssueFilter, IssueReader, Issues, Occurrence, PRINT_BYTES, Recorded, Status,
     fingerprint, normalise,
+};
+pub use llm::{
+    BadCallQuery, BadPrice, Call, CallCursor, CallPage, CallQuery, Cost, DEFAULT_CALL_LIMIT, Llm,
+    LlmError, LlmReader, MAX_CALL_LIMIT, MAX_MODEL_BYTES, MAX_PROVIDER_BYTES, MAX_RATE,
+    MODEL_LIMIT, ModelPattern, ModelPrices, Price, PriceBook, PriceDraft, PriceId, PricedCall,
+    Provider, Rates, SeenModel, Unpriced,
 };
 pub use logs::{
     BadLogQuery, Buckets, DEFAULT_BUCKETS, DEFAULT_LOG_LIMIT, LogBucket, LogCursor, LogPage,

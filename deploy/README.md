@@ -115,6 +115,34 @@ A deploy of a service an open incident's alert names, or of any service when
 the incident has no alert, is added to the incident's timeline within a
 minute and to its postmortem draft.
 
+## LLM calls
+
+A span is an LLM call when it carries `gen_ai.provider.name` (or the older
+`gen_ai.system`) or `gen_ai.request.model`, the OpenTelemetry GenAI
+conventions. FerrisTrace reads `gen_ai.operation.name`,
+`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`,
+`gen_ai.usage.output_tokens` and `gen_ai.usage.cache_read.input_tokens` (a
+subset of the input tokens), plus `enduser.id` for the user. Three attributes
+of its own say who the call is for, each with a fallback: `ferristrace.feature`
+(then `gen_ai.agent.name`, then the service name), `ferristrace.customer`
+(then `enduser.id`) and `ferristrace.prompt.version` (then
+`gen_ai.prompt.version`). Prompts and completions are never copied out of the
+span: only what the application put in its attributes is stored, as for any
+span. Spans stored before an upgrade are picked up by the migration.
+
+No price list is shipped. An owner or administrator enters the models in use
+under Settings, LLM prices, in dollars per million input, output and cached
+input tokens from an effective date (`POST /api/orgs/<org>/llm/prices` takes
+them as whole micro-dollars). A model ending in `*` prices every model with
+that prefix: an exact name beats a prefix, and the longest prefix wins. The cost of a call is computed when it is read, from
+the price in force at its time, pricing the response model before the request
+model; cached tokens cost the cached price, or the input price when none is
+set. A call without a price has `cost: null` and its model is listed under
+`GET /api/orgs/<org>/llm/unpriced`. Calls are read through
+`GET /api/orgs/<org>/llm/calls` with `from` and `to` in milliseconds and the
+filters `feature`, `model`, `customer`, `user`, `prompt`, `provider`, `trace`
+and `project`; each call carries its `cost` in US dollars.
+
 ## Coming from a Comettrace deployment
 
 The product was called Comettrace before. A stack started under that name

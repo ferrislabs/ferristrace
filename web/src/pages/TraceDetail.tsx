@@ -11,9 +11,10 @@ import { Button } from '@/components/ui/button'
 import { EmptyState, ServiceDot, SeverityBadge, svcBg } from '@/components/ft/bits'
 import { Switch } from '@/components/ui/switch'
 import { useTrace } from '@/data/traces'
+import { formatCost, formatTokens, modelTimeMs, useTraceCalls, type LlmCall } from '@/data/llm'
 import { msOf, traceLogsFilter, useTraceLogs, type LogRecord } from '@/data/logs'
 import { because } from '@/auth/client'
-import { stamp } from '@/lib/format'
+import { dur, num, stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { NotFound } from './NotFound'
 
@@ -26,12 +27,17 @@ export function TraceDetail() {
   const [panel, setPanel] = useState(true)
   const [onlySpan, setOnlySpan] = useState(false)
   const logs = useTraceLogs(t?.id, t?.startedAtMs ?? 0, t?.durationMs ?? 0)
+  const llm = useTraceCalls(t?.id, t?.startedAtMs ?? 0, t?.durationMs ?? 0)
   if (pending) return null
   if (failed) return <EmptyState title="The trace could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
   if (!t) return <NotFound />
   const s = spans.find((x) => x.id === picked) ?? spans.find((x) => x.err) ?? spans[0]
   const services = [...new Set(spans.map((x) => x.svc))]
   const logsFilter = { f: traceLogsFilter(t.id, t.startedAtMs, t.durationMs) }
+  const callOf = new Map(llm.calls.map((call) => [call.spanId, call]))
+  const modelMs = modelTimeMs(llm.calls)
+  const modelCost = llm.calls.reduce((sum, call) => sum + (call.cost ?? 0), 0)
+  const unpriced = llm.calls.filter((call) => call.cost === null).length
   const spanLogs = logs.records.filter((record) => record.span_id === s?.id)
   const shownLogs = onlySpan ? spanLogs : logs.records
   return (
@@ -47,6 +53,9 @@ export function TraceDetail() {
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-control text-muted-foreground">
         <span>Duration <span className="font-mono font-semibold text-foreground">{t.dur}</span></span><span>Spans <span className="font-mono text-foreground">{t.spans}</span></span><span>Services <span className="font-mono text-foreground">{services.length}</span></span><span>Started <span className="font-mono text-foreground">{stamp(t.startedAtMs)}</span></span><span className="font-mono">{t.id}</span>
+        {llm.calls.length ? (
+          <span data-testid="model-time">Model time <span className="font-mono font-semibold text-foreground">{dur(modelMs)}</span>{t.durationMs > 0 ? <span className="font-mono"> ({Math.min(100, Math.round((modelMs / t.durationMs) * 100))} % of the request, {dur(Math.max(t.durationMs - modelMs, 0))} elsewhere)</span> : null} · <span className="font-mono text-foreground">{num(llm.calls.length)}</span> LLM {llm.calls.length === 1 ? 'call' : 'calls'} · cost <span className="font-mono text-foreground">{formatCost(modelCost)}</span>{unpriced ? <span> ({unpriced} unpriced)</span> : null}</span>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-3 text-caption text-muted-foreground">{services.map((x) => <span key={x} className="inline-flex items-center gap-1.5"><ServiceDot name={x} />{x}</span>)}</div>
       <div className="flex min-h-[480px] overflow-hidden rounded-lg border">
@@ -68,7 +77,7 @@ export function TraceDetail() {
                 className={cn('grid h-[30px] w-full cursor-pointer grid-cols-[minmax(240px,340px)_minmax(0,1fr)_84px] items-center border-b border-border-subtle text-left text-control hover:bg-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', x.id === s?.id && 'bg-accent-subtle')}
               >
                 <span className={cn('flex min-w-0 items-center gap-1.5 pr-2', x.err && 'text-destructive-text')} style={{ paddingLeft: 12 + x.depth * 16 }}>
-                  <ServiceDot name={x.svc} />{x.err ? <CircleX className="size-3 shrink-0" aria-label="Error" /> : null}<span className="truncate">{x.name}</span>
+                  <ServiceDot name={x.svc} />{x.err ? <CircleX className="size-3 shrink-0" aria-label="Error" /> : null}<span className="truncate">{x.name}</span>{callOf.get(x.id) ? <LlmMark call={callOf.get(x.id) as LlmCall} /> : null}
                 </span>
                 <span className="relative h-[30px] border-l border-border-subtle bg-[linear-gradient(to_right,var(--border-subtle)_1px,transparent_1px)] bg-[length:25%_100%]">
                   <span className={cn('absolute top-[9px] h-3 min-w-[2px] rounded-[2px]', svcBg(x.svc), x.err && 'ring-1 ring-destructive ring-offset-2 ring-offset-background')} style={{ left: `${x.offset}%`, width: `${x.width}%` }} />
@@ -97,6 +106,7 @@ export function TraceDetail() {
               {s.err && !s.events.some((e) => e.exception) ? (
                 <span className="text-caption text-muted-foreground">This span failed and recorded no exception.</span>
               ) : null}
+              {callOf.get(s.id) ? <LlmPanel call={callOf.get(s.id) as LlmCall} /> : null}
               <PlacementChips attributes={Object.fromEntries(s.attrs)} onPick={filterTraces} />
               <h3 className="m-0 text-caption font-semibold uppercase tracking-[.05em] text-muted-foreground">Attributes</h3>
               <dl className="m-0 grid grid-cols-[minmax(120px,42%)_1fr] gap-x-3 text-caption">
@@ -157,6 +167,38 @@ export function TraceDetail() {
         {!logs.failed && !logs.pending && shownLogs.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{onlySpan ? 'No log record carries the selected span id.' : 'No log record carries this trace id.'}</p> : null}
         {shownLogs.map((record, at) => <LogLine key={`${record.time_ns}-${at}`} record={record} filter={logsFilter} wide />)}
       </section>
+    </>
+  )
+}
+
+function LlmMark({ call }: { call: LlmCall }) {
+  return <span className="shrink-0 rounded-sm border bg-muted px-1.5 font-mono text-[11px] text-muted-foreground" title="LLM call">{call.model} · {formatTokens(call.inputTokens + call.outputTokens)} tok · {formatCost(call.cost)}</span>
+}
+
+function LlmPanel({ call }: { call: LlmCall }) {
+  const rows: [string, string][] = [
+    ['Model', call.model || '—'],
+    ['Provider', call.provider || '—'],
+    ['Operation', call.operation || '—'],
+    ['Input tokens', num(call.inputTokens)],
+    ['Cached input', num(call.cachedInputTokens)],
+    ['Output tokens', num(call.outputTokens)],
+    ['Cost', formatCost(call.cost)],
+    ['Feature', call.feature || '—'],
+    ['Customer', call.customer || '—'],
+    ['Prompt version', call.promptVersion || '—'],
+  ]
+  return (
+    <>
+      <h3 className="m-0 text-caption font-semibold uppercase tracking-[.05em] text-muted-foreground">LLM call</h3>
+      <dl className="m-0 grid grid-cols-[minmax(120px,42%)_1fr] gap-x-3 text-caption">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="truncate border-b border-border-subtle py-1.5 text-muted-foreground">{k}</dt>
+            <dd className="m-0 break-all border-b border-border-subtle py-1.5 font-mono">{v}</dd>
+          </div>
+        ))}
+      </dl>
     </>
   )
 }

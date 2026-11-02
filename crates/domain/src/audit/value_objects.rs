@@ -127,10 +127,12 @@ pub enum Action {
     StatusComponentCreated,
     StatusComponentUpdated,
     StatusComponentDeleted,
+    PriceCreated,
+    PriceDeleted,
 }
 
 impl Action {
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 57] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -186,6 +188,8 @@ impl Action {
         Self::StatusComponentCreated,
         Self::StatusComponentUpdated,
         Self::StatusComponentDeleted,
+        Self::PriceCreated,
+        Self::PriceDeleted,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -245,6 +249,8 @@ impl Action {
             Self::StatusComponentCreated => "status_component.created",
             Self::StatusComponentUpdated => "status_component.updated",
             Self::StatusComponentDeleted => "status_component.deleted",
+            Self::PriceCreated => "price.created",
+            Self::PriceDeleted => "price.deleted",
         }
     }
 
@@ -276,10 +282,11 @@ pub enum TargetKind {
     Postmortem,
     StatusPage,
     StatusComponent,
+    Price,
 }
 
 impl TargetKind {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -295,6 +302,7 @@ impl TargetKind {
         Self::Postmortem,
         Self::StatusPage,
         Self::StatusComponent,
+        Self::Price,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -314,6 +322,7 @@ impl TargetKind {
             Self::Postmortem => "postmortem",
             Self::StatusPage => "status_page",
             Self::StatusComponent => "status_component",
+            Self::Price => "price",
         }
     }
 

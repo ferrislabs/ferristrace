@@ -1,6 +1,6 @@
 use ferristrace_domain::{
     AckKey, AlertMailer, AuthProvider, Authorizer, Clock, ClusterReader, CulpritReader, DeployFeed,
-    ESCALATE_AFTER_SECS, IssueReader, LinkKey, LogReader, LogSink, Mailer, MetricReader,
+    ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader, LogSink, Mailer, MetricReader,
     MetricSink, PasswordHasher, Photos, PlacementReader, ProvisionPolicy, QuotaPolicy,
     ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory, UsageMeter,
     UsageReader, WebhookSender,
@@ -15,7 +15,7 @@ pub trait Stack: Send + Sync + 'static {
     type Mailer: Mailer + AlertMailer + StatusMailer + Send + Sync + 'static;
     type Photos: Photos + Send + Sync + 'static;
     type SpanStore: SpanReader + SpanPages + PlacementReader + CulpritReader + Send + Sync + 'static;
-    type IssueStore: IssueReader + ReleaseReader + DeployFeed + Send + Sync + 'static;
+    type IssueStore: IssueReader + ReleaseReader + LlmReader + DeployFeed + Send + Sync + 'static;
     type LogStore: LogReader + CulpritReader + Send + Sync + 'static;
     type MetricStore: MetricReader + ClusterReader + Send + Sync + 'static;
     type Meter: UsageMeter + UsageReader + Send + Sync + 'static;

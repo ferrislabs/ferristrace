@@ -1859,3 +1859,64 @@ impl crate::status::StatusOutbox for StatusLedger {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct PriceLedger {
+    kept: Arc<Mutex<Vec<(TenantId, crate::llm::Price)>>>,
+}
+
+impl PriceLedger {
+    pub fn prices(&self, org: TenantId) -> Vec<crate::llm::Price> {
+        self.kept
+            .lock()
+            .expect("the price ledger lock")
+            .iter()
+            .filter(|(held, _)| *held == org)
+            .map(|(_, price)| price.clone())
+            .collect()
+    }
+}
+
+impl crate::llm::ModelPrices for PriceLedger {
+    async fn list(&self, org: TenantId) -> Result<Vec<crate::llm::Price>, StoreError> {
+        Ok(self.prices(org))
+    }
+
+    async fn create(
+        &self,
+        org: TenantId,
+        draft: &crate::llm::PriceDraft,
+        _by: crate::identity::AccountId,
+    ) -> Result<Option<crate::llm::Price>, StoreError> {
+        let mut kept = self.kept.lock().expect("the price ledger lock");
+        if kept.iter().any(|(held, price)| {
+            *held == org
+                && price.provider == draft.provider
+                && price.model == draft.model
+                && price.effective_from_ms == draft.effective_from_ms
+        }) {
+            return Ok(None);
+        }
+        let price = crate::llm::Price {
+            id: crate::llm::PriceId::new(Uuid::from_u128(kept.len() as u128 + 1)),
+            provider: draft.provider.clone(),
+            model: draft.model.clone(),
+            rates: draft.rates,
+            effective_from_ms: draft.effective_from_ms,
+        };
+        kept.push((org, price.clone()));
+        Ok(Some(price))
+    }
+
+    async fn delete(
+        &self,
+        org: TenantId,
+        id: crate::llm::PriceId,
+    ) -> Result<Option<crate::llm::Price>, StoreError> {
+        let mut kept = self.kept.lock().expect("the price ledger lock");
+        let at = kept
+            .iter()
+            .position(|(held, price)| *held == org && price.id == id);
+        Ok(at.map(|at| kept.remove(at).1))
+    }
+}
