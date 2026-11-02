@@ -80,7 +80,7 @@ export function StatusPageView({ c, compact }: { c: StatusConfig; compact?: bool
           </section>
         ) : null}
       </main>
-      {c.poweredBy ? <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1">Subscribe by email, RSS or webhook.</span><Logo className="size-3.5" />Powered by Ferristrace</div></footer> : null}
+      {c.poweredBy ? <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1">Subscribe by email, RSS or webhook.</span><Logo className="size-3.5" />Powered by FerrisTrace</div></footer> : null}
     </div>
   )
 }

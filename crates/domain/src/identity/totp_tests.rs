@@ -99,9 +99,9 @@ fn a_secret_renders_as_base32_without_padding() {
 fn a_uri_names_the_issuer_the_account_and_the_period() {
     let account = Email::try_from("person@example.com").expect("an address");
 
-    let uri = published().uri("Ferristrace", &account);
+    let uri = published().uri("FerrisTrace", &account);
 
-    assert!(uri.starts_with("otpauth://totp/Ferristrace:person@example.com?secret="));
+    assert!(uri.starts_with("otpauth://totp/FerrisTrace:person@example.com?secret="));
     assert!(uri.contains("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"));
     assert!(uri.contains(&format!("period={STEP_SECONDS}")));
     assert!(uri.contains("algorithm=SHA1"));

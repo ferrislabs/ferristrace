@@ -60,7 +60,7 @@ export function Kubernetes() {
   const inNs = <T extends { ns: string }>(l: T[]) => l.filter((x) => ns === 'all' || x.ns === ns)
   return (
     <>
-      <PageHeader title="Kubernetes" meta="From the Ferristrace agent: kubelet stats, cluster state and events">
+      <PageHeader title="Kubernetes" meta="From the FerrisTrace agent: kubelet stats, cluster state and events">
         <NativeSelect aria-label="Cluster" value={cluster} onChange={(e) => setCluster(e.target.value)} className="w-[170px] font-mono">{clusters.map((c) => <option key={c}>{c}</option>)}</NativeSelect>
         <NativeSelect aria-label="Namespace" value={ns} onChange={(e) => setNs(e.target.value)} className="w-[170px]"><option value="all">All namespaces</option>{namespaces.map((n) => <option key={n}>{n}</option>)}</NativeSelect>
       </PageHeader>

@@ -1,4 +1,4 @@
-# Self-hosting Ferristrace
+# Self-hosting FerrisTrace
 
 One command brings up the server, its control plane, the span store and the
 usage counter:

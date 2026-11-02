@@ -25,7 +25,7 @@ export const BACKEND: Record<string, SignalView> = {
         table: ['Routes', '42 routes · sorted by 5xx', 'Filter routes, e.g. /api/checkout'],
         cols: [C('Route'), C('Service', 'cw-130'), C('Requests', 'num cw-100'), C('2xx', 'num cw-80'), C('4xx', 'num cw-80'), C('5xx', 'num cw-90', 'descending'), C('p50', 'num cw-80'), C('p95', 'num cw-80'), C('Share of time', 'cw-140')],
         rows: [['POST /api/checkout', 'checkout-api', '18.2/s', '91.4 %', '0.6 %', '8.0 %', '210 ms', '1.9 s', 62, true], ['POST /api/payments/refund', 'api-gateway', '0.4/s', '94.1 %', '2.0 %', '3.9 %', '180 ms', '640 ms', 2, true], ['POST /api/login', 'auth', '6.8/s', '81.2 %', '18.1 %', '0.7 %', '24 ms', '96 ms', 3], ['GET /api/products', 'api-gateway', '72.0/s', '99.1 %', '0.8 %', '0.1 %', '18 ms', '61 ms', 14], ['GET /api/cart', 'api-gateway', '41.3/s', '99.6 %', '0.4 %', '0.0 %', '12 ms', '48 ms', 6], ['GET /api/orders/{id}', 'api-gateway', '9.1/s', '96.0 %', '4.0 %', '0.0 %', '31 ms', '88 ms', 4], ['GET /healthz', 'api-gateway', '2.0/s', '100 %', '0 %', '0 %', '0.8 ms', '1.2 ms', 0]].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono'), X(r[4], 'num mono'), X(r[5], 'num mono ' + (r[9] ? 'warn-text strong' : ''), { warn: r[9] }), X(r[6], 'num mono'), X(r[7], 'num mono'), X(r[8] + ' %', 'mono small', { bar: r[8] })]),
-        foot: 'Routes come from http.route; without it, Ferristrace groups by method and path with ids replaced. Click a route to see its traces.',
+        foot: 'Routes come from http.route; without it, FerrisTrace groups by method and path with ids replaced. Click a route to see its traces.',
         empty: ['No HTTP requests yet', 'Requests appear once a service sends server spans with http.request.method and http.route. Most HTTP frameworks do it with their OpenTelemetry instrumentation.', 'npm i @opentelemetry/auto-instrumentations-node']
       },
       jobs: {
@@ -58,7 +58,7 @@ export const BACKEND: Record<string, SignalView> = {
         table: ['Templates', '9 templates', 'Filter templates'],
         cols: [C('Template'), C('Provider', 'cw-120'), C('Sent', 'num cw-90'), C('Failed', 'num cw-90', 'descending'), C('Send p95', 'num cw-90'), C('Last sent', 'cw-110')],
         rows: [['order_confirmation', 'smtp · mailgun', '1,210', '41', '940 ms', '14:32:02', true], ['password_reset', 'smtp · mailgun', '88', '9', '820 ms', '14:31:40', true], ['shipping_update', 'smtp · mailgun', '1,402', '8', '860 ms', '14:32:01'], ['cart_reminder', 'smtp · mailgun', '960', '6', '790 ms', '14:30:00'], ['invoice', 'smtp · mailgun', '244', '0', '1.1 s', '14:12:44']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono ' + (r[6] ? 'warn-text strong' : ''), { warn: r[6] }), X(r[4], 'num mono'), X(r[5], 'mono sm')]),
-        foot: 'Ferristrace records the template, recipient domain and result, never the address or the body. Recipients show as *@domain.',
+        foot: 'FerrisTrace records the template, recipient domain and result, never the address or the body. Recipients show as *@domain.',
         empty: ['No emails yet', 'Emails appear when your mailer sends a span named email.send with ferristrace.email.template. Addresses and bodies are not recorded.', 'span.setAttribute("ferristrace.email.template", "order_confirmation")']
       },
       queries: {
@@ -81,7 +81,7 @@ export const BACKEND: Record<string, SignalView> = {
         cols: [C('Host'), C('Services', 'cw-160'), C('CPU', 'cw-140', 'descending'), C('Memory', 'cw-140'), C('Disk', 'cw-140'), C('Load 1m', 'num cw-80'), C('Up', 'cw-90')],
         rows: [['app-3', 'checkout-api, api-gateway', 78, 71, 52, '3.1', '12 d'], ['app-1', 'api-gateway, auth', 46, 62, 49, '1.8', '12 d'], ['app-2', 'api-gateway, inventory', 39, 58, 50, '1.5', '12 d'], ['app-4', 'payments', 33, 66, 47, '1.2', '3 d'], ['worker-1', 'notifier, webhook-sender', 28, 55, 88, '0.9', '40 d'], ['worker-2', 'data jobs', 22, 49, 61, '0.7', '40 d']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'sm muted'), X(r[2] + ' %', 'mono small', { bar: r[2], barColor: r[2] >= 75 ? 'bar-w' : 'bar-p' }), X(r[3] + ' %', 'mono small', { bar: r[3], barColor: r[3] >= 85 ? 'bar-w' : 'bar-p' }), X(r[4] + ' %', 'mono small ' + (r[4] >= 85 ? 'warn-text strong' : ''), { bar: r[4], barColor: r[4] >= 85 ? 'bar-w' : 'bar-p', warn: r[4] >= 85 }), X(r[5], 'num mono'), X(r[6], 'mono sm')]),
         foot: 'Needs the hostmetrics receiver of the OpenTelemetry Collector, or the host metrics package of your SDK. Amber from 75 % CPU and 85 % disk.',
-        empty: ['No system metrics yet', 'Add the hostmetrics receiver to your OpenTelemetry Collector and point its exporter at Ferristrace.', 'receivers:\n  hostmetrics:\n    scrapers: [cpu, memory, disk, load, network]']
+        empty: ['No system metrics yet', 'Add the hostmetrics receiver to your OpenTelemetry Collector and point its exporter at FerrisTrace.', 'receivers:\n  hostmetrics:\n    scrapers: [cpu, memory, disk, load, network]']
       }
     }
 

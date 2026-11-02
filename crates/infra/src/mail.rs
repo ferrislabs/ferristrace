@@ -86,7 +86,7 @@ mod tests {
             relay: "mail.example.com".to_owned(),
             username: "postmaster".to_owned(),
             password: "secret".to_owned(),
-            from: "Ferristrace <no-reply@example.com>".to_owned(),
+            from: "FerrisTrace <no-reply@example.com>".to_owned(),
             base_url: "https://app.example.com/".to_owned(),
         })
         .expect("usable settings")

@@ -30,7 +30,7 @@ else.
 | Fix released | critical within 14 days, otherwise with the next release |
 | Advisory published | once a fix is out, or 90 days after the report |
 
-Those are targets, not guarantees. Ferristrace is maintained by one person, and
+Those are targets, not guarantees. FerrisTrace is maintained by one person, and
 a report that lands mid-holiday will take the long end of each window. You
 will hear why rather than hear nothing.
 
@@ -39,7 +39,7 @@ will agree a date rather than discover it.
 
 ## Supported versions
 
-Ferristrace is pre-1.0. Only the most recent release carries fixes, and there
+FerrisTrace is pre-1.0. Only the most recent release carries fixes, and there
 are no backports to earlier ones.
 
 | Version | Supported |
@@ -67,7 +67,7 @@ Out of scope:
   them before the stack faces anything real
 - anything that needs an already-compromised host, an already-valid session, or
   an ingest key the attacker was given
-- a dependency's vulnerability with no path to it through Ferristrace. Report
+- a dependency's vulnerability with no path to it through FerrisTrace. Report
   that upstream; tell us if we expose it
 - scanner output with no demonstrated impact, missing hardening headers on
   their own, and reports about software versions
@@ -77,6 +77,6 @@ Out of scope:
 ## Testing
 
 Test against a deployment you own. Do not test against someone else's
-Ferristrace, do not run load or denial-of-service tests against a shared host,
+FerrisTrace, do not run load or denial-of-service tests against a shared host,
 and do not read, keep or publish data that is not yours. Research done that
 way, reported privately, is welcome and will not be met with a lawyer.
