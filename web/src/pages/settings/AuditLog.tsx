@@ -59,7 +59,7 @@ export function AuditLog() {
               {entries.map((entry) => (
                 <Tr key={entry.id}>
                   <Td className="font-mono">{stamp(entry.at_ms)}</Td>
-                  <Td><span className="flex items-center gap-2">{actorName(entry)}{entry.actor.kind === 'api_key' ? <Badge variant="outline">key</Badge> : null}</span></Td>
+                  <Td><span className="flex items-center gap-2">{actorName(entry)}{entry.actor.kind === 'api_key' ? <Badge variant="outline">key</Badge> : null}{entry.actor.kind === 'agent' ? <Badge variant="accent">agent</Badge> : null}</span></Td>
                   <Td className="font-mono">{entry.action}</Td>
                   <Td><span className="flex items-center gap-2"><Badge variant="outline">{entry.target.kind}</Badge><span className="truncate font-mono text-caption text-muted-foreground">{entry.target.id ?? ''}</span></span></Td>
                   <Td className="max-w-[360px] truncate text-caption text-muted-foreground" title={details(entry)}>{details(entry)}</Td>
