@@ -40,9 +40,9 @@ pub use issue::{
     fingerprint, normalise,
 };
 pub use organisation::{
-    Admitted, BadName, BadTeamName, Invitation, Member, Membership, Memberships, Named, OrgName,
-    OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError, SettingError,
-    Squad, Squads, Team, TeamError, TeamId, TeamName, Who, Whoami, WhoamiError,
+    BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
+    OrgName, OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError,
+    SettingError, Squad, Squads, Team, TeamError, TeamId, TeamName, Who, Whoami, WhoamiError,
 };
 pub use profile::{
     AccountName, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, NoPhotos, Photo, PhotoError,
@@ -54,8 +54,9 @@ pub use provisioning::{
 pub use secret::{RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use store::StoreError;
 pub use telemetry::{
-    Admission, Consumed, Consumption, DecompressedBytes, Ingest, IngestError, IngestKey, InvalidId,
-    Metering, Payload, QuotaPolicy, Scope, SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink,
-    SpanStatus, TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered, UsageHistory,
-    UsageMeter, UsageReader,
+    Admission, Allowance, BillingHour, BillingMonth, Consumed, Consumption, CounterUnreachable,
+    DecompressedBytes, HourTotal, HourlyCounters, Ingest, IngestError, IngestKey, InvalidId,
+    Metering, MonthTotal, Payload, QuotaPolicy, Scope, SinkError, Span, SpanEvent, SpanId,
+    SpanKind, SpanSink, SpanStatus, StaticQuota, TenantDirectory, TenantId, TraceId, UnknownKey,
+    Unmetered, UsageHistory, UsageLedger, UsageMeter, UsageReader, UsageSyncError,
 };

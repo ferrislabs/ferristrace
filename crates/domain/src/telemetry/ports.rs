@@ -1,8 +1,11 @@
 use core::future::Future;
 
+use super::billing::{BillingHour, BillingMonth};
 use super::entities::Span;
-use super::errors::{SinkError, UnknownKey};
-use super::value_objects::{Admission, Consumed, DecompressedBytes, IngestKey, Scope, TenantId};
+use super::errors::{CounterUnreachable, SinkError, UnknownKey};
+use super::value_objects::{
+    Admission, Consumed, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Scope, TenantId,
+};
 use crate::explore::Window;
 use crate::store::StoreError;
 
@@ -175,5 +178,115 @@ impl<T: UsageHistory + Send + Sync> UsageHistory for std::sync::Arc<T> {
         org: TenantId,
     ) -> impl Future<Output = Result<Option<DecompressedBytes>, StoreError>> + Send {
         self.as_ref().included(org)
+    }
+}
+
+pub trait HourlyCounters {
+    fn finished(
+        &self,
+        hour: BillingHour,
+    ) -> impl Future<Output = Result<Vec<HourTotal>, CounterUnreachable>> + Send;
+
+    fn discard(
+        &self,
+        total: HourTotal,
+    ) -> impl Future<Output = Result<(), CounterUnreachable>> + Send;
+
+    fn seed(
+        &self,
+        tenant: TenantId,
+        total: DecompressedBytes,
+    ) -> impl Future<Output = Result<bool, CounterUnreachable>> + Send;
+}
+
+impl<T: HourlyCounters + Sync> HourlyCounters for &T {
+    fn finished(
+        &self,
+        hour: BillingHour,
+    ) -> impl Future<Output = Result<Vec<HourTotal>, CounterUnreachable>> + Send {
+        (*self).finished(hour)
+    }
+
+    fn discard(
+        &self,
+        total: HourTotal,
+    ) -> impl Future<Output = Result<(), CounterUnreachable>> + Send {
+        (*self).discard(total)
+    }
+
+    fn seed(
+        &self,
+        tenant: TenantId,
+        total: DecompressedBytes,
+    ) -> impl Future<Output = Result<bool, CounterUnreachable>> + Send {
+        (*self).seed(tenant, total)
+    }
+}
+
+impl<T: HourlyCounters + Send + Sync> HourlyCounters for std::sync::Arc<T> {
+    fn finished(
+        &self,
+        hour: BillingHour,
+    ) -> impl Future<Output = Result<Vec<HourTotal>, CounterUnreachable>> + Send {
+        self.as_ref().finished(hour)
+    }
+
+    fn discard(
+        &self,
+        total: HourTotal,
+    ) -> impl Future<Output = Result<(), CounterUnreachable>> + Send {
+        self.as_ref().discard(total)
+    }
+
+    fn seed(
+        &self,
+        tenant: TenantId,
+        total: DecompressedBytes,
+    ) -> impl Future<Output = Result<bool, CounterUnreachable>> + Send {
+        self.as_ref().seed(tenant, total)
+    }
+}
+
+pub trait UsageLedger {
+    fn record_hours(
+        &self,
+        hours: &[HourTotal],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send;
+
+    fn billed_since(
+        &self,
+        month: BillingMonth,
+    ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send;
+}
+
+impl<T: UsageLedger + Sync> UsageLedger for &T {
+    fn record_hours(
+        &self,
+        hours: &[HourTotal],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send {
+        (*self).record_hours(hours)
+    }
+
+    fn billed_since(
+        &self,
+        month: BillingMonth,
+    ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send {
+        (*self).billed_since(month)
+    }
+}
+
+impl<T: UsageLedger + Send + Sync> UsageLedger for std::sync::Arc<T> {
+    fn record_hours(
+        &self,
+        hours: &[HourTotal],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send {
+        self.as_ref().record_hours(hours)
+    }
+
+    fn billed_since(
+        &self,
+        month: BillingMonth,
+    ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send {
+        self.as_ref().billed_since(month)
     }
 }

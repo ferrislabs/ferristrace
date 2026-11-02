@@ -1,4 +1,5 @@
-use ferristrace_domain::{DecompressedBytes, TenantId, UsageHistory, Window};
+use ferristrace_domain::telemetry::{BillingHour, BillingMonth, HourTotal, UsageLedger};
+use ferristrace_domain::{DecompressedBytes, TenantId, UnixSeconds, UsageHistory, Window};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
@@ -260,4 +261,78 @@ async fn deleting_an_organisation_takes_its_usage_with_it() {
         .expect("counting the hours")
         .get("value");
     assert_eq!(left, 0);
+}
+
+fn an_hour_total(tenant: TenantId, at: u64, bytes: u64) -> HourTotal {
+    HourTotal {
+        tenant,
+        hour: BillingHour::containing(UnixSeconds::new(at)),
+        ingested: DecompressedBytes::new(bytes),
+    }
+}
+
+#[tokio::test]
+async fn a_rolled_hour_is_written_once_and_never_doubled() {
+    let Some(pool) = control_plane("usage_rolled").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let org = an_org(&pool, "owner@example.com").await;
+    let hours = [an_hour_total(org, 1_699_999_200, 800)];
+
+    let first = committed!(pg, |usage: UsageHistory| usage
+        .record_hours(&hours)
+        .await
+        .expect("the hour is written"));
+    let second = committed!(pg, |usage: UsageHistory| usage
+        .record_hours(&hours)
+        .await
+        .expect("the hour is written again"));
+
+    assert_eq!((first, second), (1, 0));
+    let kept: i64 = sqlx::query("SELECT ingested_bytes AS value FROM usage_hourly")
+        .fetch_one(&pool)
+        .await
+        .expect("reading the hour")
+        .get("value");
+    assert_eq!(kept, 800);
+}
+
+#[tokio::test]
+async fn an_hour_of_an_unknown_organisation_is_not_written() {
+    let Some(pool) = control_plane("usage_rolled_unknown").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let stranger = TenantId::new(Uuid::new_v4());
+    let hours = [an_hour_total(stranger, 1_699_999_200, 800)];
+
+    let written = committed!(pg, |usage: UsageHistory| usage
+        .record_hours(&hours)
+        .await
+        .expect("the control plane answers"));
+
+    assert_eq!(written, 0);
+}
+
+#[tokio::test]
+async fn the_billed_hours_of_the_month_are_summed_per_organisation() {
+    let Some(pool) = control_plane("usage_billed").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let org = an_org(&pool, "owner@example.com").await;
+    an_hour(&pool, org, 1_698_800_000_000_000_000, 700).await;
+    an_hour(&pool, org, 1_698_900_000_000_000_000, 300).await;
+    an_hour(&pool, org, 1_690_000_000_000_000_000, 5_000).await;
+    let november = BillingMonth::containing(UnixSeconds::new(1_700_000_000));
+
+    let billed = committed!(pg, |usage: UsageHistory| usage
+        .billed_since(november)
+        .await
+        .expect("the billed hours are read"));
+
+    assert_eq!(billed.len(), 1);
+    assert_eq!(billed[0].tenant, org);
+    assert_eq!(billed[0].ingested, DecompressedBytes::new(1000));
 }

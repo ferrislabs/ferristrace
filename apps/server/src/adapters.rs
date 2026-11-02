@@ -3,6 +3,9 @@ use std::sync::Arc;
 use ferristrace_application::Stack;
 use ferristrace_application::registry::Repositories;
 use ferristrace_clickhouse::{ClickhouseIssues, ClickhouseReader, ClickhouseSink};
+use ferristrace_domain::telemetry::{
+    BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
+};
 use ferristrace_domain::{
     DecompressedBytes, Email, IngestKey, Mailer, NoPhotos, Photo, PhotoError, Photos, Pictured,
     Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink, TenantDirectory, TenantId,
@@ -10,7 +13,7 @@ use ferristrace_domain::{
 };
 use ferristrace_infra::{
     Argon2Hasher, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer, StaticDirectory,
-    StaticQuota, SystemClock,
+    SystemClock,
 };
 use ferristrace_postgres::{Postgres, PostgresDirectory};
 use ferristrace_redis::RedisMeter;
@@ -127,6 +130,33 @@ impl UsageReader for Meter {
         match self {
             Self::Memory(meter) => meter.used(tenant).await,
             Self::Redis(meter) => meter.used(tenant).await,
+        }
+    }
+}
+
+impl HourlyCounters for Meter {
+    async fn finished(&self, hour: BillingHour) -> Result<Vec<HourTotal>, CounterUnreachable> {
+        match self {
+            Self::Memory(_) => Ok(Vec::new()),
+            Self::Redis(meter) => meter.finished(hour).await,
+        }
+    }
+
+    async fn discard(&self, total: HourTotal) -> Result<(), CounterUnreachable> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::Redis(meter) => meter.discard(total).await,
+        }
+    }
+
+    async fn seed(
+        &self,
+        tenant: TenantId,
+        total: DecompressedBytes,
+    ) -> Result<bool, CounterUnreachable> {
+        match self {
+            Self::Memory(_) => Ok(false),
+            Self::Redis(meter) => meter.seed(tenant, total).await,
         }
     }
 }

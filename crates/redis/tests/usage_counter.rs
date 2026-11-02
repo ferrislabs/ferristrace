@@ -1,6 +1,10 @@
-use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
+use ferristrace_application::testing::Inert;
+use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::{
+    DecompressedBytes, NoPhotos, ProvisionPolicy, TenantId, UsageMeter, UsageReader,
+};
 use ferristrace_infra::FixedClock;
-use ferristrace_postgres::{CONTROL_PLANE, SELF_HOSTED_PLAN};
+use ferristrace_postgres::{CONTROL_PLANE, Postgres, SELF_HOSTED_PLAN};
 use ferristrace_redis::RedisMeter;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
@@ -23,6 +27,42 @@ async fn namespaced_meter_at(seconds: u64, namespace: &str) -> Option<RedisMeter
             .expect("connecting to the usage counter store")
             .with_prefix(format!("test:{namespace}")),
     )
+}
+
+#[derive(Debug)]
+struct Wired;
+
+impl Stack for Wired {
+    type Repos = Postgres<FixedClock>;
+    type Clock = FixedClock;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = RedisMeter<FixedClock>;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristrace<Wired>> {
+    let meter = namespaced_meter_at(seconds, namespace).await?;
+    Some(Ferristrace::new(
+        Postgres::new(pool.clone(), FixedClock::at(seconds)),
+        Adapters {
+            clock: FixedClock::at(seconds),
+            hasher: Inert::default(),
+            mailer: Inert::default(),
+            photos: NoPhotos,
+            meter,
+            span_store: None,
+            issue_store: None,
+            oidc: None,
+            provision: ProvisionPolicy::default(),
+        },
+    ))
 }
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -139,7 +179,12 @@ async fn rehydration_seeds_the_counter_from_the_billed_hours() {
     billed(&pool, tenant, 1_698_800_000_000_000_000, 700).await;
     billed(&pool, tenant, 1_698_900_000_000_000_000, 300).await;
 
-    let seeded = meter.rehydrate(&pool).await.expect("rehydration runs");
+    let seeded = driven(&pool, NOVEMBER, "rehydrate")
+        .await
+        .expect("the same store")
+        .rehydrate_usage()
+        .await
+        .expect("rehydration runs");
 
     assert_eq!(seeded, 1);
     assert_eq!(meter.used(tenant).await, DecompressedBytes::new(1000));
@@ -159,7 +204,12 @@ async fn rehydration_leaves_a_live_counter_alone() {
         .record_ingest(tenant, DecompressedBytes::new(50))
         .await;
 
-    let seeded = meter.rehydrate(&pool).await.expect("rehydration runs");
+    let seeded = driven(&pool, NOVEMBER, "live")
+        .await
+        .expect("the same store")
+        .rehydrate_usage()
+        .await
+        .expect("rehydration runs");
 
     assert_eq!(seeded, 0, "a counter already in flight must not be reset");
     assert_eq!(meter.used(tenant).await, DecompressedBytes::new(50));
@@ -176,7 +226,12 @@ async fn hours_before_the_month_are_not_rehydrated() {
     let tenant = seeded_org(&pool).await;
     billed(&pool, tenant, 1_690_000_000_000_000_000, 5_000).await;
 
-    meter.rehydrate(&pool).await.expect("rehydration runs");
+    driven(&pool, NOVEMBER, "earlier")
+        .await
+        .expect("the same store")
+        .rehydrate_usage()
+        .await
+        .expect("rehydration runs");
 
     assert_eq!(meter.used(tenant).await, DecompressedBytes::new(0));
 }
@@ -232,7 +287,7 @@ async fn a_finished_hour_moves_into_the_billing_table() {
     let Some(earlier) = namespaced_meter_at(NOVEMBER, "rollup").await else {
         return;
     };
-    let later = namespaced_meter_at(NOVEMBER + 3600, "rollup")
+    let later = driven(&pool, NOVEMBER + 3600, "rollup")
         .await
         .expect("the same store");
     let tenant = seeded_org(&pool).await;
@@ -240,7 +295,7 @@ async fn a_finished_hour_moves_into_the_billing_table() {
     earlier
         .record_ingest(tenant, DecompressedBytes::new(1500))
         .await;
-    let rolled = later.roll_up(&pool).await.expect("the rollup runs");
+    let rolled = later.roll_up_usage().await.expect("the rollup runs");
 
     assert_eq!(rolled, 1);
     assert_eq!(
@@ -257,7 +312,7 @@ async fn rolling_the_same_hour_twice_does_not_double_the_bill() {
     let Some(earlier) = namespaced_meter_at(NOVEMBER, "twice").await else {
         return;
     };
-    let later = namespaced_meter_at(NOVEMBER + 3600, "twice")
+    let later = driven(&pool, NOVEMBER + 3600, "twice")
         .await
         .expect("the same store");
     let tenant = seeded_org(&pool).await;
@@ -265,8 +320,8 @@ async fn rolling_the_same_hour_twice_does_not_double_the_bill() {
     earlier
         .record_ingest(tenant, DecompressedBytes::new(800))
         .await;
-    let first = later.roll_up(&pool).await.expect("the first rollup");
-    let second = later.roll_up(&pool).await.expect("the second rollup");
+    let first = later.roll_up_usage().await.expect("the first rollup");
+    let second = later.roll_up_usage().await.expect("the second rollup");
 
     assert_eq!((first, second), (1, 0));
     let hours = billed_hours(&pool, tenant).await;
@@ -287,7 +342,12 @@ async fn the_hour_in_progress_is_left_to_finish() {
     meter
         .record_ingest(tenant, DecompressedBytes::new(400))
         .await;
-    let rolled = meter.roll_up(&pool).await.expect("the rollup runs");
+    let rolled = driven(&pool, NOVEMBER, "current")
+        .await
+        .expect("the same store")
+        .roll_up_usage()
+        .await
+        .expect("the rollup runs");
 
     assert_eq!(rolled, 0);
     assert!(billed_hours(&pool, tenant).await.is_empty());
@@ -301,7 +361,7 @@ async fn a_rollup_leaves_the_monthly_counter_standing() {
     let Some(earlier) = namespaced_meter_at(NOVEMBER, "month_kept").await else {
         return;
     };
-    let later = namespaced_meter_at(NOVEMBER + 3600, "month_kept")
+    let later = driven(&pool, NOVEMBER + 3600, "month_kept")
         .await
         .expect("the same store");
     let tenant = seeded_org(&pool).await;
@@ -309,7 +369,7 @@ async fn a_rollup_leaves_the_monthly_counter_standing() {
     earlier
         .record_ingest(tenant, DecompressedBytes::new(1200))
         .await;
-    later.roll_up(&pool).await.expect("the rollup runs");
+    later.roll_up_usage().await.expect("the rollup runs");
 
     assert_eq!(earlier.used(tenant).await, DecompressedBytes::new(1200));
 }

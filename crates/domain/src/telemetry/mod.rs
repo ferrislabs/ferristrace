@@ -1,3 +1,6 @@
+mod billing;
+#[cfg(test)]
+mod billing_tests;
 mod entities;
 mod errors;
 mod ingest;
@@ -9,18 +12,26 @@ mod metering;
 #[cfg(test)]
 mod metering_tests;
 mod ports;
+mod quota;
+#[cfg(test)]
+mod quota_tests;
 mod value_objects;
 #[cfg(test)]
 mod value_objects_tests;
 
+pub use billing::{BillingHour, BillingMonth};
 pub use entities::Span;
-pub use errors::{IngestError, InvalidId, SinkError, UnknownKey};
+pub use errors::{
+    CounterUnreachable, IngestError, InvalidId, SinkError, UnknownKey, UsageSyncError,
+};
 pub use ingest::Ingest;
 pub use metering::Metering;
 pub use ports::{
-    QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageHistory, UsageMeter, UsageReader,
+    HourlyCounters, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageHistory, UsageLedger,
+    UsageMeter, UsageReader,
 };
+pub use quota::{Allowance, StaticQuota};
 pub use value_objects::{
-    Admission, Consumed, Consumption, DecompressedBytes, IngestKey, Payload, Scope, SpanEvent,
-    SpanId, SpanKind, SpanStatus, TenantId, TraceId,
+    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Payload,
+    Scope, SpanEvent, SpanId, SpanKind, SpanStatus, TenantId, TraceId,
 };

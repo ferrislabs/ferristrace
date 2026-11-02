@@ -17,11 +17,11 @@ use ferristrace_application::{Adapters, Ferristrace, Ingestion};
 use ferristrace_clickhouse::{
     ClickhouseIssues, ClickhouseReader, SpanStoreSettings, open_span_store,
 };
+use ferristrace_domain::telemetry::{Allowance, StaticQuota};
 use ferristrace_domain::{Clock, ProvisionPolicy, TenantId};
 use ferristrace_infra::{
-    Allowance, Argon2Hasher, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
-    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, StaticQuota,
-    SystemClock,
+    Argon2Hasher, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
+    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
 };
 use ferristrace_postgres::{
     CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
@@ -64,9 +64,15 @@ async fn main() -> anyhow::Result<()> {
     }
     let pool = control_plane_pool(&config).await?;
     let allowances = allowances_of(&config, pool.as_ref()).await?;
-    let meter = Arc::new(meter_of(&config, pool.as_ref()).await?);
+    let meter = Arc::new(meter_of(&config).await?);
     if let (Some(pool), Meter::Redis(_)) = (pool.as_ref(), meter.as_ref()) {
-        tokio::spawn(roll_up_hourly(Arc::clone(&meter), pool.clone()));
+        let usage = Arc::new(usage_of(pool, Arc::clone(&meter))?);
+        let seeded = usage
+            .rehydrate_usage()
+            .await
+            .context("rehydrating the usage counters")?;
+        tracing::info!(tenants = seeded, "usage counters rehydrated");
+        tokio::spawn(roll_up_hourly(usage));
     }
     let (sink, reader, grouping) = spans_of(&config).await?;
     let held = Held {
@@ -220,7 +226,7 @@ async fn allowances_of(
     Ok(loaded)
 }
 
-async fn meter_of(config: &Config, pool: Option<&PgPool>) -> anyhow::Result<Meter> {
+async fn meter_of(config: &Config) -> anyhow::Result<Meter> {
     let Some(url) = config.redis_url.as_deref() else {
         return Ok(Meter::Memory(MemoryMeter::default()));
     };
@@ -228,14 +234,20 @@ async fn meter_of(config: &Config, pool: Option<&PgPool>) -> anyhow::Result<Mete
     let meter = RedisMeter::connect(url, SystemClock)
         .await
         .context("connecting to the usage counter store")?;
-    if let Some(pool) = pool {
-        let seeded = meter
-            .rehydrate(pool)
-            .await
-            .context("rehydrating the usage counters")?;
-        tracing::info!(tenants = seeded, "usage counters rehydrated");
-    }
     Ok(Meter::Redis(meter))
+}
+
+fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> anyhow::Result<Ferristrace<Production>> {
+    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
+    let repos = Postgres::new(pool.clone(), SystemClock);
+    let adapters = adapters_of(
+        hasher,
+        Relay::Unreachable,
+        Gallery::Nowhere,
+        meter,
+        Optional::default(),
+    );
+    Ok(Ferristrace::new(repos, adapters))
 }
 
 fn directory_of(pool: Option<&PgPool>) -> Directory {
@@ -428,13 +440,10 @@ async fn shutdown() {
     }
 }
 
-async fn roll_up_hourly(meter: Arc<Meter>, pool: PgPool) {
-    let Meter::Redis(redis) = meter.as_ref() else {
-        return;
-    };
+async fn roll_up_hourly(usage: Arc<Ferristrace<Production>>) {
     loop {
         tokio::time::sleep(until_the_next_hour(SystemClock)).await;
-        match redis.roll_up(&pool).await {
+        match usage.roll_up_usage().await {
             Ok(tenants) => tracing::info!(tenants, "the finished hour was rolled up"),
             Err(error) => tracing::error!(%error, "the usage rollup failed"),
         }

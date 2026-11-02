@@ -1,4 +1,5 @@
 use super::value_objects::DecompressedBytes;
+use crate::store::StoreError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidId {
@@ -31,3 +32,15 @@ pub enum IngestError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the ingest key matches no tenant")]
 pub struct UnknownKey;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the usage counter store refused the command")]
+pub struct CounterUnreachable;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum UsageSyncError {
+    #[error(transparent)]
+    Counters(#[from] CounterUnreachable),
+    #[error("the control plane refused the usage query")]
+    Store(#[from] StoreError),
+}

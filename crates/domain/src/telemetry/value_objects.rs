@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use super::billing::BillingHour;
 use super::entities::Span;
 use super::errors::InvalidId;
 use crate::catalogue::ProjectId;
@@ -171,4 +172,17 @@ pub struct Consumption {
     pub ingested_bytes: u64,
     pub included_bytes: Option<u64>,
     pub hours: Vec<Consumed>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HourTotal {
+    pub tenant: TenantId,
+    pub hour: BillingHour,
+    pub ingested: DecompressedBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonthTotal {
+    pub tenant: TenantId,
+    pub ingested: DecompressedBytes,
 }

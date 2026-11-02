@@ -1,11 +1,11 @@
 use core::fmt;
 
+use ferristrace_domain::telemetry::{
+    BillingHour, BillingMonth, CounterUnreachable, HourTotal, HourlyCounters,
+};
 use ferristrace_domain::{Clock, DecompressedBytes, TenantId, UsageMeter, UsageReader};
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
-use sqlx::{PgPool, Row};
-
-use ferristrace_infra::{BillingHour, BillingMonth};
 
 const KEY_PREFIX: &str = "usage";
 const KEY_TTL_SECONDS: i64 = 70 * 24 * 60 * 60;
@@ -16,8 +16,6 @@ const SCAN_BATCH: usize = 500;
 pub enum CounterError {
     #[error("the usage counter store refused the command")]
     Redis(#[from] redis::RedisError),
-    #[error("the control plane refused the usage query")]
-    ControlPlane(#[from] sqlx::Error),
 }
 
 pub struct RedisMeter<C> {
@@ -58,13 +56,14 @@ impl<C: Clock> RedisMeter<C> {
         let hour = BillingHour::containing(self.clock.now()).key();
         format!("{}:{tenant}:{hour}", self.prefix)
     }
+}
 
-    pub async fn roll_up(&self, pool: &PgPool) -> Result<usize, CounterError> {
-        let hour = BillingHour::containing(self.clock.now()).previous();
+impl<C: Clock + Send + Sync> HourlyCounters for RedisMeter<C> {
+    async fn finished(&self, hour: BillingHour) -> Result<Vec<HourTotal>, CounterUnreachable> {
         let pattern = format!("{}:*:{}", self.prefix, hour.key());
         let mut connection = self.connection.clone();
         let mut cursor: u64 = 0;
-        let mut rolled = 0;
+        let mut totals = Vec::new();
 
         loop {
             let (next, keys): (u64, Vec<String>) = redis::cmd("SCAN")
@@ -74,29 +73,25 @@ impl<C: Clock> RedisMeter<C> {
                 .arg("COUNT")
                 .arg(SCAN_BATCH)
                 .query_async(&mut connection)
-                .await?;
+                .await
+                .map_err(refused)?;
 
             for key in keys {
                 let Some(tenant) = tenant_of(&key) else {
                     continue;
                 };
-                let Some(total) = connection.get::<_, Option<u64>>(&key).await? else {
+                let Some(total) = connection
+                    .get::<_, Option<u64>>(&key)
+                    .await
+                    .map_err(refused)?
+                else {
                     continue;
                 };
-                let written = sqlx::query(
-                    "INSERT INTO usage_hourly (org_id, hour_start, ingested_bytes) \
-                     SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM orgs WHERE id = $1) \
-                     ON CONFLICT (org_id, hour_start) DO NOTHING",
-                )
-                .bind(tenant.as_uuid())
-                .bind(hour.start_nanos())
-                .bind(i64::try_from(total).unwrap_or(i64::MAX))
-                .execute(pool)
-                .await?;
-                let _: u64 = connection.del(&key).await?;
-                if written.rows_affected() > 0 {
-                    rolled += 1;
-                }
+                totals.push(HourTotal {
+                    tenant,
+                    hour,
+                    ingested: DecompressedBytes::new(total),
+                });
             }
 
             cursor = next;
@@ -104,43 +99,40 @@ impl<C: Clock> RedisMeter<C> {
                 break;
             }
         }
-        Ok(rolled)
+        Ok(totals)
     }
 
-    pub async fn seed(
+    async fn discard(&self, total: HourTotal) -> Result<(), CounterUnreachable> {
+        let mut connection = self.connection.clone();
+        let key = format!("{}:{}:{}", self.prefix, total.tenant, total.hour.key());
+        let _: u64 = connection.del(&key).await.map_err(refused)?;
+        Ok(())
+    }
+
+    async fn seed(
         &self,
         tenant: TenantId,
         total: DecompressedBytes,
-    ) -> Result<bool, CounterError> {
+    ) -> Result<bool, CounterUnreachable> {
         let mut connection = self.connection.clone();
         let key = self.key(tenant);
-        let claimed: bool = connection.set_nx(&key, total.get()).await?;
+        let claimed: bool = connection
+            .set_nx(&key, total.get())
+            .await
+            .map_err(refused)?;
         if claimed {
-            let _: bool = connection.expire(&key, KEY_TTL_SECONDS).await?;
+            let _: bool = connection
+                .expire(&key, KEY_TTL_SECONDS)
+                .await
+                .map_err(refused)?;
         }
         Ok(claimed)
     }
+}
 
-    pub async fn rehydrate(&self, pool: &PgPool) -> Result<usize, CounterError> {
-        let since = BillingMonth::containing(self.clock.now()).start_nanos();
-        let rows = sqlx::query(
-            "SELECT org_id AS org_id, sum(ingested_bytes)::bigint AS total \
-             FROM usage_hourly WHERE hour_start >= $1 GROUP BY org_id",
-        )
-        .bind(since)
-        .fetch_all(pool)
-        .await?;
-
-        let mut seeded = 0;
-        for row in rows {
-            let tenant = TenantId::new(row.get("org_id"));
-            let total = u64::try_from(row.get::<i64, _>("total")).unwrap_or_default();
-            if self.seed(tenant, DecompressedBytes::new(total)).await? {
-                seeded += 1;
-            }
-        }
-        Ok(seeded)
-    }
+fn refused(error: redis::RedisError) -> CounterUnreachable {
+    tracing::error!(%error, "the usage counter store refused the command");
+    CounterUnreachable
 }
 
 impl<C: Clock + Send + Sync> UsageMeter for RedisMeter<C> {

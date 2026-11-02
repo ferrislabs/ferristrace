@@ -1,10 +1,11 @@
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
+use ferristrace_domain::Allowance;
 use ferristrace_domain::{
     ControlPlane, DecompressedBytes, Email, IngestKey, Issuer, OrgName, ProjectName, Projects,
     ProvisionPolicy, ResolvedIdentity, Scope, SecretHash, Subject, TenantDirectory, TenantId,
     UnknownKey, testing,
 };
-use ferristrace_infra::{Allowance, FixedClock};
+use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{
     AccountError, CONTROL_PLANE, OVERAGE_FEATURE, Postgres, PostgresDirectory, ProjectError,
     SELF_HOSTED_PLAN,

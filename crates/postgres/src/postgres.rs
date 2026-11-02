@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
+use ferristrace_domain::telemetry::Allowance;
 use ferristrace_domain::{DecompressedBytes, TenantId};
 use sqlx::migrate::Migrator;
 use sqlx::{PgPool, Row};
-
-use ferristrace_infra::Allowance;
 
 pub static CONTROL_PLANE: Migrator = sqlx::migrate!("migrations/postgres");
 

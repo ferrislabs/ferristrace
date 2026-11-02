@@ -7,16 +7,17 @@ publish = false
 
 [dependencies]
 ferristrace-domain.workspace = true
-ferristrace-infra.workspace = true
 redis.workspace = true
-sqlx.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+ferristrace-application = { workspace = true, features = ["testing"] }
+ferristrace-infra.workspace = true
 ferristrace-domain = { workspace = true, features = ["testing"] }
 ferristrace-postgres.workspace = true
+sqlx.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
