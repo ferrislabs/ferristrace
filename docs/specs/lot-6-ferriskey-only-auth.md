@@ -34,9 +34,20 @@ Context
 
   One pull request per part:
     6A  FerrisKey is the only way in        config, provisioning, stack
-    6B  Local passwords leave the code      domain to web
-    6C  The second factor leaves the code   domain to web
-    6D  The schema drops what nobody writes migration, ADRs, docs
+    6B  The password and the second factor  domain to web
+        leave the code
+    6C  The schema drops what nobody writes migration, ADRs, docs
+
+  6B and the second factor were two parts until implementation showed
+  they are one. Only `sign_in.rs:56` ever consults the `Gate`:
+  `federated_sign_in.rs` names neither `Gate` nor `offered`, so the
+  second factor is enforced by the password flow and by nothing else. It
+  becomes unreachable the moment that flow goes, which makes its removal
+  a consequence of 6B rather than a part beside it. Shipping them apart
+  would leave a release whose settings screen invites somebody to enrol
+  a factor nothing will ever ask for — which is, incidentally, what an
+  OIDC-only deployment of `main` does today, hidden only by the front
+  end gating the card on `local_password`.
 
 Glossary
   Way in       the one flow that turns a person into a session: a
@@ -200,7 +211,7 @@ Design
     there. The laptop pays one documented line; the product carries
     nothing. ADR 0027.
 
-  6B Local passwords leave the code
+  6B The password and the second factor leave the code
     Domain: `Password`, `PasswordPolicy`, `PasswordCheck`, `PasswordHash`,
     `PasswordHasher`, `Issuer::Local`, `SignIn`, `ChangePassword`,
     `ResetPassword`, `ResetStore`, `Mailer::send_password_reset`,
@@ -219,7 +230,35 @@ Design
     The mail relay stays: alerts, pages and status pages mail. Only the
     reset link leaves, so the startup warning loses its reset clause.
 
-  6C The second factor leaves the code
+    The guides move with the code, in this part rather than in 6C.
+    `deploy/README.md`'s "Make it usable" tells an operator to spend a
+    printed token at `/auth/reset/confirm`, which this part makes answer
+    404 — it is the first command a new operator runs, so a release that
+    breaks it and leaves the instruction standing is not finished. The
+    second factor section, the "signing in with an identity provider
+    instead" framing, the `FERRISTRACE_LOCAL_PASSWORD` row and the reset
+    half of "Adding somebody" go with it, and the at-rest key's row
+    stops explaining itself by a second factor and starts explaining
+    itself by webhook secrets. 6C keeps only what the schema change
+    itself touches, and the ADR supersessions.
+
+    Inviting a member goes with the reset token, and 6A is what makes
+    that safe. `Roster::invite` (crates/domain/src/organisation/roster.rs:92)
+    creates a locked account for an address nobody holds and mints a
+    `ResetToken` for the invitee to spend at `/auth/reset/confirm`. With
+    no password to choose, the token has nothing to buy: the invitation
+    creates the account and grants the role, and the invitee's first
+    FerrisKey sign-in adopts it by its verified address — exactly the
+    path 6A turned on. So `Invitation.way_in`, the `invite_token` field
+    of the roster DTO, `Roll::open_way_in`, `ControlPlane::invite` and
+    `ProvisioningService::invite` all go. `create_locked` stays, because
+    the account has to exist before the person ever signs in so a role
+    can be granted to it; what "locked" meant was a password hash of
+    random bytes (ADR 0009), and with that column gone in 6C it is
+    simply an account nobody has signed in to yet. Rename it if the name
+    now lies.
+
+    The second factor, which the password flow alone enforced:
     Domain: `SecondFactors`, `SecondStep`, `Gate`, `FactorStore`,
     `NoSecondFactor`, `FactorKind`, `TotpCode`, `TotpSecret`,
     `RecoveryCode`, `ChallengeToken`, `Pending`, `Opened`'s second-step
@@ -234,12 +273,32 @@ Design
     FerrisKey owns the second factor from here. `deploy/README.md`'s
     second factor section says so and points at the realm.
 
-  6D The schema drops what nobody writes
-    One migration, after 6B and 6C have stopped writing: drop
+  6C The schema drops what nobody writes
+    Two things 6B leaves pointing at the column, both found by sweeping
+    for it and both deliberate: the test
+    `an_account_may_now_exist_before_any_way_in_is_linked`
+    (crates/postgres/tests/control_plane.rs) inserts `password_hash =
+    NULL` to prove the cross-table CHECK is gone, and goes when the
+    column does; and `accounts_carry_a_way_in` needs no dropping,
+    because 20261024000003_identity_links.up.sql already dropped it
+    three migrations in — the live schema carries only
+    `accounts_name_is_not_blank` and `accounts_photo_is_whole`. So the
+    accounts half of this part is one `DROP COLUMN` with no constraint
+    to remove first, and `20261024000003_identity_links.down.sql` stops
+    being able to reinstate a CHECK on a column that is gone: its own
+    reversal needs reading alongside.
+
+    One migration, after 6B has stopped writing: drop
     `password_resets`, `auth_factors`, `recovery_codes`,
     `second_step_challenges`, and the `accounts.password_hash` column
     with the constraint that mentions it. Its `.down.sql` recreates them
     empty, as the house convention requires, and cannot recover rows.
+    docs/specs/second-factor.md is a frozen record of a lot, like an
+    ADR, so it keeps its text and gains one superseded line rather than
+    being rewritten or deleted — hexagonal-crates.md still names
+    crates/core and crates/storage, renamed lots ago, which is the
+    convention stated by practice.
+
     ADRs: supersede 0009 (an account is created locked by a reset token),
     0010 (a chosen password is asked only for length), 0013 (a local
     identity is its own account), 0019 (a second factor is answered
