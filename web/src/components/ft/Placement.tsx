@@ -2,13 +2,16 @@ import { Boxes } from 'lucide-react'
 import { NativeSelect } from '@/components/ui/input'
 import { chipsOf, isPlaced, usePlacements, type Place, type Placement } from '@/data/placement'
 import { cn } from '@/lib/utils'
+import { Filters } from './Filters'
 
 function kept(values: string[], chosen: string): string[] {
   const unique = Array.from(new Set(values))
   return chosen && !unique.includes(chosen) ? [chosen, ...unique] : unique
 }
 
-export function PlacementPicker({ placement, onChange, windowMs }: { placement: Placement; onChange: (part: Partial<Placement>) => void; windowMs: number }) {
+export const placedCount = (placement: Placement) => Object.values(placement).filter((value) => value.trim() !== '').length
+
+export function PlacementPicker({ placement, onChange, windowMs, collapsible }: { placement: Placement; onChange: (part: Partial<Placement>) => void; windowMs: number; collapsible?: boolean }) {
   const { seen } = usePlacements(windowMs)
   const inNamespace = (namespace: string) => !placement.namespace || namespace === placement.namespace
   const workloads = kept(seen.workloads.filter((w) => inNamespace(w.namespace)).map((w) => `${w.kind}:${w.name}`), placement.workload)
@@ -21,9 +24,9 @@ export function PlacementPicker({ placement, onChange, windowMs }: { placement: 
   )
   const nothing = seen.clusters.length + seen.namespaces.length + seen.workloads.length + seen.pods.length + seen.nodes.length === 0
   if (nothing && !isPlaced(placement)) return null
-  return (
-    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Kubernetes placement">
-      <Boxes className="size-3.5 text-muted-foreground" aria-hidden />
+  const picker = (
+    <div className="flex flex-wrap items-center gap-2 max-md:grid max-md:grid-cols-2" role="group" aria-label="Kubernetes placement">
+      <Boxes className="size-3.5 text-muted-foreground max-md:hidden" aria-hidden />
       {select('cluster', 'Cluster', kept(seen.clusters, placement.cluster), 'w-[150px]')}
       {select('namespace', 'Namespace', kept(seen.namespaces, placement.namespace), 'w-[160px]')}
       {select('workload', 'Workload', workloads, 'w-[200px]')}
@@ -31,6 +34,7 @@ export function PlacementPicker({ placement, onChange, windowMs }: { placement: 
       {select('node', 'Node', kept(seen.nodes, placement.node), 'w-[170px]')}
     </div>
   )
+  return collapsible ? <Filters active={placedCount(placement)}>{picker}</Filters> : picker
 }
 
 export function PlacementChips({ attributes, onPick, className }: { attributes: Record<string, string>; onPick: (part: Partial<Placement>) => void; className?: string }) {

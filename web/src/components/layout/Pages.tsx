@@ -19,7 +19,7 @@ export function PagesButton() {
     <Popover>
       <PopoverTrigger asChild>
         <Button variant={mine.length > 0 ? 'primary' : 'ghost'} size="sm" aria-label={`Pages, ${mine.length} waiting for you`}>
-          <BellRing />Pages{mine.length > 0 ? <span className="font-mono text-[11px]">{mine.length}</span> : null}
+          <BellRing /><span className="max-sm:sr-only">Pages</span>{mine.length > 0 ? <span className="font-mono text-[11px]">{mine.length}</span> : null}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[380px] p-0">

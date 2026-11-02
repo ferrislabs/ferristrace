@@ -21,7 +21,8 @@ import {
 } from '@/data/logs'
 import { useServiceNames } from '@/data/services'
 import { isPlaced, usePlacement, type Placement } from '@/data/placement'
-import { PlacementChips, PlacementPicker } from '@/components/ft/Placement'
+import { PlacementChips, PlacementPicker, placedCount } from '@/components/ft/Placement'
+import { Filters } from '@/components/ft/Filters'
 import { ApiError, because } from '@/auth/client'
 import { shortId, stamp } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
@@ -232,6 +233,7 @@ export function Logs() {
         <AttachToIncident attachment={attachment} />
         <Switch checked={live} onCheckedChange={setLive} label={<span className="inline-flex items-center gap-1.5"><Radio className="size-3.5" aria-hidden />Live</span>} />
       </PageHeader>
+      <Filters active={query.services.length + query.attrs.length + (query.q ? 1 : 0) + (query.trace ? 1 : 0) + placedCount(placement)}>
       <div className="flex flex-wrap items-center gap-2" role="search">
         <NativeSelect aria-label="Time range" value={isPinned(query) ? 'pinned' : query.rangeMs} onChange={(e) => apply({ rangeMs: Number(e.target.value), fromMs: null, toMs: null })} className="w-[190px]">
           {isPinned(query) ? <option value="pinned" disabled>Selected window</option> : null}
@@ -249,6 +251,7 @@ export function Logs() {
         <Button variant="ghost" size="sm" disabled={!sifting && !isPinned(query)} onClick={() => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '', fromMs: null, toMs: null }, false) }}>Clear</Button>
       </div>
       <PlacementPicker placement={placement} onChange={placeHere} windowMs={windowMs} />
+      </Filters>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Severities">
           {SEVERITIES.map((level) => {

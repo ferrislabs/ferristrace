@@ -19,14 +19,14 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
   const named = projects.find((p) => p.id === project)?.name ?? 'All projects'
   const [range, setRange] = useState<string>('Last 1 h')
   return (
-    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
-      <Link to="/" className="text-foreground md:hidden" aria-label="FerrisTrace home"><Logo className="size-5" /></Link>
+    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-1.5 border-b bg-background/95 pl-[max(16px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] backdrop-blur md:gap-2 md:px-4">
+      <Link to="/" className="text-foreground md:hidden" aria-label="FerrisTrace home"><Logo className="size-7" /></Link>
       <span className="hidden text-caption text-muted-foreground sm:inline">Organisation</span>
       <OrganisationSwitcher />
       <span className="hidden text-faint-foreground sm:inline" aria-hidden>/</span>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" aria-haspopup="listbox"><Folder />{named}<ChevronDown className="text-muted-foreground" /></Button>
+          <Button variant="ghost" size="sm" aria-haspopup="listbox" aria-label={`Project: ${named}`} className="min-w-0 max-sm:px-1.5"><Folder /><span className="max-w-[96px] truncate sm:max-w-none">{named}</span><ChevronDown className="text-muted-foreground" /></Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[260px] p-1">
           {[{ id: undefined, name: 'All projects' }, ...projects].map((p) => (
@@ -38,13 +38,14 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
       </Popover>
       {mock ? <MockData className="max-sm:hidden" /> : null}
       <span className="flex-1" />
+      <Button variant="ghost" size="icon-sm" aria-label="Search" onClick={onPalette} className="size-9 lg:hidden"><Search /></Button>
       <PagesButton />
       <button type="button" onClick={onPalette} aria-label="Search" className="hidden h-8 w-[260px] cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-2.5 text-control text-faint-foreground shadow-sm hover:bg-muted lg:flex">
         <Search className="size-3.5" aria-hidden /><span className="flex-1 text-left">Search or paste an id</span><Kbd>/</Kbd><Kbd>⌘</Kbd><Kbd>K</Kbd>
       </button>
       <Popover>
         <PopoverTrigger asChild>
-          <Button size="sm"><Clock />{range}<span className="hidden font-mono text-[11px] text-faint-foreground sm:inline">→ now</span><ChevronDown className="text-muted-foreground" /></Button>
+          <Button size="sm" className="max-md:hidden"><Clock />{range}<span className="hidden font-mono text-[11px] text-faint-foreground sm:inline">→ now</span><ChevronDown className="text-muted-foreground" /></Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-[200px] p-1">
           {RANGES.map((r, i) => (
@@ -54,7 +55,7 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
           ))}
         </PopoverContent>
       </Popover>
-      <Button variant="ghost" size="icon-sm" aria-label="Refresh"><RefreshCw /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Refresh" className="max-md:hidden"><RefreshCw /></Button>
     </header>
   )
 }

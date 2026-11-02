@@ -11,7 +11,8 @@ import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, RANGES, useTraces, type Order, type Sift } from '@/data/traces'
 import { useServiceNames } from '@/data/services'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
-import { PlacementPicker } from '@/components/ft/Placement'
+import { PlacementPicker, placedCount } from '@/components/ft/Placement'
+import { Filters } from '@/components/ft/Filters'
 import { because } from '@/auth/client'
 import { shortId } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
@@ -53,6 +54,7 @@ export function Traces() {
         <Segmented label="Row density" value={density} onChange={setDensity} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfortable' }]} />
         <span className="hidden items-center gap-1 text-caption text-muted-foreground lg:inline-flex"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>open</span>
       </PageHeader>
+      <Filters active={[sift.service, typed, sift.errorsOnly, sift.atLeastMs].filter(Boolean).length + placedCount(placement)}>
       <div className="flex flex-wrap items-center gap-2" role="search">
         <NativeSelect aria-label="Time range" value={sift.rangeMs} onChange={(e) => change({ rangeMs: Number(e.target.value) })} className="w-[150px]">
           {RANGES.map(([label, ms]) => <option key={ms} value={ms}>Last {label}</option>)}
@@ -75,6 +77,7 @@ export function Traces() {
         <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
       </div>
       <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
+      </Filters>
       {unreachable ? <p className="m-0 text-caption text-muted-foreground">{because(unreachable, 'The services could not be listed, so that filter is empty')}</p> : null}
       {failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
@@ -85,17 +88,22 @@ export function Traces() {
       ) : (
         <div className="-mx-4 overflow-x-auto border-t md:-mx-5">
           <Table aria-label="Traces">
-            <thead><tr><Th className="w-[44px]"><span className="sr-only">Status</span></Th><Th>Root span</Th><Th className="w-[150px]">Service</Th><Th className="w-[130px]">Started</Th><Th numeric className="w-[100px]">Duration</Th><Th numeric className="w-[80px]">Spans</Th><Th className="w-[170px]">Trace id</Th></tr></thead>
+            <thead><tr><Th className="w-[44px] max-md:w-[28px] max-md:px-0 max-md:pl-3"><span className="sr-only">Status</span></Th><Th>Root span</Th><Th className="w-[150px] max-md:hidden">Service</Th><Th className="w-[130px] max-md:w-[96px]">Started</Th><Th numeric className="w-[100px] max-md:w-[80px]">Duration</Th><Th numeric className="w-[80px] max-md:hidden">Spans</Th><Th className="w-[170px] max-md:hidden">Trace id</Th></tr></thead>
             <tbody>
               {rows.map((t, i) => (
                 <tr key={t.id} onClick={() => navigate(`/traces/${t.id}`)} className={cn('cursor-pointer hover:[&>td]:bg-row-hover', i === cursor && '[&>td]:bg-accent-subtle')}>
-                  <Td className={cn(density === 'comfy' && 'h-10')}>{t.errors ? <span className="inline-flex text-destructive-text" title={`${t.errors} errors`}><CircleX className="size-3.5" aria-label={`${t.errors} errors`} /></span> : null}</Td>
-                  <Td><Link to={`/traces/${t.id}`} className="font-semibold text-foreground" onClick={(e) => e.stopPropagation()}>{t.root}</Link></Td>
-                  <Td><span className="inline-flex items-center gap-1.5 text-control"><ServiceDot name={t.svc} />{t.svc}</span></Td>
-                  <Td className="font-mono text-control">{t.start}</Td>
+                  <Td className={cn(density === 'comfy' && 'h-10', 'max-md:px-0 max-md:pl-3')}>{t.errors ? <span className="inline-flex text-destructive-text" title={`${t.errors} errors`}><CircleX className="size-3.5" aria-label={`${t.errors} errors`} /></span> : null}</Td>
+                  <Td className="max-md:h-[52px] max-md:max-w-0">
+                    <span className="flex min-w-0 flex-col">
+                      <Link to={`/traces/${t.id}`} className="truncate font-semibold text-foreground" onClick={(e) => e.stopPropagation()}>{t.root}</Link>
+                      <span className="inline-flex items-center gap-1.5 truncate text-caption text-muted-foreground md:hidden"><ServiceDot name={t.svc} />{t.svc}</span>
+                    </span>
+                  </Td>
+                  <Td className="max-md:hidden"><span className="inline-flex items-center gap-1.5 text-control"><ServiceDot name={t.svc} />{t.svc}</span></Td>
+                  <Td className="font-mono text-control max-md:text-caption">{t.start.length > 8 && t.start.includes(':') ? <><span className="md:hidden">{t.start.slice(0, 8)}</span><span className="max-md:hidden">{t.start}</span></> : t.start}</Td>
                   <Td numeric>{t.dur}</Td>
-                  <Td numeric>{t.spans}</Td>
-                  <Td><button type="button" onClick={(e) => { e.stopPropagation(); copy(t.id) }} className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm font-mono text-caption text-muted-foreground hover:text-foreground" title={t.id} aria-label={`Copy trace id ${t.id}`}>{shortId(t.id)}<Copy className="size-3" aria-hidden /></button></Td>
+                  <Td numeric className="max-md:hidden">{t.spans}</Td>
+                  <Td className="max-md:hidden"><button type="button" onClick={(e) => { e.stopPropagation(); copy(t.id) }} className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm font-mono text-caption text-muted-foreground hover:text-foreground" title={t.id} aria-label={`Copy trace id ${t.id}`}>{shortId(t.id)}<Copy className="size-3" aria-hidden /></button></Td>
                 </tr>
               ))}
             </tbody>
