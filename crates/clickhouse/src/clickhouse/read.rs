@@ -166,7 +166,7 @@ impl ClickhouseReader {
         &self.client
     }
 
-    fn served(
+    pub(crate) fn served(
         &self,
         sql: &str,
         tenant: TenantId,

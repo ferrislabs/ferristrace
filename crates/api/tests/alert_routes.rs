@@ -194,6 +194,18 @@ impl ferristrace_domain::PlacementReader for Steady {
     }
 }
 
+impl ferristrace_domain::CulpritReader for Steady {
+    async fn culprits(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _project: Option<ferristrace_domain::ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl SpanReader for Steady {
     async fn services(
         &self,
@@ -752,6 +764,19 @@ async fn the_history_lists_changes_newest_first_within_the_asked_span() {
             to,
             value: Some(7.5),
             at_ms,
+            context: (at_ms == 2_000).then(|| {
+                ferristrace_domain::Culprits::new(
+                    vec![ferristrace_domain::CulpritPod {
+                        name: "checkout-1".into(),
+                        node: Some("node-a".into()),
+                        count: 4,
+                    }],
+                    3,
+                    vec!["node-a".into()],
+                    vec!["1.4.2".into()],
+                    &Labels::none(),
+                )
+            }),
         });
     }
 
@@ -770,7 +795,16 @@ async fn the_history_lists_changes_newest_first_within_the_asked_span() {
     assert_eq!(
         history,
         json!({"events": [
-            {"at_ms": 2000, "from": "ok", "to": "firing", "value": 7.5, "labels": {}},
+            {
+                "at_ms": 2000, "from": "ok", "to": "firing", "value": 7.5, "labels": {},
+                "context": {
+                    "pods": [{"name": "checkout-1", "node": "node-a", "count": 4}],
+                    "others": 2,
+                    "nodes": ["node-a"],
+                    "versions": ["1.4.2"],
+                    "labels": {},
+                },
+            },
             {"at_ms": 1000, "from": "ok", "to": "pending", "value": 7.5, "labels": {}},
         ]})
     );

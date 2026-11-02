@@ -79,6 +79,7 @@ async fn a_firing(ledger: &AlertLedger, channels: &[ChannelId]) {
         to: AlertStatus::Firing,
         value: Some(9.0),
         at_ms: NOW * 1_000,
+        context: None,
     };
     ledger.put_event(event.clone());
     for channel in channels {

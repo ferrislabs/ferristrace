@@ -42,6 +42,7 @@ where
                         to: event.to,
                         value: event.value,
                         labels: event.labels.clone(),
+                        context: event.context.clone(),
                     },
                     at_ms: event.at_ms,
                 })

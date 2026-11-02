@@ -1,12 +1,13 @@
 use core::future::Future;
 
+use super::culprits::Culprits;
 use super::entities::{
     AlertEvent, Channel, ChannelView, Claimed, Dispatch, Notification, Observation, Rule,
     RuleDraft, SeriesState, Settlement,
 };
 use super::errors::{DeliveryError, ProbeError};
 use super::value_objects::{
-    ChannelId, ChannelName, Destination, Duty, EmailList, NotificationId, RuleId, Signal,
+    ChannelId, ChannelName, Destination, Duty, EmailList, Labels, NotificationId, RuleId, Signal,
     WebhookSecret, WebhookUrl,
 };
 use crate::catalogue::ProjectId;
@@ -144,6 +145,49 @@ pub trait SignalProbe {
         signal: &Signal,
         window: Window,
     ) -> impl Future<Output = Result<Vec<Observation>, ProbeError>> + Send;
+
+    fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+        labels: &Labels,
+    ) -> impl Future<Output = Result<Culprits, ProbeError>> + Send;
+}
+
+pub trait CulpritReader {
+    fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+    ) -> impl Future<Output = Result<Culprits, StoreError>> + Send;
+}
+
+impl<T: CulpritReader + Sync> CulpritReader for &T {
+    fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+    ) -> impl Future<Output = Result<Culprits, StoreError>> + Send {
+        (*self).culprits(org, project, signal, window)
+    }
+}
+
+impl<T: CulpritReader + Send + Sync> CulpritReader for std::sync::Arc<T> {
+    fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+    ) -> impl Future<Output = Result<Culprits, StoreError>> + Send {
+        self.as_ref().culprits(org, project, signal, window)
+    }
 }
 
 pub trait WebhookSender {

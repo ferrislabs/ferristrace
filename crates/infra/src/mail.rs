@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use ferristrace_domain::{
-    AlertMailer, AlertStatus, DeliveryError, Dispatch, Email, EmailList, Letter, LetterBody,
-    Mailer, PageDispatch, PageSource, ResetError, ResetToken, StatusMailer, UpdateKind,
+    AlertMailer, AlertStatus, Culprits, DeliveryError, Dispatch, Email, EmailList, Letter,
+    LetterBody, Mailer, PageDispatch, PageSource, ResetError, ResetToken, StatusMailer, UpdateKind,
 };
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
@@ -96,8 +96,36 @@ pub fn alert_text(dispatch: &Dispatch, link: &str) -> String {
         let _ = writeln!(text, "{key}: {value}");
     }
     let _ = writeln!(text, "At: {} ms since the epoch", dispatch.at_ms);
+    if let Some(context) = &dispatch.context {
+        write_context(&mut text, context);
+    }
     let _ = write!(text, "\n{link}\n");
     text
+}
+
+fn write_context(text: &mut String, context: &Culprits) {
+    if !context.pods().is_empty() {
+        text.push_str("\nPods:\n");
+        for pod in context.pods() {
+            match &pod.node {
+                Some(node) => {
+                    let _ = writeln!(text, "  {} ({node}): {}", pod.name, pod.count);
+                }
+                None => {
+                    let _ = writeln!(text, "  {}: {}", pod.name, pod.count);
+                }
+            }
+        }
+        if context.others() > 0 {
+            let _ = writeln!(text, "  and {} more", context.others());
+        }
+    }
+    if !context.nodes().is_empty() {
+        let _ = writeln!(text, "Nodes: {}", context.nodes().join(", "));
+    }
+    if !context.versions().is_empty() {
+        let _ = writeln!(text, "Version: {}", context.versions().join(", "));
+    }
 }
 
 impl SmtpMailer {
@@ -388,6 +416,7 @@ mod tests {
             value: Some(12.5),
             labels: Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
             at_ms: 1_700_000_000_000,
+            context: None,
         };
         let to = EmailList::try_from("ops@example.com, oncall@example.com").expect("addresses");
 
@@ -405,6 +434,57 @@ mod tests {
             rendered.contains("https://app.example.com/alerts?rule")
                 && rendered.contains("00000000-0000-0000-0000-000000000007"),
             "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_firing_alert_message_names_the_pods_their_nodes_and_the_version() {
+        use ferristrace_domain::{
+            AlertSeverity, AlertStatus, CulpritPod, Culprits, Dispatch, Labels, RuleId, TenantId,
+        };
+        use uuid::Uuid;
+
+        use super::alert_text;
+
+        let pod = |name: &str, node: Option<&str>, count| CulpritPod {
+            name: name.into(),
+            node: node.map(Into::into),
+            count,
+        };
+        let mut dispatch = Dispatch {
+            rule: RuleId::new(Uuid::from_u128(7)),
+            name: "Checkout errors".into(),
+            severity: AlertSeverity::Critical,
+            org: TenantId::new(Uuid::from_u128(1)),
+            from: AlertStatus::Pending,
+            to: AlertStatus::Firing,
+            value: Some(12.5),
+            labels: Labels::none(),
+            at_ms: 1_700_000_000_000,
+            context: Some(Culprits::new(
+                vec![
+                    pod("checkout-1", Some("node-a"), 7),
+                    pod("checkout-2", None, 3),
+                ],
+                9,
+                vec!["node-a".into(), "node-b".into()],
+                vec!["1.4.2".into()],
+                &Labels::none(),
+            )),
+        };
+
+        let text = alert_text(&dispatch, "https://app.example.com/alerts");
+
+        assert!(text.contains("  checkout-1 (node-a): 7\n"), "{text}");
+        assert!(text.contains("  checkout-2: 3\n"), "{text}");
+        assert!(text.contains("  and 7 more\n"), "{text}");
+        assert!(text.contains("Nodes: node-a, node-b\n"), "{text}");
+        assert!(text.contains("Version: 1.4.2\n"), "{text}");
+        dispatch.context = None;
+        let bare = alert_text(&dispatch, "https://app.example.com/alerts");
+        assert!(
+            !bare.contains("Pods:") && !bare.contains("Version:"),
+            "{bare}"
         );
     }
 

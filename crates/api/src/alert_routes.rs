@@ -19,6 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried, reading};
+use crate::context_body::ContextBody;
 use crate::placement::PlacementBody;
 use crate::state::AppState;
 
@@ -482,6 +483,8 @@ struct EventBody {
     to: &'static str,
     value: Option<f64>,
     labels: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context: Option<ContextBody>,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +500,7 @@ impl From<&AlertEvent> for EventBody {
             to: event.to.as_str(),
             value: event.value,
             labels: labelled(&event.labels),
+            context: event.context.as_ref().map(ContextBody::from),
         }
     }
 }

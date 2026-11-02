@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertBook, AlertError, AlertEvent, Buckets, ChannelBook, ChannelId, ChannelName,
-    ChannelView, Clock, Courier, Definition, Delivery, Destination, Drained, Evaluator, Followers,
-    IssuedChannel, Labels, LogQuery, LogReader, LogSignal, MetricQuery, MetricReader, MetricSignal,
-    Observation, Paging, Preview, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId,
-    RulePatch, ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, TenantId, Tick,
-    TraceMeasure, TraceSignal, Watched, Whoami, Window,
+    ChannelView, Clock, Courier, CulpritReader, Culprits, Definition, Delivery, Destination,
+    Drained, Evaluator, Followers, IssuedChannel, Labels, LogQuery, LogReader, LogSignal,
+    MetricQuery, MetricReader, MetricSignal, Observation, Paging, Preview, ProbeError, ProjectId,
+    Reader, Readers, RuleDraft, RuleId, RulePatch, ServiceFilter, SessionToken, Signal,
+    SignalProbe, SpanReader, TenantId, Tick, TraceMeasure, TraceSignal, Watched, Whoami, Window,
 };
 
 use crate::registry::AlertRepos;
@@ -35,8 +35,8 @@ impl<'a, R, L, M> SignalReaders<'a, R, L, M> {
 
 impl<R, L, M> SignalProbe for SignalReaders<'_, R, L, M>
 where
-    R: SpanReader + Sync,
-    L: LogReader + Sync,
+    R: SpanReader + CulpritReader + Sync,
+    L: LogReader + CulpritReader + Sync,
     M: MetricReader + Sync,
 {
     async fn observe(
@@ -62,6 +62,27 @@ where
                 measured(reader, org, project, metric, window).await
             }
         }
+    }
+
+    async fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+        labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        Ok(match signal {
+            Signal::Traces(_) => {
+                let reader = self.spans.ok_or(ProbeError::Unavailable)?;
+                reader.culprits(org, project, signal, window).await?
+            }
+            Signal::Logs(_) => {
+                let reader = self.logs.ok_or(ProbeError::Unavailable)?;
+                reader.culprits(org, project, signal, window).await?
+            }
+            Signal::Metrics(_) => Culprits::of_labels(labels),
+        })
     }
 }
 

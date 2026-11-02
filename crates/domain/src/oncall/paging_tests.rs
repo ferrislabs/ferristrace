@@ -10,9 +10,9 @@ use super::paging::{Pager, Paging};
 use super::value_objects::{ESCALATE_AFTER_SECS, PageState, ScheduleId};
 use crate::access::key_ring_tests::{MINE, THEIRS, an_org};
 use crate::alerts::{
-    AlertRules, AlertSeverity, Comparison, Condition, Definition, DefinitionParts, DeliveryStatus,
-    Evaluator, Labels, NoDataPolicy, Observation, ProbeError, RuleDraft, RuleName, Signal,
-    SignalProbe, TraceMeasure, TraceSignal,
+    AlertRules, AlertSeverity, Comparison, Condition, Culprits, Definition, DefinitionParts,
+    DeliveryStatus, Evaluator, Labels, NoDataPolicy, Observation, ProbeError, RuleDraft, RuleName,
+    Signal, SignalProbe, TraceMeasure, TraceSignal,
 };
 use crate::audit::{Action, Actor, TargetKind};
 use crate::catalogue::ProjectId;
@@ -62,6 +62,17 @@ impl SignalProbe for &Scripted {
             .expect("the lock")
             .pop_front()
             .unwrap_or_default())
+    }
+
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &Signal,
+        _window: Window,
+        _labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        Ok(Culprits::default())
     }
 }
 

@@ -9,10 +9,10 @@ use axum::routing::post;
 use ferristrace_domain::testing::{AlertLedger, Couriered, IncidentLedger, OncallLedger};
 use ferristrace_domain::{
     AccountId, AlertChannels, AlertRules, AlertSeverity, AlertStatus, ChannelId, ChannelKind,
-    ChannelName, Comparison, Condition, Courier, Definition, DefinitionParts, DeliveryStatus,
-    Destination, Drained, Evaluator, Followers, Labels, NoDataPolicy, Observation, Paging,
-    ProbeError, ProjectId, RuleDraft, RuleName, Signal, SignalProbe, TenantId, TraceMeasure,
-    TraceSignal, UnixSeconds, WebhookSecret, Window,
+    ChannelName, Comparison, Condition, Courier, CulpritPod, Culprits, Definition, DefinitionParts,
+    DeliveryStatus, Destination, Drained, Evaluator, Followers, Labels, NoDataPolicy, Observation,
+    Paging, ProbeError, ProjectId, RuleDraft, RuleName, Signal, SignalProbe, TenantId,
+    TraceMeasure, TraceSignal, UnixSeconds, WebhookSecret, Window,
 };
 use ferristrace_infra::{HttpWebhooks, SIGNATURE_HEADER, WebhookSettings, signature};
 use uuid::Uuid;
@@ -77,6 +77,37 @@ impl SignalProbe for &Scripted {
             labels: Labels::none(),
             value,
         }])
+    }
+
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &Signal,
+        _window: Window,
+        _labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        let pods = (1..=7u64)
+            .map(|index| CulpritPod {
+                name: format!("checkout-{index}").into(),
+                node: Some(
+                    if index.is_multiple_of(2) {
+                        "node-a"
+                    } else {
+                        "node-b"
+                    }
+                    .into(),
+                ),
+                count: 10 - index,
+            })
+            .collect();
+        Ok(Culprits::new(
+            pods,
+            7,
+            vec!["node-a".into(), "node-b".into()],
+            vec!["1.4.2".into()],
+            &Labels::none(),
+        ))
     }
 }
 
@@ -150,6 +181,35 @@ fn webhooks() -> HttpWebhooks {
     })
 }
 
+fn assert_names_the_culprits(context: &serde_json::Value) {
+    let pods: Vec<(&str, &str, u64)> = context["pods"]
+        .as_array()
+        .expect("pods")
+        .iter()
+        .map(|pod| {
+            (
+                pod["name"].as_str().unwrap_or_default(),
+                pod["node"].as_str().unwrap_or_default(),
+                pod["count"].as_u64().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pods,
+        vec![
+            ("checkout-1", "node-b", 9),
+            ("checkout-2", "node-a", 8),
+            ("checkout-3", "node-b", 7),
+            ("checkout-4", "node-a", 6),
+            ("checkout-5", "node-b", 5),
+        ]
+    );
+    assert_eq!(context["others"], 2);
+    assert_eq!(context["nodes"], serde_json::json!(["node-a", "node-b"]));
+    assert_eq!(context["versions"], serde_json::json!(["1.4.2"]));
+    assert_eq!(context["labels"], serde_json::json!({}));
+}
+
 #[tokio::test]
 async fn spec_l2_2_each_firing_and_recovery_sends_one_email_and_one_signed_webhook_per_channel() {
     let (url, received) = a_receiver().await;
@@ -193,6 +253,13 @@ async fn spec_l2_2_each_firing_and_recovery_sends_one_email_and_one_signed_webho
         .iter()
         .map(|(to, dispatch)| {
             assert_eq!(&**to, "ops@example.com");
+            assert_eq!(
+                dispatch
+                    .context
+                    .as_ref()
+                    .map(|context| context.pods().len()),
+                (dispatch.to == AlertStatus::Firing).then_some(5)
+            );
             (dispatch.from, dispatch.to)
         })
         .collect();
@@ -223,6 +290,11 @@ async fn spec_l2_2_each_firing_and_recovery_sends_one_email_and_one_signed_webho
             "{payload}"
         );
         assert!(payload["at_ms"].is_u64());
+        if payload["to"] == "firing" {
+            assert_names_the_culprits(&payload["context"]);
+        } else {
+            assert!(payload.get("context").is_none(), "{payload}");
+        }
         moved.push((
             payload["from"].as_str().unwrap_or_default().to_owned(),
             payload["to"].as_str().unwrap_or_default().to_owned(),
@@ -336,6 +408,7 @@ async fn a_guarded_deployment_never_reaches_a_loopback_webhook() {
         value: None,
         labels: Labels::none(),
         at_ms: 0,
+        context: None,
     };
 
     let refused = ferristrace_domain::WebhookSender::send(

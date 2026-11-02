@@ -7,6 +7,9 @@ mod channel_book_tests;
 mod courier;
 #[cfg(test)]
 mod courier_tests;
+mod culprits;
+#[cfg(test)]
+mod culprits_tests;
 mod entities;
 mod errors;
 mod evaluator;
@@ -23,6 +26,9 @@ mod value_objects_tests;
 pub use alert_book::{AlertBook, HISTORY_LIMIT, PREVIEW_POINTS};
 pub use channel_book::ChannelBook;
 pub use courier::{Courier, DRAIN_BATCH, RETRY_AFTER_SECS, deliver, settlement_after};
+pub use culprits::{
+    CulpritPod, Culprits, MAX_CULPRIT_FACETS, MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS,
+};
 pub use entities::{
     AlertEvent, Channel, ChannelView, Claimed, Delivery, Dispatch, Drained, IssuedChannel,
     Notification, Observation, Overall, Preview, Rule, RuleDraft, RulePatch, RuleState,
@@ -32,7 +38,7 @@ pub use errors::{AlertError, BadChannel, BadRule, DeliveryError, ProbeError};
 pub use evaluator::{Evaluator, TICK_SECS};
 pub use ports::{
     AlertChannels, AlertDuty, AlertEvents, AlertMailer, AlertOutbox, AlertRules, AlertStates,
-    SignalProbe, WebhookSender,
+    CulpritReader, SignalProbe, WebhookSender,
 };
 pub use state_machine::next_state;
 pub use value_objects::{

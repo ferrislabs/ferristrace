@@ -150,6 +150,18 @@ fn a_summary(name: &str) -> ServiceSummary {
     }
 }
 
+impl ferristrace_domain::CulpritReader for TwoSpans {
+    async fn culprits(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _project: Option<ferristrace_domain::ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl SpanReader for TwoSpans {
     async fn services(
         &self,
@@ -268,6 +280,18 @@ impl PlacementReader for TwoSpans {
     }
 }
 
+impl ferristrace_domain::CulpritReader for NoSpans {
+    async fn culprits(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _project: Option<ferristrace_domain::ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl SpanReader for NoSpans {
     async fn services(
         &self,
@@ -354,7 +378,16 @@ impl RepoFor<domain::ApiKeys> for Fakes {
 
 struct TestStack<R>(std::marker::PhantomData<R>);
 
-impl<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static> Stack for TestStack<R> {
+impl<
+    R: SpanReader
+        + SpanPages
+        + PlacementReader
+        + ferristrace_domain::CulpritReader
+        + Send
+        + Sync
+        + 'static,
+> Stack for TestStack<R>
+{
     type Repos = Fakes;
     type Clock = Inert;
     type Hasher = Inert;
@@ -372,7 +405,15 @@ impl<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static> Stack 
     type Webhooks = Inert;
 }
 
-fn state<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static>(
+fn state<
+    R: SpanReader
+        + SpanPages
+        + PlacementReader
+        + ferristrace_domain::CulpritReader
+        + Send
+        + Sync
+        + 'static,
+>(
     reader: R,
 ) -> AppState<TestStack<R>> {
     let adapters = Adapters {
@@ -397,7 +438,13 @@ fn state<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static>(
 
 async fn served<R>(reader: R, request: Request<Body>) -> (StatusCode, String)
 where
-    R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static,
+    R: SpanReader
+        + SpanPages
+        + PlacementReader
+        + ferristrace_domain::CulpritReader
+        + Send
+        + Sync
+        + 'static,
 {
     let response = explore_router(state(reader))
         .oneshot(request)
@@ -666,6 +713,18 @@ impl SpanPages for Remembering {
         _limit: u32,
     ) -> Result<SpanPage, StoreError> {
         Ok(SpanPage::default())
+    }
+}
+
+impl ferristrace_domain::CulpritReader for Remembering {
+    async fn culprits(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _project: Option<ferristrace_domain::ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
     }
 }
 

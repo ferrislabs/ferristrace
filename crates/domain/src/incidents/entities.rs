@@ -3,7 +3,7 @@ use super::value_objects::{
     IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle, Reference, TimelineId,
 };
 use crate::access::KeyId;
-use crate::alerts::{AlertStatus, Labels, RuleId};
+use crate::alerts::{AlertStatus, Culprits, Labels, RuleId};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::oncall::{PageId, ScheduleId};
@@ -98,6 +98,7 @@ pub enum Change {
         to: AlertStatus,
         value: Option<f64>,
         labels: Labels,
+        context: Option<Culprits>,
     },
     Attachment(Attachment),
     Paged {

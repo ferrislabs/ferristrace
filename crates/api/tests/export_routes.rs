@@ -289,6 +289,18 @@ impl ferristrace_domain::PlacementReader for Shelf {
     }
 }
 
+impl ferristrace_domain::CulpritReader for Shelf {
+    async fn culprits(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _project: Option<ferristrace_domain::ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl SpanReader for Shelf {
     async fn services(
         &self,

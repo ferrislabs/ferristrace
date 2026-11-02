@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use super::alert_book::{AlertBook, PREVIEW_POINTS};
+use super::culprits::Culprits;
 use super::entities::{AlertEvent, Observation, RuleDraft, RulePatch};
 use super::errors::{AlertError, BadRule, ProbeError};
 use super::ports::{AlertChannels, SignalProbe};
@@ -353,6 +354,7 @@ async fn the_history_reads_the_last_thirty_days_newest_first() {
             to,
             value: Some(1.0),
             at_ms,
+            context: None,
         });
     }
 
@@ -397,6 +399,17 @@ impl SignalProbe for Curve {
             labels: Labels::none(),
             value: Some(value),
         }])
+    }
+
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &Signal,
+        _window: Window,
+        _labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        Ok(Culprits::default())
     }
 }
 

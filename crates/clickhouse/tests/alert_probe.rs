@@ -985,3 +985,297 @@ async fn the_probe_counts_only_the_spans_and_logs_of_the_placement_a_rule_watche
     assert_eq!(lines, Some(2.0));
     assert_eq!(stranger, Some(0.0));
 }
+
+fn blamed_span(seed: u32, pod: u32, failed: bool) -> Span {
+    let mut span = a_span(
+        seed,
+        "checkout",
+        "POST /pay",
+        u64::from(seed % 50),
+        10,
+        failed,
+    );
+    span.attributes
+        .insert("k8s.pod.name".into(), format!("checkout-{pod}").into());
+    span.attributes.insert(
+        "k8s.node.name".into(),
+        if pod.is_multiple_of(2) {
+            "node-a"
+        } else {
+            "node-b"
+        }
+        .into(),
+    );
+    span.attributes
+        .insert("service.version".into(), "1.4.2".into());
+    span
+}
+
+async fn named<P: SignalProbe>(
+    probe: &P,
+    tenant: TenantId,
+    signal: &Signal,
+    over: Window,
+) -> ferristrace_domain::Culprits {
+    probe
+        .culprits(tenant, None, signal, over, &Labels::none())
+        .await
+        .expect("the probe names the culprits")
+}
+
+fn pods_of(culprits: &ferristrace_domain::Culprits) -> Vec<(&str, Option<&str>, u64)> {
+    culprits
+        .pods()
+        .iter()
+        .map(|pod| (&*pod.name, pod.node.as_deref(), pod.count))
+        .collect()
+}
+
+#[tokio::test]
+async fn spec_l3_5_a_trace_probe_names_five_pods_counts_the_rest_and_keeps_to_its_organisation() {
+    let Some(client) = prepared("ferristrace_alert_culprits_traces").await else {
+        return;
+    };
+    let mut spans = Vec::new();
+    let mut seed = 0u32;
+    for pod in 1..=7u32 {
+        for _ in 0..(8 - pod) {
+            seed += 1;
+            spans.push(blamed_span(seed, pod, true));
+        }
+    }
+    seed += 1;
+    spans.push(blamed_span(seed, 8, false));
+    stored(&client, Scope::of(org(1)), spans).await;
+    stored(
+        &client,
+        Scope::of(org(2)),
+        (500..520)
+            .map(|seed| {
+                let mut span = blamed_span(seed, 99, true);
+                span.attributes
+                    .insert("service.version".into(), "9.9.9".into());
+                span.attributes
+                    .insert("k8s.node.name".into(), "node-z".into());
+                span
+            })
+            .collect(),
+    )
+    .await;
+    let reader = ClickhouseReader::new(client);
+    let probe = SignalReaders::<_, Inert, Inert>::new(Some(&reader), None, None);
+
+    let culprits = named(
+        &probe,
+        org(1),
+        &traces(Some("checkout"), None, TraceMeasure::ErrorRate),
+        window(0, 60),
+    )
+    .await;
+    let elsewhere = named(
+        &probe,
+        org(3),
+        &traces(Some("checkout"), None, TraceMeasure::ErrorRate),
+        window(0, 60),
+    )
+    .await;
+
+    assert_eq!(
+        pods_of(&culprits),
+        vec![
+            ("checkout-1", Some("node-b"), 7),
+            ("checkout-2", Some("node-a"), 6),
+            ("checkout-3", Some("node-b"), 5),
+            ("checkout-4", Some("node-a"), 4),
+            ("checkout-5", Some("node-b"), 3),
+        ]
+    );
+    assert_eq!(
+        culprits.others(),
+        2,
+        "pods 6 and 7 are counted, the healthy pod 8 is not a culprit"
+    );
+    let mut nodes: Vec<&str> = culprits.nodes().iter().map(|node| &**node).collect();
+    nodes.sort_unstable();
+    assert_eq!(nodes, ["node-a", "node-b"]);
+    let versions: Vec<&str> = culprits.versions().iter().map(|v| &**v).collect();
+    assert_eq!(versions, ["1.4.2"]);
+    assert!(elsewhere.is_empty(), "{elsewhere:?}");
+
+    let narrowed = named(
+        &probe,
+        org(1),
+        &traces(Some("checkout"), Some("GET /cart"), TraceMeasure::ErrorRate),
+        window(0, 60),
+    )
+    .await;
+    assert!(narrowed.is_empty(), "{narrowed:?}");
+}
+
+#[tokio::test]
+async fn spec_l3_5_a_log_probe_names_five_pods_counts_the_rest_and_keeps_to_its_organisation() {
+    let Some(client) = prepared("ferristrace_alert_culprits_logs").await else {
+        return;
+    };
+    let sink = ClickhouseLogSink::new(
+        &client,
+        limits(),
+        Duration::from_secs(7 * DAY),
+        FixedClock::at(NOW),
+    );
+    let log = |second: u64, pod: u32, node: &str, version: &str| LogRecord {
+        time_unix_nanos: nanos(second),
+        observed_unix_nanos: nanos(second),
+        severity: Severity::Error,
+        severity_number: 17,
+        service_name: "checkout".into(),
+        body: "declined".into(),
+        attributes: BTreeMap::new(),
+        resource: BTreeMap::from([
+            ("k8s.pod.name".into(), format!("checkout-{pod}").into()),
+            ("k8s.node.name".into(), node.into()),
+            ("service.version".into(), version.into()),
+        ]),
+        trace_id: None,
+        span_id: None,
+    };
+    let mut mine = Vec::new();
+    for pod in 1..=7u32 {
+        for line in 0..(8 - pod) {
+            let node = if pod.is_multiple_of(2) {
+                "node-a"
+            } else {
+                "node-b"
+            };
+            mine.push(log(u64::from(line) + 1, pod, node, "1.4.2"));
+        }
+    }
+    sink.accept_logs(Scope::of(org(1)), mine)
+        .await
+        .expect("the sink accepts");
+    sink.accept_logs(
+        Scope::of(org(2)),
+        (0..10).map(|n| log(n + 1, 99, "node-z", "9.9.9")).collect(),
+    )
+    .await
+    .expect("the sink accepts");
+    sink.flush().await.expect("the sink flushes");
+    let reader = ClickhouseLogReader::new(client);
+    let probe = SignalReaders::<Inert, _, Inert>::new(None, Some(&reader), None);
+    let errors = Signal::Logs(LogSignal {
+        services: vec!["checkout".into()],
+        severities: vec![Severity::Error],
+        text: None,
+        attributes: Vec::new(),
+        placement: ferristrace_domain::Placement::default(),
+    });
+
+    let culprits = named(&probe, org(1), &errors, window(0, 60)).await;
+    let elsewhere = named(&probe, org(3), &errors, window(0, 60)).await;
+
+    assert_eq!(
+        pods_of(&culprits),
+        vec![
+            ("checkout-1", Some("node-b"), 7),
+            ("checkout-2", Some("node-a"), 6),
+            ("checkout-3", Some("node-b"), 5),
+            ("checkout-4", Some("node-a"), 4),
+            ("checkout-5", Some("node-b"), 3),
+        ]
+    );
+    assert_eq!(culprits.others(), 2);
+    let mut nodes: Vec<&str> = culprits.nodes().iter().map(|node| &**node).collect();
+    nodes.sort_unstable();
+    assert_eq!(nodes, ["node-a", "node-b"]);
+    let versions: Vec<&str> = culprits.versions().iter().map(|v| &**v).collect();
+    assert_eq!(versions, ["1.4.2"]);
+    assert!(elsewhere.is_empty(), "{elsewhere:?}");
+}
+
+#[tokio::test]
+async fn spec_l3_5_a_metric_probe_names_the_labels_of_the_series_that_fired() {
+    let probe = SignalReaders::<Inert, Inert, Inert>::new(None, None, None);
+    let signal = Signal::Metrics(MetricSignal {
+        name: "queue.depth".into(),
+        aggregation: Aggregation::Max,
+        group_by: vec!["queue".into()],
+        filter: BTreeMap::new(),
+    });
+    let labels = Labels::new(BTreeMap::from([("queue".into(), "mail".into())]));
+
+    let culprits = probe
+        .culprits(org(1), None, &signal, window(0, 60), &labels)
+        .await
+        .expect("the labels need no read");
+
+    assert_eq!(culprits.labels(), &labels);
+    assert!(culprits.pods().is_empty());
+}
+
+#[tokio::test]
+async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
+    let Some(client) = prepared("ferristrace_alert_culprits_event").await else {
+        return;
+    };
+    let spans: Vec<Span> = (1..=9u32)
+        .map(|seed| blamed_span(seed, seed, true))
+        .collect();
+    stored(&client, Scope::of(org(1)), spans).await;
+    let ledger = AlertLedger::default();
+    AlertRules::create(
+        &ledger,
+        org(1),
+        &RuleDraft {
+            name: RuleName::try_from("Checkout errors").expect("a name"),
+            project: None,
+            enabled: true,
+            definition: Definition::new(DefinitionParts {
+                signal: traces(Some("checkout"), None, TraceMeasure::ErrorRate),
+                condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
+                window_secs: 3_600,
+                pending_secs: 0,
+                severity: AlertSeverity::Critical,
+                no_data: NoDataPolicy::Ok,
+                channels: Vec::new(),
+                page: None,
+            })
+            .expect("a definition"),
+        },
+        AccountId::new(Uuid::from_u128(9)),
+    )
+    .await
+    .expect("kept")
+    .expect("fresh");
+    let clock = Moving::default();
+    let app = Ferristrace::<Watching>::new(
+        Ledgered {
+            alerts: ledger.clone(),
+            ..Ledgered::default()
+        },
+        Adapters {
+            clock: clock.clone(),
+            hasher: Inert::default(),
+            mailer: Couriered::default(),
+            webhooks: Couriered::default(),
+            photos: NoPhotos,
+            meter: Inert::default(),
+            span_store: Some(ClickhouseReader::new(client)),
+            issue_store: None,
+            log_store: None,
+            metric_store: None,
+            oidc: None,
+            provision: ProvisionPolicy::default(),
+        },
+    );
+
+    clock.to(60);
+    app.evaluate_alerts().await.expect("a tick");
+
+    let events = ledger.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].to, AlertStatus::Firing);
+    let context = events[0].context.as_ref().expect("a context");
+    assert_eq!(context.pods().len(), 5);
+    assert_eq!(context.others(), 4);
+    assert_eq!(context.nodes().len(), 2);
+}

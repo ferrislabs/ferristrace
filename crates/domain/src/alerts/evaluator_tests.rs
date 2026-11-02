@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use uuid::Uuid;
 
+use super::culprits::{CulpritPod, Culprits};
 use super::entities::{AlertEvent, Observation, RuleDraft, Tick};
 use super::errors::ProbeError;
 use super::evaluator::Evaluator;
@@ -39,10 +40,14 @@ fn by() -> AccountId {
     AccountId::new(Uuid::from_u128(9))
 }
 
+type Named = (TenantId, Option<ProjectId>, Window, Labels);
+
 #[derive(Default)]
 struct Scripted {
     script: Mutex<VecDeque<Result<Vec<Observation>, ProbeError>>>,
     asked: Mutex<Vec<(TenantId, Option<ProjectId>, Window)>>,
+    culprit: Mutex<Option<Result<Culprits, ProbeError>>>,
+    named: Mutex<Vec<Named>>,
 }
 
 impl Scripted {
@@ -79,6 +84,25 @@ impl SignalProbe for &Scripted {
             .expect("the lock")
             .pop_front()
             .unwrap_or(Ok(Vec::new()))
+    }
+
+    async fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        _signal: &Signal,
+        window: Window,
+        labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        self.named
+            .lock()
+            .expect("the lock")
+            .push((org, project, window, labels.clone()));
+        self.culprit
+            .lock()
+            .expect("the lock")
+            .clone()
+            .unwrap_or_else(|| Ok(Culprits::default()))
     }
 }
 
@@ -384,6 +408,7 @@ async fn a_tick_forgets_events_older_than_thirty_days() {
             to: AlertStatus::Firing,
             value: None,
             at_ms,
+            context: None,
         });
     }
     let probe = Scripted::values(&[Some(1.0)]);
@@ -457,6 +482,7 @@ async fn a_transition_of_a_linked_rule_appends_a_system_entry_to_its_open_incide
                     to: AlertStatus::Firing,
                     value: Some(9.0),
                     labels: Labels::none(),
+                    context: None,
                 },
                 minute(0).get() * 1_000,
             ),
@@ -469,6 +495,7 @@ async fn a_transition_of_a_linked_rule_appends_a_system_entry_to_its_open_incide
                     to: AlertStatus::Ok,
                     value: Some(1.0),
                     labels: Labels::none(),
+                    context: None,
                 },
                 minute(2).get() * 1_000,
             ),
@@ -531,7 +558,124 @@ async fn a_flap_that_never_fires_stays_out_of_the_timeline() {
             to: AlertStatus::Firing,
             value: Some(9.0),
             labels: Labels::none(),
+            context: None,
         }],
         "ok, pending and no data flaps are history, not incident news"
     );
+}
+
+fn blamed() -> Culprits {
+    Culprits::new(
+        vec![
+            CulpritPod {
+                name: "checkout-1".into(),
+                node: Some("node-a".into()),
+                count: 7,
+            },
+            CulpritPod {
+                name: "checkout-2".into(),
+                node: Some("node-b".into()),
+                count: 3,
+            },
+        ],
+        9,
+        vec!["node-a".into(), "node-b".into()],
+        vec!["1.4.2".into()],
+        &Labels::none(),
+    )
+}
+
+#[tokio::test]
+async fn the_culprits_are_read_only_when_a_rule_goes_firing_and_ride_the_event_and_the_timeline() {
+    let ledger = AlertLedger::default();
+    let mut asked = parts(checkout(), Vec::new());
+    asked.pending_secs = 0;
+    a_rule(&ledger, asked, true).await;
+    let rule = ledger.rules()[0].id;
+    let incidents = IncidentLedger::default();
+    incidents.put(an_incident(rule, org(1), IncidentStatus::Investigating));
+    let probe = Scripted::values(&[Some(1.0), Some(9.0), Some(9.0), Some(1.0)]);
+    *probe.culprit.lock().expect("the lock") = Some(Ok(blamed()));
+    let evaluating = following(&ledger, &probe, &incidents);
+
+    for at in 0..4 {
+        evaluating.tick(minute(at)).await.expect("a tick");
+    }
+
+    let named = probe.named.lock().expect("the lock");
+    assert_eq!(named.len(), 1, "once, for the one transition to firing");
+    assert_eq!(named[0].0, org(1));
+    assert_eq!(named[0].1, Some(a_project()));
+    let events = ledger.events();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].context, Some(blamed()));
+    assert_eq!(events[1].context, None, "recovery names nothing");
+    let timeline = incidents.timeline();
+    assert!(matches!(
+        &timeline[0].change,
+        Change::Alert { context: Some(context), .. } if *context == blamed()
+    ));
+    assert!(matches!(
+        &timeline[1].change,
+        Change::Alert { context: None, .. }
+    ));
+}
+
+#[tokio::test]
+async fn an_unreadable_or_empty_context_leaves_the_firing_event_without_one() {
+    for scripted in [Some(Err(ProbeError::Unavailable)), None] {
+        let ledger = AlertLedger::default();
+        let mut asked = parts(checkout(), Vec::new());
+        asked.pending_secs = 0;
+        a_rule(&ledger, asked, true).await;
+        let probe = Scripted::values(&[Some(9.0)]);
+        *probe.culprit.lock().expect("the lock") = scripted;
+
+        evaluator(&ledger, &probe)
+            .tick(minute(0))
+            .await
+            .expect("a tick");
+
+        let events = ledger.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].to, AlertStatus::Firing);
+        assert_eq!(events[0].context, None);
+    }
+}
+
+#[tokio::test]
+async fn a_grouped_rule_asks_for_the_culprits_of_the_series_that_fired() {
+    let ledger = AlertLedger::default();
+    let mut asked = parts(
+        Signal::Metrics(MetricSignal {
+            name: "queue.depth".into(),
+            aggregation: Aggregation::Max,
+            group_by: vec!["queue".into()],
+            filter: BTreeMap::new(),
+        }),
+        Vec::new(),
+    );
+    asked.pending_secs = 0;
+    a_rule(&ledger, asked, true).await;
+    let probe = Scripted::default();
+    let mail = Labels::new(BTreeMap::from([("queue".into(), "mail".into())]));
+    probe.then(Ok(vec![
+        Observation {
+            labels: mail.clone(),
+            value: Some(9.0),
+        },
+        Observation {
+            labels: Labels::new(BTreeMap::from([("queue".into(), "sms".into())])),
+            value: Some(1.0),
+        },
+    ]));
+
+    evaluator(&ledger, &probe)
+        .tick(minute(0))
+        .await
+        .expect("a tick");
+
+    let named = probe.named.lock().expect("the lock");
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].3, mail);
 }

@@ -514,6 +514,83 @@ async fn an_incident_is_declared_listed_read_and_annotated_in_the_documented_sha
 }
 
 #[tokio::test]
+async fn spec_l3_5_an_alert_entry_carries_the_pods_nodes_and_version_that_fired() {
+    use ferristrace_domain::{
+        Author, Change, CulpritPod, Culprits, IncidentId, IncidentTimeline, TimelineEntry,
+        TimelineId,
+    };
+
+    let harness = Harness::new();
+    let rule = harness.a_rule(AlertStatus::Firing).await;
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    let id =
+        IncidentId::new(Uuid::parse_str(incident["id"].as_str().expect("an id")).expect("a uuid"));
+    for context in [
+        Some(Culprits::new(
+            vec![CulpritPod {
+                name: "checkout-1".into(),
+                node: Some("node-a".into()),
+                count: 4,
+            }],
+            3,
+            vec!["node-a".into()],
+            vec!["1.4.2".into()],
+            &Labels::none(),
+        )),
+        None,
+    ] {
+        IncidentTimeline::append(
+            &harness.incidents,
+            &TimelineEntry {
+                id: TimelineId::fresh(),
+                incident: id,
+                org: org(MINE),
+                author: Author::System,
+                change: Change::Alert {
+                    rule,
+                    from: AlertStatus::Pending,
+                    to: AlertStatus::Firing,
+                    value: Some(9.0),
+                    labels: Labels::none(),
+                    context,
+                },
+                at_ms: NOW * 1_000,
+            },
+        )
+        .await
+        .expect("appended");
+    }
+
+    let (status, read) = harness
+        .member(
+            Method::GET,
+            &format!("{}/timeline", one(MINE, &incident)),
+            None,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let alerts: Vec<&Value> = read["timeline"]
+        .as_array()
+        .expect("a timeline")
+        .iter()
+        .filter(|entry| entry["kind"] == "alert")
+        .collect();
+    assert_eq!(alerts.len(), 2);
+    assert_eq!(
+        alerts[0]["detail"]["context"],
+        json!({
+            "pods": [{"name": "checkout-1", "node": "node-a", "count": 4}],
+            "others": 2,
+            "nodes": ["node-a"],
+            "versions": ["1.4.2"],
+            "labels": {},
+        })
+    );
+    assert!(alerts[1]["detail"].get("context").is_none());
+}
+
+#[tokio::test]
 async fn a_patch_writes_one_entry_per_field_it_changes() {
     let harness = Harness::new();
     let incident = harness.declared(json!({"title": "Checkout down"})).await;

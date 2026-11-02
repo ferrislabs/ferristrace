@@ -6,7 +6,10 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::errors::{BadChannel, BadRule};
+use crate::catalogue::ProjectId;
+use crate::explore::{ServiceFilter, Window};
 use crate::identity::Email;
+use crate::logs::LogQuery;
 use crate::metrics::{Aggregation, MAX_GROUP_BY};
 use crate::oncall::ScheduleId;
 use crate::placement::Placement;
@@ -258,6 +261,16 @@ pub struct TraceSignal {
     pub placement: Placement,
 }
 
+impl TraceSignal {
+    pub fn filter(&self, project: Option<ProjectId>, window: Window) -> ServiceFilter {
+        let mut filter = ServiceFilter::over(window);
+        filter.project = project;
+        filter.environment.clone_from(&self.environment);
+        filter.placement.clone_from(&self.placement);
+        filter
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogSignal {
     pub services: Vec<Box<str>>,
@@ -265,6 +278,19 @@ pub struct LogSignal {
     pub text: Option<Box<str>>,
     pub attributes: Vec<(Box<str>, Box<str>)>,
     pub placement: Placement,
+}
+
+impl LogSignal {
+    pub fn query(&self, project: Option<ProjectId>, window: Window) -> LogQuery {
+        let mut query = LogQuery::over(window);
+        query.services.clone_from(&self.services);
+        query.severities.clone_from(&self.severities);
+        query.text.clone_from(&self.text);
+        query.attributes.clone_from(&self.attributes);
+        query.placement.clone_from(&self.placement);
+        query.project = project;
+        query
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

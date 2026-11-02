@@ -5,11 +5,12 @@ use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
     AccountId, AlertError, AlertRules, AlertSeverity, AlertStatus, Attachment, AttachmentId,
     AttachmentKind, AttachmentLabel, Author, Change, CommentBody, Comparison, Condition,
-    Definition, DefinitionParts, Evaluator, Followers, Incident, IncidentAttachments,
-    IncidentFilter, IncidentId, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
-    IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy, Observation, Paging, ProbeError,
-    ProjectId, ProjectName, Reference, RuleDraft, RuleId, RuleName, Signal, SignalProbe, TenantId,
-    Tick, TimelineEntry, TimelineId, TraceMeasure, TraceSignal, UnixSeconds, Window,
+    CulpritPod, Culprits, Definition, DefinitionParts, Evaluator, Followers, Incident,
+    IncidentAttachments, IncidentFilter, IncidentId, IncidentScope, IncidentSeverity,
+    IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy,
+    Observation, Paging, ProbeError, ProjectId, ProjectName, Reference, RuleDraft, RuleId,
+    RuleName, Signal, SignalProbe, TenantId, Tick, TimelineEntry, TimelineId, TraceMeasure,
+    TraceSignal, UnixSeconds, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -226,6 +227,7 @@ async fn incidents_timelines_and_attachments_read_back_whole() {
                 to: AlertStatus::Ok,
                 value: Some(2.5),
                 labels: Labels::new(BTreeMap::from([("region".into(), "eu".into())])),
+                context: Some(blamed()),
             },
             1_600,
         ),
@@ -402,6 +404,20 @@ async fn an_alert_is_followed_by_its_open_incidents_only() {
     assert_eq!(following, vec![open.id]);
 }
 
+fn blamed() -> Culprits {
+    Culprits::new(
+        vec![CulpritPod {
+            name: "checkout-1".into(),
+            node: Some("node-a".into()),
+            count: 7,
+        }],
+        3,
+        vec!["node-a".into()],
+        vec!["1.4.2".into()],
+        &Labels::none(),
+    )
+}
+
 struct Firing;
 
 impl SignalProbe for &Firing {
@@ -416,6 +432,17 @@ impl SignalProbe for &Firing {
             labels: Labels::none(),
             value: Some(9.0),
         }])
+    }
+
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &Signal,
+        _window: Window,
+        _labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        Ok(blamed())
     }
 }
 
@@ -527,6 +554,7 @@ async fn an_alert_change_reaches_the_timeline_in_the_transaction_of_its_event() 
             to: AlertStatus::Firing,
             value: Some(9.0),
             labels: Labels::none(),
+            context: Some(blamed()),
         }
     );
     assert_eq!(timeline[0].at_ms, NOW * 1_000);

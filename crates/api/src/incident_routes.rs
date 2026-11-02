@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
+use crate::context_body::ContextBody;
 use crate::state::AppState;
 
 pub fn incident_router<S: Stack>(state: AppState<S>) -> Router
@@ -203,17 +204,24 @@ fn detail_of(chronicle: &Chronicle, change: &Change) -> Value {
             to,
             value,
             labels,
-        } => json!({
-            "alert": alert_of(chronicle, *rule),
-            "from": from.as_str(),
-            "to": to.as_str(),
-            "value": value,
-            "labels": labels
-                .pairs()
-                .iter()
-                .map(|(key, value)| (key.to_string(), value.to_string()))
-                .collect::<BTreeMap<_, _>>(),
-        }),
+            context,
+        } => {
+            let mut detail = json!({
+                "alert": alert_of(chronicle, *rule),
+                "from": from.as_str(),
+                "to": to.as_str(),
+                "value": value,
+                "labels": labels
+                    .pairs()
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect::<BTreeMap<_, _>>(),
+            });
+            if let (Some(context), Some(fields)) = (context, detail.as_object_mut()) {
+                fields.insert("context".to_owned(), json!(ContextBody::from(context)));
+            }
+            detail
+        }
         Change::Attachment(attachment) => json!(AttachmentBody::from(attachment)),
         Change::Paged { page, step, target } => json!({
             "page": page.as_uuid(),
