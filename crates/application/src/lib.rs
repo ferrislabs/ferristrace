@@ -19,6 +19,7 @@ mod postmortems;
 mod profile;
 mod provisioning;
 pub mod registry;
+mod releases;
 mod roster;
 mod stack;
 mod status;

@@ -56,7 +56,7 @@ export function Overview() {
   const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: windowMs, limit: 200 })
   const { records: errorLogs } = useLogs({ ...ANY_LOG, rangeMs: windowMs, severities: ['error', 'fatal'], limit: 10 }, false, placement)
   const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 }, placement)
-  const markers = useDeployMarkers()
+  const markers = useDeployMarkers(series)
   const label = WINDOWS.find((w) => w.value === range)?.label ?? ''
   const scope = projects.find((p) => p.id === project)?.name ?? 'all projects'
   if (!pending && !all.length && !series?.requests && !isPlaced(placement)) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>

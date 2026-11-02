@@ -108,6 +108,11 @@ pub enum Change {
     Acknowledged {
         page: PageId,
     },
+    Deploy {
+        service: Box<str>,
+        version: Box<str>,
+        environment: Box<str>,
+    },
 }
 
 impl Change {
@@ -124,6 +129,7 @@ impl Change {
             Self::Attachment(_) => EntryKind::Attachment,
             Self::Paged { .. } => EntryKind::Paged,
             Self::Acknowledged { .. } => EntryKind::Acknowledged,
+            Self::Deploy { .. } => EntryKind::Deploy,
         }
     }
 }

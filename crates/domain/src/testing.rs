@@ -800,6 +800,34 @@ impl crate::incidents::IncidentTimeline for IncidentLedger {
         Ok(())
     }
 
+    async fn append_once(
+        &self,
+        entry: &crate::incidents::TimelineEntry,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|kept| {
+            let twin = kept.timeline.iter().any(|held| {
+                held.incident == entry.incident
+                    && matches!(
+                        (&held.change, &entry.change),
+                        (
+                            crate::incidents::Change::Deploy { service, version, environment },
+                            crate::incidents::Change::Deploy {
+                                service: other_service,
+                                version: other_version,
+                                environment: other_environment,
+                            },
+                        ) if service == other_service
+                            && version == other_version
+                            && environment == other_environment
+                    )
+            });
+            if !twin {
+                kept.timeline.push(entry.clone());
+            }
+            !twin
+        }))
+    }
+
     async fn of(
         &self,
         org: TenantId,

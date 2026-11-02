@@ -1,4 +1,4 @@
-import { BellRing, LineChart, MessageSquare, Paperclip, Pencil, ScrollText, Waypoints } from 'lucide-react'
+import { BellRing, LineChart, MessageSquare, Paperclip, Pencil, Rocket, ScrollText, Waypoints } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { because } from '@/auth/client'
@@ -16,6 +16,7 @@ import {
   type Attachment, type AttachmentKind, type Dossier, type IncidentChange, type IncidentSeverity, type IncidentStatus, type TimelineEntry,
 } from '@/data/incidents'
 import { useMembers } from '@/data/members'
+import { releasePath } from '@/data/releases'
 import { stamp } from '@/lib/format'
 import { Link, useParams } from '@/lib/router'
 import { labelOf } from '@/components/ft/MetricChart'
@@ -220,5 +221,13 @@ function Told({ entry }: { entry: TimelineEntry }) {
       )
     case 'acknowledged':
       return <span>Acknowledged the page, which stops its escalation</span>
+    case 'deploy':
+      return (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <Rocket className="size-3.5" aria-hidden />Deployed <span className="font-semibold">{entry.detail.service}</span>
+          <Link to={releasePath(entry.detail.service, entry.detail.version)} className="font-mono">{entry.detail.version}</Link>
+          {entry.detail.environment ? <span className="text-caption text-muted-foreground">to {entry.detail.environment}</span> : null}
+        </span>
+      )
   }
 }

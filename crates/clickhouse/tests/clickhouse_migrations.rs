@@ -394,8 +394,16 @@ async fn the_placement_migration_reverts_alone_and_applies_again() {
     }
     let again = migrator.up().await.expect("the second up");
 
-    assert_eq!(reverted, vec![placement]);
+    let from_placement: Vec<u32> = MIGRATIONS
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version >= placement)
+        .collect();
+    let mut backwards = from_placement.clone();
+    backwards.reverse();
+
+    assert_eq!(reverted, backwards);
     assert!(left.iter().all(String::is_empty), "{left:?}");
-    assert_eq!(again, vec![placement]);
+    assert_eq!(again, from_placement);
     assert!(!placement_columns(&client, "logs").await.is_empty());
 }

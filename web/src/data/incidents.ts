@@ -46,6 +46,7 @@ export type TimelineEntry = { at_ms: number; author: Author } & (
   | { kind: 'attachment'; detail: Attachment }
   | { kind: 'paged'; detail: { page: string; step: number; target: Person | null } }
   | { kind: 'acknowledged'; detail: { page: string } }
+  | { kind: 'deploy'; detail: { service: string; version: string; environment: string } }
 )
 
 export type Dossier = Incident & { attachments: Attachment[]; timeline: TimelineEntry[] }

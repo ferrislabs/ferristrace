@@ -20,6 +20,7 @@ pub const EVALUATE_LOCK: i64 = 0x6674_616c_6572_7401;
 pub const DELIVER_LOCK: i64 = 0x6674_616c_6572_7402;
 pub const ESCALATE_LOCK: i64 = 0x6674_616c_6572_7403;
 pub const ANNOUNCE_LOCK: i64 = 0x6674_616c_6572_7404;
+pub const DEPLOYS_LOCK: i64 = 0x6674_616c_6572_7405;
 
 fn unreachable(doing: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
     move |error| {
@@ -674,6 +675,7 @@ fn lock_of(duty: Duty) -> i64 {
         Duty::Deliver => DELIVER_LOCK,
         Duty::Escalate => ESCALATE_LOCK,
         Duty::Announce => ANNOUNCE_LOCK,
+        Duty::Deploys => DEPLOYS_LOCK,
     }
 }
 

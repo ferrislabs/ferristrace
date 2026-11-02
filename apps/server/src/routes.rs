@@ -3,7 +3,7 @@ use ferristrace_api::{
     AppState, SessionCookie, SignInMethods, alert_router, audit_router, auth_router,
     catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
     key_router, log_router, me_router, methods_router, metric_router, oidc_router, oncall_router,
-    org_router, password_router, postmortem_router, reset_router, roster_router,
+    org_router, password_router, postmortem_router, release_router, reset_router, roster_router,
     second_factor_router, session_router, status_router, team_router, usage_router,
 };
 
@@ -111,7 +111,7 @@ fn issue_routes(state: Option<&State>, held: bool) -> Router {
         );
         return Router::new();
     };
-    issue_router(state.clone())
+    issue_router(state.clone()).merge(release_router(state.clone()))
 }
 
 fn catalogue_routes(state: Option<&State>) -> Router {

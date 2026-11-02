@@ -6,6 +6,7 @@ mod alerts;
 mod api_keys;
 mod audit;
 mod decisions;
+mod deploys;
 mod export;
 mod factors;
 mod flows;
@@ -30,13 +31,14 @@ mod unit_of_work;
 
 pub use accounts::{AccountError, PostgresAccounts};
 pub use alerts::{
-    ANNOUNCE_LOCK, DELIVER_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels,
+    ANNOUNCE_LOCK, DELIVER_LOCK, DEPLOYS_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels,
     PostgresAlertDuty, PostgresAlertEvents, PostgresAlertOutbox, PostgresAlertRules,
     PostgresAlertStates,
 };
 pub use api_keys::PostgresApiKeys;
 pub use audit::PostgresAuditTrail;
 pub use decisions::PostgresDecisions;
+pub use deploys::PostgresDeployMarks;
 pub use export::PostgresExport;
 pub use factors::PostgresFactors;
 pub use flows::PostgresFlows;

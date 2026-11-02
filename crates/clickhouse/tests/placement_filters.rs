@@ -12,7 +12,7 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_clickhouse::{
     BatchLimits, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
-    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink,
+    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, MIGRATIONS,
 };
 use ferristrace_domain::{
     AccountId, Agent, Aggregation, Buckets, LiveSession, LogQuery, LogReader, LogSink, Membership,
@@ -511,7 +511,12 @@ async fn rows_written_before_the_placement_columns_existed_are_still_found() {
     let logs = ClickhouseLogReader::new(client.clone());
     let metrics = ClickhouseMetricReader::new(client);
 
-    assert_eq!(applied, vec![PLACEMENT_VERSION]);
+    let after_placement: Vec<u32> = MIGRATIONS
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version >= PLACEMENT_VERSION)
+        .collect();
+    assert_eq!(applied, after_placement);
     assert_eq!(
         traced(&spans, org(MINE), on_pod("checkout-7d9f-2")).await,
         vec![2]

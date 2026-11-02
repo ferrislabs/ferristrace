@@ -58,6 +58,15 @@ pub(crate) fn encode_change(change: &Change) -> (Option<&str>, String) {
             "target": id_of(target.map(AccountId::as_uuid)),
         }),
         Change::Acknowledged { page } => json!({"page": page.to_string()}),
+        Change::Deploy {
+            service,
+            version,
+            environment,
+        } => json!({
+            "service": service,
+            "version": version,
+            "environment": environment,
+        }),
     };
     let body = match change {
         Change::Comment { body, .. } => Some(body.as_str()),
@@ -151,6 +160,11 @@ pub(crate) fn decode_change(
         },
         EntryKind::Acknowledged => Change::Acknowledged {
             page: PageId::new(uuid_at(&detail, "page").ok()??),
+        },
+        EntryKind::Deploy => Change::Deploy {
+            service: text(&detail, "service")?.into(),
+            version: text(&detail, "version")?.into(),
+            environment: text(&detail, "environment")?.into(),
         },
     })
 }
@@ -257,6 +271,16 @@ mod tests {
             },
             Change::Acknowledged {
                 page: PageId::new(Uuid::from_u128(5)),
+            },
+            Change::Deploy {
+                service: "checkout".into(),
+                version: "2.4.1".into(),
+                environment: "prod".into(),
+            },
+            Change::Deploy {
+                service: "mailer".into(),
+                version: "7".into(),
+                environment: "".into(),
             },
         ];
 

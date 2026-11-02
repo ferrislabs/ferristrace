@@ -25,7 +25,7 @@ export function ServiceDetail() {
   const { operations, failed: opsFailed } = useOperations(name, environment, WINDOW_MS, placement)
   const { series } = useServiceSeries(name, environment, WINDOW_MS, placement)
   const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: WINDOW_MS, service: name, limit: 50 })
-  const markers = useDeployMarkers()
+  const markers = useDeployMarkers(series, name)
   const s = services.find((x) => x.name === name)
   const bad = (s?.err ?? 0) >= ERROR_THRESHOLD
   const lines = charted(series)
