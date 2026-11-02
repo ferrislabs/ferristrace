@@ -2,7 +2,7 @@ use core::future::Future;
 
 use super::entities::{Holder, Joined, Member, Membership, Organisation, Team};
 use super::errors::WhoamiError;
-use super::value_objects::{Named, OrgName, OrgRole, TeamId, TeamName};
+use super::value_objects::{Named, OrgName, OrgRole, OrgTimezone, TeamId, TeamName};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
@@ -31,6 +31,12 @@ pub trait Orgs {
         &self,
         org: TenantId,
         retention: Option<RetentionDays>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn set_timezone(
+        &self,
+        org: TenantId,
+        timezone: &OrgTimezone,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -65,6 +71,14 @@ impl<T: Orgs + Sync> Orgs for &T {
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).set_retention(org, retention)
     }
+
+    fn set_timezone(
+        &self,
+        org: TenantId,
+        timezone: &OrgTimezone,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        (*self).set_timezone(org, timezone)
+    }
 }
 
 impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
@@ -97,6 +111,14 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
         retention: Option<RetentionDays>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().set_retention(org, retention)
+    }
+
+    fn set_timezone(
+        &self,
+        org: TenantId,
+        timezone: &OrgTimezone,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.as_ref().set_timezone(org, timezone)
     }
 }
 

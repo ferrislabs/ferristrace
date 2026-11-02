@@ -1,7 +1,7 @@
 use super::entities::Organisation;
 use super::errors::SettingError;
 use super::ports::{Memberships, Orgs};
-use super::value_objects::{OrgName, OrgRole};
+use super::value_objects::{OrgName, OrgRole, OrgTimezone};
 use super::whoami::Whoami;
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::identity::{AccountId, SessionStore};
@@ -134,6 +134,29 @@ where
             Detail::default()
                 .with("from", shown(before.retention))
                 .with("to", shown(retention)),
+        )
+        .await?;
+        Ok(card)
+    }
+
+    pub async fn set_timezone(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        timezone: &OrgTimezone,
+    ) -> Result<Organisation, SettingError> {
+        let by = self.standing(token, org, OrgRole::Admin).await?;
+        let before = self.card(org).await?.timezone;
+        if &before == timezone {
+            return self.card(org).await;
+        }
+        self.orgs.set_timezone(org, timezone).await?;
+        let card = self.card(org).await?;
+        self.note(
+            org,
+            by,
+            Action::OrgTimezoneSet,
+            Detail::default().with("from", before).with("to", timezone),
         )
         .await?;
         Ok(card)

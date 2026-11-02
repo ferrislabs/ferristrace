@@ -82,6 +82,7 @@ pub enum Action {
     OrgLogoSet,
     OrgLogoRemoved,
     OrgRetentionSet,
+    OrgTimezoneSet,
     OrgExported,
     ProjectCreated,
     ProjectRenamed,
@@ -140,12 +141,13 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Self; 60] = [
+    pub const ALL: [Self; 61] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
         Self::OrgLogoRemoved,
         Self::OrgRetentionSet,
+        Self::OrgTimezoneSet,
         Self::OrgExported,
         Self::ProjectCreated,
         Self::ProjectRenamed,
@@ -210,6 +212,7 @@ impl Action {
             Self::OrgLogoSet => "org.logo_set",
             Self::OrgLogoRemoved => "org.logo_removed",
             Self::OrgRetentionSet => "org.retention_set",
+            Self::OrgTimezoneSet => "org.timezone_set",
             Self::OrgExported => "org.exported",
             Self::ProjectCreated => "project.created",
             Self::ProjectRenamed => "project.renamed",

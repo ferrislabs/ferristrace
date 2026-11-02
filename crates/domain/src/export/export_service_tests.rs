@@ -88,6 +88,7 @@ impl ExportSource for Source {
                     logo: None,
                     retention: None,
                     retention_cap: None,
+                    timezone: crate::organisation::OrgTimezone::utc(),
                 },
                 projects: Vec::new(),
                 teams: Vec::new(),

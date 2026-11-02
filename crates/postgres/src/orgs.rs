@@ -1,6 +1,6 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    OrgName, Organisation, Orgs, Portrait, RetentionDays, StoreError, TenantId,
+    OrgName, OrgTimezone, Organisation, Orgs, Portrait, RetentionDays, StoreError, TenantId,
 };
 use sqlx::Row;
 
@@ -25,7 +25,8 @@ impl Orgs for PostgresOrgs {
         let found = sqlx::query(
             "SELECT o.name AS name, p.name AS plan, o.created_at AS created_at, \
              o.logo_token AS photo_token, o.logo_type AS photo_type, \
-             o.retention_days AS retention_days, p.retention_days AS retention_cap_days \
+             o.retention_days AS retention_days, p.retention_days AS retention_cap_days, \
+             o.timezone AS timezone \
              FROM orgs o JOIN plans p ON p.id = o.plan_id \
              WHERE o.id = $1",
         )
@@ -46,6 +47,8 @@ impl Orgs for PostgresOrgs {
             logo: read_portrait(&row),
             retention: days(&row, "retention_days"),
             retention_cap: days(&row, "retention_cap_days"),
+            timezone: OrgTimezone::try_from(row.get::<String, _>("timezone").as_str())
+                .unwrap_or_default(),
         }))
     }
 
@@ -76,6 +79,20 @@ impl Orgs for PostgresOrgs {
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to keep a retention");
+                StoreError::Unreachable
+            })?;
+        Ok(())
+    }
+
+    async fn set_timezone(&self, org: TenantId, timezone: &OrgTimezone) -> Result<(), StoreError> {
+        let mut tx = self.tx.lock().await;
+        sqlx::query("UPDATE orgs SET timezone = $2 WHERE id = $1")
+            .bind(org.as_uuid())
+            .bind(timezone.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "the control plane refused to keep a time zone");
                 StoreError::Unreachable
             })?;
         Ok(())

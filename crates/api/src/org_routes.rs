@@ -7,15 +7,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
 use ferristrace_application::Stack;
-use ferristrace_application::registry::OrgRepos;
+use ferristrace_application::registry::{OrgRepos, ReadRepos};
 use ferristrace_domain::{
-    BadName, BadPhoto, BadRetention, MAX_PHOTO_BYTES, OrgName, Organisation, Photo, PhotoError,
-    Portrait, RetentionDays, SettingError, TenantId,
+    BadName, BadPhoto, BadRetention, BadTimezone, MAX_PHOTO_BYTES, OrgName, OrgTimezone,
+    Organisation, Photo, PhotoError, Portrait, ReadRefusal, RetentionDays, SettingError, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carried::{NotCarried, carried};
+use crate::carried::{NotCarried, carried, reading};
 use crate::session_cookie;
 use crate::state::AppState;
 
@@ -34,6 +34,7 @@ pub struct Card {
     retention_days: Option<u32>,
     retention_cap_days: Option<u32>,
     default_retention_days: u64,
+    timezone: String,
 }
 
 pub fn logo_url(org: Uuid, portrait: &Portrait) -> String {
@@ -55,6 +56,7 @@ impl Card {
             retention_days: org.retention.map(RetentionDays::get),
             retention_cap_days: org.retention_cap.map(RetentionDays::get),
             default_retention_days,
+            timezone: org.timezone.to_string(),
         }
     }
 }
@@ -62,6 +64,16 @@ impl Card {
 #[derive(Debug, Deserialize)]
 pub struct Renaming {
     name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Clock {
+    timezone: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Zoning {
+    timezone: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,11 +84,13 @@ pub struct Retaining {
 
 pub fn org_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S::Repos: OrgRepos,
+    S::Repos: OrgRepos + ReadRepos,
 {
     Router::new()
         .route("/api/orgs/{org}", get(card::<S>).patch(rename::<S>))
         .route("/api/orgs/{org}/retention", patch(retain::<S>))
+        .route("/api/orgs/{org}/timezone", patch(zone::<S>))
+        .route("/api/orgs/{org}/clock", get(clock::<S>))
         .route(
             "/api/orgs/{org}/logo",
             get(served::<S>)
@@ -136,6 +150,40 @@ where
         .await?;
     tracing::info!(org = %org, "an organisation changed its retention");
     Ok(Json(Card::of(card, state.default_retention_days)))
+}
+
+async fn zone<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<Zoning>,
+) -> Result<Json<Card>, OrgRefused>
+where
+    S::Repos: OrgRepos + ReadRepos,
+{
+    let token = carried(&headers)?;
+    let timezone = OrgTimezone::try_from(asked.timezone.as_str())?;
+    let card = state
+        .app
+        .set_org_timezone(&token, TenantId::new(org), &timezone)
+        .await?;
+    tracing::info!(org = %org, timezone = %timezone, "an organisation changed its time zone");
+    Ok(Json(Card::of(card, state.default_retention_days)))
+}
+
+async fn clock<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<Clock>, OrgRefused>
+where
+    S::Repos: OrgRepos + ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let timezone = state.app.org_timezone(&who, TenantId::new(org)).await?;
+    Ok(Json(Clock {
+        timezone: timezone.to_string(),
+    }))
 }
 
 async fn keep<S: Stack>(
@@ -206,6 +254,10 @@ pub enum OrgRefused {
     Picture(#[from] BadPhoto),
     #[error(transparent)]
     Retention(#[from] BadRetention),
+    #[error(transparent)]
+    Timezone(#[from] BadTimezone),
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("the plan keeps spans at most {0} days")]
     AboveCap(u32),
     #[error("retention is an owner's to set")]
@@ -237,15 +289,28 @@ impl From<SettingError> for OrgRefused {
     }
 }
 
+impl From<ReadRefusal> for OrgRefused {
+    fn from(error: ReadRefusal) -> Self {
+        match error {
+            ReadRefusal::Unknown => Self::Reaching(NotCarried::NoSession),
+            ReadRefusal::NotYours => Self::NoSuchOrg,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
+            ReadRefusal::StoreUnreachable => Self::Unavailable,
+        }
+    }
+}
+
 impl IntoResponse for OrgRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
-            Self::Name(_) | Self::Picture(_) | Self::Retention(_) | Self::AboveCap(_) => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            Self::Name(_)
+            | Self::Picture(_)
+            | Self::Retention(_)
+            | Self::Timezone(_)
+            | Self::AboveCap(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoSuchOrg | Self::NoLogo => StatusCode::NOT_FOUND,
-            Self::NotAnAdministrator | Self::NotAnOwner => StatusCode::FORBIDDEN,
+            Self::NotAnAdministrator | Self::NotAnOwner | Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoStore(_) | Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
         if status.is_server_error() {

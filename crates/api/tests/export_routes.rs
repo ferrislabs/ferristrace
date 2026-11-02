@@ -215,6 +215,7 @@ impl ExportSource for Snapshots {
                 logo: None,
                 retention: None,
                 retention_cap: None,
+                timezone: ferristrace_domain::OrgTimezone::utc(),
             },
             projects: Vec::new(),
             teams: Vec::new(),

@@ -5,7 +5,7 @@ use super::entities::{Membership, Organisation};
 use super::errors::{BadName, SettingError, WhoamiError};
 use super::org_settings::OrgSettings;
 use super::ports::{Memberships, Orgs};
-use super::value_objects::{MAX_ORG_NAME_BYTES, OrgName, OrgRole};
+use super::value_objects::{MAX_ORG_NAME_BYTES, OrgName, OrgRole, OrgTimezone};
 use super::whoami::Whoami;
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
@@ -79,6 +79,7 @@ struct Kept {
     renames: Mutex<Vec<String>>,
     logo: Mutex<Option<Portrait>>,
     retention: Mutex<Option<RetentionDays>>,
+    timezone: Mutex<OrgTimezone>,
     cap: Option<RetentionDays>,
 }
 
@@ -89,6 +90,7 @@ impl Kept {
             renames: Mutex::default(),
             logo: Mutex::default(),
             retention: Mutex::default(),
+            timezone: Mutex::default(),
             cap: None,
         }
     }
@@ -99,6 +101,7 @@ impl Kept {
             renames: Mutex::default(),
             logo: Mutex::default(),
             retention: Mutex::default(),
+            timezone: Mutex::default(),
             cap: None,
         }
     }
@@ -132,6 +135,7 @@ impl Orgs for &Kept {
                 logo: self.logo.lock().expect("the lock").clone(),
                 retention: self.retention(),
                 retention_cap: self.cap,
+                timezone: self.timezone.lock().expect("the lock").clone(),
             }))
     }
 
@@ -155,6 +159,11 @@ impl Orgs for &Kept {
         retention: Option<RetentionDays>,
     ) -> Result<(), StoreError> {
         *self.retention.lock().expect("the lock") = retention;
+        Ok(())
+    }
+
+    async fn set_timezone(&self, _org: TenantId, timezone: &OrgTimezone) -> Result<(), StoreError> {
+        *self.timezone.lock().expect("the lock") = timezone.clone();
         Ok(())
     }
 }
@@ -297,6 +306,7 @@ async fn a_member_reads_the_card_of_its_own_organisation() {
             logo: None,
             retention: None,
             retention_cap: None,
+            timezone: OrgTimezone::utc(),
         }
     );
 }
@@ -737,4 +747,91 @@ fn a_retention_is_between_one_day_and_ten_years() {
     assert_eq!(days_of(7).seconds(), 7 * 24 * 60 * 60);
     assert_eq!(RetentionDays::saturating(0).get(), 1);
     assert_eq!(RetentionDays::saturating(u32::MAX).get(), 3650);
+}
+
+fn paris() -> OrgTimezone {
+    OrgTimezone::try_from("Europe/Paris").expect("an IANA name")
+}
+
+#[test]
+fn a_time_zone_is_an_iana_name_and_nothing_else() {
+    assert_eq!(paris().as_str(), "Europe/Paris");
+    assert_eq!(OrgTimezone::default().as_str(), "UTC");
+    assert_eq!(
+        OrgTimezone::try_from("  Asia/Tokyo ").map(|zone| zone.to_string()),
+        Ok("Asia/Tokyo".to_owned())
+    );
+    for bad in ["", "   ", "Mars/Olympus", "CET+1"] {
+        assert!(OrgTimezone::try_from(bad).is_err(), "{bad:?}");
+    }
+    assert!(OrgTimezone::try_from("x".repeat(65).as_str()).is_err());
+}
+
+#[tokio::test]
+async fn a_new_card_reads_utc() {
+    let kept = Kept::holding("Acme");
+
+    let card = settings(OrgRole::Member, &kept)
+        .read(&token(), an_org(MINE))
+        .await
+        .expect("a member may read");
+
+    assert_eq!(card.timezone, OrgTimezone::utc());
+}
+
+#[tokio::test]
+async fn an_administrator_sets_the_time_zone_and_the_change_is_audited_with_both_sides() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    let card = noting(OrgRole::Admin, &kept, &notebook)
+        .set_timezone(&token(), an_org(MINE), &paris())
+        .await
+        .expect("an administrator may set it");
+
+    assert_eq!(card.timezone, paris());
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, Action::OrgTimezoneSet);
+    assert_eq!(entries[0].target, Target::org(an_org(MINE)));
+    assert_eq!(entries[0].detail.get("from"), Some(Some("UTC")));
+    assert_eq!(entries[0].detail.get("to"), Some(Some("Europe/Paris")));
+}
+
+#[tokio::test]
+async fn a_member_cannot_set_the_time_zone_and_nothing_is_written() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Member, &kept, &notebook)
+        .set_timezone(&token(), an_org(MINE), &paris())
+        .await;
+
+    assert_eq!(refused, Err(SettingError::NotYoursToChange));
+    assert!(notebook.entries().is_empty());
+    assert_eq!(*kept.timezone.lock().expect("the lock"), OrgTimezone::utc());
+}
+
+#[tokio::test]
+async fn the_time_zone_of_another_organisation_is_not_ours_to_set() {
+    let kept = Kept::holding("Acme");
+
+    let refused = settings(OrgRole::Owner, &kept)
+        .set_timezone(&token(), an_org(THEIRS), &paris())
+        .await;
+
+    assert_eq!(refused, Err(SettingError::NotYours));
+}
+
+#[tokio::test]
+async fn setting_the_zone_it_already_has_writes_nothing() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    noting(OrgRole::Admin, &kept, &notebook)
+        .set_timezone(&token(), an_org(MINE), &OrgTimezone::utc())
+        .await
+        .expect("a no-op");
+
+    assert!(notebook.entries().is_empty());
 }

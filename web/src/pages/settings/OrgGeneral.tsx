@@ -1,13 +1,13 @@
 import { Copy, Download, Upload } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Field, Input } from '@/components/ui/input'
+import { Field, Input, NativeSelect } from '@/components/ui/input'
 import { Avatar } from '@/components/ui/misc'
 import { because } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
-import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, type OrgCard } from '@/data/orgs'
+import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, timeZoneNames, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, useSetOrgTimezone, type OrgCard } from '@/data/orgs'
 import { initialsOf } from '@/data/profile'
 import { stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -109,6 +109,43 @@ function Retention({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
   )
 }
 
+function TimeZone({ card, mayChange }: { card: OrgCard; mayChange: boolean }) {
+  const set = useSetOrgTimezone()
+  const [chosen, setChosen] = useState<string | null>(null)
+  const zones = useMemo(() => {
+    const names = timeZoneNames()
+    return names.includes(card.timezone) ? names : [card.timezone, ...names]
+  }, [card.timezone])
+  const shown = chosen ?? card.timezone
+
+  const save = () =>
+    set.mutate(shown, {
+      onSuccess: () => {
+        setChosen(null)
+        toast.success('Saved')
+      },
+      onError: (error) => toast.error(because(error, 'The time zone was not changed')),
+    })
+
+  return (
+    <Card className="flex flex-col gap-3.5 p-4">
+      <Field
+        label="Time zone"
+        htmlFor="og-tz"
+        hint="The organisation's own clock. Rules that depend on the time of day, like office hours, are read in this zone."
+      >
+        <div className="flex max-w-[420px] items-center gap-2">
+          <NativeSelect id="og-tz" value={shown} disabled={!mayChange} onChange={(e) => setChosen(e.target.value)}>
+            {zones.map((name) => <option key={name} value={name}>{name}</option>)}
+          </NativeSelect>
+          <Button size="sm" className="h-8" variant="primary" disabled={!mayChange || shown === card.timezone || set.isPending} onClick={save}>Save</Button>
+        </div>
+      </Field>
+      {mayChange ? null : <span className="text-caption text-muted-foreground">Only an owner or an administrator can change this.</span>}
+    </Card>
+  )
+}
+
 function Export({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
   return (
     <Card className="flex flex-wrap items-center gap-3 p-4">
@@ -161,6 +198,7 @@ export function OrgGeneral() {
       {card ? (
         <>
           <Identity card={card} />
+          <TimeZone card={card} mayChange={mayChange} />
           <Retention card={card} isOwner={active?.role === 'owner'} />
           <Export card={card} isOwner={active?.role === 'owner'} />
           <Danger title={`Delete ${card.name}`} text="Deletes every project, signal, member and key of the organisation. Export first if you need anything." action="Delete organisation" onClick={() => setDel(true)} />

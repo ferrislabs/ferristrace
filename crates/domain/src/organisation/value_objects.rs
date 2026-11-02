@@ -1,14 +1,16 @@
 use core::fmt;
+use jiff::tz::TimeZoneDatabase;
 use uuid::Uuid;
 
 use super::entities::{Member, Membership};
-use super::errors::{BadName, BadTeamName};
+use super::errors::{BadName, BadTeamName, BadTimezone};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
 use crate::telemetry::TenantId;
 
 pub(super) const MAX_ORG_NAME_BYTES: usize = 128;
+pub(super) const MAX_TIMEZONE_BYTES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrgName(Box<str>);
@@ -31,6 +33,46 @@ impl TryFrom<&str> for OrgName {
             return Err(BadName::Blank);
         }
         Ok(Self(kept.into()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrgTimezone(Box<str>);
+
+impl OrgTimezone {
+    pub fn utc() -> Self {
+        Self("UTC".into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for OrgTimezone {
+    fn default() -> Self {
+        Self::utc()
+    }
+}
+
+impl TryFrom<&str> for OrgTimezone {
+    type Error = BadTimezone;
+
+    fn try_from(chosen: &str) -> Result<Self, Self::Error> {
+        let kept = chosen.trim();
+        if kept.is_empty() || kept.len() > MAX_TIMEZONE_BYTES {
+            return Err(BadTimezone);
+        }
+        TimeZoneDatabase::bundled()
+            .get(kept)
+            .map_err(|_| BadTimezone)?;
+        Ok(Self(kept.into()))
+    }
+}
+
+impl fmt::Display for OrgTimezone {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
     }
 }
 

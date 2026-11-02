@@ -197,6 +197,7 @@ impl ExportSource for FakeExport {
                 logo: None,
                 retention: None,
                 retention_cap: None,
+                timezone: ferristrace_domain::OrgTimezone::utc(),
             },
             projects: Vec::new(),
             teams: Vec::new(),
@@ -286,6 +287,7 @@ impl Orgs for FakeOrgs {
             logo: None,
             retention: None,
             retention_cap: None,
+            timezone: ferristrace_domain::OrgTimezone::utc(),
         }))
     }
 
@@ -296,6 +298,15 @@ impl Orgs for FakeOrgs {
     }
 
     async fn set_logo(&self, _org: TenantId, _logo: Option<&Portrait>) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn set_timezone(
+        &self,
+        _org: TenantId,
+        _timezone: &ferristrace_domain::OrgTimezone,
+    ) -> Result<(), StoreError> {
+        self.handle.write();
         Ok(())
     }
 
