@@ -128,3 +128,4 @@ Verify (exit, per PR)
   DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
   CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-clickhouse
   cd web && pnpm typecheck && pnpm build
+Amended: 2026-11-02 4A as built: `llm_calls` is a ReplacingMergeTree keyed by tenant, time, trace and span, read with FINAL, so a replayed span counts once; prices are whole micro-dollars per million tokens on the wire and costs are dollars; a price without an effective date applies from the start; providers match case-insensitively; a model is listed as unpriced when no price is in force at its last call; model time in the trace header is the union of the calls' intervals.
