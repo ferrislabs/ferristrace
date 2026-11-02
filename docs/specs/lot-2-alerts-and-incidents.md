@@ -203,3 +203,4 @@ Verify (exit, per PR)
   cd web && pnpm typecheck && pnpm build
 
 Amended: 2026-11-02 2B: an incident timeline records alert changes into or out of firing only, like notifications; `deploy` entries arrive with lot 3 deploy markers; per-comment public flags arrive with 2E.
+Amended: 2026-11-02 2C as built: a rule or an incident pages a named schedule (`"page": {"schedule": uuid} | null` in the rule JSON, `page` on incident creation); the current on-call is `GET .../schedules/{id}/now`; pages resolve with their alert or incident, there is no resolve route; escalation goes through the rotation once, then pages the organisation's owners and admins once and stops; the delay is 15 minutes; teams have no admin role of their own, so organisation admins write schedules; acknowledgement links are HMAC-signed under a key derived from the at-rest key and last 24 hours.
