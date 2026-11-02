@@ -462,6 +462,7 @@ where
     type Photos = P;
     type SpanStore = Inert;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Z;
     type Sink = Inert;
@@ -492,6 +493,7 @@ where
         meter: Inert::default(),
         span_store: None,
         issue_store: None,
+        log_store: None,
         oidc,
         provision: ProvisionPolicy::default(),
     };

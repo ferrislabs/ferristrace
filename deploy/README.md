@@ -37,7 +37,7 @@ curl -X POST http://localhost:4318/auth/reset/confirm \
 `bootstrap` does nothing if an organisation already exists, so it is safe
 to run again.
 
-## Send a trace
+## Send telemetry
 
 Draw an ingest key for the organisation `bootstrap` named:
 
@@ -47,7 +47,7 @@ docker compose exec server ferristrace issue-key --org <the printed org id>
 
 An owner or an administrator can also create one in the web application,
 under Settings > Project > Api keys, with the `ingest` scope. A key with
-the `read` scope reads services, traces and issues through `/api` with the
+the `read` scope reads services, traces, logs and issues through `/api` with the
 same bearer header, and a key bound to a project reads only that project.
 
 Every change made to an organisation, from the web application or from the
@@ -58,15 +58,27 @@ through `GET /api/orgs/<org>/audit`. No entry carries a key secret, a
 token or a password, and nothing in FerrisTrace edits or deletes an entry;
 deleting the organisation deletes its log.
 
-Then point any OTLP exporter at `http://localhost:4318/v1/traces` or
-`localhost:4317`, with the key as a bearer token:
+Then point any OTLP exporter at `http://localhost:4318` (traces on
+`/v1/traces`, logs on `/v1/logs`) or at `localhost:4317` over gRPC, with the
+key as a bearer token. Both signals take protobuf, gzip or not, count their
+decompressed bytes in the organisation's usage and quota, and refuse a body
+over 4 MiB with 413 rather than truncating it:
 
 ```sh
 curl -X POST http://localhost:4318/v1/traces \
   -H "authorization: Bearer <the printed key>" \
   -H 'content-type: application/x-protobuf' \
-  --data-binary @payload.pb
+  --data-binary @traces.pb
+
+curl -X POST http://localhost:4318/v1/logs \
+  -H "authorization: Bearer <the printed key>" \
+  -H 'content-type: application/x-protobuf' \
+  --data-binary @logs.pb
 ```
+
+Logs are kept in the span store beside the spans and expire with the
+organisation's retention. They are read back through
+`GET /api/orgs/<org>/logs` and `GET /api/orgs/<org>/logs/histogram`.
 
 ## Coming from a Comettrace deployment
 

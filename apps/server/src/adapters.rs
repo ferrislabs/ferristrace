@@ -2,14 +2,16 @@ use std::sync::Arc;
 
 use ferristrace_application::Stack;
 use ferristrace_application::registry::Repositories;
-use ferristrace_clickhouse::{ClickhouseIssues, ClickhouseReader, ClickhouseSink};
+use ferristrace_clickhouse::{
+    ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseReader, ClickhouseSink,
+};
 use ferristrace_domain::telemetry::{
     BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
 };
 use ferristrace_domain::{
-    DecompressedBytes, Email, IngestKey, Mailer, NoPhotos, Photo, PhotoError, Photos, Pictured,
-    Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink, TenantDirectory, TenantId,
-    UnknownKey, UsageMeter, UsageReader,
+    DecompressedBytes, Email, IngestKey, LogRecord, LogSink, Mailer, NoPhotos, Photo, PhotoError,
+    Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink,
+    TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
     Argon2Hasher, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer, StaticDirectory,
@@ -29,6 +31,7 @@ impl Stack for Production {
     type Photos = Gallery;
     type SpanStore = ClickhouseReader;
     type IssueStore = ClickhouseIssues;
+    type LogStore = ClickhouseLogReader;
     type Meter = Arc<Meter>;
     type Oidc = OidcProvider;
     type Sink = Arc<Sink>;
@@ -42,16 +45,31 @@ const _: fn() = || {
 };
 
 #[derive(Debug)]
+pub(crate) struct Stored {
+    pub(crate) spans: ClickhouseSink<SystemClock>,
+    pub(crate) logs: ClickhouseLogSink<SystemClock>,
+}
+
+#[derive(Debug)]
 pub(crate) enum Sink {
     Memory(MemorySink),
-    Spans(Box<ClickhouseSink<SystemClock>>),
+    Store(Box<Stored>),
 }
 
 impl SpanSink for Sink {
     async fn accept(&self, scope: Scope, spans: Vec<Span>) -> Result<(), SinkError> {
         match self {
             Self::Memory(sink) => sink.accept(scope, spans).await,
-            Self::Spans(sink) => sink.accept(scope, spans).await,
+            Self::Store(store) => store.spans.accept(scope, spans).await,
+        }
+    }
+}
+
+impl LogSink for Sink {
+    async fn accept_logs(&self, scope: Scope, records: Vec<LogRecord>) -> Result<(), SinkError> {
+        match self {
+            Self::Memory(sink) => sink.accept_logs(scope, records).await,
+            Self::Store(store) => store.logs.accept_logs(scope, records).await,
         }
     }
 }

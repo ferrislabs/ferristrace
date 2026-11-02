@@ -2,7 +2,7 @@ use core::future::Future;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use ferristrace_domain::{Scope, SinkError, Span, SpanSink};
+use ferristrace_domain::{LogRecord, LogSink, Scope, SinkError, Span, SpanSink};
 
 const DEFAULT_RETENTION: usize = 1024;
 
@@ -10,6 +10,8 @@ const DEFAULT_RETENTION: usize = 1024;
 struct State {
     accepted: u64,
     recent: VecDeque<(Scope, Span)>,
+    logs_accepted: u64,
+    recent_logs: VecDeque<(Scope, LogRecord)>,
 }
 
 #[derive(Debug)]
@@ -46,6 +48,34 @@ impl MemorySink {
             .collect()
     }
 
+    pub fn logs_accepted(&self) -> u64 {
+        self.state.lock().expect("sink state").logs_accepted
+    }
+
+    pub fn recent_logs(&self) -> Vec<(Scope, LogRecord)> {
+        self.state
+            .lock()
+            .expect("sink state")
+            .recent_logs
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    fn push_logs(&self, scope: Scope, records: Vec<LogRecord>) {
+        let mut state = self.state.lock().expect("sink state");
+        state.logs_accepted += records.len() as u64;
+        if self.retention == 0 {
+            return;
+        }
+        for record in records {
+            while state.recent_logs.len() >= self.retention {
+                state.recent_logs.pop_front();
+            }
+            state.recent_logs.push_back((scope, record));
+        }
+    }
+
     fn push(&self, scope: Scope, spans: Vec<Span>) {
         let mut state = self.state.lock().expect("sink state");
         state.accepted += spans.len() as u64;
@@ -72,12 +102,24 @@ impl SpanSink for MemorySink {
     }
 }
 
+impl LogSink for MemorySink {
+    fn accept_logs(
+        &self,
+        scope: Scope,
+        records: Vec<LogRecord>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        self.push_logs(scope, records);
+        async { Ok(()) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use ferristrace_domain::{
-        Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId,
+        LogRecord, LogSink, Scope, Severity, Span, SpanId, SpanKind, SpanSink, SpanStatus,
+        TenantId, TraceId,
     };
     use uuid::Uuid;
 
@@ -138,5 +180,35 @@ mod tests {
 
         assert_eq!(sink.accepted(), 1);
         assert!(sink.recent().is_empty());
+    }
+
+    fn a_log(body: &str) -> LogRecord {
+        LogRecord {
+            time_unix_nanos: 1,
+            observed_unix_nanos: 1,
+            severity: Severity::Info,
+            severity_number: 9,
+            service_name: "orders".into(),
+            body: body.into(),
+            attributes: BTreeMap::new(),
+            resource: BTreeMap::new(),
+            trace_id: None,
+            span_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_logs_are_counted_and_retained_apart_from_spans() {
+        let tenant = TenantId::new(Uuid::from_u128(5));
+        let sink = MemorySink::with_retention(1);
+
+        sink.accept_logs(Scope::of(tenant), vec![a_log("first"), a_log("second")])
+            .await
+            .expect("the sink accepts");
+
+        assert_eq!(sink.logs_accepted(), 2);
+        assert_eq!(sink.accepted(), 0);
+        assert_eq!(sink.recent_logs().len(), 1);
+        assert_eq!(&*sink.recent_logs()[0].1.body, "second");
     }
 }

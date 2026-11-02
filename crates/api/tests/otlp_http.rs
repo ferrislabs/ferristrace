@@ -39,6 +39,7 @@ impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
     type Photos = NoPhotos;
     type SpanStore = Inert;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Arc<MemoryMeter>;
     type Oidc = Inert;
     type Sink = Arc<MemorySink>;

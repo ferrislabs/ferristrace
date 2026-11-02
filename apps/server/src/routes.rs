@@ -1,7 +1,7 @@
 use axum::Router;
 use ferristrace_api::{
     AppState, SessionCookie, SignInMethods, audit_router, auth_router, catalogue_router,
-    explore_router, export_router, issue_router, key_router, me_router, methods_router,
+    explore_router, export_router, issue_router, key_router, log_router, me_router, methods_router,
     oidc_router, org_router, password_router, reset_router, roster_router, second_factor_router,
     session_router, team_router, usage_router,
 };
@@ -86,12 +86,12 @@ fn reset_routes(config: &Config, state: &State) -> Router {
 fn explore_routes(state: Option<&State>, held: bool) -> Router {
     let (Some(state), true) = (state, held) else {
         tracing::warn!(
-            "traces cannot be read back: that needs both a control plane to \
-             authorise the reader and a span store to read from"
+            "traces and logs cannot be read back: that needs both a control plane \
+             to authorise the reader and a span store to read from"
         );
         return Router::new();
     };
-    explore_router(state.clone())
+    explore_router(state.clone()).merge(log_router(state.clone()))
 }
 
 fn issue_routes(state: Option<&State>, held: bool) -> Router {

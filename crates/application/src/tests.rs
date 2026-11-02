@@ -20,6 +20,7 @@ fn adapters() -> Adapters<Probing> {
         meter: Inert::default(),
         span_store: None,
         issue_store: None,
+        log_store: None,
         oidc: None,
         provision: the_policy(),
     }

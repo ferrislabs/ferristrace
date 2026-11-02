@@ -48,6 +48,12 @@ pub const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../migrations/clickhouse/0006_event_fingerprint.up.sql"),
         down: include_str!("../../migrations/clickhouse/0006_event_fingerprint.down.sql"),
     },
+    Migration {
+        version: 7,
+        name: "logs",
+        up: include_str!("../../migrations/clickhouse/0007_logs.up.sql"),
+        down: include_str!("../../migrations/clickhouse/0007_logs.down.sql"),
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -201,6 +207,24 @@ mod tests {
         assert!(up.contains("PARTITION BY toDate(start_time)"), "{up}");
         assert!(up.contains("TTL expire_at DELETE"), "{up}");
         assert!(up.contains("attributes       Map(String, String)"), "{up}");
+    }
+
+    #[test]
+    fn the_logs_key_leads_with_the_tenant_and_expires_each_row() {
+        let up = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "logs")
+            .expect("a logs migration")
+            .up;
+
+        assert!(
+            up.contains("ORDER BY (tenant_id, service_name, time)"),
+            "{up}"
+        );
+        assert!(up.contains("PARTITION BY toDate(time)"), "{up}");
+        assert!(up.contains("TTL expire_at DELETE"), "{up}");
+        assert!(up.contains("trace_id TYPE bloom_filter"), "{up}");
+        assert!(up.contains("body TYPE tokenbf_v1"), "{up}");
     }
 
     #[test]

@@ -13,7 +13,7 @@ const SERVICE_NAME: &str = "service.name";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
-    #[error("the payload is not a valid OTLP trace export request")]
+    #[error("the payload is not a valid OTLP export request")]
     Protobuf(#[from] prost::DecodeError),
     #[error(transparent)]
     Id(#[from] InvalidId),

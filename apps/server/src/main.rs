@@ -12,10 +12,10 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
-use ferristrace_api::{AppState, health_router, router, trace_server, web_router};
+use ferristrace_api::{AppState, health_router, logs_server, router, trace_server, web_router};
 use ferristrace_application::{Adapters, Ferristrace, Ingestion};
 use ferristrace_clickhouse::{
-    ClickhouseIssues, ClickhouseReader, SpanStoreSettings, open_span_store,
+    ClickhouseIssues, ClickhouseLogReader, ClickhouseReader, SpanStoreSettings, open_span_store,
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
 use ferristrace_domain::{Clock, ProvisionPolicy, TenantId};
@@ -33,7 +33,7 @@ use tokio::net::TcpListener;
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
-use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink};
+use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink, Stored};
 use crate::cli::{Cli, Command, health, run_command};
 use crate::config::{Config, default_retention_days};
 use crate::routes::{Held, State, control_routes, cookie_of};
@@ -46,6 +46,7 @@ const MIN_FLUSH_WAIT: Duration = Duration::from_millis(100);
 struct Optional {
     span_store: Option<ClickhouseReader>,
     issue_store: Option<ClickhouseIssues>,
+    log_store: Option<ClickhouseLogReader>,
     oidc: Option<OidcProvider>,
 }
 
@@ -74,19 +75,25 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(tenants = seeded, "usage counters rehydrated");
         tokio::spawn(roll_up_hourly(usage));
     }
-    let (sink, reader, grouping) = spans_of(&config).await?;
+    let Opened {
+        sink,
+        reader,
+        grouping,
+        logs,
+    } = spans_of(&config).await?;
     let held = Held {
         explore: reader.is_some(),
         issues: grouping.is_some(),
     };
     let sink = Arc::new(sink);
-    tokio::spawn(flush_spans(Arc::clone(&sink)));
+    tokio::spawn(flush_store(Arc::clone(&sink)));
     let gallery = gallery_of(&config)?;
     let state = match pool.as_ref() {
         Some(pool) => {
             let optional = Optional {
                 span_store: reader,
                 issue_store: grouping,
+                log_store: logs,
                 oidc: oidc_of(&config).await?,
             };
             Some(control_plane(
@@ -191,6 +198,7 @@ fn adapters_of(
         meter,
         span_store: optional.span_store,
         issue_store: optional.issue_store,
+        log_store: optional.log_store,
         oidc: optional.oidc,
         provision: ProvisionPolicy::default(),
     }
@@ -286,16 +294,26 @@ fn gateway_of(
     Ingestion::new(directory, quota, sink, meter)
 }
 
-async fn spans_of(
-    config: &Config,
-) -> anyhow::Result<(Sink, Option<ClickhouseReader>, Option<ClickhouseIssues>)> {
+struct Opened {
+    sink: Sink,
+    reader: Option<ClickhouseReader>,
+    grouping: Option<ClickhouseIssues>,
+    logs: Option<ClickhouseLogReader>,
+}
+
+async fn spans_of(config: &Config) -> anyhow::Result<Opened> {
     let Some(spans) = config.spans.clone() else {
         tracing::warn!(
-            "no span store is configured, so accepted spans are held in memory and \
-             lost when this process ends, and no trace can be read back; \
+            "no span store is configured, so accepted spans and logs are held in memory \
+             and lost when this process ends, and nothing can be read back; \
              set spans.url to keep them"
         );
-        return Ok((Sink::Memory(MemorySink::default()), None, None));
+        return Ok(Opened {
+            sink: Sink::Memory(MemorySink::default()),
+            reader: None,
+            grouping: None,
+            logs: None,
+        });
     };
     let settings = SpanStoreSettings::from(spans);
     let store = open_span_store(&settings, SystemClock)
@@ -304,42 +322,59 @@ async fn spans_of(
     tracing::info!(
         url = %settings.url,
         retention_days = settings.retention_days,
-        "spans are written to the span store"
+        "spans and logs are written to the span store"
     );
-    Ok((
-        Sink::Spans(Box::new(store.sink)),
-        Some(store.reader),
-        Some(store.issues),
-    ))
+    Ok(Opened {
+        sink: Sink::Store(Box::new(Stored {
+            spans: store.sink,
+            logs: store.logs,
+        })),
+        reader: Some(store.reader),
+        grouping: Some(store.issues),
+        logs: Some(store.log_reader),
+    })
 }
 
-async fn flush_spans(sink: Arc<Sink>) {
-    let Sink::Spans(spans) = sink.as_ref() else {
+async fn flush_store(sink: Arc<Sink>) {
+    let Sink::Store(store) = sink.as_ref() else {
         return;
     };
     loop {
-        let wait = spans
-            .time_left()
-            .await
-            .unwrap_or(FLUSH_FALLBACK)
-            .max(MIN_FLUSH_WAIT);
+        let spans = store.spans.time_left().await;
+        let logs = store.logs.time_left().await;
+        let wait = match (spans, logs) {
+            (Some(spans), Some(logs)) => Some(spans.min(logs)),
+            (left, None) | (None, left) => left,
+        }
+        .unwrap_or(FLUSH_FALLBACK)
+        .max(MIN_FLUSH_WAIT);
         tokio::time::sleep(wait).await;
-        match spans.flush().await {
+        match store.spans.flush().await {
             Ok(0) => {}
             Ok(rows) => tracing::debug!(rows, "a span batch was committed on its deadline"),
             Err(error) => tracing::error!(%error, "a span batch could not be committed"),
+        }
+        match store.logs.flush().await {
+            Ok(0) => {}
+            Ok(rows) => tracing::debug!(rows, "a log batch was committed on its deadline"),
+            Err(error) => tracing::error!(%error, "a log batch could not be committed"),
         }
     }
 }
 
 async fn flush_once(sink: &Sink) {
-    let Sink::Spans(spans) = sink else {
+    let Sink::Store(store) = sink else {
         return;
     };
-    match spans.flush().await {
+    match store.spans.flush().await {
         Ok(0) => {}
         Ok(rows) => tracing::info!(rows, "the last span batch was committed before leaving"),
         Err(error) => tracing::error!(%error, "the last span batch was lost"),
+    }
+    match store.logs.flush().await {
+        Ok(0) => {}
+        Ok(rows) => tracing::info!(rows, "the last log batch was committed before leaving"),
+        Err(error) => tracing::error!(%error, "the last log batch was lost"),
     }
 }
 
@@ -443,7 +478,8 @@ async fn serve_grpc(
     gateway: Arc<Ingestion<Production>>,
 ) -> anyhow::Result<()> {
     Server::builder()
-        .add_service(trace_server(gateway))
+        .add_service(trace_server(Arc::clone(&gateway)))
+        .add_service(logs_server(gateway))
         .serve_with_shutdown(address, shutdown())
         .await
         .context("serving OTLP over gRPC")

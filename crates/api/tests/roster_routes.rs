@@ -288,6 +288,7 @@ impl Stack for TestStack {
     type Photos = NoPhotos;
     type SpanStore = Inert;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -308,6 +309,7 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         meter: Inert::default(),
         span_store: None,
         issue_store: None,
+        log_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

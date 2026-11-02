@@ -165,10 +165,20 @@ async fn up_then_down_then_up_leaves_one_recorded_version() {
         .await
         .expect("counting the table")
         .value;
+    let logs_gone = client
+        .query(
+            "SELECT count() AS value FROM system.tables \
+             WHERE database = currentDatabase() AND name = 'logs'",
+        )
+        .fetch_one::<Count>()
+        .await
+        .expect("counting the table")
+        .value;
     let again = migrator.up().await.expect("the second up");
 
     assert_eq!(reverted.len(), MIGRATIONS.len());
     assert_eq!(gone, 0, "the down step left the spans table behind");
+    assert_eq!(logs_gone, 0, "the down step left the logs table behind");
     assert_eq!(
         again,
         MIGRATIONS.iter().map(|m| m.version).collect::<Vec<_>>()
@@ -181,4 +191,55 @@ async fn up_then_down_then_up_leaves_one_recorded_version() {
             .len(),
         MIGRATIONS.len()
     );
+}
+
+#[tokio::test]
+async fn the_logs_table_carries_the_intended_key_partition_ttl_and_indexes() {
+    let Some(client) = fresh_database("ferristrace_migrate_logs").await else {
+        return;
+    };
+    ClickhouseMigrator::new(client.clone())
+        .up()
+        .await
+        .expect("the migrations apply");
+
+    let sorting_key = one_text(
+        &client,
+        "SELECT sorting_key AS value FROM system.tables \
+         WHERE database = currentDatabase() AND name = 'logs'",
+    )
+    .await;
+    let partition_key = one_text(
+        &client,
+        "SELECT partition_key AS value FROM system.tables \
+         WHERE database = currentDatabase() AND name = 'logs'",
+    )
+    .await;
+    let created = one_text(
+        &client,
+        "SELECT create_table_query AS value FROM system.tables \
+         WHERE database = currentDatabase() AND name = 'logs'",
+    )
+    .await;
+    let indexes = one_text(
+        &client,
+        "SELECT arrayStringConcat(groupArray(concat(expr, ':', type)), ',') AS value \
+         FROM system.data_skipping_indices \
+         WHERE database = currentDatabase() AND table = 'logs'",
+    )
+    .await;
+    let trace_type = one_text(
+        &client,
+        "SELECT type AS value FROM system.columns \
+         WHERE database = currentDatabase() AND table = 'logs' AND name = 'trace_id'",
+    )
+    .await;
+
+    assert_eq!(sorting_key, "tenant_id, service_name, time");
+    assert_eq!(partition_key, "toDate(time)");
+    assert!(created.contains("TTL expire_at"), "{created}");
+    assert!(created.contains("ENGINE = MergeTree"), "{created}");
+    assert!(indexes.contains("trace_id:bloom_filter"), "{indexes}");
+    assert!(indexes.contains("body:tokenbf_v1"), "{indexes}");
+    assert_eq!(trace_type, "FixedString(16)");
 }

@@ -418,6 +418,7 @@ impl Stack for TestStack {
     type Photos = NoPhotos;
     type SpanStore = Looked;
     type IssueStore = Looked;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -447,6 +448,7 @@ impl Harness {
             meter: Inert::default(),
             span_store: Some(self.looked.clone()),
             issue_store: Some(self.looked.clone()),
+            log_store: None,
             oidc: None,
             provision: ProvisionPolicy::default(),
         };

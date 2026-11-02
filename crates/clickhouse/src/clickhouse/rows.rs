@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use clickhouse::Row;
 use ferristrace_domain::{
-    EXCEPTION_EVENT, Fingerprint, PRINT_BYTES, ProjectId, Scope, SinkError, Span, SpanEvent,
-    SpanKind, SpanStatus, UnixSeconds,
+    EXCEPTION_EVENT, Fingerprint, LogRecord, PRINT_BYTES, ProjectId, Scope, Severity, SinkError,
+    Span, SpanEvent, SpanKind, SpanStatus, UnixSeconds,
 };
 use serde::Serialize;
 use serde_repr::Serialize_repr;
@@ -150,6 +150,80 @@ impl<'a> EventRow<'a> {
             expire_at: seconds(expire_at)?,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr)]
+#[repr(i8)]
+pub(crate) enum SeverityRow {
+    Trace = 1,
+    Debug = 2,
+    Info = 3,
+    Warn = 4,
+    Error = 5,
+    Fatal = 6,
+}
+
+impl From<Severity> for SeverityRow {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Trace => Self::Trace,
+            Severity::Debug => Self::Debug,
+            Severity::Info => Self::Info,
+            Severity::Warn => Self::Warn,
+            Severity::Error => Self::Error,
+            Severity::Fatal => Self::Fatal,
+        }
+    }
+}
+
+#[derive(Debug, Row, Serialize)]
+pub(crate) struct LogRow<'a> {
+    #[serde(with = "clickhouse::serde::uuid")]
+    pub(crate) tenant_id: Uuid,
+    #[serde(with = "clickhouse::serde::uuid")]
+    pub(crate) project_id: Uuid,
+    pub(crate) service_name: &'a str,
+    pub(crate) time: i64,
+    pub(crate) observed_time: i64,
+    pub(crate) severity: SeverityRow,
+    pub(crate) severity_number: u8,
+    pub(crate) body: &'a str,
+    pub(crate) attributes: BTreeMap<&'a str, &'a str>,
+    pub(crate) resource: BTreeMap<&'a str, &'a str>,
+    pub(crate) trace_id: [u8; 16],
+    pub(crate) span_id: [u8; 8],
+    pub(crate) expire_at: u32,
+}
+
+impl<'a> LogRow<'a> {
+    pub(crate) fn of(
+        scope: Scope,
+        record: &'a LogRecord,
+        expire_at: UnixSeconds,
+    ) -> Result<Self, SinkError> {
+        Ok(Self {
+            tenant_id: scope.tenant.as_uuid(),
+            project_id: scope.project.map(ProjectId::as_uuid).unwrap_or_default(),
+            service_name: &record.service_name,
+            time: nanos(record.time_unix_nanos)?,
+            observed_time: nanos(record.observed_unix_nanos)?,
+            severity: record.severity.into(),
+            severity_number: record.severity_number,
+            body: &record.body,
+            attributes: borrowed(&record.attributes),
+            resource: borrowed(&record.resource),
+            trace_id: record.trace_id.map(|id| *id.as_bytes()).unwrap_or_default(),
+            span_id: record.span_id.map(|id| *id.as_bytes()).unwrap_or_default(),
+            expire_at: seconds(expire_at)?,
+        })
+    }
+}
+
+fn borrowed(pairs: &BTreeMap<Box<str>, Box<str>>) -> BTreeMap<&str, &str> {
+    pairs
+        .iter()
+        .map(|(key, value)| (&**key, &**value))
+        .collect()
 }
 
 fn print_of(span: &Span, event: &SpanEvent) -> [u8; PRINT_BYTES] {

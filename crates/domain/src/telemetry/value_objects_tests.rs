@@ -82,3 +82,17 @@ mod proptests {
         }
     }
 }
+
+#[test]
+fn a_severity_reads_back_from_its_name() {
+    for severity in super::value_objects::Severity::ALL {
+        assert_eq!(
+            super::value_objects::Severity::try_from(severity.name()),
+            Ok(severity)
+        );
+    }
+    assert_eq!(
+        super::value_objects::Severity::try_from("loud"),
+        Err(super::errors::BadSeverity)
+    );
+}

@@ -17,6 +17,10 @@ pub struct BadRetention {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a severity is one of trace, debug, info, warn, error or fatal")]
+pub struct BadSeverity;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SinkError {
     #[error("the span sink is unavailable")]
     Unavailable,

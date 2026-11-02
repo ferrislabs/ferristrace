@@ -374,6 +374,7 @@ impl Stack for TestStack {
     type Photos = NoPhotos;
     type SpanStore = Shelf;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -442,6 +443,7 @@ impl Harness {
             meter: Inert::default(),
             span_store,
             issue_store: None,
+            log_store: None,
             oidc: None,
             provision: ProvisionPolicy::default(),
         };

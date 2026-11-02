@@ -38,6 +38,7 @@ impl Stack for Probing {
     type Photos = NoPhotos;
     type SpanStore = Inert;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
