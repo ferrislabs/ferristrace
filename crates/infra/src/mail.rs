@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use ferristrace_domain::{
-    AlertMailer, AlertStatus, DeliveryError, Dispatch, Email, EmailList, Mailer, PageDispatch,
-    PageSource, ResetError, ResetToken,
+    AlertMailer, AlertStatus, DeliveryError, Dispatch, Email, EmailList, Letter, LetterBody,
+    Mailer, PageDispatch, PageSource, ResetError, ResetToken, StatusMailer, UpdateKind,
 };
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
@@ -217,6 +217,98 @@ impl AlertMailer for SmtpMailer {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusLinks {
+    pub page: String,
+    pub confirm: Option<String>,
+    pub unsubscribe: String,
+}
+
+pub fn status_subject(letter: &Letter) -> String {
+    let page = letter.page_name.as_str();
+    match &letter.body {
+        LetterBody::Confirm => format!("[{page} status] Confirm your subscription"),
+        LetterBody::Update(bulletin) => match bulletin.kind {
+            UpdateKind::Opened => format!("[{page} status] New incident: {}", bulletin.title),
+            UpdateKind::Status | UpdateKind::Comment => {
+                format!("[{page} status] {}: {}", bulletin.title, bulletin.status)
+            }
+        },
+    }
+}
+
+pub fn status_text(letter: &Letter, links: &StatusLinks) -> String {
+    let page = letter.page_name.as_str();
+    let mut text = match &letter.body {
+        LetterBody::Confirm => format!(
+            "Someone, hopefully you, asked to receive the incident updates of the {page} status \
+             page at this address.\n\n"
+        ),
+        LetterBody::Update(bulletin) => {
+            let mut text = format!("{}\n\nStatus: {}\n", bulletin.title, bulletin.status);
+            if bulletin.kind == UpdateKind::Comment {
+                let _ = write!(text, "\n{}\n", bulletin.text);
+            }
+            let _ = writeln!(text, "\nAt: {} ms since the epoch", bulletin.at_ms);
+            text
+        }
+    };
+    if let Some(confirm) = &links.confirm {
+        let _ = write!(
+            text,
+            "Confirm it within seven days by opening this link:\n{confirm}\n\n\
+             If you did not ask for it, ignore this message and nothing is sent.\n"
+        );
+    }
+    let _ = write!(
+        text,
+        "\nThe {page} status page: {}\nStop these emails: {}\n",
+        links.page, links.unsubscribe
+    );
+    text
+}
+
+impl SmtpMailer {
+    pub fn status_links(&self, letter: &Letter) -> StatusLinks {
+        StatusLinks {
+            page: format!("{}/status/{}", self.base_url, letter.slug),
+            confirm: letter
+                .confirm
+                .as_deref()
+                .map(|token| format!("{}/api/status/confirm?token={token}", self.base_url)),
+            unsubscribe: format!(
+                "{}/api/status/unsubscribe?token={}",
+                self.base_url, letter.unsubscribe
+            ),
+        }
+    }
+
+    fn compose_status(&self, to: &Email, letter: &Letter) -> Result<Message, MailError> {
+        let recipient: Mailbox = to.as_str().parse().map_err(|_| MailError::Settings)?;
+        Message::builder()
+            .from(self.from.clone())
+            .to(recipient)
+            .subject(status_subject(letter))
+            .header(ContentType::TEXT_PLAIN)
+            .body(status_text(letter, &self.status_links(letter)))
+            .map_err(|_| MailError::Settings)
+    }
+}
+
+impl StatusMailer for SmtpMailer {
+    async fn send_status(&self, to: &Email, letter: &Letter) -> Result<(), DeliveryError> {
+        let message = self.compose_status(to, letter).map_err(|error| {
+            tracing::error!(%error, "a status message could not be composed");
+            DeliveryError::new("the status message could not be composed")
+        })?;
+        self.transport.send(message).await.map_err(|error| {
+            tracing::warn!(%error, "a status message was not accepted by the relay");
+            DeliveryError::new("the mail relay did not accept the message")
+        })?;
+        Ok(())
+    }
+}
+
 impl Mailer for SmtpMailer {
     async fn send_password_reset(&self, to: &Email, token: &ResetToken) -> Result<(), ResetError> {
         let message = self.compose(to, token).map_err(|error| {
@@ -398,6 +490,83 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("in the app"), "{text}");
+    }
+
+    #[test]
+    fn a_status_confirmation_carries_both_signed_links_under_the_configured_host() {
+        use ferristrace_domain::{Letter, LetterBody, PageName, Slug};
+
+        let letter = Letter {
+            page_name: PageName::try_from("Acme").expect("a name"),
+            slug: Slug::try_from("acme").expect("a slug"),
+            body: LetterBody::Confirm,
+            confirm: Some("v1.c.abc.def".into()),
+            unsubscribe: "v1.u.abc.ghi".into(),
+        };
+
+        let message = mailer()
+            .compose_status(
+                &Email::try_from("ada@example.com").expect("an address"),
+                &letter,
+            )
+            .expect("it composes");
+        let rendered = String::from_utf8(message.formatted()).expect("text");
+        let text = super::status_text(&letter, &mailer().status_links(&letter));
+
+        assert!(rendered.contains("ada@example.com"), "{rendered}");
+        assert_eq!(
+            super::status_subject(&letter),
+            "[Acme status] Confirm your subscription"
+        );
+        assert!(
+            text.contains("https://app.example.com/api/status/confirm?token=v1.c.abc.def"),
+            "{text}"
+        );
+        assert!(
+            text.contains("https://app.example.com/api/status/unsubscribe?token=v1.u.abc.ghi"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_status_update_names_the_incident_its_status_and_the_page() {
+        use ferristrace_domain::{
+            Bulletin, IncidentStatus, IncidentTitle, Letter, LetterBody, PageName, Slug, UpdateKind,
+        };
+
+        let letter = Letter {
+            page_name: PageName::try_from("Acme").expect("a name"),
+            slug: Slug::try_from("acme").expect("a slug"),
+            body: LetterBody::Update(Bulletin {
+                title: IncidentTitle::try_from("Payments fail").expect("a title"),
+                kind: UpdateKind::Comment,
+                status: IncidentStatus::Identified,
+                text: "A provider is down; we are switching.".into(),
+                at_ms: 1_700_000_000_000,
+            }),
+            confirm: None,
+            unsubscribe: "v1.u.abc.ghi".into(),
+        };
+
+        let text = super::status_text(&letter, &mailer().status_links(&letter));
+
+        assert_eq!(
+            super::status_subject(&letter),
+            "[Acme status] Payments fail: identified"
+        );
+        assert!(
+            text.contains("A provider is down; we are switching."),
+            "{text}"
+        );
+        assert!(
+            text.contains("https://app.example.com/status/acme"),
+            "{text}"
+        );
+        assert!(
+            text.contains("/api/status/unsubscribe?token=v1.u.abc.ghi"),
+            "{text}"
+        );
+        assert!(!text.contains("/api/status/confirm"), "{text}");
     }
 
     #[test]

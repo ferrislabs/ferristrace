@@ -569,11 +569,13 @@ impl crate::alerts::AlertDuty for AlertLedger {
 
 type Sent = Vec<(Box<str>, crate::alerts::Dispatch)>;
 type Paged = Vec<(Box<str>, crate::oncall::PageDispatch)>;
+type Lettered = Vec<(Box<str>, crate::status::Letter)>;
 
 #[derive(Debug, Clone, Default)]
 pub struct Couriered {
     sent: Arc<Mutex<Sent>>,
     paged: Arc<Mutex<Paged>>,
+    lettered: Arc<Mutex<Lettered>>,
     failing: Arc<Mutex<bool>>,
     private: bool,
 }
@@ -596,6 +598,10 @@ impl Couriered {
 
     pub fn paged(&self) -> Paged {
         self.paged.lock().expect("the courier lock").clone()
+    }
+
+    pub fn lettered(&self) -> Lettered {
+        self.lettered.lock().expect("the courier lock").clone()
     }
 
     fn note(
@@ -658,6 +664,25 @@ impl crate::alerts::AlertMailer for Couriered {
             .lock()
             .expect("the courier lock")
             .push((to.as_str().into(), dispatch.clone()));
+        Ok(())
+    }
+}
+
+impl crate::status::StatusMailer for Couriered {
+    async fn send_status(
+        &self,
+        to: &crate::identity::Email,
+        letter: &crate::status::Letter,
+    ) -> Result<(), crate::alerts::DeliveryError> {
+        if *self.failing.lock().expect("the courier lock") {
+            return Err(crate::alerts::DeliveryError::new(
+                "the mail relay answered 451",
+            ));
+        }
+        self.lettered
+            .lock()
+            .expect("the courier lock")
+            .push((to.as_str().into(), letter.clone()));
         Ok(())
     }
 }
@@ -1398,5 +1423,410 @@ impl crate::postmortems::Postmortems for PostmortemLedger {
             .find(|held| held.org == postmortem.org && held.id == postmortem.id)
             .map(|held| *held = postmortem.clone())
             .is_some())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedLetter {
+    pub id: crate::status::LetterId,
+    pub page: crate::status::StatusPageId,
+    pub subscriber: crate::status::SubscriberId,
+    pub body: crate::status::LetterBody,
+    pub attempt: u32,
+    pub next_at_ms: u64,
+    pub status: crate::alerts::DeliveryStatus,
+    pub last_error: Option<Box<str>>,
+}
+
+#[derive(Debug, Default)]
+struct Board {
+    pages: Vec<crate::status::StatusPage>,
+    components: Vec<(TenantId, crate::status::Component)>,
+    subscribers: Vec<crate::status::Subscriber>,
+    letters: Vec<QueuedLetter>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatusLedger {
+    held: Arc<Mutex<Board>>,
+}
+
+impl StatusLedger {
+    fn with<T>(&self, work: impl FnOnce(&mut Board) -> T) -> T {
+        work(&mut self.held.lock().expect("the status ledger lock"))
+    }
+
+    pub fn pages(&self) -> Vec<crate::status::StatusPage> {
+        self.with(|held| held.pages.clone())
+    }
+
+    pub fn subscribers(&self) -> Vec<crate::status::Subscriber> {
+        self.with(|held| held.subscribers.clone())
+    }
+
+    pub fn letters(&self) -> Vec<QueuedLetter> {
+        self.with(|held| held.letters.clone())
+    }
+
+    pub fn put_page(&self, page: crate::status::StatusPage) {
+        self.with(|held| held.pages.push(page));
+    }
+
+    pub fn put_component(&self, org: TenantId, component: crate::status::Component) {
+        self.with(|held| held.components.push((org, component)));
+    }
+
+    pub fn put_subscriber(&self, subscriber: crate::status::Subscriber) {
+        self.with(|held| held.subscribers.push(subscriber));
+    }
+}
+
+impl crate::status::StatusPages for StatusLedger {
+    async fn list(&self, org: TenantId) -> Result<Vec<crate::status::StatusPage>, StoreError> {
+        Ok(self.with(|held| {
+            held.pages
+                .iter()
+                .filter(|page| page.org == org)
+                .cloned()
+                .collect()
+        }))
+    }
+
+    async fn get(
+        &self,
+        org: TenantId,
+        id: crate::status::StatusPageId,
+    ) -> Result<Option<crate::status::StatusPage>, StoreError> {
+        Ok(self.with(|held| {
+            held.pages
+                .iter()
+                .find(|page| page.org == org && page.id == id)
+                .cloned()
+        }))
+    }
+
+    async fn by_slug(
+        &self,
+        slug: &crate::status::Slug,
+    ) -> Result<Option<crate::status::StatusPage>, StoreError> {
+        Ok(self.with(|held| held.pages.iter().find(|page| &page.slug == slug).cloned()))
+    }
+
+    async fn by_id(
+        &self,
+        id: crate::status::StatusPageId,
+    ) -> Result<Option<crate::status::StatusPage>, StoreError> {
+        Ok(self.with(|held| held.pages.iter().find(|page| page.id == id).cloned()))
+    }
+
+    async fn create(
+        &self,
+        page: &crate::status::StatusPage,
+    ) -> Result<crate::status::Saved, StoreError> {
+        Ok(self.with(|held| {
+            if held.pages.iter().any(|kept| kept.slug == page.slug) {
+                return crate::status::Saved::SlugTaken;
+            }
+            held.pages.push(page.clone());
+            crate::status::Saved::Done
+        }))
+    }
+
+    async fn keep(
+        &self,
+        page: &crate::status::StatusPage,
+    ) -> Result<crate::status::Saved, StoreError> {
+        Ok(self.with(|held| {
+            if held
+                .pages
+                .iter()
+                .any(|kept| kept.slug == page.slug && kept.id != page.id)
+            {
+                return crate::status::Saved::SlugTaken;
+            }
+            held.pages
+                .iter_mut()
+                .find(|kept| kept.org == page.org && kept.id == page.id)
+                .map_or(crate::status::Saved::Gone, |kept| {
+                    *kept = page.clone();
+                    crate::status::Saved::Done
+                })
+        }))
+    }
+
+    async fn delete(
+        &self,
+        org: TenantId,
+        id: crate::status::StatusPageId,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let before = held.pages.len();
+            held.pages
+                .retain(|page| !(page.org == org && page.id == id));
+            let gone = held.pages.len() != before;
+            if gone {
+                held.components
+                    .retain(|(_, component)| component.page != id);
+                held.subscribers.retain(|subscriber| subscriber.page != id);
+                held.letters.retain(|letter| letter.page != id);
+            }
+            gone
+        }))
+    }
+
+    async fn components(
+        &self,
+        org: TenantId,
+        page: crate::status::StatusPageId,
+    ) -> Result<Vec<crate::status::Component>, StoreError> {
+        Ok(self.with(|held| {
+            let mut found: Vec<crate::status::Component> = held
+                .components
+                .iter()
+                .filter(|(kept, component)| *kept == org && component.page == page)
+                .map(|(_, component)| component.clone())
+                .collect();
+            found.sort_by_key(|component| (component.position, component.id));
+            found
+        }))
+    }
+
+    async fn add_component(
+        &self,
+        org: TenantId,
+        component: &crate::status::Component,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            if !held
+                .pages
+                .iter()
+                .any(|page| page.org == org && page.id == component.page)
+            {
+                return false;
+            }
+            held.components.push((org, component.clone()));
+            true
+        }))
+    }
+
+    async fn keep_component(
+        &self,
+        org: TenantId,
+        component: &crate::status::Component,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            held.components
+                .iter_mut()
+                .find(|(kept, held)| {
+                    *kept == org && held.id == component.id && held.page == component.page
+                })
+                .map(|(_, held)| *held = component.clone())
+                .is_some()
+        }))
+    }
+
+    async fn remove_component(
+        &self,
+        org: TenantId,
+        page: crate::status::StatusPageId,
+        id: crate::status::ComponentId,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let before = held.components.len();
+            held.components.retain(|(kept, component)| {
+                !(*kept == org && component.page == page && component.id == id)
+            });
+            held.components.len() != before
+        }))
+    }
+}
+
+impl crate::status::StatusSubscribers for StatusLedger {
+    async fn find(
+        &self,
+        page: crate::status::StatusPageId,
+        email: &crate::identity::Email,
+    ) -> Result<Option<crate::status::Subscriber>, StoreError> {
+        Ok(self.with(|held| {
+            held.subscribers
+                .iter()
+                .find(|subscriber| subscriber.page == page && &subscriber.email == email)
+                .cloned()
+        }))
+    }
+
+    async fn get(
+        &self,
+        id: crate::status::SubscriberId,
+    ) -> Result<Option<crate::status::Subscriber>, StoreError> {
+        Ok(self.with(|held| {
+            held.subscribers
+                .iter()
+                .find(|subscriber| subscriber.id == id)
+                .cloned()
+        }))
+    }
+
+    async fn add(&self, subscriber: &crate::status::Subscriber) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            if held
+                .subscribers
+                .iter()
+                .any(|kept| kept.page == subscriber.page && kept.email == subscriber.email)
+            {
+                return false;
+            }
+            held.subscribers.push(subscriber.clone());
+            true
+        }))
+    }
+
+    async fn keep(&self, subscriber: &crate::status::Subscriber) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            held.subscribers
+                .iter_mut()
+                .find(|kept| kept.id == subscriber.id)
+                .map(|kept| *kept = subscriber.clone())
+                .is_some()
+        }))
+    }
+
+    async fn remove(&self, id: crate::status::SubscriberId) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let before = held.subscribers.len();
+            held.subscribers.retain(|subscriber| subscriber.id != id);
+            held.letters.retain(|letter| letter.subscriber != id);
+            held.subscribers.len() != before
+        }))
+    }
+
+    async fn confirmed(&self, page: crate::status::StatusPageId) -> Result<u64, StoreError> {
+        Ok(self.with(|held| {
+            u64::try_from(
+                held.subscribers
+                    .iter()
+                    .filter(|subscriber| subscriber.page == page && subscriber.confirmed)
+                    .count(),
+            )
+            .unwrap_or(u64::MAX)
+        }))
+    }
+}
+
+impl crate::status::StatusOutbox for StatusLedger {
+    async fn announce(
+        &self,
+        announcement: &crate::status::Announcement,
+    ) -> Result<u64, StoreError> {
+        Ok(self.with(|held| {
+            let pages: Vec<crate::status::StatusPageId> = held
+                .pages
+                .iter()
+                .filter(|page| page.org == announcement.org && page.public)
+                .map(|page| page.id)
+                .collect();
+            let fresh: Vec<QueuedLetter> = held
+                .subscribers
+                .iter()
+                .filter(|subscriber| subscriber.confirmed && pages.contains(&subscriber.page))
+                .map(|subscriber| QueuedLetter {
+                    id: crate::status::LetterId::fresh(),
+                    page: subscriber.page,
+                    subscriber: subscriber.id,
+                    body: crate::status::LetterBody::Update(crate::status::Bulletin {
+                        title: announcement.title.clone(),
+                        kind: announcement.kind,
+                        status: announcement.status,
+                        text: announcement.text.clone(),
+                        at_ms: announcement.at_ms,
+                    }),
+                    attempt: 0,
+                    next_at_ms: announcement.at_ms,
+                    status: crate::alerts::DeliveryStatus::Pending,
+                    last_error: None,
+                })
+                .collect();
+            let count = u64::try_from(fresh.len()).unwrap_or(u64::MAX);
+            held.letters.extend(fresh);
+            count
+        }))
+    }
+
+    async fn invite(&self, invite: &crate::status::Invite) -> Result<(), StoreError> {
+        self.with(|held| {
+            held.letters.push(QueuedLetter {
+                id: invite.id,
+                page: invite.page,
+                subscriber: invite.subscriber,
+                body: crate::status::LetterBody::Confirm,
+                attempt: 0,
+                next_at_ms: invite.at_ms,
+                status: crate::alerts::DeliveryStatus::Pending,
+                last_error: None,
+            });
+        });
+        Ok(())
+    }
+
+    async fn claim(
+        &self,
+        now_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<crate::status::ClaimedLetter>, StoreError> {
+        Ok(self.with(|held| {
+            held.letters
+                .iter()
+                .filter(|letter| {
+                    letter.status == crate::alerts::DeliveryStatus::Pending
+                        && letter.next_at_ms <= now_ms
+                })
+                .take(usize::try_from(limit).unwrap_or(usize::MAX))
+                .filter_map(|letter| {
+                    let page = held.pages.iter().find(|page| page.id == letter.page)?;
+                    let subscriber = held
+                        .subscribers
+                        .iter()
+                        .find(|subscriber| subscriber.id == letter.subscriber)?;
+                    Some(crate::status::ClaimedLetter {
+                        id: letter.id,
+                        attempt: letter.attempt,
+                        page: page.id,
+                        page_name: page.name.clone(),
+                        slug: page.slug.clone(),
+                        subscriber: subscriber.id,
+                        email: subscriber.email.clone(),
+                        body: letter.body.clone(),
+                    })
+                })
+                .collect()
+        }))
+    }
+
+    async fn settle(
+        &self,
+        id: crate::status::LetterId,
+        attempts: u32,
+        settlement: &crate::alerts::Settlement,
+    ) -> Result<(), StoreError> {
+        self.with(|held| {
+            if let Some(letter) = held.letters.iter_mut().find(|held| held.id == id) {
+                letter.attempt = attempts;
+                match settlement {
+                    crate::alerts::Settlement::Sent => {
+                        letter.status = crate::alerts::DeliveryStatus::Sent;
+                        letter.last_error = None;
+                    }
+                    crate::alerts::Settlement::Retry { next_at_ms, error } => {
+                        letter.next_at_ms = *next_at_ms;
+                        letter.last_error = Some(error.clone());
+                    }
+                    crate::alerts::Settlement::Abandoned { error } => {
+                        letter.status = crate::alerts::DeliveryStatus::Abandoned;
+                        letter.last_error = Some(error.clone());
+                    }
+                }
+            }
+        });
+        Ok(())
     }
 }

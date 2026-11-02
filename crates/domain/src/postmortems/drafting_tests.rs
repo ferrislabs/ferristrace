@@ -138,6 +138,7 @@ fn the_resolved_story() -> (Incident, Chronicle, Vec<Attachment>) {
             Author::Account(account(9)),
             Change::Comment {
                 body: CommentBody::try_from("rolled back\nthe | release  ").expect("a body"),
+                public: false,
             },
             BASE_MS + 3 * MINUTE,
         ),

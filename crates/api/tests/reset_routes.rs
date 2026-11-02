@@ -128,6 +128,16 @@ impl ferristrace_domain::AlertMailer for Dropped {
     }
 }
 
+impl ferristrace_domain::StatusMailer for Dropped {
+    async fn send_status(
+        &self,
+        _to: &Email,
+        _letter: &ferristrace_domain::Letter,
+    ) -> Result<(), ferristrace_domain::DeliveryError> {
+        Ok(())
+    }
+}
+
 fn choosing(token: &str, password: &str) -> Request<Body> {
     Request::builder()
         .uri("/auth/reset/confirm")

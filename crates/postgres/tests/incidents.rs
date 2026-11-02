@@ -206,6 +206,7 @@ async fn incidents_timelines_and_attachments_read_back_whole() {
             Author::Agent("triage".into()),
             Change::Comment {
                 body: CommentBody::try_from("rolled back").expect("a body"),
+                public: false,
             },
             1_050,
         ),
@@ -301,6 +302,7 @@ async fn one_organisation_never_sees_or_writes_another_organisations_incidents()
         Author::Account(stranger),
         Change::Comment {
             body: CommentBody::try_from("not yours").expect("a body"),
+            public: false,
         },
         1_100,
     );

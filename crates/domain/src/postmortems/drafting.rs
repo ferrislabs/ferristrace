@@ -150,7 +150,7 @@ fn told(chronicle: &Chronicle, change: &Change) -> String {
                 "made the incident private".to_owned()
             }
         }
-        Change::Comment { body } => format!("commented: \"{}\"", body.as_str()),
+        Change::Comment { body, .. } => format!("commented: \"{}\"", body.as_str()),
         Change::Alert {
             rule,
             from,

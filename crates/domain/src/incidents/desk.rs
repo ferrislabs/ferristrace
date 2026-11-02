@@ -16,13 +16,14 @@ use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, SessionStore};
 use crate::oncall::{Origin, PageSource, Pages, Paging, Schedules};
 use crate::organisation::{Memberships, Roll};
+use crate::status::{Announcement, StatusOutbox, UpdateKind};
 use crate::telemetry::TenantId;
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 pub const DEFAULT_SEVERITY: IncidentSeverity = IncidentSeverity::Sev3;
 
 #[derive(Debug)]
-pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg> {
+pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg, Ou> {
     readers: Readers<S, G, K>,
     projects: P,
     rules: R,
@@ -33,9 +34,11 @@ pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg> {
     roster: M,
     trail: A,
     paging: Paging<Sc, Pg>,
+    announcer: Ou,
 }
 
-impl<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg> IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg>
+impl<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg, Ou>
+    IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg, Ou>
 where
     S: SessionStore,
     G: Memberships,
@@ -50,6 +53,7 @@ where
     A: AuditTrail,
     Sc: Schedules,
     Pg: Pages,
+    Ou: StatusOutbox,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -63,6 +67,7 @@ where
         roster: M,
         trail: A,
         paging: Paging<Sc, Pg>,
+        announcer: Ou,
     ) -> Self {
         Self {
             readers,
@@ -75,6 +80,7 @@ where
             roster,
             trail,
             paging,
+            announcer,
         }
     }
 
@@ -208,6 +214,13 @@ where
         )
         .await?;
         self.page_on_call(&incident, now_ms).await?;
+        self.announce(
+            &incident,
+            UpdateKind::Opened,
+            IncidentStatus::Investigating.as_str(),
+            now_ms,
+        )
+        .await?;
         let people = self.people(org).await?;
         let alerts = rule
             .map(|rule| AlertRef {
@@ -250,6 +263,10 @@ where
         }
         let mut updated = Vec::new();
         for change in steps {
+            if let Change::Status { to, .. } = &change {
+                self.announce(&changed, UpdateKind::Status, to.as_str(), now_ms)
+                    .await?;
+            }
             match &change {
                 Change::Status { from, to } if from.is_open() && !to.is_open() => {
                     self.note(&changed, by, Action::IncidentResolved, Detail::default())
@@ -290,25 +307,36 @@ where
         org: TenantId,
         id: IncidentId,
         body: &CommentBody,
+        public: bool,
         now: UnixSeconds,
     ) -> Result<Chronicle, IncidentError> {
         let by = self.writer(who, org).await?;
         let incident = self.writable(org, id).await?;
+        let now_ms = millis(now);
         let entry = self
             .append(
                 &incident,
                 by,
-                Change::Comment { body: body.clone() },
-                millis(now),
+                Change::Comment {
+                    body: body.clone(),
+                    public,
+                },
+                now_ms,
             )
             .await?;
         self.note(
             &incident,
             by,
             Action::IncidentCommented,
-            Detail::default().with("bytes", body.as_str().len()),
+            Detail::default()
+                .with("bytes", body.as_str().len())
+                .with("public", public),
         )
         .await?;
+        if public {
+            self.announce(&incident, UpdateKind::Comment, body.as_str(), now_ms)
+                .await?;
+        }
         Ok(Chronicle {
             entries: vec![entry],
             people: self.people(org).await?,
@@ -384,6 +412,30 @@ where
                     target: Some(page.target),
                 },
                 at_ms: now_ms,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn announce(
+        &self,
+        incident: &Incident,
+        kind: UpdateKind,
+        text: &str,
+        at_ms: u64,
+    ) -> Result<(), IncidentError> {
+        if !incident.public {
+            return Ok(());
+        }
+        self.announcer
+            .announce(&Announcement {
+                org: incident.org,
+                incident: incident.id,
+                title: incident.title.clone(),
+                kind,
+                status: incident.status,
+                text: text.into(),
+                at_ms,
             })
             .await?;
         Ok(())

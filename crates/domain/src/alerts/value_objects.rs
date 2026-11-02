@@ -208,12 +208,14 @@ pub enum Duty {
     Evaluate,
     Deliver,
     Escalate,
+    Announce,
 }
 
 spelled!(Duty {
     Evaluate => "evaluate",
     Deliver => "deliver",
     Escalate => "escalate",
+    Announce => "announce",
 });
 
 #[derive(Debug, Clone, Copy, PartialEq)]

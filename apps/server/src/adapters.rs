@@ -10,10 +10,10 @@ use ferristrace_domain::telemetry::{
     BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
 };
 use ferristrace_domain::{
-    AlertMailer, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey,
+    AlertMailer, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey, Letter,
     LogRecord, LogSink, Mailer, Metric, MetricSink, NoPhotos, PageDispatch, Photo, PhotoError,
     Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink,
-    TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
+    StatusMailer, TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
     Argon2Hasher, HttpWebhooks, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer,
@@ -122,6 +122,20 @@ impl AlertMailer for Relay {
             Self::Smtp(mailer) => mailer.send_page(to, dispatch).await,
             Self::Unreachable => {
                 tracing::warn!("a page was to be mailed but no mail relay is configured");
+                Err(DeliveryError::new("no mail relay is configured"))
+            }
+        }
+    }
+}
+
+impl StatusMailer for Relay {
+    async fn send_status(&self, to: &Email, letter: &Letter) -> Result<(), DeliveryError> {
+        match self {
+            Self::Smtp(mailer) => mailer.send_status(to, letter).await,
+            Self::Unreachable => {
+                tracing::warn!(
+                    "a status page email was to be sent but no mail relay is configured"
+                );
                 Err(DeliveryError::new("no mail relay is configured"))
             }
         }

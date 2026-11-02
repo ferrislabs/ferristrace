@@ -121,10 +121,16 @@ pub enum Action {
     PostmortemEdited,
     PostmortemPublished,
     PostmortemUnpublished,
+    StatusPageCreated,
+    StatusPageUpdated,
+    StatusPageDeleted,
+    StatusComponentCreated,
+    StatusComponentUpdated,
+    StatusComponentDeleted,
 }
 
 impl Action {
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 55] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -174,6 +180,12 @@ impl Action {
         Self::PostmortemEdited,
         Self::PostmortemPublished,
         Self::PostmortemUnpublished,
+        Self::StatusPageCreated,
+        Self::StatusPageUpdated,
+        Self::StatusPageDeleted,
+        Self::StatusComponentCreated,
+        Self::StatusComponentUpdated,
+        Self::StatusComponentDeleted,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -227,6 +239,12 @@ impl Action {
             Self::PostmortemEdited => "postmortem.edited",
             Self::PostmortemPublished => "postmortem.published",
             Self::PostmortemUnpublished => "postmortem.unpublished",
+            Self::StatusPageCreated => "status_page.created",
+            Self::StatusPageUpdated => "status_page.updated",
+            Self::StatusPageDeleted => "status_page.deleted",
+            Self::StatusComponentCreated => "status_component.created",
+            Self::StatusComponentUpdated => "status_component.updated",
+            Self::StatusComponentDeleted => "status_component.deleted",
         }
     }
 
@@ -256,10 +274,12 @@ pub enum TargetKind {
     Schedule,
     Page,
     Postmortem,
+    StatusPage,
+    StatusComponent,
 }
 
 impl TargetKind {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 15] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -273,6 +293,8 @@ impl TargetKind {
         Self::Schedule,
         Self::Page,
         Self::Postmortem,
+        Self::StatusPage,
+        Self::StatusComponent,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -290,6 +312,8 @@ impl TargetKind {
             Self::Schedule => "schedule",
             Self::Page => "page",
             Self::Postmortem => "postmortem",
+            Self::StatusPage => "status_page",
+            Self::StatusComponent => "status_component",
         }
     }
 

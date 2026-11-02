@@ -23,7 +23,7 @@ use crate::identity::AccountId;
 use crate::oncall::Paging;
 use crate::organisation::{OrgRole, Whoami};
 use crate::telemetry::TenantId;
-use crate::testing::{AlertLedger, Crew, IncidentLedger, Notebook, OncallLedger};
+use crate::testing::{AlertLedger, Crew, IncidentLedger, Notebook, OncallLedger, StatusLedger};
 
 const NOW: u64 = 1_700_000_000;
 const ME: u128 = 9;
@@ -44,6 +44,7 @@ type Desk<'a> = IncidentDesk<
     Notebook,
     OncallLedger,
     OncallLedger,
+    StatusLedger,
 >;
 
 struct World {
@@ -53,6 +54,7 @@ struct World {
     notebook: Notebook,
     keys: Ring,
     oncall: OncallLedger,
+    status: StatusLedger,
 }
 
 impl World {
@@ -68,6 +70,7 @@ impl World {
             notebook: Notebook::default(),
             keys: Ring::default(),
             oncall: crate::oncall::fixtures::oncall(),
+            status: StatusLedger::default(),
         }
     }
 
@@ -83,6 +86,7 @@ impl World {
             self.crew.clone(),
             self.notebook.clone(),
             Paging::new(self.oncall.clone(), self.oncall.clone()),
+            self.status.clone(),
         )
     }
 
@@ -184,6 +188,7 @@ async fn every_change_appends_exactly_one_entry_in_order() {
         an_org(MINE),
         id,
         &CommentBody::try_from("rolled back").expect("a body"),
+        false,
         at(120),
     )
     .await
@@ -508,6 +513,7 @@ async fn every_incident_write_is_audited() {
         an_org(MINE),
         id,
         &CommentBody::try_from("on it").expect("a body"),
+        false,
         at(2),
     )
     .await
@@ -584,6 +590,7 @@ async fn a_read_key_reads_but_never_writes_and_a_stranger_sees_nothing() {
             an_org(MINE),
             id,
             &CommentBody::try_from("hi").expect("a body"),
+            false,
             at(1),
         )
         .await;
@@ -781,4 +788,249 @@ async fn declaring_with_an_unknown_schedule_is_refused() {
 
     assert_eq!(refused.map(|_| ()), Err(IncidentError::NoSuchSchedule));
     assert!(world.incidents.incidents().is_empty());
+}
+
+fn a_status_page(
+    world: &World,
+    org: TenantId,
+    slug: &str,
+    public: bool,
+) -> crate::status::StatusPageId {
+    let id = crate::status::StatusPageId::fresh();
+    world.status.put_page(crate::status::StatusPage {
+        id,
+        org,
+        name: crate::status::PageName::try_from("Acme").expect("a name"),
+        slug: crate::status::Slug::try_from(slug).expect("a slug"),
+        public,
+        hide_from_search: false,
+        theme: crate::status::Theme::default(),
+        intro: None,
+        created_ms: 1,
+        updated_ms: 1,
+    });
+    id
+}
+
+fn a_subscriber(world: &World, page: crate::status::StatusPageId, email: &str, confirmed: bool) {
+    world.status.put_subscriber(crate::status::Subscriber {
+        id: crate::status::SubscriberId::fresh(),
+        page,
+        email: crate::identity::Email::try_from(email).expect("an address"),
+        confirmed,
+        invited_ms: 1,
+    });
+}
+
+fn updates(world: &World) -> Vec<(crate::status::UpdateKind, String)> {
+    world
+        .status
+        .letters()
+        .into_iter()
+        .filter_map(|letter| match letter.body {
+            crate::status::LetterBody::Update(bulletin) => {
+                Some((bulletin.kind, bulletin.text.to_string()))
+            }
+            crate::status::LetterBody::Confirm => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_comment_keeps_whether_it_is_public_in_the_timeline() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let opened = desk
+        .open(&session(), an_org(MINE), &titled("Checkout down"), at(0))
+        .await
+        .expect("opened");
+    let id = opened.incident.id;
+
+    for (text, public) in [("internal", false), ("for everyone", true)] {
+        desk.comment(
+            &session(),
+            an_org(MINE),
+            id,
+            &CommentBody::try_from(text).expect("a body"),
+            public,
+            at(1),
+        )
+        .await
+        .expect("commented");
+    }
+
+    let comments: Vec<(String, bool)> = world
+        .incidents
+        .timeline()
+        .into_iter()
+        .filter_map(|entry| match entry.change {
+            Change::Comment { body, public } => Some((body.as_str().to_owned(), public)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        comments,
+        vec![
+            ("internal".to_owned(), false),
+            ("for everyone".to_owned(), true)
+        ]
+    );
+    let audited = world
+        .notebook
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.action == Action::IncidentCommented)
+        .map(|entry| entry.detail.get("public").flatten().map(ToOwned::to_owned))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        audited,
+        vec![Some("false".to_owned()), Some("true".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn a_public_comment_on_a_public_incident_reaches_each_confirmed_subscriber_once() {
+    let world = World::new();
+    let page = a_status_page(&world, an_org(MINE), "acme", true);
+    let hidden = a_status_page(&world, an_org(MINE), "acme-internal", false);
+    let theirs = a_status_page(&world, an_org(THEIRS), "theirs", true);
+    a_subscriber(&world, page, "one@example.com", true);
+    a_subscriber(&world, page, "two@example.com", true);
+    a_subscriber(&world, page, "pending@example.com", false);
+    a_subscriber(&world, hidden, "hidden@example.com", true);
+    a_subscriber(&world, theirs, "stranger@example.com", true);
+    let desk = world.desk(OrgRole::Member);
+    let public = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                public: true,
+                ..titled("Checkout down")
+            },
+            at(0),
+        )
+        .await
+        .expect("opened")
+        .incident
+        .id;
+
+    desk.comment(
+        &session(),
+        an_org(MINE),
+        public,
+        &CommentBody::try_from("the primary db is full").expect("a body"),
+        false,
+        at(1),
+    )
+    .await
+    .expect("commented");
+    desk.comment(
+        &session(),
+        an_org(MINE),
+        public,
+        &CommentBody::try_from("Some payments fail.").expect("a body"),
+        true,
+        at(2),
+    )
+    .await
+    .expect("commented");
+
+    let comments: Vec<_> = updates(&world)
+        .into_iter()
+        .filter(|(kind, _)| *kind == crate::status::UpdateKind::Comment)
+        .collect();
+    assert_eq!(
+        comments.len(),
+        2,
+        "one per confirmed subscriber of a public page"
+    );
+    assert!(
+        comments
+            .iter()
+            .all(|(_, text)| text == "Some payments fail.")
+    );
+    let reached: Vec<_> = world
+        .status
+        .letters()
+        .iter()
+        .map(|letter| letter.page)
+        .collect();
+    assert!(reached.iter().all(|held| *held == page));
+}
+
+#[tokio::test]
+async fn opening_and_moving_a_public_incident_is_announced_and_a_private_one_never() {
+    let world = World::new();
+    let page = a_status_page(&world, an_org(MINE), "acme", true);
+    a_subscriber(&world, page, "one@example.com", true);
+    let desk = world.desk(OrgRole::Member);
+    let private = desk
+        .open(&session(), an_org(MINE), &titled("Quiet"), at(0))
+        .await
+        .expect("opened")
+        .incident
+        .id;
+    desk.comment(
+        &session(),
+        an_org(MINE),
+        private,
+        &CommentBody::try_from("public but on a private incident").expect("a body"),
+        true,
+        at(1),
+    )
+    .await
+    .expect("commented");
+    desk.amend(
+        &session(),
+        an_org(MINE),
+        private,
+        IncidentPatch {
+            status: Some(IncidentStatus::Identified),
+            ..IncidentPatch::default()
+        },
+        at(2),
+    )
+    .await
+    .expect("amended");
+    assert!(updates(&world).is_empty());
+
+    let public = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                public: true,
+                ..titled("Loud")
+            },
+            at(3),
+        )
+        .await
+        .expect("opened")
+        .incident
+        .id;
+    desk.amend(
+        &session(),
+        an_org(MINE),
+        public,
+        IncidentPatch {
+            status: Some(IncidentStatus::Monitoring),
+            severity: Some(IncidentSeverity::Sev1),
+            ..IncidentPatch::default()
+        },
+        at(4),
+    )
+    .await
+    .expect("amended");
+
+    assert_eq!(
+        updates(&world),
+        vec![
+            (
+                crate::status::UpdateKind::Opened,
+                "investigating".to_owned()
+            ),
+            (crate::status::UpdateKind::Status, "monitoring".to_owned()),
+        ]
+    );
 }

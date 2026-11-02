@@ -8,7 +8,7 @@ use ferristrace_api::{AppState, SessionCookie, oncall_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
     AlertLedger, Bench, Couriered, Crew, IncidentLedger, Inert, Notebook, OncallLedger,
-    Untransacted,
+    StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -261,6 +261,10 @@ repo!(Schedules, OncallLedger, |fakes| fakes
     .oncall
     .clone());
 repo!(Pages, OncallLedger, |fakes| fakes.harness.oncall.clone());
+repo!(StatusOutbox, StatusLedger, |fakes| {
+    let _ = fakes;
+    StatusLedger::default()
+});
 
 struct TestStack;
 

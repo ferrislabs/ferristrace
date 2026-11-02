@@ -2,20 +2,21 @@ use core::future::Future;
 
 pub use ferristrace_domain::testing::{
     AlertLedger, Bench, Couriered, Crew, IncidentLedger, Notebook, OncallLedger, PostmortemLedger,
+    QueuedLetter, StatusLedger,
 };
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
     AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,
     Counted, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, Fingerprint, HashError,
-    IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LogBucket, LogPage,
-    LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
+    IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter, LogBucket,
+    LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
     MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, Password,
     PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant,
     ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries,
     ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
-    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
-    UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl,
-    Window,
+    SpanSink, StatusMailer, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
+    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender,
+    WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -90,6 +91,12 @@ impl AlertMailer for Inert {
     }
 
     async fn send_page(&self, _to: &Email, _dispatch: &PageDispatch) -> Result<(), DeliveryError> {
+        Err(DeliveryError::new("no mail relay is configured"))
+    }
+}
+
+impl StatusMailer for Inert {
+    async fn send_status(&self, _to: &Email, _letter: &Letter) -> Result<(), DeliveryError> {
         Err(DeliveryError::new("no mail relay is configured"))
     }
 }

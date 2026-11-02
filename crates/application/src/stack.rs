@@ -1,8 +1,8 @@
 use ferristrace_domain::{
     AckKey, AlertMailer, AuthProvider, Authorizer, Clock, ESCALATE_AFTER_SECS, IssueReader,
-    LogReader, LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos, ProvisionPolicy,
-    QuotaPolicy, SpanPages, SpanReader, SpanSink, TenantDirectory, UsageMeter, UsageReader,
-    WebhookSender,
+    LinkKey, LogReader, LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos,
+    ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory,
+    UsageMeter, UsageReader, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -11,7 +11,7 @@ pub trait Stack: Send + Sync + 'static {
     type Repos: UnitOfWork;
     type Clock: Clock + Send + Sync + 'static;
     type Hasher: PasswordHasher + Send + Sync + 'static;
-    type Mailer: Mailer + AlertMailer + Send + Sync + 'static;
+    type Mailer: Mailer + AlertMailer + StatusMailer + Send + Sync + 'static;
     type Photos: Photos + Send + Sync + 'static;
     type SpanStore: SpanReader + SpanPages + Send + Sync + 'static;
     type IssueStore: IssueReader + Send + Sync + 'static;
@@ -57,6 +57,7 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) oidc: Option<S::Oidc>,
     pub(crate) provision: ProvisionPolicy,
     pub(crate) ack_key: Option<AckKey>,
+    pub(crate) status_key: Option<LinkKey>,
     pub(crate) escalate_after_secs: u64,
 }
 
@@ -64,6 +65,12 @@ impl<S: Stack> Ferristrace<S> {
     #[must_use]
     pub fn with_ack_key(mut self, key: Option<AckKey>) -> Self {
         self.ack_key = key;
+        self
+    }
+
+    #[must_use]
+    pub fn with_status_key(mut self, key: Option<LinkKey>) -> Self {
+        self.status_key = key;
         self
     }
 
@@ -89,6 +96,7 @@ impl<S: Stack> Ferristrace<S> {
             oidc: adapters.oidc,
             provision: adapters.provision,
             ack_key: None,
+            status_key: None,
             escalate_after_secs: ESCALATE_AFTER_SECS,
         }
     }

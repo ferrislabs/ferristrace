@@ -6,7 +6,7 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, Untransacted,
+    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, SignalReaders, Stack};
 use ferristrace_clickhouse::{
@@ -581,6 +581,10 @@ repo!(IncidentAttachments, IncidentLedger, |held| held
     .clone());
 repo!(Schedules, OncallLedger, |held| held.oncall.clone());
 repo!(Pages, OncallLedger, |held| held.oncall.clone());
+repo!(StatusOutbox, StatusLedger, |held| {
+    let _ = held;
+    StatusLedger::default()
+});
 
 struct Watching;
 
@@ -831,6 +835,7 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
         org(1),
         id,
         &CommentBody::try_from("rolled back the payment service").expect("a body"),
+        false,
     )
     .await
     .expect("commented");

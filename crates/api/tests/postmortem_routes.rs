@@ -8,7 +8,7 @@ use ferristrace_api::{AppState, SessionCookie, incident_router, postmortem_route
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
     AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, PostmortemLedger,
-    Untransacted,
+    StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -244,6 +244,10 @@ repo!(IncidentAttachments, IncidentLedger, |fakes| fakes
     .clone());
 repo!(Schedules, OncallLedger, |fakes| fakes.oncall.clone());
 repo!(Pages, OncallLedger, |fakes| fakes.oncall.clone());
+repo!(StatusOutbox, StatusLedger, |fakes| {
+    let _ = fakes;
+    StatusLedger::default()
+});
 repo!(Postmortems, PostmortemLedger, |fakes| fakes
     .postmortems
     .clone());

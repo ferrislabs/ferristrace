@@ -24,13 +24,15 @@ mod provisioning;
 mod resets;
 mod roster;
 mod sessions;
+mod status;
 mod teams;
 mod unit_of_work;
 
 pub use accounts::{AccountError, PostgresAccounts};
 pub use alerts::{
-    DELIVER_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels, PostgresAlertDuty,
-    PostgresAlertEvents, PostgresAlertOutbox, PostgresAlertRules, PostgresAlertStates,
+    ANNOUNCE_LOCK, DELIVER_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels,
+    PostgresAlertDuty, PostgresAlertEvents, PostgresAlertOutbox, PostgresAlertRules,
+    PostgresAlertStates,
 };
 pub use api_keys::PostgresApiKeys;
 pub use audit::PostgresAuditTrail;
@@ -52,5 +54,6 @@ pub use provisioning::{INVITE_WINDOW, PostgresControlPlane};
 pub use resets::PostgresResets;
 pub use roster::PostgresRoster;
 pub use sessions::PostgresSessions;
+pub use status::{PostgresStatusOutbox, PostgresStatusPages, PostgresStatusSubscribers};
 pub use teams::PostgresTeams;
 pub use unit_of_work::{Postgres, SharedTx};

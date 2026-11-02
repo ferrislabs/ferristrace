@@ -7,7 +7,7 @@ use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, incident_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, Untransacted,
+    AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -244,6 +244,10 @@ repo!(IncidentAttachments, IncidentLedger, |fakes| fakes
     .clone());
 repo!(Schedules, OncallLedger, |fakes| fakes.oncall.clone());
 repo!(Pages, OncallLedger, |fakes| fakes.oncall.clone());
+repo!(StatusOutbox, StatusLedger, |fakes| {
+    let _ = fakes;
+    StatusLedger::default()
+});
 
 struct TestStack;
 
@@ -475,7 +479,7 @@ async fn an_incident_is_declared_listed_read_and_annotated_in_the_documented_sha
     assert_eq!(commented["kind"], "comment");
     assert_eq!(
         commented["detail"],
-        json!({"body": "rolled back the deploy"})
+        json!({"body": "rolled back the deploy", "public": false})
     );
     assert_eq!(
         commented["author"],
