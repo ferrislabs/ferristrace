@@ -20,9 +20,10 @@ use crate::alerts::{
 use crate::audit::{Action, TargetKind};
 use crate::clock::UnixSeconds;
 use crate::identity::AccountId;
+use crate::oncall::Paging;
 use crate::organisation::{OrgRole, Whoami};
 use crate::telemetry::TenantId;
-use crate::testing::{AlertLedger, Crew, IncidentLedger, Notebook};
+use crate::testing::{AlertLedger, Crew, IncidentLedger, Notebook, OncallLedger};
 
 const NOW: u64 = 1_700_000_000;
 const ME: u128 = 9;
@@ -41,6 +42,8 @@ type Desk<'a> = IncidentDesk<
     IncidentLedger,
     Crew,
     Notebook,
+    OncallLedger,
+    OncallLedger,
 >;
 
 struct World {
@@ -49,6 +52,7 @@ struct World {
     crew: Crew,
     notebook: Notebook,
     keys: Ring,
+    oncall: OncallLedger,
 }
 
 impl World {
@@ -63,6 +67,7 @@ impl World {
             crew,
             notebook: Notebook::default(),
             keys: Ring::default(),
+            oncall: crate::oncall::fixtures::oncall(),
         }
     }
 
@@ -77,6 +82,7 @@ impl World {
             self.incidents.clone(),
             self.crew.clone(),
             self.notebook.clone(),
+            Paging::new(self.oncall.clone(), self.oncall.clone()),
         )
     }
 
@@ -101,6 +107,7 @@ impl World {
                     severity,
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
+                    page: None,
                 })
                 .expect("a definition"),
             },
@@ -660,4 +667,118 @@ async fn a_project_bound_key_sees_only_its_projects_incidents() {
     );
     assert_eq!(hidden.err(), Some(IncidentError::NoSuchIncident));
     assert_eq!(elsewhere.err(), Some(IncidentError::NoSuchProject));
+}
+
+fn paging(title: &str) -> IncidentDraft {
+    IncidentDraft {
+        page: Some(crate::oncall::fixtures::weekly().id),
+        ..titled(title)
+    }
+}
+
+#[tokio::test]
+async fn spec_l2_5_declaring_with_paging_pages_the_person_on_call_at_that_time() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let opened_at = crate::oncall::fixtures::START - NOW + 7 * 86_400;
+
+    let opened = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &paging("Checkout down"),
+            at(opened_at),
+        )
+        .await
+        .expect("declared with paging");
+
+    assert_eq!(
+        opened.incident.paged_schedule,
+        Some(crate::oncall::fixtures::weekly().id)
+    );
+    let pages = world.oncall.pages();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(
+        pages[0].target,
+        crate::oncall::fixtures::person(crate::oncall::fixtures::ADA),
+        "the second week of the rotation"
+    );
+    assert_eq!(
+        pages[0].source,
+        crate::oncall::PageSource::Incident(opened.incident.id)
+    );
+    let kinds: Vec<_> = world
+        .incidents
+        .timeline()
+        .into_iter()
+        .map(|entry| (entry.author, entry.change.kind()))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            (Author::Account(account(ME)), EntryKind::Opened),
+            (Author::System, EntryKind::Paged),
+        ]
+    );
+    assert_eq!(
+        world.notebook.entries()[0].detail.get("paged"),
+        Some(Some(
+            crate::oncall::fixtures::weekly().id.to_string().as_str()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn resolving_a_paged_incident_resolves_its_page() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let opened_at = crate::oncall::fixtures::START - NOW;
+    let opened = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &paging("Checkout down"),
+            at(opened_at),
+        )
+        .await
+        .expect("declared");
+
+    desk.amend(
+        &session(),
+        an_org(MINE),
+        opened.incident.id,
+        IncidentPatch {
+            status: Some(IncidentStatus::Resolved),
+            ..IncidentPatch::default()
+        },
+        at(opened_at + 60),
+    )
+    .await
+    .expect("resolved");
+
+    assert_eq!(
+        world.oncall.pages()[0].state,
+        crate::oncall::PageState::Resolved
+    );
+}
+
+#[tokio::test]
+async fn declaring_with_an_unknown_schedule_is_refused() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+
+    let refused = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                page: Some(crate::oncall::ScheduleId::fresh()),
+                ..titled("Nowhere")
+            },
+            at(0),
+        )
+        .await;
+
+    assert_eq!(refused.map(|_| ()), Err(IncidentError::NoSuchSchedule));
+    assert!(world.incidents.incidents().is_empty());
 }

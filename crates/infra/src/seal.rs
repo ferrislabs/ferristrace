@@ -2,7 +2,7 @@ use core::fmt;
 
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use ferristrace_domain::{SECRET_BYTES, TotpSecret};
+use ferristrace_domain::{AckKey, SECRET_BYTES, TotpSecret};
 use zeroize::{Zeroize, Zeroizing};
 
 const NONCE_BYTES: usize = 12;
@@ -54,6 +54,13 @@ impl SecretSeal {
             .ok()
             .map(Zeroizing::new)
     }
+}
+
+pub fn ack_key_from_hex(text: &str) -> Result<AckKey, BadKey> {
+    let mut key = hex::decode(text.trim()).map_err(|_| BadKey)?;
+    let derived = (key.len() == 32).then(|| AckKey::derive(&key));
+    key.zeroize();
+    derived.ok_or(BadKey)
 }
 
 impl fmt::Debug for SecretSeal {
@@ -171,6 +178,31 @@ mod tests {
             None,
             "a webhook secret is not a totp secret"
         );
+    }
+
+    #[test]
+    fn the_acknowledgement_key_follows_the_key_at_rest() {
+        use ferristrace_domain::{AccountId, AckClaim, PageId, TenantId, UnixSeconds};
+        use uuid::Uuid;
+
+        let claim = AckClaim {
+            org: TenantId::new(Uuid::from_u128(1)),
+            page: PageId::new(Uuid::from_u128(2)),
+            account: AccountId::new(Uuid::from_u128(3)),
+        };
+        let mine = super::ack_key_from_hex(&a_key()).expect("a key");
+        let again = super::ack_key_from_hex(&format!(" {} ", a_key())).expect("a key");
+        let theirs = super::ack_key_from_hex(&another_key()).expect("a key");
+
+        let token = mine.sign(&claim, UnixSeconds::new(100));
+
+        assert_eq!(again.open(&token, UnixSeconds::new(1)), Ok(claim));
+        assert!(theirs.open(&token, UnixSeconds::new(1)).is_err());
+        assert!(
+            !token.contains(&a_key()),
+            "the key at rest is not in the link"
+        );
+        assert_eq!(super::ack_key_from_hex("nope").map(|_| ()), Err(BadKey));
     }
 
     #[test]

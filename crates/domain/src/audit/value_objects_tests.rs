@@ -59,6 +59,13 @@ fn the_spellings_are_stable_and_dotted() {
             "incident.attached",
             "incident.resolved",
             "incident.reopened",
+            "schedule.created",
+            "schedule.updated",
+            "schedule.deleted",
+            "override.created",
+            "override.deleted",
+            "page.acknowledged",
+            "page.escalated",
         ]
     );
 }
@@ -73,7 +80,7 @@ fn an_actor_reads_back_from_its_kind_and_id() {
     let account = Actor::Account(AccountId::new(Uuid::from_u128(4)));
     let key = Actor::ApiKey(KeyId::new(Uuid::from_u128(5)));
 
-    for actor in [account, key, Actor::Operator] {
+    for actor in [account, key, Actor::Operator, Actor::System] {
         assert_eq!(Actor::of(actor.kind(), actor.id()), Some(actor));
     }
 }
@@ -84,6 +91,13 @@ fn the_operator_carries_no_id_and_an_account_always_does() {
     assert_eq!(Actor::of("account", None), None);
     assert_eq!(Actor::of("operator", Some(Uuid::from_u128(1))), None);
     assert_eq!(Actor::of("robot", None), None);
+}
+
+#[test]
+fn the_system_acts_anonymously() {
+    assert_eq!(Actor::System.kind(), "system");
+    assert_eq!(Actor::System.id(), None);
+    assert_eq!(Actor::of("system", Some(Uuid::from_u128(1))), None);
 }
 
 #[test]

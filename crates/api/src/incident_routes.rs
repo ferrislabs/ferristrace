@@ -12,7 +12,7 @@ use ferristrace_domain::{
     AccountId, AlertRef, Attachment, AttachmentKind, AttachmentLabel, Author, BadIncident, Briefed,
     Change, Chronicle, CommentBody, Dossier, IncidentDraft, IncidentError, IncidentFilter,
     IncidentId, IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle,
-    Person, ProjectId, Reference, RuleId, TenantId, TimelineEntry,
+    Person, ProjectId, Reference, RuleId, ScheduleId, TenantId, TimelineEntry,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -101,6 +101,7 @@ pub struct IncidentBody {
     opened_ms: u64,
     resolved_ms: Option<u64>,
     alert: Option<AlertBody>,
+    paged_schedule: Option<Uuid>,
 }
 
 impl From<&Briefed> for IncidentBody {
@@ -117,6 +118,7 @@ impl From<&Briefed> for IncidentBody {
             opened_ms: incident.opened_ms,
             resolved_ms: incident.resolved_ms,
             alert: briefed.alert.as_ref().map(AlertBody::from),
+            paged_schedule: incident.paged_schedule.map(ScheduleId::as_uuid),
         }
     }
 }
@@ -213,6 +215,12 @@ fn detail_of(chronicle: &Chronicle, change: &Change) -> Value {
                 .collect::<BTreeMap<_, _>>(),
         }),
         Change::Attachment(attachment) => json!(AttachmentBody::from(attachment)),
+        Change::Paged { page, step, target } => json!({
+            "page": page.as_uuid(),
+            "step": step,
+            "target": owner_of(chronicle, *target),
+        }),
+        Change::Acknowledged { page } => json!({"page": page.as_uuid()}),
     }
 }
 
@@ -303,6 +311,13 @@ pub struct DraftBody {
     alert: Option<Uuid>,
     #[serde(default)]
     public: bool,
+    #[serde(default)]
+    page: Option<PagedBody>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct PagedBody {
+    schedule: Uuid,
 }
 
 impl DraftBody {
@@ -317,6 +332,7 @@ impl DraftBody {
             project: self.project.map(ProjectId::new),
             alert: self.alert.map(RuleId::new),
             public: self.public,
+            page: self.page.map(|page| ScheduleId::new(page.schedule)),
         })
     }
 }
@@ -558,6 +574,7 @@ fn status_of(error: IncidentError) -> StatusCode {
         IncidentError::NotYours | IncidentError::NoSuchIncident => StatusCode::NOT_FOUND,
         IncidentError::ReadOnly => StatusCode::FORBIDDEN,
         IncidentError::NoSuchProject
+        | IncidentError::NoSuchSchedule
         | IncidentError::NoSuchAlert
         | IncidentError::AlertNotFiring
         | IncidentError::NotAMember

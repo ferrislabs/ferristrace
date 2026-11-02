@@ -3,7 +3,7 @@ use ferristrace_domain::{
     AccountId, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Incident,
     IncidentAttachments, IncidentFilter, IncidentId, IncidentScope, IncidentSeverity,
     IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, ProjectId, Reference, RuleId,
-    StoreError, TenantId, TimelineEntry, TimelineId,
+    ScheduleId, StoreError, TenantId, TimelineEntry, TimelineId,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -53,6 +53,9 @@ fn read_incident(row: &PgRow) -> Result<Incident, StoreError> {
         opened_from_alert: row
             .get::<Option<Uuid>, _>("opened_from_alert")
             .map(RuleId::new),
+        paged_schedule: row
+            .get::<Option<Uuid>, _>("paged_schedule")
+            .map(ScheduleId::new),
     })
 }
 
@@ -72,19 +75,19 @@ fn listing(scope: IncidentScope) -> &'static str {
     match scope {
         IncidentScope::Open => {
             "SELECT id, org_id, project_id, title, severity, status, owner_id, public, \
-             opened_ms, resolved_ms, opened_from_alert FROM incidents \
+             opened_ms, resolved_ms, opened_from_alert, paged_schedule FROM incidents \
              WHERE org_id = $1 AND ($2::uuid IS NULL OR project_id = $2) \
              AND status <> 'resolved' ORDER BY opened_ms DESC, id"
         }
         IncidentScope::Resolved => {
             "SELECT id, org_id, project_id, title, severity, status, owner_id, public, \
-             opened_ms, resolved_ms, opened_from_alert FROM incidents \
+             opened_ms, resolved_ms, opened_from_alert, paged_schedule FROM incidents \
              WHERE org_id = $1 AND ($2::uuid IS NULL OR project_id = $2) \
              AND status = 'resolved' ORDER BY opened_ms DESC, id"
         }
         IncidentScope::All => {
             "SELECT id, org_id, project_id, title, severity, status, owner_id, public, \
-             opened_ms, resolved_ms, opened_from_alert FROM incidents \
+             opened_ms, resolved_ms, opened_from_alert, paged_schedule FROM incidents \
              WHERE org_id = $1 AND ($2::uuid IS NULL OR project_id = $2) \
              ORDER BY opened_ms DESC, id"
         }
@@ -111,7 +114,7 @@ impl Incidents for PostgresIncidents {
         let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "SELECT id, org_id, project_id, title, severity, status, owner_id, public, \
-             opened_ms, resolved_ms, opened_from_alert FROM incidents \
+             opened_ms, resolved_ms, opened_from_alert, paged_schedule FROM incidents \
              WHERE org_id = $1 AND id = $2",
         )
         .bind(org.as_uuid())
@@ -127,10 +130,12 @@ impl Incidents for PostgresIncidents {
         sqlx::query(
             "INSERT INTO incidents \
              (id, org_id, project_id, title, severity, status, owner_id, public, \
-              opened_ms, resolved_ms, opened_from_alert) \
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11 \
-             WHERE $11::uuid IS NULL OR EXISTS \
-               (SELECT 1 FROM alerts WHERE id = $11 AND org_id = $2)",
+              opened_ms, resolved_ms, opened_from_alert, paged_schedule) \
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 \
+             WHERE ($11::uuid IS NULL OR EXISTS \
+               (SELECT 1 FROM alerts WHERE id = $11 AND org_id = $2)) \
+             AND ($12::uuid IS NULL OR EXISTS \
+               (SELECT 1 FROM oncall_schedules WHERE id = $12 AND org_id = $2))",
         )
         .bind(incident.id.as_uuid())
         .bind(incident.org.as_uuid())
@@ -143,6 +148,7 @@ impl Incidents for PostgresIncidents {
         .bind(signed(incident.opened_ms))
         .bind(incident.resolved_ms.map(signed))
         .bind(incident.opened_from_alert.map(RuleId::as_uuid))
+        .bind(incident.paged_schedule.map(ScheduleId::as_uuid))
         .execute(&mut **tx)
         .await
         .map_err(unreachable("open an incident"))?;

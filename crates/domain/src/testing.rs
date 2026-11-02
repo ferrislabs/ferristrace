@@ -568,10 +568,12 @@ impl crate::alerts::AlertDuty for AlertLedger {
 }
 
 type Sent = Vec<(Box<str>, crate::alerts::Dispatch)>;
+type Paged = Vec<(Box<str>, crate::oncall::PageDispatch)>;
 
 #[derive(Debug, Clone, Default)]
 pub struct Couriered {
     sent: Arc<Mutex<Sent>>,
+    paged: Arc<Mutex<Paged>>,
     failing: Arc<Mutex<bool>>,
     private: bool,
 }
@@ -590,6 +592,10 @@ impl Couriered {
 
     pub fn sent(&self) -> Sent {
         self.sent.lock().expect("the courier lock").clone()
+    }
+
+    pub fn paged(&self) -> Paged {
+        self.paged.lock().expect("the courier lock").clone()
     }
 
     fn note(
@@ -636,6 +642,23 @@ impl crate::alerts::AlertMailer for Couriered {
         dispatch: &crate::alerts::Dispatch,
     ) -> Result<(), crate::alerts::DeliveryError> {
         self.note(to.target().into(), dispatch)
+    }
+
+    async fn send_page(
+        &self,
+        to: &crate::identity::Email,
+        dispatch: &crate::oncall::PageDispatch,
+    ) -> Result<(), crate::alerts::DeliveryError> {
+        if *self.failing.lock().expect("the courier lock") {
+            return Err(crate::alerts::DeliveryError::new(
+                "the mail relay answered 451",
+            ));
+        }
+        self.paged
+            .lock()
+            .expect("the courier lock")
+            .push((to.as_str().into(), dispatch.clone()));
+        Ok(())
     }
 }
 
@@ -799,6 +822,16 @@ pub struct Crew {
 
 impl Crew {
     pub fn seat(&self, org: TenantId, account: crate::identity::AccountId, email: &str) {
+        self.seat_as(org, account, email, crate::organisation::OrgRole::Member);
+    }
+
+    pub fn seat_as(
+        &self,
+        org: TenantId,
+        account: crate::identity::AccountId,
+        email: &str,
+        role: crate::organisation::OrgRole,
+    ) {
         self.members.lock().expect("the crew lock").push((
             org,
             crate::organisation::Member {
@@ -806,7 +839,7 @@ impl Crew {
                 email: crate::identity::Email::try_from(email).expect("an address"),
                 name: None,
                 photo: None,
-                role: crate::organisation::OrgRole::Member,
+                role,
                 joined_at_unix_nanos: 0,
             },
         ));
@@ -871,5 +904,431 @@ impl crate::organisation::Roll for Crew {
         _digest: crate::secret::SecretHash,
     ) -> Result<(), StoreError> {
         Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct Rostering {
+    schedules: Vec<crate::oncall::Schedule>,
+    overrides: Vec<(TenantId, crate::oncall::Override)>,
+    pages: Vec<crate::oncall::Page>,
+    notices: Vec<crate::oncall::Notice>,
+    addresses: Vec<(crate::identity::AccountId, crate::identity::Email)>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OncallLedger {
+    held: Arc<Mutex<Rostering>>,
+}
+
+impl OncallLedger {
+    fn with<T>(&self, work: impl FnOnce(&mut Rostering) -> T) -> T {
+        work(&mut self.held.lock().expect("the on-call ledger lock"))
+    }
+
+    pub fn put(&self, schedule: crate::oncall::Schedule) {
+        self.with(|held| held.schedules.push(schedule));
+    }
+
+    pub fn address(&self, account: crate::identity::AccountId, email: &str) {
+        let email = crate::identity::Email::try_from(email).expect("an address");
+        self.with(|held| held.addresses.push((account, email)));
+    }
+
+    pub fn schedules(&self) -> Vec<crate::oncall::Schedule> {
+        self.with(|held| held.schedules.clone())
+    }
+
+    pub fn pages(&self) -> Vec<crate::oncall::Page> {
+        self.with(|held| held.pages.clone())
+    }
+
+    pub fn notices(&self) -> Vec<crate::oncall::Notice> {
+        self.with(|held| held.notices.clone())
+    }
+}
+
+impl crate::oncall::Schedules for OncallLedger {
+    async fn of_team(
+        &self,
+        org: TenantId,
+        team: crate::organisation::TeamId,
+    ) -> Result<Vec<crate::oncall::Schedule>, StoreError> {
+        Ok(self.with(|held| {
+            held.schedules
+                .iter()
+                .filter(|schedule| schedule.org == org && schedule.team == team)
+                .cloned()
+                .collect()
+        }))
+    }
+
+    async fn of_org(&self, org: TenantId) -> Result<Vec<crate::oncall::Schedule>, StoreError> {
+        Ok(self.with(|held| {
+            held.schedules
+                .iter()
+                .filter(|schedule| schedule.org == org)
+                .cloned()
+                .collect()
+        }))
+    }
+
+    async fn get(
+        &self,
+        org: TenantId,
+        id: crate::oncall::ScheduleId,
+    ) -> Result<Option<crate::oncall::Schedule>, StoreError> {
+        Ok(self.with(|held| {
+            held.schedules
+                .iter()
+                .find(|schedule| schedule.org == org && schedule.id == id)
+                .cloned()
+        }))
+    }
+
+    async fn create(
+        &self,
+        org: TenantId,
+        team: crate::organisation::TeamId,
+        draft: &crate::oncall::ScheduleDraft,
+    ) -> Result<Option<crate::oncall::Schedule>, StoreError> {
+        Ok(self.with(|held| {
+            if held.schedules.iter().any(|schedule| {
+                schedule.org == org && schedule.team == team && schedule.name == draft.name
+            }) {
+                return None;
+            }
+            let schedule = crate::oncall::Schedule {
+                id: crate::oncall::ScheduleId::fresh(),
+                org,
+                team,
+                name: draft.name.clone(),
+                timezone: draft.timezone.clone(),
+                rotation: draft.rotation.clone(),
+                handoff: draft.handoff,
+                length: draft.length,
+                starts_on: draft.starts_on,
+            };
+            held.schedules.push(schedule.clone());
+            Some(schedule)
+        }))
+    }
+
+    async fn update(&self, schedule: &crate::oncall::Schedule) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            held.schedules
+                .iter_mut()
+                .find(|kept| kept.org == schedule.org && kept.id == schedule.id)
+                .map(|kept| *kept = schedule.clone())
+                .is_some()
+        }))
+    }
+
+    async fn delete(
+        &self,
+        org: TenantId,
+        id: crate::oncall::ScheduleId,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let before = held.schedules.len();
+            held.schedules
+                .retain(|schedule| !(schedule.org == org && schedule.id == id));
+            held.overrides.retain(|(_, cover)| cover.schedule != id);
+            held.pages.retain(|page| page.schedule != id);
+            held.schedules.len() != before
+        }))
+    }
+
+    async fn overrides(
+        &self,
+        org: TenantId,
+        schedule: crate::oncall::ScheduleId,
+    ) -> Result<Vec<crate::oncall::Override>, StoreError> {
+        Ok(self.with(|held| {
+            held.overrides
+                .iter()
+                .filter(|(kept, cover)| *kept == org && cover.schedule == schedule)
+                .map(|(_, cover)| *cover)
+                .collect()
+        }))
+    }
+
+    async fn add_override(
+        &self,
+        org: TenantId,
+        cover: &crate::oncall::Override,
+    ) -> Result<(), StoreError> {
+        self.with(|held| held.overrides.push((org, *cover)));
+        Ok(())
+    }
+
+    async fn remove_override(
+        &self,
+        org: TenantId,
+        schedule: crate::oncall::ScheduleId,
+        id: crate::oncall::OverrideId,
+    ) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let before = held.overrides.len();
+            held.overrides.retain(|(kept, cover)| {
+                !(*kept == org && cover.schedule == schedule && cover.id == id)
+            });
+            held.overrides.len() != before
+        }))
+    }
+}
+
+impl crate::oncall::Pages for OncallLedger {
+    async fn raise(&self, page: &crate::oncall::Page) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            let origin = page.source.origin();
+            if held
+                .pages
+                .iter()
+                .any(|kept| kept.state.is_open() && kept.source.origin() == origin)
+            {
+                return false;
+            }
+            held.pages.push(page.clone());
+            true
+        }))
+    }
+
+    async fn get(
+        &self,
+        org: TenantId,
+        id: crate::oncall::PageId,
+    ) -> Result<Option<crate::oncall::Page>, StoreError> {
+        Ok(self.with(|held| {
+            held.pages
+                .iter()
+                .find(|page| page.org == org && page.id == id)
+                .cloned()
+        }))
+    }
+
+    async fn list(
+        &self,
+        org: TenantId,
+        scope: crate::oncall::PageScope,
+    ) -> Result<Vec<crate::oncall::Page>, StoreError> {
+        Ok(self.with(|held| {
+            let mut found: Vec<_> = held
+                .pages
+                .iter()
+                .filter(|page| page.org == org && scope.admits(page.state))
+                .cloned()
+                .collect();
+            found.sort_by_key(|page| core::cmp::Reverse(page.created_ms));
+            found
+        }))
+    }
+
+    async fn due(&self, now_ms: u64, limit: u32) -> Result<Vec<crate::oncall::Page>, StoreError> {
+        Ok(self.with(|held| {
+            held.pages
+                .iter()
+                .filter(|page| {
+                    page.state.awaits() && page.escalate_at_ms.is_some_and(|at| at <= now_ms)
+                })
+                .take(usize::try_from(limit).unwrap_or(usize::MAX))
+                .cloned()
+                .collect()
+        }))
+    }
+
+    async fn keep(&self, page: &crate::oncall::Page) -> Result<bool, StoreError> {
+        Ok(self.with(|held| {
+            held.pages
+                .iter_mut()
+                .find(|kept| kept.org == page.org && kept.id == page.id)
+                .map(|kept| *kept = page.clone())
+                .is_some()
+        }))
+    }
+
+    async fn resolve(
+        &self,
+        org: TenantId,
+        origin: crate::oncall::Origin,
+        at_ms: u64,
+    ) -> Result<Vec<crate::oncall::Page>, StoreError> {
+        Ok(self.with(|held| {
+            let mut resolved = Vec::new();
+            for page in &mut held.pages {
+                if page.org == org && page.state.is_open() && page.source.origin() == origin {
+                    page.state = crate::oncall::PageState::Resolved;
+                    page.escalate_at_ms = None;
+                    page.resolved_ms = Some(at_ms);
+                    resolved.push(page.clone());
+                }
+            }
+            resolved
+        }))
+    }
+
+    async fn enqueue(&self, notice: &crate::oncall::Notice) -> Result<(), StoreError> {
+        self.with(|held| {
+            if !held.notices.iter().any(|kept| {
+                kept.page == notice.page && kept.step == notice.step && kept.to == notice.to
+            }) {
+                held.notices.push(notice.clone());
+            }
+        });
+        Ok(())
+    }
+
+    async fn claim(
+        &self,
+        now_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<crate::oncall::ClaimedNotice>, StoreError> {
+        Ok(self.with(|held| {
+            let mut claimed = Vec::new();
+            for notice in &held.notices {
+                if claimed.len() >= usize::try_from(limit).unwrap_or(usize::MAX) {
+                    break;
+                }
+                if notice.status != crate::alerts::DeliveryStatus::Pending
+                    || notice.next_at_ms > now_ms
+                {
+                    continue;
+                }
+                let Some(page) = held.pages.iter().find(|page| page.id == notice.page) else {
+                    continue;
+                };
+                let Some((_, email)) = held
+                    .addresses
+                    .iter()
+                    .find(|(account, _)| *account == notice.to)
+                else {
+                    continue;
+                };
+                claimed.push(crate::oncall::ClaimedNotice {
+                    notice: notice.clone(),
+                    email: email.clone(),
+                    dispatch: crate::oncall::PageDispatch {
+                        page: page.id,
+                        org: page.org,
+                        source: page.source,
+                        headline: page.headline.clone(),
+                        step: notice.step,
+                        at_ms: page.created_ms,
+                        ack: None,
+                    },
+                });
+            }
+            claimed
+        }))
+    }
+
+    async fn settle(
+        &self,
+        id: crate::oncall::NoticeId,
+        attempts: u32,
+        settlement: &crate::alerts::Settlement,
+    ) -> Result<(), StoreError> {
+        self.with(|held| {
+            if let Some(notice) = held.notices.iter_mut().find(|held| held.id == id) {
+                notice.attempt = attempts;
+                match settlement {
+                    crate::alerts::Settlement::Sent => {
+                        notice.status = crate::alerts::DeliveryStatus::Sent;
+                        notice.last_error = None;
+                    }
+                    crate::alerts::Settlement::Retry { next_at_ms, error } => {
+                        notice.next_at_ms = *next_at_ms;
+                        notice.last_error = Some(error.clone());
+                    }
+                    crate::alerts::Settlement::Abandoned { error } => {
+                        notice.status = crate::alerts::DeliveryStatus::Abandoned;
+                        notice.last_error = Some(error.clone());
+                    }
+                }
+            }
+        });
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Bench {
+    teams: Arc<Mutex<Vec<(TenantId, crate::organisation::Team)>>>,
+}
+
+impl Bench {
+    pub fn team(
+        &self,
+        org: TenantId,
+        team: crate::organisation::TeamId,
+        name: &str,
+        members: &[crate::identity::AccountId],
+    ) {
+        self.teams.lock().expect("the bench lock").push((
+            org,
+            crate::organisation::Team {
+                id: team,
+                name: name.into(),
+                created_at_unix_nanos: 0,
+                members: members.to_vec(),
+                projects: Vec::new(),
+            },
+        ));
+    }
+}
+
+impl crate::organisation::Squads for Bench {
+    async fn of(&self, org: TenantId) -> Result<Vec<crate::organisation::Team>, StoreError> {
+        Ok(self
+            .teams
+            .lock()
+            .expect("the bench lock")
+            .iter()
+            .filter(|(held, _)| *held == org)
+            .map(|(_, team)| team.clone())
+            .collect())
+    }
+
+    async fn create(
+        &self,
+        _org: TenantId,
+        _name: &crate::organisation::TeamName,
+    ) -> Result<crate::organisation::Named, StoreError> {
+        Ok(crate::organisation::Named::Taken)
+    }
+
+    async fn rename(
+        &self,
+        _org: TenantId,
+        _team: crate::organisation::TeamId,
+        _name: &crate::organisation::TeamName,
+    ) -> Result<crate::organisation::Named, StoreError> {
+        Ok(crate::organisation::Named::Taken)
+    }
+
+    async fn disband(
+        &self,
+        _org: TenantId,
+        _team: crate::organisation::TeamId,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn seat(
+        &self,
+        _org: TenantId,
+        _team: crate::organisation::TeamId,
+        _members: &[crate::identity::AccountId],
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn own(
+        &self,
+        _org: TenantId,
+        _team: crate::organisation::TeamId,
+        _projects: &[crate::catalogue::ProjectId],
+    ) -> Result<bool, StoreError> {
+        Ok(false)
     }
 }

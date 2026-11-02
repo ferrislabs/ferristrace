@@ -17,6 +17,7 @@ import {
   SEVERITIES, STATUSES, personOf, severityVariant, statusVariant, useDeclareIncident, useIncidents,
   type Incident, type IncidentScope, type IncidentSeverity, type IncidentStatus,
 } from '@/data/incidents'
+import { useSchedules } from '@/data/oncall'
 import { useProjects } from '@/data/projects'
 import { stamp } from '@/lib/format'
 import { Link, useNavigate } from '@/lib/router'
@@ -112,12 +113,15 @@ export function DeclareIncident({ open, onClose, alert }: { open: boolean; onClo
   const [title, setTitle] = useState('')
   const [severity, setSeverity] = useState<IncidentSeverity | ''>('')
   const [shared, setShared] = useState(false)
-  const close = () => { setTitle(''); setSeverity(''); setShared(false); onClose() }
+  const [paged, setPaged] = useState('')
+  const { schedules } = useSchedules()
+  const close = () => { setTitle(''); setSeverity(''); setShared(false); setPaged(''); onClose() }
   const submit = () => {
     const asked = {
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(severity ? { severity } : {}),
       ...(alert ? { alert: alert.id } : {}),
+      ...(paged ? { page: { schedule: paged } } : {}),
       public: shared,
     }
     declare.mutate(asked, {
@@ -136,6 +140,12 @@ export function DeclareIncident({ open, onClose, alert }: { open: boolean; onClo
             <NativeSelect id="incident-severity" value={severity} onChange={(e) => setSeverity(e.target.value as IncidentSeverity | '')}>
               <option value="">{alert ? 'From the alert' : 'SEV3'}</option>
               {SEVERITIES.map((one) => <option key={one} value={one}>{one.toUpperCase()}</option>)}
+            </NativeSelect>
+          </Field>
+          <Field label="Page on-call" htmlFor="incident-page" hint={schedules.length > 0 ? 'Pages the person on call now, by email, and escalates until someone acknowledges.' : 'No on-call schedule yet. Add one in Settings, Teams, On-call.'}>
+            <NativeSelect id="incident-page" value={paged} onChange={(e) => setPaged(e.target.value)} disabled={schedules.length === 0}>
+              <option value="">Nobody</option>
+              {schedules.map((one) => <option key={one.id} value={one.id}>{one.teamName} · {one.name}</option>)}
             </NativeSelect>
           </Field>
           <Switch checked={shared} onCheckedChange={setShared} label="Public, once status pages show incidents" />

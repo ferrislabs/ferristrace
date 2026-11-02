@@ -14,6 +14,7 @@ use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, Target
 use crate::catalogue::{ProjectId, Projects};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, SessionStore};
+use crate::oncall::{Origin, PageSource, Pages, Paging, Schedules};
 use crate::organisation::{Memberships, Roll};
 use crate::telemetry::TenantId;
 
@@ -21,7 +22,7 @@ const MILLIS_PER_SECOND: u64 = 1_000;
 pub const DEFAULT_SEVERITY: IncidentSeverity = IncidentSeverity::Sev3;
 
 #[derive(Debug)]
-pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A> {
+pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg> {
     readers: Readers<S, G, K>,
     projects: P,
     rules: R,
@@ -31,9 +32,10 @@ pub struct IncidentDesk<S, G, K, P, R, T, I, L, N, M, A> {
     attachments: N,
     roster: M,
     trail: A,
+    paging: Paging<Sc, Pg>,
 }
 
-impl<S, G, K, P, R, T, I, L, N, M, A> IncidentDesk<S, G, K, P, R, T, I, L, N, M, A>
+impl<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg> IncidentDesk<S, G, K, P, R, T, I, L, N, M, A, Sc, Pg>
 where
     S: SessionStore,
     G: Memberships,
@@ -46,6 +48,8 @@ where
     N: IncidentAttachments,
     M: Roll,
     A: AuditTrail,
+    Sc: Schedules,
+    Pg: Pages,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -58,6 +62,7 @@ where
         attachments: N,
         roster: M,
         trail: A,
+        paging: Paging<Sc, Pg>,
     ) -> Self {
         Self {
             readers,
@@ -69,6 +74,7 @@ where
             attachments,
             roster,
             trail,
+            paging,
         }
     }
 
@@ -143,6 +149,11 @@ where
             .project
             .or_else(|| rule.as_ref().and_then(|rule| rule.project));
         self.check_project(org, project).await?;
+        if let Some(schedule) = draft.page
+            && self.paging.schedules().get(org, schedule).await?.is_none()
+        {
+            return Err(IncidentError::NoSuchSchedule);
+        }
         let title = match (&draft.title, &rule) {
             (Some(title), _) => title.clone(),
             (None, Some(rule)) => IncidentTitle::try_from(rule.name.as_str())?,
@@ -171,6 +182,7 @@ where
             opened_ms: now_ms,
             resolved_ms: None,
             opened_from_alert: rule.as_ref().map(|rule| rule.id),
+            paged_schedule: draft.page,
         };
         self.incidents.open(&incident).await?;
         self.append(
@@ -191,9 +203,11 @@ where
             Detail::default()
                 .with("title", &incident.title)
                 .with("severity", severity)
-                .with_maybe("alert", incident.opened_from_alert),
+                .with_maybe("alert", incident.opened_from_alert)
+                .with_maybe("paged", incident.paged_schedule),
         )
         .await?;
+        self.page_on_call(&incident, now_ms).await?;
         let people = self.people(org).await?;
         let alerts = rule
             .map(|rule| AlertRef {
@@ -239,6 +253,9 @@ where
             match &change {
                 Change::Status { from, to } if from.is_open() && !to.is_open() => {
                     self.note(&changed, by, Action::IncidentResolved, Detail::default())
+                        .await?;
+                    self.paging
+                        .resolve(org, Origin::Incident(id), now_ms)
                         .await?;
                 }
                 Change::Status { from, to } if !from.is_open() && to.is_open() => {
@@ -336,6 +353,40 @@ where
         )
         .await?;
         Ok(attachment)
+    }
+
+    async fn page_on_call(&self, incident: &Incident, now_ms: u64) -> Result<(), IncidentError> {
+        let Some(schedule) = incident.paged_schedule else {
+            return Ok(());
+        };
+        let Some(page) = self
+            .paging
+            .raise(
+                incident.org,
+                schedule,
+                PageSource::Incident(incident.id),
+                incident.title.as_str(),
+                now_ms,
+            )
+            .await?
+        else {
+            return Ok(());
+        };
+        self.timeline
+            .append(&TimelineEntry {
+                id: TimelineId::fresh(),
+                incident: incident.id,
+                org: incident.org,
+                author: Author::System,
+                change: Change::Paged {
+                    page: page.id,
+                    step: page.step,
+                    target: Some(page.target),
+                },
+                at_ms: now_ms,
+            })
+            .await?;
+        Ok(())
     }
 
     async fn writer(&self, who: &Reader, org: TenantId) -> Result<AccountId, IncidentError> {

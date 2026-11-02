@@ -83,6 +83,8 @@ pub enum AlertError {
     NoSuchProject,
     #[error("a rule names a channel this organisation does not hold")]
     UnknownChannel,
+    #[error("a rule pages the on-call of a schedule this organisation does not hold")]
+    UnknownSchedule,
     #[error("that name is already taken in this organisation")]
     NameTaken,
     #[error(

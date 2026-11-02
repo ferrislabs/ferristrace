@@ -34,6 +34,8 @@ pub enum IncidentError {
     AlertNotFiring,
     #[error("an incident is owned by a member of its organisation")]
     NotAMember,
+    #[error("no on-call schedule of this organisation carries that id")]
+    NoSuchSchedule,
     #[error(transparent)]
     Incident(#[from] BadIncident),
     #[error("a store could not be reached")]

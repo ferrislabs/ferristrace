@@ -118,6 +118,14 @@ impl ferristrace_domain::AlertMailer for Dropped {
     ) -> Result<(), ferristrace_domain::DeliveryError> {
         Ok(())
     }
+
+    async fn send_page(
+        &self,
+        _to: &Email,
+        _dispatch: &ferristrace_domain::PageDispatch,
+    ) -> Result<(), ferristrace_domain::DeliveryError> {
+        Ok(())
+    }
 }
 
 fn choosing(token: &str, password: &str) -> Request<Body> {

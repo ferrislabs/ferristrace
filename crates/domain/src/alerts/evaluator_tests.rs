@@ -21,8 +21,9 @@ use crate::incidents::{
     IncidentTitle,
 };
 use crate::metrics::Aggregation;
+use crate::oncall::Paging;
 use crate::telemetry::TenantId;
-use crate::testing::{AlertLedger, IncidentLedger};
+use crate::testing::{AlertLedger, IncidentLedger, OncallLedger};
 
 const START: u64 = 1_700_000_040;
 
@@ -90,6 +91,8 @@ type Evaluating<'a> = Evaluator<
     &'a Scripted,
     IncidentLedger,
     IncidentLedger,
+    OncallLedger,
+    OncallLedger,
 >;
 
 fn evaluator<'a>(ledger: &AlertLedger, probe: &'a Scripted) -> Evaluating<'a> {
@@ -109,6 +112,7 @@ fn following<'a>(
         ledger.clone(),
         probe,
         Followers::new(incidents.clone(), incidents.clone()),
+        Paging::new(OncallLedger::default(), OncallLedger::default()),
     )
 }
 
@@ -121,6 +125,7 @@ fn parts(signal: Signal, channels: Vec<ChannelId>) -> DefinitionParts {
         severity: AlertSeverity::Critical,
         no_data: NoDataPolicy::Ok,
         channels,
+        page: None,
     }
 }
 
@@ -409,6 +414,7 @@ fn an_incident(
         opened_ms: 1,
         resolved_ms: (status == IncidentStatus::Resolved).then_some(2),
         opened_from_alert: Some(rule),
+        paged_schedule: None,
     }
 }
 

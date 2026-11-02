@@ -44,6 +44,7 @@ export type RuleDefinition = {
   severity: RuleSeverity
   no_data: NoData
   channels: string[]
+  page: { schedule: string } | null
 }
 
 export type Rule = RuleDefinition & { id: string; state: RuleState }
@@ -227,6 +228,7 @@ export const definitionOf = (rule: Rule): RuleDefinition => ({
   severity: rule.severity,
   no_data: rule.no_data,
   channels: rule.channels,
+  page: rule.page,
 })
 
 export function duration(seconds: number): string {

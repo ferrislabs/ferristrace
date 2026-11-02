@@ -13,6 +13,7 @@ mod ingestion;
 mod issues;
 mod logs;
 mod metrics;
+mod oncall;
 mod organisation;
 mod profile;
 mod provisioning;

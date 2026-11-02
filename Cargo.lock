@@ -1136,6 +1136,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "hmac 0.13.0",
+ "jiff",
  "proptest",
  "rand 0.10.3",
  "sha1",
@@ -1966,6 +1967,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",

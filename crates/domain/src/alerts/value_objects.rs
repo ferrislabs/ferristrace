@@ -8,6 +8,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use super::errors::{BadChannel, BadRule};
 use crate::identity::Email;
 use crate::metrics::{Aggregation, MAX_GROUP_BY};
+use crate::oncall::ScheduleId;
 use crate::telemetry::Severity;
 
 pub const MIN_WINDOW_SECS: u64 = 60;
@@ -206,11 +207,13 @@ spelled!(DeliveryStatus {
 pub enum Duty {
     Evaluate,
     Deliver,
+    Escalate,
 }
 
 spelled!(Duty {
     Evaluate => "evaluate",
     Deliver => "deliver",
+    Escalate => "escalate",
 });
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -341,6 +344,7 @@ pub struct DefinitionParts {
     pub severity: AlertSeverity,
     pub no_data: NoDataPolicy,
     pub channels: Vec<ChannelId>,
+    pub page: Option<ScheduleId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -403,6 +407,10 @@ impl Definition {
 
     pub fn channels(&self) -> &[ChannelId] {
         &self.0.channels
+    }
+
+    pub fn page(&self) -> Option<ScheduleId> {
+        self.0.page
     }
 }
 

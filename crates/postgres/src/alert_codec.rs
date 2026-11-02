@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-    Labels, LogSignal, MetricSignal, NoDataPolicy, Severity, Signal, TraceMeasure, TraceSignal,
+    Labels, LogSignal, MetricSignal, NoDataPolicy, ScheduleId, Severity, Signal, TraceMeasure,
+    TraceSignal,
 };
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -73,8 +74,25 @@ pub(crate) fn encode(definition: &Definition) -> String {
                 .map(|channel| Value::String(channel.to_string()))
                 .collect()
         ),
+        "page": definition
+            .page()
+            .map_or(Value::Null, |schedule| json!({"schedule": schedule.to_string()})),
     })
     .to_string()
+}
+
+struct Unreadable;
+
+fn decode_page(value: &Value) -> Result<Option<ScheduleId>, Unreadable> {
+    match value.get("page") {
+        None | Some(Value::Null) => Ok(None),
+        Some(page) => page
+            .get("schedule")
+            .and_then(Value::as_str)
+            .and_then(|held| Uuid::try_parse(held).ok())
+            .map(|id| Some(ScheduleId::new(id)))
+            .ok_or(Unreadable),
+    }
 }
 
 fn string(value: &Value, key: &str) -> Option<Box<str>> {
@@ -141,6 +159,7 @@ pub(crate) fn decode(text: &str) -> Option<Definition> {
             .iter()
             .map(|channel| Uuid::try_parse(channel).ok().map(ChannelId::new))
             .collect::<Option<Vec<_>>>()?,
+        page: decode_page(&value).ok()?,
     })
     .ok()
 }
@@ -169,7 +188,8 @@ mod tests {
 
     use ferristrace_domain::{
         Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-        Labels, LogSignal, MetricSignal, NoDataPolicy, Severity, Signal, TraceMeasure, TraceSignal,
+        Labels, LogSignal, MetricSignal, NoDataPolicy, ScheduleId, Severity, Signal, TraceMeasure,
+        TraceSignal,
     };
     use uuid::Uuid;
 
@@ -184,8 +204,27 @@ mod tests {
             severity: AlertSeverity::Info,
             no_data: NoDataPolicy::NoData,
             channels: vec![ChannelId::new(Uuid::from_u128(3))],
+            page: Some(ScheduleId::new(Uuid::from_u128(4))),
         })
         .expect("a definition")
+    }
+
+    #[test]
+    fn a_definition_kept_before_paging_existed_pages_nobody() {
+        let mut stored: serde_json::Value =
+            serde_json::from_str(&encode(&kept(Signal::Traces(TraceSignal {
+                service: None,
+                operation: None,
+                environment: None,
+                measure: TraceMeasure::Count,
+            }))))
+            .expect("json");
+        stored.as_object_mut().expect("an object").remove("page");
+
+        let read = decode(&stored.to_string()).expect("it reads");
+
+        assert_eq!(read.page(), None);
+        assert!(encode(&read).contains("\"page\":null"));
     }
 
     #[test]

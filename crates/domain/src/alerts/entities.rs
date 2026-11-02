@@ -5,6 +5,7 @@ use super::value_objects::{
     Signal, WebhookSecret,
 };
 use crate::catalogue::ProjectId;
+use crate::oncall::ScheduleId;
 use crate::telemetry::TenantId;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,6 +39,7 @@ pub struct RulePatch {
     pub severity: Option<AlertSeverity>,
     pub no_data: Option<NoDataPolicy>,
     pub channels: Option<Vec<ChannelId>>,
+    pub page: Option<Option<ScheduleId>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

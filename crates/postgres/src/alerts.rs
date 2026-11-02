@@ -18,6 +18,7 @@ use crate::unit_of_work::{Postgres, SharedTx};
 const NANOS_PER_MILLI: i64 = 1_000_000;
 pub const EVALUATE_LOCK: i64 = 0x6674_616c_6572_7401;
 pub const DELIVER_LOCK: i64 = 0x6674_616c_6572_7402;
+pub const ESCALATE_LOCK: i64 = 0x6674_616c_6572_7403;
 
 fn unreachable(doing: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
     move |error| {
@@ -670,6 +671,7 @@ fn lock_of(duty: Duty) -> i64 {
     match duty {
         Duty::Evaluate => EVALUATE_LOCK,
         Duty::Deliver => DELIVER_LOCK,
+        Duty::Escalate => ESCALATE_LOCK,
     }
 }
 

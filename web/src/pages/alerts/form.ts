@@ -37,6 +37,7 @@ export type Form = {
   severity: RuleSeverity
   noData: NoData
   channels: string[]
+  page: string
   enabled: boolean
 }
 
@@ -63,6 +64,7 @@ export const BLANK: Form = {
   severity: 'warning',
   noData: 'no_data',
   channels: [],
+  page: '',
   enabled: true,
 }
 
@@ -83,6 +85,7 @@ export function formOf(rule: Rule): Form {
     severity: rule.severity,
     noData: rule.no_data,
     channels: rule.channels,
+    page: rule.page?.schedule ?? '',
     enabled: rule.enabled,
   }
   const signal = rule.signal
@@ -165,6 +168,7 @@ export function definitionFrom(form: Form): { definition: RuleDefinition } | { p
       severity: form.severity,
       no_data: form.noData,
       channels: form.channels,
+      page: form.page ? { schedule: form.page } : null,
     },
   }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, Crew, IncidentLedger, Inert, Untransacted,
+    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, SignalReaders, Stack};
 use ferristrace_clickhouse::{
@@ -542,6 +542,7 @@ struct Ledgered {
     alerts: AlertLedger,
     incidents: IncidentLedger,
     crew: Crew,
+    oncall: OncallLedger,
 }
 
 impl Untransacted for Ledgered {}
@@ -578,6 +579,8 @@ repo!(IncidentTimeline, IncidentLedger, |held| held
 repo!(IncidentAttachments, IncidentLedger, |held| held
     .incidents
     .clone());
+repo!(Schedules, OncallLedger, |held| held.oncall.clone());
+repo!(Pages, OncallLedger, |held| held.oncall.clone());
 
 struct Watching;
 
@@ -632,6 +635,7 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
                 severity: AlertSeverity::Critical,
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
+                page: None,
             })
             .expect("a definition"),
         },
@@ -750,6 +754,7 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
                 severity: AlertSeverity::Warning,
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
+                page: None,
             })
             .expect("a definition"),
         },
