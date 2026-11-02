@@ -101,7 +101,9 @@ impl Parse for Registration {
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown key `{other}`, expected `domain`, `backend` or `generics`"),
+                        format!(
+                            "unknown key `{other}`, expected `domain`, `backend` or `generics`"
+                        ),
                     ));
                 }
             }
