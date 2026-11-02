@@ -1,9 +1,8 @@
 use axum::http::HeaderMap;
 use axum::http::header::{COOKIE, HeaderValue, USER_AGENT};
-use ferristrace_domain::{Agent, ChallengeToken, SessionToken};
+use ferristrace_domain::{Agent, SessionToken};
 
 const NAME: &str = "ft_session";
-const CHALLENGE: &str = "ft_second_step";
 const FLAGS: &str = "Path=/; HttpOnly; SameSite=Lax";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,16 +38,6 @@ pub(crate) fn cleared(cookie: SessionCookie) -> Option<HeaderValue> {
     rendered(&format!("{NAME}="), 0, cookie.secure)
 }
 
-pub(crate) fn challenged(headers: &HeaderMap) -> Option<ChallengeToken> {
-    named(headers, CHALLENGE)
-        .map(|value| ChallengeToken::from_plaintext(&value))
-        .filter(ChallengeToken::looks_like_one)
-}
-
-pub(crate) fn answered(cookie: SessionCookie) -> Option<HeaderValue> {
-    rendered(&format!("{CHALLENGE}="), 0, cookie.secure)
-}
-
 pub(crate) fn agent(headers: &HeaderMap) -> Option<Agent> {
     headers
         .get(USER_AGENT)
@@ -79,9 +68,9 @@ fn rendered(pair: &str, max_age: u32, secure: bool) -> Option<HeaderValue> {
 mod tests {
     use axum::http::HeaderMap;
     use axum::http::header::{COOKIE, HeaderValue};
-    use ferristrace_domain::{ChallengeToken, SessionToken};
+    use ferristrace_domain::SessionToken;
 
-    use super::{SessionCookie, answered, carried, challenged, cleared, opened};
+    use super::{SessionCookie, carried, cleared, opened};
 
     fn headers(values: &[&str]) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -147,29 +136,6 @@ mod tests {
         let text = rendered.to_str().expect("text");
 
         assert!(text.starts_with("ft_session=;"));
-        assert!(text.contains("Max-Age=0"));
-    }
-
-    #[test]
-    fn a_challenge_is_read_back_from_its_own_cookie() {
-        let found = challenged(&headers(&[
-            "ft_session=ft_ss_abc; ft_second_step=ft_2f_abc",
-        ]));
-
-        assert_eq!(
-            found.as_ref().map(ChallengeToken::exposed),
-            Some("ft_2f_abc")
-        );
-        assert!(challenged(&headers(&["ft_second_step=garbage"])).is_none());
-        assert!(challenged(&headers(&["ft_session=ft_ss_abc"])).is_none());
-    }
-
-    #[test]
-    fn an_answered_challenge_is_cleared() {
-        let rendered = answered(SessionCookie::default()).expect("a header");
-        let text = rendered.to_str().expect("text");
-
-        assert!(text.starts_with("ft_second_step=;"));
         assert!(text.contains("Max-Age=0"));
     }
 }

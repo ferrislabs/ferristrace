@@ -1,12 +1,12 @@
 use core::future::Future;
 
 use super::entities::Session;
-use super::errors::{AuthError, FactorError, FlowError, SessionError};
+use super::errors::{AuthError, FlowError, SessionError};
 use super::value_objects::{
-    AccountId, Agent, FactorKind, Kept, LiveSession, Pending, PendingFlow, ProvisionPolicy,
-    ResolvedIdentity, SessionId, SignInProof, Step, TotpSecret,
+    AccountId, Agent, LiveSession, PendingFlow, ProvisionPolicy, ResolvedIdentity, SessionId,
+    SignInProof,
 };
-use crate::secret::{SecretHash, SessionToken};
+use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 pub trait AuthProvider {
@@ -23,95 +23,6 @@ impl<T: AuthProvider + Sync> AuthProvider for &T {
     ) -> impl Future<Output = Result<ResolvedIdentity, AuthError>> + Send {
         (*self).sign_in(proof)
     }
-}
-
-pub trait Gate {
-    fn offered(
-        &self,
-        account: AccountId,
-    ) -> impl Future<Output = Result<Vec<FactorKind>, FactorError>> + Send;
-
-    fn open(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), FactorError>> + Send;
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct NoSecondFactor;
-
-impl Gate for NoSecondFactor {
-    async fn offered(&self, _account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        Ok(Vec::new())
-    }
-
-    async fn open(&self, _account: AccountId, _digest: SecretHash) -> Result<(), FactorError> {
-        Err(FactorError::NotOffered)
-    }
-}
-
-pub trait FactorStore {
-    fn live(
-        &self,
-        account: AccountId,
-    ) -> impl Future<Output = Result<Vec<FactorKind>, FactorError>> + Send;
-
-    fn keep(
-        &self,
-        account: AccountId,
-        kind: FactorKind,
-        secret: &TotpSecret,
-    ) -> impl Future<Output = Result<(), FactorError>> + Send;
-
-    fn kept(
-        &self,
-        account: AccountId,
-        kind: FactorKind,
-    ) -> impl Future<Output = Result<Option<Kept>, FactorError>> + Send;
-
-    fn confirm(
-        &self,
-        account: AccountId,
-        kind: FactorKind,
-    ) -> impl Future<Output = Result<(), FactorError>> + Send;
-
-    fn forget(
-        &self,
-        account: AccountId,
-        kind: FactorKind,
-    ) -> impl Future<Output = Result<bool, FactorError>> + Send;
-
-    fn spent_step(
-        &self,
-        account: AccountId,
-        kind: FactorKind,
-        step: Step,
-    ) -> impl Future<Output = Result<(), FactorError>> + Send;
-
-    fn keep_recovery(
-        &self,
-        account: AccountId,
-        digests: &[SecretHash],
-    ) -> impl Future<Output = Result<(), FactorError>> + Send;
-
-    fn spend_recovery(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<bool, FactorError>> + Send;
-
-    fn recovery_left(
-        &self,
-        account: AccountId,
-    ) -> impl Future<Output = Result<u32, FactorError>> + Send;
-
-    fn answered(
-        &self,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<Pending, FactorError>> + Send;
-
-    fn close(&self, digest: SecretHash) -> impl Future<Output = Result<(), FactorError>> + Send;
 }
 
 pub trait SessionStore {

@@ -1118,7 +1118,6 @@ dependencies = [
  "jiff",
  "proptest",
  "rand 0.10.3",
- "sha1",
  "sha2 0.11.1",
  "subtle",
  "thiserror 2.0.21",

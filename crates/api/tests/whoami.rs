@@ -284,7 +284,6 @@ where
         },
         memberships,
         accounts: Profiled(Arc::clone(kept)),
-        gate: Nowhere,
         flows: Nowhere,
     };
     let me = state(

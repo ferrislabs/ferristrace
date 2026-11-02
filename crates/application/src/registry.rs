@@ -3,10 +3,10 @@ use core::future::Future;
 use ferristrace_domain::{
     AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, ControlPlane, DeployMarks,
-    ExportSource, FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents,
-    IssueDecisions, Memberships, ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages,
-    Postmortems, Projects, Roll, Schedules, SessionRoll, SessionStore, SessionSwitch, Squads,
-    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
+    ExportSource, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships,
+    ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages, Postmortems, Projects, Roll, Schedules,
+    SessionRoll, SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
+    UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,8 +66,6 @@ pub mod domain {
     pub struct DeployMarks;
     #[derive(Debug)]
     pub struct Export;
-    #[derive(Debug)]
-    pub struct Factors;
     #[derive(Debug)]
     pub struct Flows;
     #[derive(Debug)]
@@ -233,7 +231,6 @@ impl<R> ProfileRepos for R where
 pub trait IdentityRepos:
     StandingRepos
     + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
-    + RepoFor<domain::Factors, Repo: FactorStore + Gate>
     + RepoFor<domain::Flows, Repo: OidcFlows>
 {
 }
@@ -241,7 +238,6 @@ pub trait IdentityRepos:
 impl<R> IdentityRepos for R where
     R: StandingRepos
         + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
-        + RepoFor<domain::Factors, Repo: FactorStore + Gate>
         + RepoFor<domain::Flows, Repo: OidcFlows>
 {
 }

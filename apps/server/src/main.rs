@@ -482,13 +482,13 @@ fn gallery_of(config: &Config) -> anyhow::Result<Gallery> {
 fn seal_of(config: &Config) -> anyhow::Result<Option<SecretSeal>> {
     let Some(secrets) = &config.secrets else {
         tracing::warn!(
-            "no secrets.at_rest_key is configured, so nobody can keep a second factor or a webhook \
-             channel; mint one with `openssl rand -hex 32`"
+            "no secrets.at_rest_key is configured, so nobody can keep a webhook channel \
+             secret; mint one with `openssl rand -hex 32`"
         );
         return Ok(None);
     };
     let seal = SecretSeal::from_hex(&secrets.at_rest_key).context("reading secrets.at_rest_key")?;
-    tracing::info!("second factors and webhook secrets are sealed at rest");
+    tracing::info!("webhook secrets are sealed at rest");
     Ok(Some(seal))
 }
 

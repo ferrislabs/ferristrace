@@ -101,10 +101,6 @@ pub fn decisions<C>(backend: &Postgres<C>) -> Each<'_, domain::Decisions, C> {
     Each::over(backend)
 }
 
-pub fn factors<C>(backend: &Postgres<C>) -> Each<'_, domain::Factors, C> {
-    Each::over(backend)
-}
-
 pub fn flows<C>(backend: &Postgres<C>) -> Each<'_, domain::Flows, C> {
     Each::over(backend)
 }
@@ -243,25 +239,6 @@ forward!(Decisions: IssueDecisions {
     fn assign(&self, project: ProjectId, print: Fingerprint, owner: Option<AccountId>, by: AccountId, at_unix_nanos: u64) -> Result<(), StoreError>;
 });
 
-forward!(Factors: FactorStore {
-    fn live(&self, account: AccountId) -> Result<Vec<FactorKind>, FactorError>;
-    fn keep(&self, account: AccountId, kind: FactorKind, secret: &TotpSecret) -> Result<(), FactorError>;
-    fn kept(&self, account: AccountId, kind: FactorKind) -> Result<Option<Kept>, FactorError>;
-    fn confirm(&self, account: AccountId, kind: FactorKind) -> Result<(), FactorError>;
-    fn forget(&self, account: AccountId, kind: FactorKind) -> Result<bool, FactorError>;
-    fn spent_step(&self, account: AccountId, kind: FactorKind, step: Step) -> Result<(), FactorError>;
-    fn keep_recovery(&self, account: AccountId, digests: &[SecretHash]) -> Result<(), FactorError>;
-    fn spend_recovery(&self, account: AccountId, digest: SecretHash) -> Result<bool, FactorError>;
-    fn recovery_left(&self, account: AccountId) -> Result<u32, FactorError>;
-    fn answered(&self, digest: SecretHash) -> Result<Pending, FactorError>;
-    fn close(&self, digest: SecretHash) -> Result<(), FactorError>;
-});
-
-forward!(Factors: Gate {
-    fn offered(&self, account: AccountId) -> Result<Vec<FactorKind>, FactorError>;
-    fn open(&self, account: AccountId, digest: SecretHash) -> Result<(), FactorError>;
-});
-
 forward!(Flows: OidcFlows {
     fn begin(&self, flow: &PendingFlow) -> Result<(), FlowError>;
     fn take(&self, state: &str) -> Result<PendingFlow, FlowError>;
@@ -315,12 +292,6 @@ impl<C: Send + Sync + 'static> Each<'_, domain::Projects, C> {
 
     pub async fn only(&self, org: TenantId) -> Result<Option<ProjectId>, ProjectError> {
         committed!((*self.backend), |repo: Projects| repo.only(org).await)
-    }
-}
-
-impl<C: Clock + Clone + Send + Sync + 'static> Each<'_, domain::Factors, C> {
-    pub async fn prune(&self) -> Result<u64, FactorError> {
-        committed!((*self.backend), |repo: Factors| repo.prune().await)
     }
 }
 

@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deployment_keeps_no_second_factor_unless_a_key_at_rest_is_declared() {
+    fn a_deployment_keeps_no_sealed_secret_unless_a_key_at_rest_is_declared() {
         figment::Jail::expect_with(|_jail| {
             let config: Config = figment().extract()?;
 

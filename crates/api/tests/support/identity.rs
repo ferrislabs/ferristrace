@@ -7,10 +7,9 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, Authorizer,
-    FactorError, FactorKind, FactorStore, FlowError, Gate, Kept, LiveSession, Membership,
-    Memberships, OidcFlows, Pending, PendingFlow, Photos, Portrait, ProvisionPolicy,
-    ResolvedIdentity, SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, SignInProof, Step, StoreError, TenantId, TotpSecret, WhoamiError,
+    FlowError, LiveSession, Membership, Memberships, OidcFlows, PendingFlow, Photos, Portrait,
+    ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, SignInProof, StoreError, TenantId, WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -70,16 +69,6 @@ impl AccountDirectory for Nowhere {
         _policy: ProvisionPolicy,
     ) -> Result<AccountId, AuthError> {
         Err(AuthError::ProviderUnreachable)
-    }
-}
-
-impl Gate for Nowhere {
-    async fn offered(&self, _account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn open(&self, _account: AccountId, _digest: SecretHash) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
     }
 }
 
@@ -213,119 +202,35 @@ impl<T: Send + Sync> AccountDirectory for Profiled<T> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Gated<T>(T);
-
-impl<T: Gate + Send + Sync> Gate for Gated<T> {
-    async fn offered(&self, account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        self.0.offered(account).await
-    }
-
-    async fn open(&self, account: AccountId, digest: SecretHash) -> Result<(), FactorError> {
-        self.0.open(account, digest).await
-    }
-}
-
-impl<T: Send + Sync> FactorStore for Gated<T> {
-    async fn live(&self, _account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn keep(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-        _secret: &TotpSecret,
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn kept(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-    ) -> Result<Option<Kept>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn confirm(&self, _account: AccountId, _kind: FactorKind) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn forget(&self, _account: AccountId, _kind: FactorKind) -> Result<bool, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn spent_step(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-        _step: Step,
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn keep_recovery(
-        &self,
-        _account: AccountId,
-        _digests: &[SecretHash],
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn spend_recovery(
-        &self,
-        _account: AccountId,
-        _digest: SecretHash,
-    ) -> Result<bool, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn recovery_left(&self, _account: AccountId) -> Result<u32, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn answered(&self, _digest: SecretHash) -> Result<Pending, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn close(&self, _digest: SecretHash) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-}
-
 #[derive(Debug)]
-pub struct Fakes<S, M, A, F, W> {
+pub struct Fakes<S, M, A, W> {
     pub sessions: S,
     pub memberships: M,
     pub accounts: A,
-    pub gate: F,
     pub flows: W,
 }
 
-impl Fakes<Nowhere, Nowhere, Nowhere, Nowhere, Nowhere> {
+impl Fakes<Nowhere, Nowhere, Nowhere, Nowhere> {
     pub fn nowhere() -> Self {
         Self {
             sessions: Nowhere,
             memberships: Nowhere,
             accounts: Nowhere,
-            gate: Nowhere,
             flows: Nowhere,
         }
     }
 }
 
-impl<S, M, A, F, W> Untransacted for Fakes<S, M, A, F, W>
+impl<S, M, A, W> Untransacted for Fakes<S, M, A, W>
 where
     S: Send + Sync + 'static,
     M: Send + Sync + 'static,
     A: Send + Sync + 'static,
-    F: Send + Sync + 'static,
     W: Send + Sync + 'static,
 {
 }
 
-impl<S, M, A, F, W> RepoFor<domain::Sessions> for Fakes<S, M, A, F, W>
+impl<S, M, A, W> RepoFor<domain::Sessions> for Fakes<S, M, A, W>
 where
     S: SessionStore + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -337,7 +242,7 @@ where
     }
 }
 
-impl<S, M, A, F, W> RepoFor<domain::Memberships> for Fakes<S, M, A, F, W>
+impl<S, M, A, W> RepoFor<domain::Memberships> for Fakes<S, M, A, W>
 where
     M: Memberships + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -349,7 +254,7 @@ where
     }
 }
 
-impl<S, M, A, F, W> RepoFor<domain::Accounts> for Fakes<S, M, A, F, W>
+impl<S, M, A, W> RepoFor<domain::Accounts> for Fakes<S, M, A, W>
 where
     A: Accounts + AccountDirectory + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -361,19 +266,7 @@ where
     }
 }
 
-impl<S, M, A, F, W> RepoFor<domain::Factors> for Fakes<S, M, A, F, W>
-where
-    F: Gate + Clone + Send + Sync + 'static,
-    Self: Untransacted,
-{
-    type Repo = Gated<F>;
-
-    fn build(&self, (): &()) -> Self::Repo {
-        Gated(self.gate.clone())
-    }
-}
-
-impl<S, M, A, F, W> RepoFor<domain::Flows> for Fakes<S, M, A, F, W>
+impl<S, M, A, W> RepoFor<domain::Flows> for Fakes<S, M, A, W>
 where
     W: OidcFlows + Clone + Send + Sync + 'static,
     Self: Untransacted,

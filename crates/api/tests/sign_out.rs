@@ -86,7 +86,6 @@ fn routed(sessions: &Arc<MemorySessions>) -> axum::Router {
         sessions: Arc::clone(sessions),
         memberships: Nowhere,
         accounts: Nowhere,
-        gate: Nowhere,
         flows: Nowhere,
     };
     session_router(state(

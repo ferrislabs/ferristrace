@@ -141,7 +141,6 @@ fn harness(vouches: bool) -> (axum::Router, Arc<MemoryFlows>, Arc<MemorySessions
         sessions: Arc::clone(&sessions),
         memberships: Nowhere,
         accounts: Directed(OneAccount),
-        gate: Nowhere,
         flows: Arc::clone(&flows),
     };
     let app = state(

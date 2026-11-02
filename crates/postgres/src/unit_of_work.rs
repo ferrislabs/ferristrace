@@ -8,7 +8,6 @@ use ferristrace_infra::SecretSeal;
 use sqlx::{PgPool, Transaction};
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::factors::DEFAULT_WINDOW as FACTOR_WINDOW;
 use crate::flows::DEFAULT_WINDOW as FLOW_WINDOW;
 
 #[derive(Debug, Clone)]
@@ -31,7 +30,6 @@ pub struct Postgres<C> {
     pub(crate) lifetime: SessionLifetime,
     pub(crate) seal: Option<SecretSeal>,
     pub(crate) flow_window: Duration,
-    pub(crate) factor_window: Duration,
 }
 
 impl<C> Postgres<C> {
@@ -42,7 +40,6 @@ impl<C> Postgres<C> {
             lifetime: SessionLifetime::default(),
             seal: None,
             flow_window: FLOW_WINDOW,
-            factor_window: FACTOR_WINDOW,
         }
     }
 
@@ -61,12 +58,6 @@ impl<C> Postgres<C> {
     #[must_use]
     pub fn with_flow_window(mut self, window: Duration) -> Self {
         self.flow_window = window;
-        self
-    }
-
-    #[must_use]
-    pub fn with_factor_window(mut self, window: Duration) -> Self {
-        self.factor_window = window;
         self
     }
 

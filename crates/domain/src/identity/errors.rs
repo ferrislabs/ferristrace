@@ -19,35 +19,6 @@ pub enum AuthError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum FactorError {
-    #[error("no live session carries this token")]
-    NoSession,
-    #[error("no live challenge carries this token")]
-    NoChallenge,
-    #[error("that answer opens nothing")]
-    Refused,
-    #[error("this challenge has taken all the answers it will take")]
-    Exhausted,
-    #[error("this account keeps no such factor")]
-    NoFactor,
-    #[error("this account already keeps that factor")]
-    AlreadyKept,
-    #[error("this deployment cannot offer a second factor")]
-    NotOffered,
-    #[error("the control plane could not be reached")]
-    StoreUnreachable,
-}
-
-impl From<SessionError> for FactorError {
-    fn from(error: SessionError) -> Self {
-        match error {
-            SessionError::Unknown => Self::NoSession,
-            SessionError::StoreUnreachable => Self::StoreUnreachable,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SessionError {
     #[error("no live session carries this token")]
     Unknown,
@@ -91,7 +62,3 @@ pub enum FlowError {
     #[error("the attempt store could not be reached")]
     StoreUnreachable,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a code from an authenticator is six digits")]
-pub struct NotACode;
