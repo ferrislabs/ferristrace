@@ -34,6 +34,8 @@ pub struct Config {
     pub objects: Option<ObjectsConfig>,
     #[serde(default)]
     pub secrets: Option<SecretsConfig>,
+    #[serde(default)]
+    pub alerts: AlertsConfig,
     #[serde(default = "yes")]
     pub local_password: bool,
     #[serde(default = "yes")]
@@ -119,6 +121,14 @@ pub struct SecretsConfig {
     pub at_rest_key: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlertsConfig {
+    #[serde(default)]
+    pub allow_private_webhooks: bool,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OidcConfig {
     pub issuer: String,
@@ -167,6 +177,7 @@ impl Default for Config {
             mail: None,
             objects: None,
             secrets: None,
+            alerts: AlertsConfig::default(),
             local_password: true,
             cookie_secure: true,
             after_sign_in: landing(),
@@ -375,6 +386,43 @@ mod tests {
             let secrets = config.secrets.expect("a key");
 
             assert_eq!(secrets.at_rest_key.len(), 64);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn webhooks_stay_off_private_addresses_unless_the_deployment_says_otherwise() {
+        figment::Jail::expect_with(|jail| {
+            let quiet: Config = figment().extract()?;
+            jail.set_env("FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS", "true");
+            jail.set_env("FERRISTRACE_ALERTS__BASE_URL", "https://app.example.com");
+            let open: Config = figment().extract()?;
+
+            assert!(!quiet.alerts.allow_private_webhooks);
+            assert_eq!(quiet.alerts.base_url, None);
+            assert!(open.alerts.allow_private_webhooks);
+            assert_eq!(
+                open.alerts.base_url.as_deref(),
+                Some("https://app.example.com")
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_alert_settings_are_read_from_the_file() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                "
+                [alerts]
+                allow_private_webhooks = true
+                ",
+            )?;
+
+            let config: Config = figment().extract()?;
+
+            assert!(config.alerts.allow_private_webhooks);
             Ok(())
         });
     }

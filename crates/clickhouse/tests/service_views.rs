@@ -571,6 +571,7 @@ impl Stack for Views {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 async fn asked(reader: ClickhouseReader, uri: &str) -> serde_json::Value {
@@ -578,6 +579,7 @@ async fn asked(reader: ClickhouseReader, uri: &str) -> serde_json::Value {
         clock: Inert::default(),
         hasher: Inert::default(),
         mailer: Inert::default(),
+        webhooks: Inert::default(),
         photos: NoPhotos,
         meter: Inert::default(),
         span_store: Some(reader),

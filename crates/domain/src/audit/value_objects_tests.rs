@@ -45,6 +45,14 @@ fn the_spellings_are_stable_and_dotted() {
             "issue.assigned",
             "account.created_by_operator",
             "reset_link.issued_by_operator",
+            "alert.created",
+            "alert.updated",
+            "alert.deleted",
+            "alert.enabled",
+            "alert.disabled",
+            "channel.created",
+            "channel.updated",
+            "channel.deleted",
         ]
     );
 }

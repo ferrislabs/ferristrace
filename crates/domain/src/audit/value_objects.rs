@@ -93,10 +93,18 @@ pub enum Action {
     IssueAssigned,
     AccountCreatedByOperator,
     ResetLinkIssuedByOperator,
+    AlertCreated,
+    AlertUpdated,
+    AlertDeleted,
+    AlertEnabled,
+    AlertDisabled,
+    ChannelCreated,
+    ChannelUpdated,
+    ChannelDeleted,
 }
 
 impl Action {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 32] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -121,6 +129,14 @@ impl Action {
         Self::IssueAssigned,
         Self::AccountCreatedByOperator,
         Self::ResetLinkIssuedByOperator,
+        Self::AlertCreated,
+        Self::AlertUpdated,
+        Self::AlertDeleted,
+        Self::AlertEnabled,
+        Self::AlertDisabled,
+        Self::ChannelCreated,
+        Self::ChannelUpdated,
+        Self::ChannelDeleted,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -149,6 +165,14 @@ impl Action {
             Self::IssueAssigned => "issue.assigned",
             Self::AccountCreatedByOperator => "account.created_by_operator",
             Self::ResetLinkIssuedByOperator => "reset_link.issued_by_operator",
+            Self::AlertCreated => "alert.created",
+            Self::AlertUpdated => "alert.updated",
+            Self::AlertDeleted => "alert.deleted",
+            Self::AlertEnabled => "alert.enabled",
+            Self::AlertDisabled => "alert.disabled",
+            Self::ChannelCreated => "channel.created",
+            Self::ChannelUpdated => "channel.updated",
+            Self::ChannelDeleted => "channel.deleted",
         }
     }
 
@@ -172,10 +196,12 @@ pub enum TargetKind {
     Account,
     Key,
     Issue,
+    Alert,
+    Channel,
 }
 
 impl TargetKind {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 9] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -183,6 +209,8 @@ impl TargetKind {
         Self::Account,
         Self::Key,
         Self::Issue,
+        Self::Alert,
+        Self::Channel,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -194,6 +222,8 @@ impl TargetKind {
             Self::Account => "account",
             Self::Key => "key",
             Self::Issue => "issue",
+            Self::Alert => "alert",
+            Self::Channel => "channel",
         }
     }
 

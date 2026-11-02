@@ -10,6 +10,10 @@ data:
   FERRISTRACE_COOKIE_SECURE: {{ $c.cookieSecure | quote }}
   FERRISTRACE_LOCAL_PASSWORD: {{ $c.localPassword | quote }}
   FERRISTRACE_AFTER_SIGN_IN: {{ $c.afterSignIn | quote }}
+  FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS: {{ $c.alerts.allowPrivateWebhooks | quote }}
+  {{- with $c.alerts.baseUrl }}
+  FERRISTRACE_ALERTS__BASE_URL: {{ . | quote }}
+  {{- end }}
   {{- with $c.webRoot }}
   FERRISTRACE_WEB_ROOT: {{ . | quote }}
   {{- end }}

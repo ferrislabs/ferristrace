@@ -155,7 +155,9 @@ pub struct ServiceSeries {
     pub step_nanos: u64,
     pub requests: u64,
     pub errors: u64,
+    pub p50_nanos: Option<u64>,
     pub p95_nanos: Option<u64>,
+    pub p99_nanos: Option<u64>,
     pub points: Vec<ServicePoint>,
 }
 

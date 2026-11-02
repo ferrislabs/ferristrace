@@ -298,6 +298,7 @@ impl Stack for TestStack {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
@@ -309,6 +310,7 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         clock: Inert::default(),
         hasher: Inert::default(),
         mailer: Inert::default(),
+        webhooks: Inert::default(),
         photos: NoPhotos,
         meter: Inert::default(),
         span_store: None,

@@ -1,6 +1,8 @@
 extern crate self as ferristrace_postgres;
 
 mod accounts;
+mod alert_codec;
+mod alerts;
 mod api_keys;
 mod audit;
 mod decisions;
@@ -22,6 +24,10 @@ mod teams;
 mod unit_of_work;
 
 pub use accounts::{AccountError, PostgresAccounts};
+pub use alerts::{
+    DELIVER_LOCK, EVALUATE_LOCK, PostgresAlertChannels, PostgresAlertDuty, PostgresAlertEvents,
+    PostgresAlertOutbox, PostgresAlertRules, PostgresAlertStates,
+};
 pub use api_keys::PostgresApiKeys;
 pub use audit::PostgresAuditTrail;
 pub use decisions::PostgresDecisions;

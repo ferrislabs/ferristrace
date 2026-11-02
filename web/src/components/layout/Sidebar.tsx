@@ -8,7 +8,7 @@ import { NAV } from './nav'
 import { NotificationsPanel } from './Notifications'
 import { useNotifications } from '@/data/notifications'
 import { useIssues } from '@/data/issues'
-import { useAlertRules } from '@/data/alerts'
+import { useAlerts } from '@/data/alerts'
 import { initialsOf, nameOf } from '@/data/profile'
 import { useAccount, useOrganisations, useSignOut } from '@/auth/session'
 import { useTheme, type ThemePref } from '@/lib/theme'
@@ -21,12 +21,12 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const notifs = useNotifications()
   const { issues } = useIssues()
-  const rules = useAlertRules()
+  const { alerts } = useAlerts()
   const account = useAccount()
   const { active } = useOrganisations()
   const signingOut = useSignOut()
   const newIssues = issues.filter((x) => x.status === 'unresolved' || x.regressed).length
-  const firing = rules.filter((r) => r.firing && r.on).length
+  const firing = (alerts ?? []).filter((r) => r.enabled && r.state.status === 'firing').length
   const { pref, setPref } = useTheme()
   const navigate = useNavigate()
   const who = account ? nameOf(account) : null

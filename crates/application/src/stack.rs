@@ -1,7 +1,7 @@
 use ferristrace_domain::{
-    AuthProvider, Authorizer, Clock, IssueReader, LogReader, LogSink, Mailer, MetricReader,
-    MetricSink, PasswordHasher, Photos, ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader,
-    SpanSink, TenantDirectory, UsageMeter, UsageReader,
+    AlertMailer, AuthProvider, Authorizer, Clock, IssueReader, LogReader, LogSink, Mailer,
+    MetricReader, MetricSink, PasswordHasher, Photos, ProvisionPolicy, QuotaPolicy, SpanPages,
+    SpanReader, SpanSink, TenantDirectory, UsageMeter, UsageReader, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -10,7 +10,7 @@ pub trait Stack: Send + Sync + 'static {
     type Repos: UnitOfWork;
     type Clock: Clock + Send + Sync + 'static;
     type Hasher: PasswordHasher + Send + Sync + 'static;
-    type Mailer: Mailer + Send + Sync + 'static;
+    type Mailer: Mailer + AlertMailer + Send + Sync + 'static;
     type Photos: Photos + Send + Sync + 'static;
     type SpanStore: SpanReader + SpanPages + Send + Sync + 'static;
     type IssueStore: IssueReader + Send + Sync + 'static;
@@ -21,6 +21,7 @@ pub trait Stack: Send + Sync + 'static {
     type Sink: SpanSink + LogSink + MetricSink + Send + Sync + 'static;
     type Quota: QuotaPolicy + Send + Sync + 'static;
     type Directory: TenantDirectory + Send + Sync + 'static;
+    type Webhooks: WebhookSender + Send + Sync + 'static;
 }
 
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub struct Adapters<S: Stack> {
     pub clock: S::Clock,
     pub hasher: S::Hasher,
     pub mailer: S::Mailer,
+    pub webhooks: S::Webhooks,
     pub photos: S::Photos,
     pub meter: S::Meter,
     pub span_store: Option<S::SpanStore>,
@@ -44,6 +46,7 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) clock: S::Clock,
     pub(crate) hasher: S::Hasher,
     pub(crate) mailer: S::Mailer,
+    pub(crate) webhooks: S::Webhooks,
     pub(crate) photos: S::Photos,
     pub(crate) meter: S::Meter,
     pub(crate) span_store: Option<S::SpanStore>,
@@ -61,6 +64,7 @@ impl<S: Stack> Ferristrace<S> {
             clock: adapters.clock,
             hasher: adapters.hasher,
             mailer: adapters.mailer,
+            webhooks: adapters.webhooks,
             photos: adapters.photos,
             meter: adapters.meter,
             span_store: adapters.span_store,

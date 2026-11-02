@@ -1,51 +1,152 @@
-import { Plus, TriangleAlert } from 'lucide-react'
+import { AlertTriangle, Copy, Pencil, Plus, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from '@/lib/router'
 import { toast } from 'sonner'
+import { because } from '@/auth/client'
+import { useOrganisations } from '@/auth/session'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
-import { Field, NativeSelect } from '@/components/ui/input'
+import { Field, Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
-import { Switch } from '@/components/ui/switch'
 import { Alert, Table, Td, Th, Tr } from '@/components/ui/misc'
-import { useMock } from '@/data/seam'
-import { ALERT_RULES } from '@/mocks/mock'
-import { cn } from '@/lib/utils'
+import { isForbidden, isNotConfigured, useChannels, useCreateChannel, useDeleteChannel, useUpdateChannel, type Channel, type ChannelKind, type IssuedChannel } from '@/data/alerts'
 import { H } from './parts'
 
+type Editing = { channel: Channel | null } | null
+
+const addresses = (text: string) => text.split(',').map((one) => one.trim()).filter((one) => one.length > 0)
+
+function problemOf(kind: ChannelKind, name: string, target: string): string | null {
+  if (!name.trim()) return 'A channel needs a name'
+  if (kind === 'email') {
+    const found = addresses(target)
+    if (found.length === 0) return 'Give at least one address'
+    const bad = found.find((one) => !/^[^\s@]+@[^\s@]+$/.test(one))
+    return bad ? `"${bad}" is not an address` : null
+  }
+  try {
+    const url = new URL(target.trim())
+    return url.protocol === 'https:' || url.protocol === 'http:' ? null : 'The URL must start with https://'
+  } catch {
+    return 'The URL is not valid'
+  }
+}
+
 export function ProjectAlerts() {
-  const [rules, setRules] = useState(useMock(['organisation', 'exception-alerts'], () => ALERT_RULES))
-  const [open, setOpen] = useState(false)
-  const [cond, setCond] = useState('rate')
-  const [thr, setThr] = useState('2')
+  const { active } = useOrganisations()
+  const { channels, failed, nothing } = useChannels()
+  const create = useCreateChannel()
+  const update = useUpdateChannel()
+  const remove = useDeleteChannel()
+  const [editing, setEditing] = useState<Editing>(null)
+  const [kind, setKind] = useState<ChannelKind>('email')
+  const [name, setName] = useState('')
+  const [target, setTarget] = useState('')
+  const [issued, setIssued] = useState<IssuedChannel | null>(null)
+  const [deleting, setDeleting] = useState<Channel | null>(null)
+  const mayChange = active?.role === 'owner' || active?.role === 'admin'
+  const editingExisting = editing?.channel ?? null
+  const shape = editingExisting?.kind ?? kind
+  const problem = problemOf(shape, name, target)
+
+  const close = () => {
+    setEditing(null)
+    setIssued(null)
+    setName('')
+    setTarget('')
+    setKind('email')
+  }
+  const begin = (channel: Channel | null) => {
+    setEditing({ channel })
+    setName(channel?.name ?? '')
+    setTarget(channel?.target ?? '')
+    setKind(channel?.kind ?? 'email')
+  }
+  const normal = shape === 'email' ? addresses(target).join(', ') : target.trim()
+
+  const submit = () => {
+    if (problem) return
+    if (editingExisting) {
+      update.mutate({ id: editingExisting.id, name: name.trim(), target: normal }, { onSuccess: () => { toast.success('Channel saved'); close() }, onError: (error) => toast.error(because(error, 'The channel was not saved')) })
+      return
+    }
+    create.mutate({ name: name.trim(), kind, target: normal }, {
+      onSuccess: (made) => {
+        if (made.secret) setIssued(made)
+        else { toast.success('Channel created'); close() }
+      },
+      onError: (error) => toast.error(because(error, 'The channel was not created')),
+    })
+  }
+
   return (
     <>
-      <H title="Exception alerts" sub="Rules on the exceptions recorded in storefront's spans and logs."><Button variant="primary" size="sm" onClick={() => setOpen(true)}><Plus />New alert</Button></H>
-      <Card className="overflow-x-auto">
-        <Table aria-label="Alert rules"><thead><tr><Th>Rule</Th><Th className="w-[230px]">Notify</Th><Th className="w-[130px]">Last triggered</Th><Th numeric className="w-[70px]">On</Th></tr></thead>
-          <tbody>{rules.map((r, i) => (
-            <Tr key={r.name}><Td className="whitespace-normal py-2"><div className="flex flex-col gap-0.5"><span className="text-control font-semibold">{r.name}</span><span className="text-caption text-muted-foreground">{r.cond}</span></div></Td><Td className="whitespace-normal text-control">{r.notify}</Td><Td className={cn('font-mono text-control', r.fired && 'text-warning-text', r.last === 'never' && 'text-muted-foreground')}>{r.last}</Td>
-              <Td numeric><Switch checked={r.on} onCheckedChange={(v) => setRules((x) => x.map((y, k) => (k === i ? { ...y, on: v } : y)))} aria-label={`Enable ${r.name}`} /></Td></Tr>
-          ))}</tbody></Table>
-      </Card>
-      <Card className="overflow-hidden">
-        <div className="border-b px-4 py-3 text-control font-semibold">Recent triggers</div>
-        {[['PspTimeoutError · checkout-api', 'New exception type · 412 times'], ['checkout-api error rate 4.1 %', 'Error rate above 2 %']].map(([a, b]) => (
-          <div key={a} className="flex items-center gap-2.5 border-b border-border-subtle px-4 py-2.5 text-control last:border-b-0"><TriangleAlert className="size-3.5 text-warning-text" aria-hidden /><span className="flex-1 font-mono">{a}</span><span className="text-muted-foreground max-md:hidden">{b}</span><time className="font-mono text-muted-foreground">14:05</time><Link to="/services/checkout-api">Open</Link></div>
-        ))}
-      </Card>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent size="md" title="New exception alert" description="storefront · fires once, then again only after it resolves.">
-          <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); setRules((r) => [...r, { name: cond === 'rate' ? `checkout-api error rate above ${thr} %` : 'New rule', cond: cond === 'rate' ? `Error rate of checkout-api above ${thr} % for 5 min` : 'Custom condition', notify: 'Backend · Slack #alerts-backend', last: 'never', on: true, fired: false }]); setOpen(false); toast.success('Alert created') }}>
-            <Field label="When"><div><Segmented label="Condition" value={cond} onChange={setCond} options={[{ value: 'new', label: 'New exception type' }, { value: 'rate', label: 'Error rate' }, { value: 'spike', label: 'Spike' }, { value: 'silence', label: 'Silence' }]} /></div></Field>
-            {cond === 'rate' ? (
-              <div className="flex flex-wrap items-center gap-2 text-control">Error rate of<NativeSelect className="w-[170px] font-mono"><option>checkout-api</option><option>payments</option></NativeSelect>above<div className="flex w-20 items-center gap-1 rounded-md border border-input px-2"><input aria-label="Threshold" value={thr} onChange={(e) => setThr(e.target.value)} className="h-8 w-full bg-transparent font-mono outline-none" />%</div>for 5 min</div>
-            ) : null}
-            {cond === 'rate' && Number(thr) < 4.1 ? <Alert variant="warning" icon={<TriangleAlert />}>Now: 4.1 %. This rule would fire right away.</Alert> : null}
-            <Field label="Notify"><NativeSelect><option>Backend team · Slack #alerts-backend, email</option><option>Payments team · Slack #alerts-payments</option></NativeSelect></Field>
-            <DialogFooter><Button type="button" onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" type="submit">Create alert</Button></DialogFooter>
-          </form>
+      <H title="Alert channels" sub="Where an alert goes: email addresses or a signed webhook. Rules pick their channels in the rule editor.">
+        {mayChange ? <Button variant="primary" size="sm" onClick={() => begin(null)}><Plus />New channel</Button> : null}
+      </H>
+      {channels && !mayChange ? <span className="text-control text-muted-foreground">Read only. Only an owner or an administrator can change a channel.</span> : null}
+      {isNotConfigured(failed) ? (
+        <Alert variant="warning" icon={<TriangleAlert />} title="Alerting is not configured">This server does not run the alert evaluator. Ask the operator to enable it.</Alert>
+      ) : isForbidden(failed) ? (
+        <Alert variant="warning" icon={<TriangleAlert />} title="You may not read alert channels">Your role in this organisation does not allow it.</Alert>
+      ) : (
+        <Card className="overflow-x-auto">
+          {channels ? (
+            <Table aria-label="Alert channels">
+              <thead><tr><Th>Name</Th><Th className="w-[100px]">Kind</Th><Th>Target</Th>{mayChange ? <Th className="w-[160px]"><span className="sr-only">Actions</span></Th> : null}</tr></thead>
+              <tbody>
+                {channels.length === 0 ? <Tr><Td colSpan={mayChange ? 4 : 3} className="text-muted-foreground">No channel yet. A rule with no channel changes state without telling anyone.</Td></Tr> : null}
+                {channels.map((one) => (
+                  <Tr key={one.id}>
+                    <Td className="font-semibold">{one.name}</Td>
+                    <Td><Badge variant="outline">{one.kind}</Badge></Td>
+                    <Td className="whitespace-normal break-all font-mono text-control">{one.target}{one.has_secret ? <Badge variant="neutral" className="ml-2">signed</Badge> : null}</Td>
+                    {mayChange ? <Td numeric><span className="inline-flex gap-1"><Button variant="ghost" size="sm" onClick={() => begin(one)}><Pencil />Edit</Button><Button variant="ghost" size="sm" className="text-destructive-text" onClick={() => setDeleting(one)}>Delete</Button></span></Td> : null}
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          ) : <div className="px-4 py-3 text-control text-muted-foreground">{nothing}</div>}
+        </Card>
+      )}
+
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && close()}>
+        <DialogContent size="md" title={issued ? `Secret for ${issued.name}` : editingExisting ? 'Edit channel' : 'New channel'} description={issued ? 'Signs every delivery to this webhook.' : undefined}>
+          {issued?.secret ? (
+            <>
+              <Alert variant="warning" icon={<AlertTriangle />}>Copy this secret now. It is shown once and cannot be retrieved later.</Alert>
+              <div className="flex gap-2"><Input readOnly mono value={issued.secret} className="bg-muted text-[12px]" aria-label="Webhook secret" /><Button onClick={() => { void navigator.clipboard?.writeText(issued.secret ?? ''); toast.success('Secret copied') }}><Copy />Copy</Button></div>
+              <p className="m-0 text-control text-muted-foreground">Each request carries an <span className="font-mono">X-FerrisTrace-Signature: sha256=&lt;hex&gt;</span> header, the HMAC-SHA256 of the request body under this secret. Recompute it on your side and compare before trusting the payload.</p>
+              <DialogFooter><Button variant="primary" onClick={close}>Done</Button></DialogFooter>
+            </>
+          ) : (
+            <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); submit() }}>
+              {editingExisting ? null : <Field label="Kind"><div><Segmented label="Kind" value={kind} onChange={setKind} options={[{ value: 'email', label: 'Email' }, { value: 'webhook', label: 'Webhook' }]} /></div></Field>}
+              <Field label="Name" htmlFor="ch-n"><Input id="ch-n" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
+              <Field label={shape === 'email' ? 'Addresses' : 'URL'} htmlFor="ch-t" hint={shape === 'email' ? 'Comma separated.' : 'Private, loopback and link-local addresses are refused unless the deployment allows them.'}>
+                <Input id="ch-t" mono value={target} placeholder={shape === 'email' ? 'oncall@example.com, team@example.com' : 'https://hooks.example.com/ferristrace'} onChange={(e) => setTarget(e.target.value)} />
+              </Field>
+              {problem && (name || target) ? <span className="text-caption text-destructive-text">{problem}</span> : null}
+              <DialogFooter><Button type="button" onClick={close}>Cancel</Button><Button variant="primary" type="submit" disabled={problem !== null || create.isPending || update.isPending}>{editingExisting ? 'Save channel' : 'Create channel'}</Button></DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
+        <DialogContent role="alertdialog" title={`Delete ${deleting?.name ?? 'this channel'}?`} description="Rules that notify it stop notifying it. This cannot be undone.">
+          <DialogFooter>
+            <Button onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => {
+                if (!deleting) return
+                remove.mutate(deleting.id, { onSuccess: () => { setDeleting(null); toast.success('Channel deleted') }, onError: (error) => toast.error(because(error, 'The channel was not deleted')) })
+              }}
+            >Delete channel</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

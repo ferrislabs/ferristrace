@@ -1213,6 +1213,7 @@ dependencies = [
  "ferristrace-macros",
  "hex",
  "rand 0.10.3",
+ "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "time",

@@ -191,7 +191,7 @@ impl ApiKeys for &Ring {
     }
 }
 
-struct OneProject;
+pub(crate) struct OneProject;
 
 impl Projects for OneProject {
     async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError> {

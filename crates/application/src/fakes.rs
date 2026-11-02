@@ -45,6 +45,7 @@ impl Stack for Probing {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 #[repository(domain = Sessions, backend = Recording)]

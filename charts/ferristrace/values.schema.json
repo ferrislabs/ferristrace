@@ -282,6 +282,17 @@
               "type": "string"
             }
           }
+        },
+        "alerts": {
+          "type": "object",
+          "properties": {
+            "allowPrivateWebhooks": {
+              "type": "boolean"
+            },
+            "baseUrl": {
+              "type": "string"
+            }
+          }
         }
       }
     },

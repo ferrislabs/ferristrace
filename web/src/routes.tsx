@@ -103,7 +103,7 @@ const settingsChildren = [
   createRoute({ getParentRoute: () => settingsRoute, path: 'audit', component: AuditLog, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'billing', component: Billing, staticData: mock }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'project/general', component: ProjectGeneral, staticData: real }),
-  createRoute({ getParentRoute: () => settingsRoute, path: 'project/alerts', component: ProjectAlerts, staticData: mock }),
+  createRoute({ getParentRoute: () => settingsRoute, path: 'project/alerts', component: ProjectAlerts, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'project/api-keys', component: ProjectApiKeys, staticData: real }),
 ]
 
@@ -121,7 +121,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/issues/$id', IssueDetail),
     inShell('/releases', Releases),
     inShell('/releases/$version', ReleaseDetail),
-    inShell('/alerts', Alerts),
+    inShell('/alerts', Alerts, real),
     inShell('/infra/kubernetes', Kubernetes),
     inShell('/infra/docker', Docker),
     inShell('/traces', Traces, {}),

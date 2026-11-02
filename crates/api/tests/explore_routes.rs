@@ -178,7 +178,9 @@ impl SpanReader for TwoSpans {
             step_nanos: filter.step_nanos(),
             requests: 7,
             errors: 2,
+            p50_nanos: None,
             p95_nanos: Some(3_000_000),
+            p99_nanos: None,
             points: vec![ServicePoint {
                 start_unix_nanos: start,
                 requests: 7,
@@ -344,6 +346,7 @@ impl<R: SpanReader + SpanPages + Send + Sync + 'static> Stack for TestStack<R> {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppState<TestStack<R>> {
@@ -351,6 +354,7 @@ fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppSta
         clock: Inert::default(),
         hasher: Inert::default(),
         mailer: Inert::default(),
+        webhooks: Inert::default(),
         photos: NoPhotos,
         meter: Inert::default(),
         span_store: Some(reader),
