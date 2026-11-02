@@ -6,7 +6,6 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SignInMethods {
-    pub local_password: bool,
     pub oidc: bool,
 }
 
@@ -46,36 +45,24 @@ mod tests {
 
     #[tokio::test]
     async fn the_ways_in_are_readable_before_anybody_has_signed_in() {
-        let (status, body) = asked(SignInMethods {
-            local_password: true,
-            oidc: false,
-        })
-        .await;
+        let (status, body) = asked(SignInMethods { oidc: true }).await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, r#"{"local_password":true,"oidc":false}"#);
+        assert_eq!(body, r#"{"oidc":true}"#);
     }
 
     #[tokio::test]
-    async fn a_deployment_offering_neither_way_says_so() {
-        let (status, body) = asked(SignInMethods {
-            local_password: false,
-            oidc: false,
-        })
-        .await;
+    async fn a_deployment_offering_no_way_says_so() {
+        let (status, body) = asked(SignInMethods { oidc: false }).await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, r#"{"local_password":false,"oidc":false}"#);
+        assert_eq!(body, r#"{"oidc":false}"#);
     }
 
     #[tokio::test]
-    async fn both_ways_in_can_stand_together() {
-        let (_, body) = asked(SignInMethods {
-            local_password: true,
-            oidc: true,
-        })
-        .await;
+    async fn a_federated_way_in_is_said_so() {
+        let (_, body) = asked(SignInMethods { oidc: true }).await;
 
-        assert_eq!(body, r#"{"local_password":true,"oidc":true}"#);
+        assert_eq!(body, r#"{"oidc":true}"#);
     }
 }

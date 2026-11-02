@@ -442,7 +442,7 @@ impl RepoFor<domain::Audit> for Fakes {
     type Repo = Inert;
 
     fn build(&self, (): &()) -> Self::Repo {
-        Inert::default()
+        Inert
     }
 }
 
@@ -524,7 +524,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Looked;
@@ -555,12 +554,11 @@ impl Harness {
 
     fn app(&self, role: OrgRole) -> Router {
         let adapters = Adapters {
-            clock: Inert::default(),
-            hasher: Inert::default(),
-            mailer: Inert::default(),
-            webhooks: Inert::default(),
+            clock: Inert,
+            mailer: Inert,
+            webhooks: Inert,
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(self.looked.clone()),
             issue_store: Some(self.looked.clone()),
             log_store: None,
@@ -580,9 +578,9 @@ impl Harness {
         );
         let ingest = Arc::new(Ingestion::<TestStack>::new(
             Door(Arc::clone(&self.vault)),
-            Inert::default(),
-            Inert::default(),
-            Inert::default(),
+            Inert,
+            Inert,
+            Inert,
         ));
         key_router(state.clone())
             .merge(explore_router(state.clone()))

@@ -1,12 +1,11 @@
-use ferristrace_domain::{AccountId, Email, Member, OrgRole, Roll, SecretHash, TenantId};
-use ferristrace_infra::{Argon2Hasher, FixedClock};
+use ferristrace_domain::{AccountId, Email, Member, OrgRole, Roll, TenantId};
+use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
 const NOW: u64 = 1_700_000_000;
-const A_DAY: i64 = 24 * 60 * 60 * 1_000_000_000;
 
 #[macro_use]
 mod backend;
@@ -23,7 +22,6 @@ async fn admit(
     org: TenantId,
     email: &Email,
     role: OrgRole,
-    way_in: SecretHash,
 ) -> Result<Admitted, ferristrace_domain::StoreError> {
     let backing = roster_backend(pool);
     let roster = backend::roster(&backing);
@@ -50,11 +48,11 @@ async fn admit(
         role: joined.role,
         joined_at_unix_nanos: joined.joined_at_unix_nanos,
     };
-    if !created {
-        return Ok(Admitted::Standing(member));
-    }
-    roster.open_way_in(holder.account, way_in).await?;
-    Ok(Admitted::Awaiting(member))
+    Ok(if created {
+        Admitted::Awaiting(member)
+    } else {
+        Admitted::Standing(member)
+    })
 }
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -100,12 +98,11 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
 
 fn roster_backend(pool: &PgPool) -> Postgres<FixedClock> {
     Postgres::new(pool.clone(), FixedClock::at(NOW))
-        .with_hasher(Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"))
 }
 
 async fn an_account(pool: &PgPool, email: &str) -> Uuid {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(id)
         .bind(email)
         .execute(pool)
@@ -124,39 +121,6 @@ async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
 
 fn an_address(local: &str) -> Email {
     Email::try_from(format!("{local}@example.com").as_str()).expect("an address")
-}
-
-fn a_digest(seed: u8) -> SecretHash {
-    SecretHash::from_bytes([seed; 32])
-}
-
-async fn hash_held(pool: &PgPool, email: &str) -> Option<String> {
-    sqlx::query("SELECT password_hash AS password_hash FROM accounts WHERE email = $1")
-        .bind(email)
-        .fetch_optional(pool)
-        .await
-        .expect("reading the account")
-        .and_then(|row| row.get("password_hash"))
-}
-
-async fn resets_for(pool: &PgPool, account: Uuid) -> Vec<(Vec<u8>, i64, i64)> {
-    sqlx::query(
-        "SELECT digest AS digest, created_at AS created_at, expires_at AS expires_at \
-         FROM password_resets WHERE account_id = $1",
-    )
-    .bind(account)
-    .fetch_all(pool)
-    .await
-    .expect("reading the resets")
-    .into_iter()
-    .map(|row| {
-        (
-            row.get("digest"),
-            row.get("created_at"),
-            row.get("expires_at"),
-        )
-    })
-    .collect()
 }
 
 async fn accounts_with(pool: &PgPool, email: &str) -> i64 {
@@ -333,90 +297,56 @@ async fn a_membership_is_removed_once_and_then_there_is_nothing_left_to_remove()
 }
 
 #[tokio::test]
-async fn an_unknown_address_is_given_an_account_a_membership_and_one_way_in() {
+async fn an_unknown_address_is_given_an_account_and_a_membership() {
     let Some(pool) = control_plane("roster_admit_new").await else {
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(7))
+    let admitted = admit(&pool, org, &an_address("new"), OrgRole::Member)
         .await
         .expect("the admission");
 
     let Admitted::Awaiting(member) = admitted else {
-        panic!("an address nobody held must be awaiting a password: {admitted:?}");
+        panic!("an address nobody held must be given a fresh account: {admitted:?}");
     };
     assert_eq!(member.email.as_str(), "new@example.com");
     assert_eq!(member.role, OrgRole::Member);
-
-    let held = hash_held(&pool, "new@example.com")
-        .await
-        .expect("the row satisfies the constraint that every account carries a way in");
-    assert!(held.starts_with("$argon2"), "{held}");
-
-    let resets = resets_for(&pool, member.account.as_uuid()).await;
-    assert_eq!(resets.len(), 1);
-    let (digest, created_at, expires_at) = &resets[0];
-    assert_eq!(digest.as_slice(), a_digest(7).as_bytes().as_slice());
-    assert_eq!(
-        *created_at,
-        i64::try_from(NOW).expect("a date") * 1_000_000_000
-    );
-    assert_eq!(
-        *expires_at - *created_at,
-        A_DAY,
-        "an invitation lasts as long as one handed over by the command line"
-    );
 }
 
 #[tokio::test]
-async fn an_address_that_already_has_an_account_joins_without_a_way_in() {
+async fn an_address_that_already_has_an_account_joins_standing() {
     let Some(pool) = control_plane("roster_admit_known").await else {
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
     let standing = an_account(&pool, "known@example.com").await;
 
-    let admitted = admit(
-        &pool,
-        org,
-        &an_address("known"),
-        OrgRole::Admin,
-        a_digest(9),
-    )
-    .await
-    .expect("the admission");
+    let admitted = admit(&pool, org, &an_address("known"), OrgRole::Admin)
+        .await
+        .expect("the admission");
 
     let Admitted::Standing(member) = admitted else {
         panic!("an address somebody already holds must join standing: {admitted:?}");
     };
     assert_eq!(member.account.as_uuid(), standing);
     assert_eq!(member.role, OrgRole::Admin);
-    assert!(
-        resets_for(&pool, standing).await.is_empty(),
-        "an administrator must not be handed the password of an account it does not own"
-    );
-    assert_eq!(
-        hash_held(&pool, "known@example.com").await.as_deref(),
-        Some("chosen"),
-        "the password it chose is untouched"
-    );
 }
 
 #[tokio::test]
-async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_way_in() {
+async fn admitting_an_address_twice_leaves_one_account_and_one_membership() {
     let Some(pool) = control_plane("roster_admit_twice").await else {
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    let first = admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(1))
+    let first = admit(&pool, org, &an_address("new"), OrgRole::Member)
         .await
         .expect("the first admission");
-    let Admitted::Awaiting(member) = first else {
+    let Admitted::Awaiting(_) = first else {
         panic!("the first admission must create the account: {first:?}");
     };
 
-    let again = admit(&pool, org, &an_address("new"), OrgRole::Admin, a_digest(2))
+    let again = admit(&pool, org, &an_address("new"), OrgRole::Admin)
         .await
         .expect("the second admission");
 
@@ -431,11 +361,6 @@ async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_wa
         .await
         .expect("the roll is read");
     assert_eq!(member_at(&roll, "new@example.com").role, OrgRole::Member);
-    assert_eq!(
-        resets_for(&pool, member.account.as_uuid()).await.len(),
-        1,
-        "the refused admission must leave no second way in behind"
-    );
 }
 
 #[tokio::test]
@@ -444,7 +369,7 @@ async fn deleting_an_organisation_takes_the_roll_with_it_and_leaves_the_accounts
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(3))
+    admit(&pool, org, &an_address("new"), OrgRole::Member)
         .await
         .expect("the admission");
 
@@ -502,15 +427,9 @@ async fn an_admitted_standing_account_brings_its_name_with_it() {
     let standing = an_account(&pool, "known@example.com").await;
     named(&pool, standing, "Ines Martin").await;
 
-    let admitted = admit(
-        &pool,
-        org,
-        &an_address("known"),
-        OrgRole::Admin,
-        a_digest(9),
-    )
-    .await
-    .expect("the admission");
+    let admitted = admit(&pool, org, &an_address("known"), OrgRole::Admin)
+        .await
+        .expect("the admission");
 
     let Admitted::Standing(member) = admitted else {
         panic!("an address somebody already holds must join standing: {admitted:?}");
@@ -525,15 +444,9 @@ async fn an_account_created_by_an_invitation_carries_no_name() {
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = admit(
-        &pool,
-        org,
-        &an_address("stranger"),
-        OrgRole::Member,
-        a_digest(4),
-    )
-    .await
-    .expect("the admission");
+    let admitted = admit(&pool, org, &an_address("stranger"), OrgRole::Member)
+        .await
+        .expect("the admission");
 
     let Admitted::Awaiting(member) = admitted else {
         panic!("an unknown address must be given an account: {admitted:?}");

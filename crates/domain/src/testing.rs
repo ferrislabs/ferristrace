@@ -688,16 +688,6 @@ impl crate::status::StatusMailer for Couriered {
     }
 }
 
-impl crate::identity::Mailer for Couriered {
-    async fn send_password_reset(
-        &self,
-        _to: &crate::identity::Email,
-        _token: &crate::secret::ResetToken,
-    ) -> Result<(), crate::identity::ResetError> {
-        Ok(())
-    }
-}
-
 #[derive(Debug, Default)]
 struct Kept {
     incidents: Vec<crate::incidents::Incident>,
@@ -950,14 +940,6 @@ impl crate::organisation::Roll for Crew {
         _role: crate::organisation::OrgRole,
     ) -> Result<Option<crate::organisation::Joined>, StoreError> {
         Ok(None)
-    }
-
-    async fn open_way_in(
-        &self,
-        _account: crate::identity::AccountId,
-        _digest: crate::secret::SecretHash,
-    ) -> Result<(), StoreError> {
-        Ok(())
     }
 }
 

@@ -4,12 +4,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use ferristrace_application::registry::ProvisioningRepos;
 use ferristrace_application::{Ferristrace, Stack};
-use ferristrace_domain::{
-    Bootstrapped, Email, OrgName, OrgRole, ProjectId, ProjectName, ResetToken, TenantId,
-};
+use ferristrace_domain::{Bootstrapped, Email, OrgName, OrgRole, ProjectId, ProjectName, TenantId};
 use uuid::Uuid;
 
-use crate::SECONDS_PER_HOUR;
 use crate::config::Config;
 
 #[derive(Debug, Parser)]
@@ -37,14 +34,6 @@ pub(crate) enum Command {
         email: String,
         #[arg(long, default_value = "Default")]
         org: String,
-    },
-    CreateAccount {
-        #[arg(long)]
-        email: String,
-    },
-    ResetPassword {
-        #[arg(long)]
-        email: String,
     },
     CreateProject {
         #[arg(long)]
@@ -85,19 +74,6 @@ impl From<Role> for OrgRole {
     }
 }
 
-fn print_the_way_in(token: &ResetToken, window: Duration) {
-    eprintln!(
-        "The token printed below lasts {} hours and can be spent once:",
-        window.as_secs() / SECONDS_PER_HOUR
-    );
-    eprintln!(
-        "  curl -X POST <base>/auth/reset/confirm -H 'x-requested-with: cli' \\\n    \
-         -H 'content-type: application/json' \\\n    \
-         -d '{{\"token\":\"<token>\",\"password\":\"<chosen>\"}}'"
-    );
-    println!("{}", token.exposed());
-}
-
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn health(config: &Config) -> anyhow::Result<()> {
@@ -122,7 +98,6 @@ pub(crate) async fn run_command<S: Stack>(
     command: Command,
     config: &Config,
     app: &Ferristrace<S>,
-    invite_window: Duration,
 ) -> anyhow::Result<()>
 where
     S::Repos: ProvisioningRepos,
@@ -131,11 +106,7 @@ where
         Command::Health => health(config).await,
         Command::IssueKey { org, project } => issue_key(app, org, project).await,
         Command::RevokeKey { prefix } => revoke_key(app, &prefix).await,
-        Command::Bootstrap { email, org } => {
-            bootstrap(app, &email, &org, config.local_password, invite_window).await
-        }
-        Command::CreateAccount { email } => create_account(app, &email, invite_window).await,
-        Command::ResetPassword { email } => reset_password(app, &email, invite_window).await,
+        Command::Bootstrap { email, org } => bootstrap(app, &email, &org).await,
         Command::CreateProject { org, name } => create_project(app, org, &name).await,
         Command::CreateOrg { name, owner } => create_org(app, &name, &owner).await,
         Command::GrantRole { org, member, role } => {
@@ -185,13 +156,7 @@ where
     Ok(())
 }
 
-async fn bootstrap<S: Stack>(
-    app: &Ferristrace<S>,
-    email: &str,
-    org: &str,
-    local_password: bool,
-    window: Duration,
-) -> anyhow::Result<()>
+async fn bootstrap<S: Stack>(app: &Ferristrace<S>, email: &str, org: &str) -> anyhow::Result<()>
 where
     S::Repos: ProvisioningRepos,
 {
@@ -199,7 +164,7 @@ where
     let name = OrgName::try_from(org).context("reading the name")?;
 
     let outcome = app
-        .bootstrap(&name, &email, local_password)
+        .bootstrap(&name, &email)
         .await
         .context("founding the organisation")?;
 
@@ -227,58 +192,9 @@ where
                 "  ferristrace issue-key --org {} --project {}",
                 founded.org, founded.project
             );
-            match &founded.invitation {
-                Some(token) => print_the_way_in(token, window),
-                None => {
-                    eprintln!("Local passwords are off, so sign in through the identity provider.");
-                }
-            }
+            eprintln!("{} signs in through the identity provider.", email.as_str());
         }
     }
-    Ok(())
-}
-
-async fn create_account<S: Stack>(
-    app: &Ferristrace<S>,
-    email: &str,
-    window: Duration,
-) -> anyhow::Result<()>
-where
-    S::Repos: ProvisioningRepos,
-{
-    let email = Email::try_from(email).context("reading the address")?;
-    let token = app
-        .create_account(&email)
-        .await
-        .with_context(|| format!("creating an account for {}", email.as_str()))?;
-
-    eprintln!(
-        "{} cannot sign in until it carries a password.",
-        email.as_str()
-    );
-    print_the_way_in(&token, window);
-    Ok(())
-}
-
-async fn reset_password<S: Stack>(
-    app: &Ferristrace<S>,
-    email: &str,
-    window: Duration,
-) -> anyhow::Result<()>
-where
-    S::Repos: ProvisioningRepos,
-{
-    let email = Email::try_from(email).context("reading the address")?;
-    let token = app
-        .issue_reset_link(&email)
-        .await
-        .with_context(|| format!("resetting the password of {}", email.as_str()))?;
-
-    eprintln!(
-        "Every session of {} ends once the password changes.",
-        email.as_str()
-    );
-    print_the_way_in(&token, window);
     Ok(())
 }
 

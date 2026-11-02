@@ -6,7 +6,6 @@ use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, Target
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::identity::{AccountId, Email};
 use crate::organisation::{OrgName, OrgRole};
-use crate::secret::ResetToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug, Clone)]
@@ -27,53 +26,22 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
         &self,
         name: &OrgName,
         owner: &Email,
-        local_password: bool,
     ) -> Result<Bootstrapped, ProvisionError> {
         if let Some(existing) = self.control_plane.founded().await? {
             return Ok(Bootstrapped::AlreadyFounded { existing });
         }
 
-        let account = self.account_for_or_create(owner).await?;
+        self.account_for_or_create(owner).await?;
         let org = self.control_plane.found(name, owner).await?;
         let project_name = default_project();
         let project = self.control_plane.claim_project(org, &project_name).await?;
-        let invitation = if local_password {
-            Some(self.invite(account).await?)
-        } else {
-            None
-        };
         self.note_founding(org, name, owner).await?;
 
         Ok(Bootstrapped::Founded(Founded {
             org,
             project,
             project_name,
-            invitation,
         }))
-    }
-
-    pub async fn create_account(&self, email: &Email) -> Result<ResetToken, ProvisionError> {
-        let account = self.control_plane.create_locked_account(email).await?;
-        self.invite(account).await
-    }
-
-    pub async fn reset_password(&self, email: &Email) -> Result<ResetToken, ProvisionError> {
-        let account = self
-            .control_plane
-            .account_for(email)
-            .await?
-            .ok_or(ProvisionError::NoSuchAccount)?;
-        let token = self.invite(account).await?;
-        for org in self.control_plane.memberships_of(account).await? {
-            self.note(
-                org,
-                Action::ResetLinkIssuedByOperator,
-                Target::account(account),
-                Detail::default().with("email", email.as_str()),
-            )
-            .await?;
-        }
-        Ok(token)
     }
 
     pub async fn create_org(
@@ -202,12 +170,6 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
             return Ok(found);
         }
         self.control_plane.create_locked_account(email).await
-    }
-
-    async fn invite(&self, account: AccountId) -> Result<ResetToken, ProvisionError> {
-        let token = ResetToken::random();
-        self.control_plane.invite(account, token.hash()).await?;
-        Ok(token)
     }
 }
 

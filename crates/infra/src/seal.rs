@@ -2,7 +2,7 @@ use core::fmt;
 
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use ferristrace_domain::{AckKey, LinkKey, SECRET_BYTES, TotpSecret};
+use ferristrace_domain::{AckKey, LinkKey};
 use zeroize::{Zeroize, Zeroizing};
 
 const NONCE_BYTES: usize = 12;
@@ -22,16 +22,6 @@ impl SecretSeal {
         let built = ChaCha20Poly1305::new_from_slice(&key).map_err(|_| BadKey);
         key.zeroize();
         built.map(|cipher| Self { cipher })
-    }
-
-    pub fn seal(&self, secret: &TotpSecret) -> Option<Vec<u8>> {
-        self.seal_bytes(secret.as_bytes().as_slice())
-    }
-
-    pub fn unseal(&self, row: &[u8]) -> Option<TotpSecret> {
-        let opened = self.unseal_bytes(row)?;
-        let bytes: [u8; SECRET_BYTES] = opened.as_slice().try_into().ok()?;
-        Some(TotpSecret::from_bytes(bytes))
     }
 
     pub fn seal_bytes(&self, clear: &[u8]) -> Option<Vec<u8>> {
@@ -78,8 +68,6 @@ impl fmt::Debug for SecretSeal {
 
 #[cfg(test)]
 mod tests {
-    use ferristrace_domain::{SECRET_BYTES, TotpSecret};
-
     use super::{BadKey, SecretSeal};
 
     fn a_key() -> String {
@@ -90,37 +78,8 @@ mod tests {
         hex::encode([4_u8; 32])
     }
 
-    fn a_secret() -> TotpSecret {
-        TotpSecret::from_bytes([5_u8; SECRET_BYTES])
-    }
-
-    #[test]
-    fn a_sealed_secret_comes_back_whole() {
-        let seal = SecretSeal::from_hex(&a_key()).expect("a key");
-        let secret = a_secret();
-
-        let row = seal.seal(&secret).expect("it seals");
-
-        assert_eq!(seal.unseal(&row), Some(secret));
-    }
-
-    #[test]
-    fn a_row_carries_neither_the_bytes_nor_their_base32() {
-        let seal = SecretSeal::from_hex(&a_key()).expect("a key");
-        let secret = a_secret();
-
-        let row = seal.seal(&secret).expect("it seals");
-
-        assert!(
-            !row.windows(SECRET_BYTES)
-                .any(|window| window == secret.as_bytes().as_slice()),
-            "the clear secret is not in the row"
-        );
-        assert!(
-            !String::from_utf8_lossy(&row).contains(&secret.base32()),
-            "nor is its base32"
-        );
-        assert!(row.len() > SECRET_BYTES);
+    fn a_secret() -> Vec<u8> {
+        vec![5_u8; 20]
     }
 
     #[test]
@@ -128,11 +87,11 @@ mod tests {
         let seal = SecretSeal::from_hex(&a_key()).expect("a key");
         let secret = a_secret();
 
-        let once = seal.seal(&secret).expect("it seals");
-        let twice = seal.seal(&secret).expect("it seals");
+        let once = seal.seal_bytes(&secret).expect("it seals");
+        let twice = seal.seal_bytes(&secret).expect("it seals");
 
         assert_ne!(once, twice, "the nonce is fresh per write");
-        assert_eq!(seal.unseal(&once), seal.unseal(&twice));
+        assert_eq!(seal.unseal_bytes(&once), seal.unseal_bytes(&twice));
     }
 
     #[test]
@@ -140,21 +99,21 @@ mod tests {
         let mine = SecretSeal::from_hex(&a_key()).expect("a key");
         let theirs = SecretSeal::from_hex(&another_key()).expect("a key");
 
-        let row = mine.seal(&a_secret()).expect("it seals");
+        let row = mine.seal_bytes(&a_secret()).expect("it seals");
 
-        assert_eq!(theirs.unseal(&row), None);
+        assert_eq!(theirs.unseal_bytes(&row), None);
     }
 
     #[test]
     fn a_row_changed_in_the_database_opens_nothing() {
         let seal = SecretSeal::from_hex(&a_key()).expect("a key");
-        let mut row = seal.seal(&a_secret()).expect("it seals");
+        let mut row = seal.seal_bytes(&a_secret()).expect("it seals");
         let last = row.len() - 1;
         row[last] ^= 1;
 
-        assert_eq!(seal.unseal(&row), None);
-        assert_eq!(seal.unseal(&[]), None);
-        assert_eq!(seal.unseal(&[0_u8; 12]), None);
+        assert_eq!(seal.unseal_bytes(&row), None);
+        assert_eq!(seal.unseal_bytes(&[]), None);
+        assert_eq!(seal.unseal_bytes(&[0_u8; 12]), None);
     }
 
     #[test]
@@ -179,11 +138,6 @@ mod tests {
         assert_eq!(
             seal.unseal_bytes(&row).as_deref().map(Vec::as_slice),
             Some(&clear[..])
-        );
-        assert_eq!(
-            seal.unseal(&row),
-            None,
-            "a webhook secret is not a totp secret"
         );
     }
 

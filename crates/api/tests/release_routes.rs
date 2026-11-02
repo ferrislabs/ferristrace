@@ -328,7 +328,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -347,11 +346,10 @@ impl Stack for TestStack {
 fn state(shelf: Option<Arc<Shelf>>) -> AppState<TestStack> {
     let adapters = Adapters {
         clock: FixedClock::at(NOW),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        mailer: Inert,
+        webhooks: Inert,
         photos: NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: None,
         issue_store: shelf.map(Store),
         log_store: None,

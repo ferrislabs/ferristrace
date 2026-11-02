@@ -64,7 +64,7 @@ fn backend_of(pool: &PgPool) -> Postgres<FixedClock> {
 
 async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     let account = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(account)
         .bind(email)
         .execute(pool)

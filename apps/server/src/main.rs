@@ -26,13 +26,11 @@ use ferristrace_domain::{
     LinkKey, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
 };
 use ferristrace_infra::{
-    Argon2Hasher, HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink,
-    OidcProvider, OidcSettings, PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer,
-    StaticDirectory, SystemClock, WebhookSettings, ack_key_from_hex, status_key_from_hex,
+    HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink, OidcProvider,
+    OidcSettings, PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory,
+    SystemClock, WebhookSettings, ack_key_from_hex, status_key_from_hex,
 };
-use ferristrace_postgres::{
-    CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
-};
+use ferristrace_postgres::{CONTROL_PLANE, Postgres, PostgresDirectory, load_allowances};
 use ferristrace_redis::RedisMeter;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -84,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let allowances = allowances_of(&config, pool.as_ref()).await?;
     let meter = Arc::new(meter_of(&config).await?);
     if let (Some(pool), Meter::Redis(_)) = (pool.as_ref(), meter.as_ref()) {
-        let usage = Arc::new(usage_of(pool, Arc::clone(&meter))?);
+        let usage = Arc::new(usage_of(pool, Arc::clone(&meter)));
         let seeded = usage
             .rehydrate_usage()
             .await
@@ -171,12 +169,8 @@ async fn provision(command: Command, config: &Config) -> anyhow::Result<()> {
     let pool = control_plane_pool(config)
         .await?
         .context("this command needs a control plane, so set database_url")?;
-    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
-    let repos = Postgres::new(pool, SystemClock)
-        .with_hasher(hasher.clone())
-        .with_invite_window(INVITE_WINDOW);
+    let repos = Postgres::new(pool, SystemClock);
     let adapters = adapters_of(
-        hasher,
         Relay::Unreachable,
         guarded_webhooks(),
         Gallery::Nowhere,
@@ -184,7 +178,7 @@ async fn provision(command: Command, config: &Config) -> anyhow::Result<()> {
         Optional::default(),
     );
     let app = Ferristrace::<Production>::new(repos, adapters);
-    run_command(command, config, &app, INVITE_WINDOW).await
+    run_command(command, config, &app).await
 }
 
 fn control_plane(
@@ -194,24 +188,13 @@ fn control_plane(
     meter: Arc<Meter>,
     mut optional: Optional,
 ) -> anyhow::Result<State> {
-    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
     let seal = seal_of(config)?;
     let ack = ack_key_of(config)?;
     let links = status_key_of(config)?;
     let mailer = relay_of(config)?;
-    let repos = Postgres::new(pool.clone(), SystemClock)
-        .with_hasher(hasher.clone())
-        .with_seal(seal)
-        .with_invite_window(INVITE_WINDOW);
+    let repos = Postgres::new(pool.clone(), SystemClock).with_seal(seal);
     let agents = optional.agents.take();
-    let adapters = adapters_of(
-        hasher,
-        mailer,
-        webhooks_of(config),
-        gallery,
-        meter,
-        optional,
-    );
+    let adapters = adapters_of(mailer, webhooks_of(config), gallery, meter, optional);
     let app = Arc::new(
         Ferristrace::<Production>::new(repos, adapters)
             .with_ack_key(ack)
@@ -227,7 +210,6 @@ fn control_plane(
 }
 
 fn adapters_of(
-    hasher: Argon2Hasher,
     mailer: Relay,
     webhooks: HttpWebhooks,
     photos: Gallery,
@@ -236,7 +218,6 @@ fn adapters_of(
 ) -> Adapters<Production> {
     Adapters {
         clock: SystemClock,
-        hasher,
         mailer,
         webhooks,
         photos,
@@ -303,18 +284,16 @@ async fn meter_of(config: &Config) -> anyhow::Result<Meter> {
     Ok(Meter::Redis(meter))
 }
 
-fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> anyhow::Result<Ferristrace<Production>> {
-    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
+fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> Ferristrace<Production> {
     let repos = Postgres::new(pool.clone(), SystemClock);
     let adapters = adapters_of(
-        hasher,
         Relay::Unreachable,
         guarded_webhooks(),
         Gallery::Nowhere,
         meter,
         Optional::default(),
     );
-    Ok(Ferristrace::new(repos, adapters))
+    Ferristrace::new(repos, adapters)
 }
 
 fn directory_of(pool: Option<&PgPool>, default_retention_days: u64) -> Directory {
@@ -503,13 +482,13 @@ fn gallery_of(config: &Config) -> anyhow::Result<Gallery> {
 fn seal_of(config: &Config) -> anyhow::Result<Option<SecretSeal>> {
     let Some(secrets) = &config.secrets else {
         tracing::warn!(
-            "no secrets.at_rest_key is configured, so nobody can keep a second factor or a webhook \
-             channel; mint one with `openssl rand -hex 32`"
+            "no secrets.at_rest_key is configured, so nobody can keep a webhook channel; \
+             mint one with `openssl rand -hex 32`"
         );
         return Ok(None);
     };
     let seal = SecretSeal::from_hex(&secrets.at_rest_key).context("reading secrets.at_rest_key")?;
-    tracing::info!("second factors and webhook secrets are sealed at rest");
+    tracing::info!("webhook secrets are sealed at rest");
     Ok(Some(seal))
 }
 
@@ -539,10 +518,7 @@ fn status_key_of(config: &Config) -> anyhow::Result<Option<LinkKey>> {
 
 fn relay_of(config: &Config) -> anyhow::Result<Relay> {
     let Some(mail) = &config.mail else {
-        tracing::warn!(
-            "no mail relay is configured, so nobody can ask for a reset link and no alert is mailed; \
-             hand a reset link over with `ferristrace reset-password`"
-        );
+        tracing::warn!("no mail relay is configured, so no alert is mailed");
         return Ok(Relay::Unreachable);
     };
     let mailer = SmtpMailer::connect(&MailSettings {
@@ -553,7 +529,7 @@ fn relay_of(config: &Config) -> anyhow::Result<Relay> {
         base_url: mail.base_url.clone(),
     })
     .context("preparing the mail relay")?;
-    tracing::info!(relay = %mail.relay, "password resets and alerts can be mailed");
+    tracing::info!(relay = %mail.relay, "alerts can be mailed");
     Ok(Relay::Smtp(Box::new(mailer)))
 }
 

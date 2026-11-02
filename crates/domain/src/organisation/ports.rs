@@ -6,7 +6,6 @@ use super::value_objects::{Named, OrgName, OrgRole, TeamId, TeamName};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
-use crate::secret::SecretHash;
 use crate::store::StoreError;
 use crate::telemetry::{RetentionDays, TenantId};
 
@@ -158,12 +157,6 @@ pub trait Roll {
         account: AccountId,
         role: OrgRole,
     ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send;
-
-    fn open_way_in(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 impl<T: Roll + Sync> Roll for &T {
@@ -210,14 +203,6 @@ impl<T: Roll + Sync> Roll for &T {
     ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send {
         (*self).join(org, account, role)
     }
-
-    fn open_way_in(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send {
-        (*self).open_way_in(account, digest)
-    }
 }
 
 impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
@@ -263,14 +248,6 @@ impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
         role: OrgRole,
     ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send {
         self.as_ref().join(org, account, role)
-    }
-
-    fn open_way_in(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send {
-        self.as_ref().open_way_in(account, digest)
     }
 }
 

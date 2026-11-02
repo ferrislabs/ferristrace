@@ -5,7 +5,7 @@ use super::value_objects::{Invitation, OrgRole, Who};
 use super::whoami::Whoami;
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::identity::{AccountId, Email, SessionStore};
-use crate::secret::{ResetToken, SessionToken};
+use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug)]
@@ -98,25 +98,21 @@ where
     ) -> Result<Invitation, RosterError> {
         let who = self.standing(token, org, OrgRole::Admin).await?;
         owners_only(&who, org, [role])?;
-        let (holder, way_in) = if let Some(holder) = self.roll.standing_of(email).await? {
-            (holder, None)
+        let holder = if let Some(holder) = self.roll.standing_of(email).await? {
+            holder
         } else {
             let account = self.roll.create_locked(email).await?;
-            let holder = Holder {
+            Holder {
                 account,
                 name: None,
                 photo: None,
-            };
-            (holder, Some(ResetToken::random()))
+            }
         };
         let joined = self
             .roll
             .join(org, holder.account, role)
             .await?
             .ok_or(RosterError::AlreadyAMember)?;
-        if let Some(way_in) = &way_in {
-            self.roll.open_way_in(holder.account, way_in.hash()).await?;
-        }
         self.note(
             org,
             &who,
@@ -136,7 +132,6 @@ where
                 role: joined.role,
                 joined_at_unix_nanos: joined.joined_at_unix_nanos,
             },
-            way_in,
         })
     }
 

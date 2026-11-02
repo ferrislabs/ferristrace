@@ -23,8 +23,6 @@ import { SignalPage } from '@/pages/SignalPage'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
 import { Traces } from '@/pages/Traces'
-import { ForgotPassword } from '@/pages/auth/ForgotPassword'
-import { ResetPassword } from '@/pages/auth/ResetPassword'
 import { SignIn } from '@/pages/auth/SignIn'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
@@ -65,15 +63,6 @@ const signInRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
     redirect: typeof search.redirect === 'string' && search.redirect.startsWith('/') ? search.redirect : undefined,
   }),
-})
-
-const forgotPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: '/forgot-password', component: ForgotPassword })
-
-const resetPasswordRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/reset',
-  component: ResetPassword,
-  validateSearch: (search: Record<string, unknown>): { token?: string } => ({ token: typeof search.token === 'string' ? search.token : undefined }),
 })
 
 const publicStatusRoute = createRoute({
@@ -124,8 +113,6 @@ const settingsChildren = [
 
 const routeTree = rootRoute.addChildren([
   signInRoute,
-  forgotPasswordRoute,
-  resetPasswordRoute,
   publicStatusRoute,
   publicPostmortemRoute,
   shellRoute.addChildren([

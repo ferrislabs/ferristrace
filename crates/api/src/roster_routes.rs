@@ -70,7 +70,6 @@ impl From<Member> for Listed {
 #[derive(Debug, Serialize)]
 pub struct Welcomed {
     member: Listed,
-    invite_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,14 +133,12 @@ where
     tracing::info!(
         org = %org,
         role = role.as_str(),
-        awaited = invitation.way_in.is_some(),
         "an address was admitted to an organisation"
     );
     Ok((
         StatusCode::CREATED,
         Json(Welcomed {
             member: invitation.member.into(),
-            invite_token: invitation.way_in.map(|way_in| way_in.exposed().to_owned()),
         }),
     ))
 }

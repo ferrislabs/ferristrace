@@ -13,12 +13,11 @@ use crate::{Adapters, Ferristrace, Stack, repository, transactional};
 
 fn adapters() -> Adapters<Probing> {
     Adapters {
-        clock: Inert::default(),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        clock: Inert,
+        mailer: Inert,
+        webhooks: Inert,
         photos: ferristrace_domain::NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: None,
         issue_store: None,
         log_store: None,
@@ -132,7 +131,7 @@ async fn bootstrapping_runs_in_one_transaction_and_commits_once() {
     let repos = Recording::default();
 
     let outcome = app(&repos)
-        .bootstrap(&a_name("Acme"), &the_email(), false)
+        .bootstrap(&a_name("Acme"), &the_email())
         .await
         .expect("a founded organisation");
 
@@ -148,9 +147,7 @@ async fn bootstrapping_interrupted_at_the_project_rolls_the_organisation_back() 
     let repos = Recording::default();
     repos.0.refuse_claims.store(true, Ordering::SeqCst);
 
-    let outcome = app(&repos)
-        .bootstrap(&a_name("Acme"), &the_email(), false)
-        .await;
+    let outcome = app(&repos).bootstrap(&a_name("Acme"), &the_email()).await;
 
     assert_eq!(outcome, Err(ProvisionError::Unreachable));
     assert_eq!(count(&repos.0.opened), 1);
@@ -239,7 +236,7 @@ async fn a_ruling_refused_after_its_decision_was_noted_commits_no_entry() {
     let ruled = Ferristrace::<Probing>::new(
         repos.clone(),
         Adapters {
-            issue_store: Some(Inert::default()),
+            issue_store: Some(Inert),
             ..adapters()
         },
     );
@@ -268,7 +265,7 @@ async fn a_command_line_bootstrap_commits_one_founding_by_the_operator() {
     let repos = Recording::default();
 
     app(&repos)
-        .bootstrap(&a_name("Acme"), &the_email(), false)
+        .bootstrap(&a_name("Acme"), &the_email())
         .await
         .expect("a founded organisation");
 
@@ -282,7 +279,7 @@ fn exporting_app(repos: &Recording) -> Ferristrace<Probing> {
     Ferristrace::new(
         repos.clone(),
         Adapters {
-            span_store: Some(Inert::default()),
+            span_store: Some(Inert),
             ..adapters()
         },
     )

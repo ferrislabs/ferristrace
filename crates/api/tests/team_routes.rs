@@ -253,7 +253,7 @@ impl RepoFor<domain::Audit> for Fakes {
     type Repo = Inert;
 
     fn build(&self, (): &()) -> Self::Repo {
-        Inert::default()
+        Inert
     }
 }
 
@@ -286,7 +286,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -308,12 +307,11 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         kept: Arc::clone(kept),
     };
     let adapters = Adapters {
-        clock: Inert::default(),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        clock: Inert,
+        mailer: Inert,
+        webhooks: Inert,
         photos: NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: None,
         issue_store: None,
         log_store: None,

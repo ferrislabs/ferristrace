@@ -55,16 +55,12 @@ that:
 docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
-It creates the account, creates an organisation owned by it, and prints a
-single-use token on stdout. The account has no password until you spend
-that token:
-
-```sh
-curl -X POST http://localhost:4318/auth/reset/confirm \
-  -H 'x-requested-with: cli' \
-  -H 'content-type: application/json' \
-  -d '{"token":"<the printed token>","password":"<at least twelve characters>"}'
-```
+It creates the account, creates an organisation owned by it, and prints
+`you@example.com signs in through the identity provider.` That is the
+whole instruction: open <http://localhost:4318> and sign in as that
+address through FerrisKey, nothing to set here, once the
+`127.0.0.1 ferriskey` line from
+[before the first sign-in](#before-the-first-sign-in) is in place.
 
 `bootstrap` does nothing if an organisation already exists, so it is safe
 to run again.
@@ -185,9 +181,8 @@ does not carry over:
 - the compose project, the Postgres and ClickHouse database, user and
   password are `ferristrace`, so the volumes of a `comettrace` project are
   not reused
-- ingest keys (`ft_live_`), sessions and reset links (`ft_pr_`) carry a new
-  prefix, so every key issued before has to be issued again and everybody
-  signs in again
+- ingest keys (`ft_live_`) and sessions carry a new prefix, so every key
+  issued before has to be issued again and everybody signs in again
 
 On a machine whose data can go, bring the old stack down with its volumes
 and start this one:
@@ -283,7 +278,7 @@ stores inside its own network rather than something to choose.
 | `RUST_LOG` | `info` | Log filter |
 | `POSTGRES_BIND` | `127.0.0.1` | Which address the control plane answers on |
 | `POSTGRES_PORT` | `5432` | Host port for the control plane |
-| `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor and no webhook channel is offered |
+| `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no webhook channel is offered |
 | `FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS` | `false` | Whether a webhook may reach a private, loopback or link-local address |
 | `FERRISTRACE_ALERTS__BASE_URL` | the mail `base_url` | Public address of the app, for the link in an alert |
 | `FERRISTRACE_AGENTS__ISSUER` | the OIDC issuer | Issuer of the access tokens AI agents present; without it (and without OIDC) or without the audience every agent token is refused with 401 |
@@ -306,29 +301,26 @@ config` and `docker inspect` print that generated client secret in
 plaintext, the same way they already print `POSTGRES_PASSWORD`, so do not
 paste either into a support ticket.
 
-## Signing in with an identity provider instead
+## Using a different identity provider
 
 The previous section is what the bundled FerrisKey already does for you.
-Set the OIDC block in `.env` instead to point at a different provider, or
-at a FerrisKey running somewhere else, and it wins over what
-`ferriskey-init` wrote. Before you do, check that realm's client does not
-assert `email_verified` for an address it has not actually verified:
-FerrisTrace trusts that claim to decide whether an unlinked identity may
-adopt an existing account by address, and has no way to check it itself.
+Set the OIDC block in `.env` to point at a different provider, or at a
+FerrisKey running somewhere else, and it wins over what `ferriskey-init`
+wrote. Before you do, check that realm's client does not assert
+`email_verified` for an address it has not actually verified: FerrisTrace
+trusts that claim to decide whether an unlinked identity may adopt an
+existing account by address, and has no way to check it itself.
 
 ```sh
 FERRISTRACE_OIDC__ISSUER=https://id.example.com
 FERRISTRACE_OIDC__CLIENT_ID=ferristrace
 FERRISTRACE_OIDC__CLIENT_SECRET=...
 FERRISTRACE_OIDC__REDIRECT_URI=https://ferristrace.example.com/auth/oidc/callback
-FERRISTRACE_LOCAL_PASSWORD=false
 ```
 
 An account is provisioned the first time somebody signs in, so run
 `bootstrap` with that person's address afterwards to give them an
-organisation to own. It prints no reset token in that case: there is no
-password to set, and `/auth/reset/*` is not mounted when local passwords
-are off.
+organisation to own.
 
 ## AI agents
 
@@ -419,33 +411,11 @@ naming the agent and the `jti`; a refused one leaves nothing.
 
 ## A second factor
 
-An account can keep an authenticator app as a second step after its
-password. The server will not offer one without a key to seal the shared
-secret with, because the alternative is a totp secret in clear in a column
-that lands in every backup:
-
-```sh
-FERRISTRACE_SECRETS__AT_REST_KEY=$(openssl rand -hex 32)
-```
-
-Keep that key where the database password is kept. It is not derivable and
-it is not stored anywhere else: lose it and every enrolled account has to
-enrol again, because what is in `auth_factors` no longer opens. Rotating it
-is the same operation by hand — there is no rotation command yet.
-
-With the key set, `/auth/2fa/app` enrols, `/auth/2fa/app/confirm` turns the
-enrolment on and answers ten recovery codes, and a password for an account
-that keeps a confirmed factor answers `200` with a challenge cookie instead
-of a session. The sign-in screen drives that second step: the password form
-gives way to a field that takes six digits or a recovery code. Recovery codes
-are shown once, hashed at rest, and spent one at a time; `ferristrace` has no
-command to clear a factor, so an account that loses both its app and its
-codes is unlocked with SQL:
-
-```sh
-docker compose exec postgres psql -U ferristrace -d ferristrace \
-  -c "DELETE FROM auth_factors WHERE account_id = (SELECT id FROM accounts WHERE email = 'person@example.com')"
-```
+FerrisKey owns the second factor now, not FerrisTrace. Turn an authenticator
+app on for the `ferristrace` realm in FerrisKey's own console, under
+Authentication, and it stands between a sign-in and the authorization code
+FerrisTrace exchanges for a session; FerrisTrace never sees the factor
+itself, only the result.
 
 ## Alerts
 
@@ -468,8 +438,8 @@ aggregated over the window (sum, min or max of the steps; the mean of the
 steps for avg, rate and the percentiles).
 
 A change into or out of `firing` sends one notification per channel of the
-rule. Email goes through the same relay as reset links. A webhook is a JSON
-`POST`:
+rule. Email goes through the same relay as pages and status page
+notifications. A webhook is a JSON `POST`:
 
 ```json
 {"alert": {"id": "…", "name": "Checkout errors", "severity": "critical"},
@@ -489,9 +459,9 @@ A failed delivery is retried 1, 5, 15 and 60 minutes after each failure,
 then marked `abandoned` with the last error in `alert_outbox`; nothing is
 dropped silently. History is kept 30 days.
 
-A webhook secret is sealed with `secrets.at_rest_key`, like a second factor.
-Without the key the server refuses to create a webhook channel (`422`)
-rather than keep the secret in clear; email channels work without it.
+Webhook secrets are sealed at rest, under `secrets.at_rest_key`. Without the
+key the server refuses to create a webhook channel (`422`) rather than keep
+the secret in clear; email channels work without it.
 
 A webhook never reaches a private, loopback, link-local or cloud metadata
 address, checked on the literal address when the channel is saved and on
@@ -639,14 +609,11 @@ dependency rather than a saving.
 ## Adding somebody
 
 Settings > Organization > Members does it: an owner or an administrator
-invites an address, and gets back one link that sets that account's
-password. The link lasts 24 hours and can be spent once, and it is shown
-once — nothing can read it back, because the control plane keeps only its
-digest. Send it through whatever channel you already trust.
-
-An address that already has an account here joins without a link: it signs
-in with the password it already chose. Nothing on that screen can set a
-password for an account somebody else signs in with.
+invites an address and a role, which creates the account and grants it that
+role at once, whether or not the address has signed in here before. There
+is nothing to send: the invitee's own first FerrisKey sign-in adopts the
+account FerrisTrace already made for them, because FerrisKey said their
+address was verified.
 
 Only an owner hands out the owner role, changes an owner or removes one,
 and an organisation keeps at least one owner. So the sole owner of a fresh
@@ -655,15 +622,11 @@ else, but cannot stop being the owner until it has made somebody else one —
 after which it can step down, or leave. An organisation with no owner left
 could only be rescued with `grant-role`, which is why that is refused.
 
-Somebody who has lost their password asks for a link on the sign-in
-screen, which needs the mail relay. Without one, print a link yourself:
-
-```sh
-docker compose exec server ferristrace reset-password --email somebody@example.com
-```
-
-`create-account` and `grant-role` still do the same job from the command
-line, which is how you add the first person when nobody can sign in yet.
+`grant-role` grants a role to an address from the command line, but only one
+that already holds an account; it creates none. Adding somebody who has
+never been seen here before is done through the web application, which is
+how you add the first person beside the one `bootstrap` already founded the
+organisation with.
 
 ## Projects
 

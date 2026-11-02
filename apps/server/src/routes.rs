@@ -1,11 +1,10 @@
 use axum::Router;
 use ferristrace_api::{
-    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router, auth_router,
+    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router,
     catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
     key_router, llm_router, log_router, mark_routes, me_router, methods_router, metric_router,
-    oidc_router, oncall_router, org_router, password_router, postmortem_router, release_router,
-    reset_router, roster_router, second_factor_router, session_router, status_router, team_router,
-    usage_router,
+    oidc_router, oncall_router, org_router, postmortem_router, release_router, roster_router,
+    session_router, sign_out_router, status_router, team_router, usage_router,
 };
 
 use crate::adapters::Production;
@@ -50,11 +49,10 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
 
 fn identity_routes(config: &Config, state: Option<&State>) -> Router {
     let offered = methods_router(SignInMethods {
-        local_password: config.local_password && state.is_some(),
         oidc: config.oidc.is_some() && state.is_some(),
     });
     let Some(state) = state else {
-        if config.local_password || config.oidc.is_some() {
+        if config.oidc.is_some() {
             tracing::warn!("no control plane is configured, so nobody can sign in");
         }
         return offered;
@@ -62,17 +60,8 @@ fn identity_routes(config: &Config, state: Option<&State>) -> Router {
     offered
         .merge(me_router(state.clone()))
         .merge(session_router(state.clone()))
-        .merge(password_routes(config, state))
+        .merge(sign_out_router(state.clone()))
         .merge(federated_routes(config, state))
-        .merge(reset_routes(config, state))
-}
-
-fn password_routes(config: &Config, state: &State) -> Router {
-    if !config.local_password {
-        return Router::new();
-    }
-    tracing::info!("local passwords accepted");
-    auth_router(state.clone()).merge(second_factor_router(state.clone()))
 }
 
 fn federated_routes(config: &Config, state: &State) -> Router {
@@ -81,16 +70,6 @@ fn federated_routes(config: &Config, state: &State) -> Router {
     };
     tracing::info!(issuer = %settings.issuer, "federated sign in accepted");
     oidc_router(state.clone(), config.after_sign_in.clone())
-}
-
-fn reset_routes(config: &Config, state: &State) -> Router {
-    if !config.local_password {
-        if config.mail.is_some() {
-            tracing::warn!("a mail relay is configured but local passwords are off");
-        }
-        return Router::new();
-    }
-    reset_router(state.clone()).merge(password_router(state.clone()))
 }
 
 fn explore_routes(state: Option<&State>, held: bool) -> Router {

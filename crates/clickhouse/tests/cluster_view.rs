@@ -868,7 +868,7 @@ impl RepoFor<domain::ApiKeys> for Fakes {
     type Repo = Inert;
 
     fn build(&self, (): &()) -> Self::Repo {
-        Inert::default()
+        Inert
     }
 }
 
@@ -877,7 +877,6 @@ struct Clustered;
 impl Stack for Clustered {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -896,11 +895,10 @@ impl Stack for Clustered {
 fn routes(client: &Client) -> Router {
     let adapters = Adapters {
         clock: FixedClock::at(NOW_SECS),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        mailer: Inert,
+        webhooks: Inert,
         photos: NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: None,
         issue_store: None,
         log_store: None,

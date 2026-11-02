@@ -336,7 +336,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Steady;
@@ -381,13 +380,12 @@ impl Harness {
     fn app(&self, role: OrgRole) -> Router {
         let adapters = Adapters {
             clock: FixedClock::at(NOW),
-            hasher: Inert::default(),
             mailer: self.mailer.clone(),
             webhooks: self.hooks.clone(),
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(Steady),
-            issue_store: Some(Inert::default()),
+            issue_store: Some(Inert),
             log_store: None,
             metric_store: None,
             oidc: None,

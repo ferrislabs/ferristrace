@@ -7,11 +7,9 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, Authorizer,
-    Email, FactorError, FactorKind, FactorStore, FlowError, Gate, Kept, LiveSession, Mailer,
-    Membership, Memberships, OidcFlows, PasswordHash, PasswordHasher, Pending, PendingFlow, Photos,
-    Portrait, ProvisionPolicy, ResetError, ResetStore, ResolvedIdentity, SecretHash, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SignInProof, Step,
-    StoreError, TenantId, TotpSecret, WhoamiError,
+    FlowError, LiveSession, Membership, Memberships, OidcFlows, PendingFlow, Photos, Portrait,
+    ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, StoreError, TenantId, WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -74,42 +72,6 @@ impl AccountDirectory for Nowhere {
     }
 }
 
-impl Gate for Nowhere {
-    async fn offered(&self, _account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn open(&self, _account: AccountId, _digest: SecretHash) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-}
-
-impl ResetStore for Nowhere {
-    async fn account_for(&self, _email: &Email) -> Result<Option<AccountId>, ResetError> {
-        Err(ResetError::StoreUnreachable)
-    }
-
-    async fn begin(&self, _account: AccountId, _digest: SecretHash) -> Result<(), ResetError> {
-        Err(ResetError::StoreUnreachable)
-    }
-
-    async fn take(&self, _digest: SecretHash) -> Result<AccountId, ResetError> {
-        Err(ResetError::StoreUnreachable)
-    }
-
-    async fn set_password(
-        &self,
-        _account: AccountId,
-        _hash: &PasswordHash,
-    ) -> Result<(), ResetError> {
-        Err(ResetError::StoreUnreachable)
-    }
-
-    async fn revoke_sessions(&self, _account: AccountId) -> Result<u64, ResetError> {
-        Err(ResetError::StoreUnreachable)
-    }
-}
-
 impl OidcFlows for Nowhere {
     async fn begin(&self, _flow: &PendingFlow) -> Result<(), FlowError> {
         Err(FlowError::StoreUnreachable)
@@ -117,12 +79,6 @@ impl OidcFlows for Nowhere {
 
     async fn take(&self, _state: &str) -> Result<PendingFlow, FlowError> {
         Err(FlowError::StoreUnreachable)
-    }
-}
-
-impl AuthProvider for Nowhere {
-    async fn sign_in(&self, _proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
-        Err(AuthError::ProviderUnreachable)
     }
 }
 
@@ -240,125 +196,35 @@ impl<T: Send + Sync> AccountDirectory for Profiled<T> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Gated<T>(T);
-
-impl<T: Gate + Send + Sync> Gate for Gated<T> {
-    async fn offered(&self, account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        self.0.offered(account).await
-    }
-
-    async fn open(&self, account: AccountId, digest: SecretHash) -> Result<(), FactorError> {
-        self.0.open(account, digest).await
-    }
-}
-
-impl<T: Send + Sync> FactorStore for Gated<T> {
-    async fn live(&self, _account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn keep(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-        _secret: &TotpSecret,
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn kept(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-    ) -> Result<Option<Kept>, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn confirm(&self, _account: AccountId, _kind: FactorKind) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn forget(&self, _account: AccountId, _kind: FactorKind) -> Result<bool, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn spent_step(
-        &self,
-        _account: AccountId,
-        _kind: FactorKind,
-        _step: Step,
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn keep_recovery(
-        &self,
-        _account: AccountId,
-        _digests: &[SecretHash],
-    ) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn spend_recovery(
-        &self,
-        _account: AccountId,
-        _digest: SecretHash,
-    ) -> Result<bool, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn recovery_left(&self, _account: AccountId) -> Result<u32, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn answered(&self, _digest: SecretHash) -> Result<Pending, FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-
-    async fn close(&self, _digest: SecretHash) -> Result<(), FactorError> {
-        Err(FactorError::StoreUnreachable)
-    }
-}
-
 #[derive(Debug)]
-pub struct Fakes<S, M, A, F, R, W, L> {
+pub struct Fakes<S, M, A, W> {
     pub sessions: S,
     pub memberships: M,
     pub accounts: A,
-    pub gate: F,
-    pub resets: R,
     pub flows: W,
-    pub local: L,
 }
 
-impl Fakes<Nowhere, Nowhere, Nowhere, Nowhere, Nowhere, Nowhere, Nowhere> {
+impl Fakes<Nowhere, Nowhere, Nowhere, Nowhere> {
     pub fn nowhere() -> Self {
         Self {
             sessions: Nowhere,
             memberships: Nowhere,
             accounts: Nowhere,
-            gate: Nowhere,
-            resets: Nowhere,
             flows: Nowhere,
-            local: Nowhere,
         }
     }
 }
 
-impl<S, M, A, F, R, W, L> Untransacted for Fakes<S, M, A, F, R, W, L>
+impl<S, M, A, W> Untransacted for Fakes<S, M, A, W>
 where
     S: Send + Sync + 'static,
     M: Send + Sync + 'static,
     A: Send + Sync + 'static,
-    F: Send + Sync + 'static,
-    R: Send + Sync + 'static,
     W: Send + Sync + 'static,
-    L: Send + Sync + 'static,
 {
 }
 
-impl<S, M, A, F, R, W, L> RepoFor<domain::Sessions> for Fakes<S, M, A, F, R, W, L>
+impl<S, M, A, W> RepoFor<domain::Sessions> for Fakes<S, M, A, W>
 where
     S: SessionStore + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -370,7 +236,7 @@ where
     }
 }
 
-impl<S, M, A, F, R, W, L> RepoFor<domain::Memberships> for Fakes<S, M, A, F, R, W, L>
+impl<S, M, A, W> RepoFor<domain::Memberships> for Fakes<S, M, A, W>
 where
     M: Memberships + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -382,7 +248,7 @@ where
     }
 }
 
-impl<S, M, A, F, R, W, L> RepoFor<domain::Accounts> for Fakes<S, M, A, F, R, W, L>
+impl<S, M, A, W> RepoFor<domain::Accounts> for Fakes<S, M, A, W>
 where
     A: Accounts + AccountDirectory + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -394,31 +260,7 @@ where
     }
 }
 
-impl<S, M, A, F, R, W, L> RepoFor<domain::Factors> for Fakes<S, M, A, F, R, W, L>
-where
-    F: Gate + Clone + Send + Sync + 'static,
-    Self: Untransacted,
-{
-    type Repo = Gated<F>;
-
-    fn build(&self, (): &()) -> Self::Repo {
-        Gated(self.gate.clone())
-    }
-}
-
-impl<S, M, A, F, R, W, L> RepoFor<domain::Resets> for Fakes<S, M, A, F, R, W, L>
-where
-    R: ResetStore + Clone + Send + Sync + 'static,
-    Self: Untransacted,
-{
-    type Repo = R;
-
-    fn build(&self, (): &()) -> Self::Repo {
-        self.resets.clone()
-    }
-}
-
-impl<S, M, A, F, R, W, L> RepoFor<domain::Flows> for Fakes<S, M, A, F, R, W, L>
+impl<S, M, A, W> RepoFor<domain::Flows> for Fakes<S, M, A, W>
 where
     W: OidcFlows + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -430,39 +272,20 @@ where
     }
 }
 
-impl<S, M, A, F, R, W, L> RepoFor<domain::LocalPasswords> for Fakes<S, M, A, F, R, W, L>
-where
-    L: AuthProvider + Clone + Send + Sync + 'static,
-    Self: Untransacted,
-{
-    type Repo = L;
-
-    fn build(&self, (): &()) -> Self::Repo {
-        self.local.clone()
-    }
-}
-
 type Unowned<T> = PhantomData<fn() -> T>;
 
 #[derive(Debug)]
-pub struct Wired<R, H, M, P, Z>(Unowned<(R, H, M, P, Z)>);
+pub struct Wired<R, M, P, Z>(Unowned<(R, M, P, Z)>);
 
-impl<R, H, M, P, Z> Stack for Wired<R, H, M, P, Z>
+impl<R, M, P, Z> Stack for Wired<R, M, P, Z>
 where
     R: ferristrace_application::registry::UnitOfWork,
-    H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer
-        + ferristrace_domain::AlertMailer
-        + ferristrace_domain::StatusMailer
-        + Send
-        + Sync
-        + 'static,
+    M: ferristrace_domain::AlertMailer + ferristrace_domain::StatusMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {
     type Repos = R;
     type Clock = Inert;
-    type Hasher = H;
     type Mailer = M;
     type Photos = P;
     type SpanStore = Inert;
@@ -478,33 +301,25 @@ where
     type Webhooks = Inert;
 }
 
-pub fn state<R, H, M, P, Z>(
+pub fn state<R, M, P, Z>(
     repos: R,
-    hasher: H,
     mailer: M,
     photos: P,
     oidc: Option<Z>,
     cookie: SessionCookie,
-) -> AppState<Wired<R, H, M, P, Z>>
+) -> AppState<Wired<R, M, P, Z>>
 where
     R: ferristrace_application::registry::UnitOfWork,
-    H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer
-        + ferristrace_domain::AlertMailer
-        + ferristrace_domain::StatusMailer
-        + Send
-        + Sync
-        + 'static,
+    M: ferristrace_domain::AlertMailer + ferristrace_domain::StatusMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {
     let adapters = Adapters {
-        clock: Inert::default(),
-        hasher,
+        clock: Inert,
         mailer,
-        webhooks: Inert::default(),
+        webhooks: Inert,
         photos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: None,
         issue_store: None,
         log_store: None,

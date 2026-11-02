@@ -10,7 +10,6 @@ use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::identity::{AccountId, Email};
 use crate::organisation::{OrgName, OrgRole};
-use crate::secret::SecretHash;
 use crate::telemetry::{IngestKey, TenantId};
 use crate::testing::Notebook;
 
@@ -22,7 +21,6 @@ struct Written {
     org: Option<TenantId>,
     org_name: Option<OrgName>,
     accounts: Vec<(Email, AccountId)>,
-    invited: Vec<AccountId>,
     projects: Vec<(TenantId, ProjectName, ProjectId)>,
     issued: Vec<(TenantId, Option<ProjectId>)>,
     granted: Vec<(TenantId, Email, OrgRole)>,
@@ -86,11 +84,6 @@ impl ControlPlane for FakeControlPlane {
         Ok(account)
     }
 
-    async fn invite(&self, account: AccountId, _digest: SecretHash) -> Result<(), ProvisionError> {
-        self.written.lock().expect("the lock").invited.push(account);
-        Ok(())
-    }
-
     async fn claim_project(
         &self,
         org: TenantId,
@@ -143,20 +136,6 @@ impl ControlPlane for FakeControlPlane {
             org: TenantId::new(Uuid::from_u128(KEYS_ORG)),
             id: KeyId::new(Uuid::from_u128(ISSUED_KEY)),
         }))
-    }
-
-    async fn memberships_of(&self, account: AccountId) -> Result<Vec<TenantId>, ProvisionError> {
-        let held = self.written.lock().expect("the lock");
-        Ok(held
-            .granted
-            .iter()
-            .filter(|(_, email, _)| {
-                held.accounts
-                    .iter()
-                    .any(|(carried, id)| carried == email && *id == account)
-            })
-            .map(|(org, _, _)| *org)
-            .collect())
     }
 }
 
@@ -216,23 +195,21 @@ fn founded(outcome: Bootstrapped) -> Founded {
 }
 
 #[tokio::test]
-async fn a_bootstrap_founds_an_organisation_its_first_project_and_one_invitation() {
+async fn a_bootstrap_founds_an_organisation_and_its_first_project() {
     let email = an_address();
     let (control_plane, held) = a_control_plane();
     let provisioning = Provisioning::new(control_plane, Notebook::default());
 
     let outcome = provisioning
-        .bootstrap(&a_name(), &email, true)
+        .bootstrap(&a_name(), &email)
         .await
         .expect("a fresh deployment");
 
     let founded = founded(outcome);
     assert_eq!(founded.project_name.as_str(), "default");
-    assert!(founded.invitation.is_some());
     let written = written(&held);
     assert_eq!(written.org, Some(founded.org));
     assert_eq!(written.org_name, Some(a_name()));
-    assert_eq!(written.invited.len(), 1);
     assert_eq!(
         written.projects,
         vec![(founded.org, founded.project_name, founded.project)]
@@ -245,13 +222,13 @@ async fn a_second_bootstrap_changes_nothing() {
     let (control_plane, held) = a_control_plane();
     let provisioning = Provisioning::new(control_plane, Notebook::default());
     provisioning
-        .bootstrap(&a_name(), &email, true)
+        .bootstrap(&a_name(), &email)
         .await
         .expect("a fresh deployment");
     let after_the_first = written(&held);
 
     let outcome = provisioning
-        .bootstrap(&a_name(), &email, true)
+        .bootstrap(&a_name(), &email)
         .await
         .expect("a deployment that already holds one");
 
@@ -265,21 +242,6 @@ async fn a_second_bootstrap_changes_nothing() {
 }
 
 #[tokio::test]
-async fn a_bootstrap_without_local_passwords_invites_nobody() {
-    let email = an_address();
-    let (control_plane, held) = a_control_plane();
-    let provisioning = Provisioning::new(control_plane, Notebook::default());
-
-    let outcome = provisioning
-        .bootstrap(&a_name(), &email, false)
-        .await
-        .expect("a fresh deployment");
-
-    assert_eq!(founded(outcome).invitation, None);
-    assert!(written(&held).invited.is_empty());
-}
-
-#[tokio::test]
 async fn a_bootstrap_keeps_the_account_that_already_carries_the_address() {
     let email = an_address();
     let account = AccountId::new(Uuid::from_u128(42));
@@ -287,13 +249,12 @@ async fn a_bootstrap_keeps_the_account_that_already_carries_the_address() {
     let provisioning = Provisioning::new(control_plane, Notebook::default());
 
     provisioning
-        .bootstrap(&a_name(), &email, true)
+        .bootstrap(&a_name(), &email)
         .await
         .expect("a fresh deployment");
 
     let written = written(&held);
     assert_eq!(written.accounts.len(), 1);
-    assert_eq!(written.invited, vec![account]);
 }
 
 #[tokio::test]
@@ -303,7 +264,7 @@ async fn a_key_takes_the_only_project_of_its_organisation() {
     let provisioning = Provisioning::new(control_plane, Notebook::default());
     let founded = founded(
         provisioning
-            .bootstrap(&a_name(), &email, true)
+            .bootstrap(&a_name(), &email)
             .await
             .expect("a fresh deployment"),
     );
@@ -327,7 +288,7 @@ async fn a_key_names_no_project_when_the_organisation_holds_several() {
     let provisioning = Provisioning::new(control_plane, Notebook::default());
     let founded = founded(
         provisioning
-            .bootstrap(&a_name(), &email, true)
+            .bootstrap(&a_name(), &email)
             .await
             .expect("a fresh deployment"),
     );
@@ -366,7 +327,7 @@ async fn a_project_name_the_organisation_already_holds_is_refused() {
     let provisioning = Provisioning::new(control_plane, Notebook::default());
     let founded = founded(
         provisioning
-            .bootstrap(&a_name(), &email, true)
+            .bootstrap(&a_name(), &email)
             .await
             .expect("a fresh deployment"),
     );
@@ -379,64 +340,10 @@ async fn a_project_name_the_organisation_already_holds_is_refused() {
 }
 
 #[tokio::test]
-async fn a_reset_refuses_an_address_nobody_carries() {
-    let (control_plane, _held) = a_control_plane();
-    let provisioning = Provisioning::new(control_plane, Notebook::default());
-
-    let outcome = provisioning.reset_password(&an_address()).await;
-
-    assert_eq!(outcome.err(), Some(ProvisionError::NoSuchAccount));
-}
-
-#[tokio::test]
-async fn a_reset_invites_the_account_that_carries_the_address() {
-    let email = an_address();
-    let account = AccountId::new(Uuid::from_u128(11));
-    let (control_plane, held) = a_control_plane_holding(&email, account);
-    let provisioning = Provisioning::new(control_plane, Notebook::default());
-
-    let token = provisioning
-        .reset_password(&email)
-        .await
-        .expect("an invitation");
-
-    assert!(token.looks_like_one());
-    assert_eq!(written(&held).invited, vec![account]);
-}
-
-#[tokio::test]
-async fn a_new_account_is_refused_when_the_address_is_taken() {
-    let email = an_address();
-    let (control_plane, _held) =
-        a_control_plane_holding(&email, AccountId::new(Uuid::from_u128(3)));
-    let provisioning = Provisioning::new(control_plane, Notebook::default());
-
-    let outcome = provisioning.create_account(&email).await;
-
-    assert_eq!(outcome.err(), Some(ProvisionError::Taken));
-}
-
-#[tokio::test]
-async fn a_new_account_is_created_locked_and_invited() {
-    let (control_plane, held) = a_control_plane();
-    let provisioning = Provisioning::new(control_plane, Notebook::default());
-
-    let token = provisioning
-        .create_account(&an_address())
-        .await
-        .expect("an invitation");
-
-    assert!(token.looks_like_one());
-    let written = written(&held);
-    assert_eq!(written.accounts.len(), 1);
-    assert_eq!(written.invited.len(), 1);
-}
-
-#[tokio::test]
 async fn an_unreachable_control_plane_surfaces_to_the_caller() {
     let provisioning = Provisioning::new(an_unreachable_control_plane(), Notebook::default());
 
-    let outcome = provisioning.bootstrap(&a_name(), &an_address(), true).await;
+    let outcome = provisioning.bootstrap(&a_name(), &an_address()).await;
 
     assert_eq!(outcome.err(), Some(ProvisionError::Unreachable));
 }
@@ -491,12 +398,12 @@ async fn a_bootstrap_records_one_founding_by_the_operator_and_a_second_records_n
 
     let founded = founded(
         provisioning
-            .bootstrap(&a_name(), &email, true)
+            .bootstrap(&a_name(), &email)
             .await
             .expect("a fresh deployment"),
     );
     provisioning
-        .bootstrap(&a_name(), &email, true)
+        .bootstrap(&a_name(), &email)
         .await
         .expect("a deployment that already holds one");
 
@@ -511,14 +418,6 @@ async fn a_bootstrap_records_one_founding_by_the_operator_and_a_second_records_n
         entries[0].detail.get("owner"),
         Some(Some("operator@example.com"))
     );
-    let invitation = founded.invitation.expect("an invitation");
-    assert!(
-        entries[0]
-            .detail
-            .pairs()
-            .iter()
-            .all(|(_, value)| value.as_deref() != Some(invitation.exposed()))
-    );
 }
 
 #[tokio::test]
@@ -526,7 +425,7 @@ async fn an_unreachable_bootstrap_records_nothing() {
     let notebook = Notebook::default();
     let provisioning = Provisioning::new(an_unreachable_control_plane(), notebook.clone());
 
-    let outcome = provisioning.bootstrap(&a_name(), &an_address(), true).await;
+    let outcome = provisioning.bootstrap(&a_name(), &an_address()).await;
 
     assert_eq!(outcome.err(), Some(ProvisionError::Unreachable));
     assert!(notebook.entries().is_empty());
@@ -596,51 +495,4 @@ async fn each_command_line_change_is_recorded_as_the_operator() {
                     .is_none_or(|value| !value.contains("the-secret"))
             }))
     );
-}
-
-#[tokio::test]
-async fn a_reset_link_is_recorded_in_every_organisation_the_account_belongs_to() {
-    let email = an_address();
-    let account = AccountId::new(Uuid::from_u128(11));
-    let (control_plane, _held) = a_control_plane_holding(&email, account);
-    let notebook = Notebook::default();
-    let provisioning = Provisioning::new(control_plane, notebook.clone());
-    let org = TenantId::new(Uuid::from_u128(8));
-    provisioning
-        .grant_role(org, &email, OrgRole::Member)
-        .await
-        .expect("a granted role");
-
-    let token = provisioning
-        .reset_password(&email)
-        .await
-        .expect("an invitation");
-
-    let entries = notebook.entries();
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[1].org, org);
-    assert_eq!(entries[1].actor, Actor::Operator);
-    assert_eq!(entries[1].action, Action::ResetLinkIssuedByOperator);
-    assert_eq!(entries[1].target, Target::account(account));
-    assert!(
-        entries[1]
-            .detail
-            .pairs()
-            .iter()
-            .all(|(_, value)| value.as_deref() != Some(token.exposed()))
-    );
-}
-
-#[tokio::test]
-async fn a_new_account_belongs_to_no_organisation_so_no_log_records_it() {
-    let (control_plane, _held) = a_control_plane();
-    let notebook = Notebook::default();
-    let provisioning = Provisioning::new(control_plane, notebook.clone());
-
-    provisioning
-        .create_account(&an_address())
-        .await
-        .expect("an invitation");
-
-    assert!(notebook.entries().is_empty());
 }

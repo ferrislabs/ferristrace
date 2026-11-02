@@ -588,8 +588,8 @@ macro_rules! repo {
 repo!(Sessions, OnCall, |_held| OnCall);
 repo!(Memberships, OnCall, |_held| OnCall);
 repo!(Projects, Nobody, |_held| Nobody);
-repo!(ApiKeys, Inert, |_held| Inert::default());
-repo!(Audit, Inert, |_held| Inert::default());
+repo!(ApiKeys, Inert, |_held| Inert);
+repo!(Audit, Inert, |_held| Inert);
 repo!(Roster, Crew, |held| held.crew.clone());
 repo!(AlertRules, AlertLedger, |held| held.alerts.clone());
 repo!(AlertStates, AlertLedger, |held| held.alerts.clone());
@@ -617,7 +617,6 @@ struct Watching;
 impl Stack for Watching {
     type Repos = Ledgered;
     type Clock = Moving;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = ClickhouseReader;
@@ -683,11 +682,10 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(ClickhouseReader::new(client)),
             issue_store: None,
             log_store: None,
@@ -800,11 +798,10 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
         ledgered.clone(),
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(ClickhouseReader::new(client)),
             issue_store: None,
             log_store: None,
@@ -1303,11 +1300,10 @@ async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(ClickhouseReader::new(client)),
             issue_store: None,
             log_store: None,
@@ -1334,7 +1330,6 @@ struct Spending;
 impl Stack for Spending {
     type Repos = Ledgered;
     type Clock = Moving;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -1537,11 +1532,10 @@ async fn spec_l4_4_a_cost_rule_fires_when_the_priced_calls_cross_ten_dollars_and
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: None,
             issue_store: Some(ClickhouseIssues::new(client)),
             log_store: None,

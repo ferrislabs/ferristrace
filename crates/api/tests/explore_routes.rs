@@ -372,7 +372,7 @@ impl RepoFor<domain::ApiKeys> for Fakes {
     type Repo = Inert;
 
     fn build(&self, (): &()) -> Self::Repo {
-        Inert::default()
+        Inert
     }
 }
 
@@ -390,7 +390,6 @@ impl<
 {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = R;
@@ -418,12 +417,11 @@ fn state<
     reader: R,
 ) -> AppState<TestStack<R>> {
     let adapters = Adapters {
-        clock: Inert::default(),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        clock: Inert,
+        mailer: Inert,
+        webhooks: Inert,
         photos: NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: Some(reader),
         issue_store: None,
         log_store: None,

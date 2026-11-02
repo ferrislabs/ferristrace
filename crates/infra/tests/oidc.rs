@@ -155,7 +155,7 @@ async fn a_callback_resolves_the_federated_identity() {
     *nonce.lock().expect("the nonce lock") = flow.nonce.clone();
 
     let identity = provider
-        .sign_in(SignInProof::Federated {
+        .sign_in(SignInProof {
             code: CODE.to_owned(),
             code_verifier: flow.verifier.exposed().to_owned(),
             nonce: flow.nonce.clone(),
@@ -164,7 +164,6 @@ async fn a_callback_resolves_the_federated_identity() {
         .await
         .expect("the provider answers");
 
-    assert!(!identity.issuer.is_local());
     assert_eq!(identity.subject.as_str(), SUBJECT);
     assert_eq!(identity.email.as_str(), ADDRESS);
     assert!(identity.email_verified);
@@ -177,7 +176,7 @@ async fn a_callback_carrying_the_wrong_nonce_is_refused() {
     *nonce.lock().expect("the nonce lock") = "a-nonce-nobody-asked-for".to_owned();
 
     let refused = provider
-        .sign_in(SignInProof::Federated {
+        .sign_in(SignInProof {
             code: CODE.to_owned(),
             code_verifier: flow.verifier.exposed().to_owned(),
             nonce: flow.nonce.clone(),
@@ -186,18 +185,4 @@ async fn a_callback_carrying_the_wrong_nonce_is_refused() {
         .await;
 
     assert_eq!(refused, Err(AuthError::Rejected));
-}
-
-#[tokio::test]
-async fn a_password_proof_belongs_to_another_source() {
-    let (provider, _nonce) = a_provider().await;
-
-    let refused = provider
-        .sign_in(SignInProof::Password {
-            email: ferristrace_domain::Email::try_from(ADDRESS).expect("an address"),
-            password: ferristrace_domain::Password::new("correct horse"),
-        })
-        .await;
-
-    assert_eq!(refused, Err(AuthError::SourceDisabled));
 }

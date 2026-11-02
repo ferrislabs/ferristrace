@@ -5,7 +5,6 @@ use super::value_objects::{Minted, Revoked};
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::identity::{AccountId, Email};
 use crate::organisation::{OrgName, OrgRole};
-use crate::secret::SecretHash;
 use crate::telemetry::TenantId;
 
 pub trait ControlPlane {
@@ -34,12 +33,6 @@ pub trait ControlPlane {
         email: &Email,
     ) -> impl Future<Output = Result<AccountId, ProvisionError>> + Send;
 
-    fn invite(
-        &self,
-        account: AccountId,
-        digest: SecretHash,
-    ) -> impl Future<Output = Result<(), ProvisionError>> + Send;
-
     fn claim_project(
         &self,
         org: TenantId,
@@ -61,9 +54,4 @@ pub trait ControlPlane {
         &self,
         prefix: &str,
     ) -> impl Future<Output = Result<Option<Revoked>, ProvisionError>> + Send;
-
-    fn memberships_of(
-        &self,
-        account: AccountId,
-    ) -> impl Future<Output = Result<Vec<TenantId>, ProvisionError>> + Send;
 }

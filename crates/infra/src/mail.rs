@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use ferristrace_domain::{
     AlertMailer, AlertStatus, Culprits, DeliveryError, Dispatch, Email, EmailList, Letter,
-    LetterBody, Mailer, PageDispatch, PageSource, ResetError, ResetToken, StatusMailer, UpdateKind,
+    LetterBody, PageDispatch, PageSource, StatusMailer, UpdateKind,
 };
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
@@ -45,24 +45,6 @@ impl SmtpMailer {
             from,
             base_url: settings.base_url.trim_end_matches('/').to_owned(),
         })
-    }
-
-    pub fn reset_link(&self, token: &ResetToken) -> String {
-        format!("{}/reset?token={}", self.base_url, token.exposed())
-    }
-
-    fn compose(&self, to: &Email, token: &ResetToken) -> Result<Message, MailError> {
-        let recipient: Mailbox = to.as_str().parse().map_err(|_| MailError::Settings)?;
-        Message::builder()
-            .from(self.from.clone())
-            .to(recipient)
-            .subject("Reset your ferristrace password")
-            .header(ContentType::TEXT_PLAIN)
-            .body(format!(
-                "Open this link to choose a new password. It works once and expires within the hour.\n\n{}\n\nIf you did not ask for this, nothing has changed and you can ignore it.\n",
-                self.reset_link(token)
-            ))
-            .map_err(|_| MailError::Settings)
     }
 }
 
@@ -337,23 +319,9 @@ impl StatusMailer for SmtpMailer {
     }
 }
 
-impl Mailer for SmtpMailer {
-    async fn send_password_reset(&self, to: &Email, token: &ResetToken) -> Result<(), ResetError> {
-        let message = self.compose(to, token).map_err(|error| {
-            tracing::error!(%error, "a reset message could not be composed");
-            ResetError::Undeliverable
-        })?;
-        self.transport.send(message).await.map_err(|error| {
-            tracing::error!(%error, "a reset message was not accepted by the relay");
-            ResetError::Undeliverable
-        })?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use ferristrace_domain::{Email, ResetToken};
+    use ferristrace_domain::Email;
 
     use super::{MailSettings, SmtpMailer};
 
@@ -366,35 +334,6 @@ mod tests {
             base_url: "https://app.example.com/".to_owned(),
         })
         .expect("usable settings")
-    }
-
-    #[test]
-    fn a_link_carries_the_token_under_the_configured_host() {
-        let token = ResetToken::from_plaintext("ft_pr_abc");
-
-        assert_eq!(
-            mailer().reset_link(&token),
-            "https://app.example.com/reset?token=ft_pr_abc",
-            "the trailing slash of the base url is not doubled"
-        );
-    }
-
-    #[test]
-    fn a_composed_message_names_both_parties_and_carries_the_link() {
-        let token = ResetToken::from_plaintext("ft_pr_abc");
-
-        let message = mailer()
-            .compose(
-                &Email::try_from("person@example.com").expect("an address"),
-                &token,
-            )
-            .expect("it composes");
-        let rendered = String::from_utf8(message.formatted()).expect("text");
-
-        assert!(rendered.contains("no-reply@example.com"), "{rendered}");
-        assert!(rendered.contains("person@example.com"), "{rendered}");
-        assert!(rendered.contains("ft_pr_abc"), "{rendered}");
-        assert!(rendered.contains("works once"), "{rendered}");
     }
 
     #[test]

@@ -31,7 +31,7 @@ Organisation > Audit log.
 | `crates/postgres` | The control plane adapters and their migrations. |
 | `crates/clickhouse` | The span store adapters and their migrations. |
 | `crates/redis` | The usage counter. |
-| `crates/infra` | S3 photos, SMTP, OIDC, argon2, the secret seal, clocks, in-memory adapters. |
+| `crates/infra` | S3 photos, SMTP, OIDC, the secret seal, clocks, in-memory adapters. |
 | `crates/api` | The driving adapters: the HTTP routers, the OTLP gRPC service, the DTOs. |
 | `crates/ee` | The cloud build, behind the `ee` feature. Empty in this repository. |
 | `apps/server` | The binary: configuration, wiring, the CLI, the server. |

@@ -729,7 +729,7 @@ impl RepoFor<domain::ApiKeys> for Fakes {
     type Repo = Inert;
 
     fn build(&self, (): &()) -> Self::Repo {
-        Inert::default()
+        Inert
     }
 }
 
@@ -738,7 +738,6 @@ struct Placing;
 impl Stack for Placing {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = ClickhouseReader;
@@ -756,12 +755,11 @@ impl Stack for Placing {
 
 fn routes(client: &Client) -> Router {
     let adapters = Adapters {
-        clock: Inert::default(),
-        hasher: Inert::default(),
-        mailer: Inert::default(),
-        webhooks: Inert::default(),
+        clock: Inert,
+        mailer: Inert,
+        webhooks: Inert,
         photos: NoPhotos,
-        meter: Inert::default(),
+        meter: Inert,
         span_store: Some(ClickhouseReader::new(client.clone())),
         issue_store: None,
         log_store: Some(ClickhouseLogReader::new(client.clone())),

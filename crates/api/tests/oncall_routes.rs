@@ -275,7 +275,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -343,11 +342,10 @@ impl Harness {
     fn app(&self, role: OrgRole) -> Router {
         let adapters = Adapters {
             clock: FixedClock::at(NOW + 3_600),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
-            webhooks: Inert::default(),
+            webhooks: Inert,
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: None,
             issue_store: None,
             log_store: None,
@@ -985,7 +983,6 @@ struct Watching;
 impl Stack for Watching {
     type Repos = Fakes;
     type Clock = Moving;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Failing;
@@ -1055,11 +1052,10 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: mail.clone(),
-            webhooks: Inert::default(),
+            webhooks: Inert,
             photos: NoPhotos,
-            meter: Inert::default(),
+            meter: Inert,
             span_store: Some(Failing),
             issue_store: None,
             log_store: None,

@@ -44,7 +44,6 @@ ferristrace-api = { path = "crates/api" }
 ferristrace-ee = { path = "crates/ee" }
 
 anyhow = "1.0.104"
-argon2 = "0.6.0"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 base64 = "0.23.1"
@@ -70,7 +69,6 @@ redis = { version = "1.8.0", default-features = false, features = ["tokio-comp",
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde_repr = "0.1.20"
-sha1 = "0.11.0"
 sha2 = "0.11.1"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "uuid"] }
 subtle = "2.6.1"

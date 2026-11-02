@@ -284,15 +284,11 @@ where
         },
         memberships,
         accounts: Profiled(Arc::clone(kept)),
-        gate: Nowhere,
-        resets: Nowhere,
         flows: Nowhere,
-        local: Nowhere,
     };
     let me = state(
         fakes,
-        Inert::default(),
-        Inert::default(),
+        Inert,
         photos,
         None::<Inert>,
         SessionCookie::default(),

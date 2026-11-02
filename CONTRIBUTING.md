@@ -45,12 +45,14 @@ docker compose up --build --detach
 docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
-That brings up Postgres, ClickHouse, Redis and the server, applies both sets
-of migrations, and prints a single-use token that sets your password. The
-application is on <http://localhost:4318>, OTLP over gRPC on 4317.
-[deploy/README.md](deploy/README.md) covers the rest: settings, an identity
-provider, sending a trace, and running the front end against the stack
-without rebuilding the image.
+That brings up Postgres, ClickHouse, Redis, FerrisKey and the server,
+applies both sets of migrations, and prints that your address signs in
+through the identity provider — open <http://localhost:4318> and do that,
+once the `127.0.0.1 ferriskey` line [deploy/README.md](deploy/README.md)
+asks for is in place. OTLP over gRPC answers on 4317.
+[deploy/README.md](deploy/README.md) covers the rest: settings, a
+different identity provider, sending a trace, and running the front end
+against the stack without rebuilding the image.
 
 ## Running the tests
 
