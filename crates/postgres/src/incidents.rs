@@ -9,7 +9,7 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use crate::incident_codec::{author_of, author_parts, decode_change, encode_change};
+use crate::incident_codec::{author_of, author_parts, decode_change, encode_entry, on_behalf_of};
 use crate::unit_of_work::{Postgres, SharedTx};
 
 fn unreachable(doing: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
@@ -213,6 +213,7 @@ fn read_entry(
         row.get::<&str, _>("author_kind"),
         row.get("author_id"),
         row.get::<Option<&str>, _>("author_label"),
+        on_behalf_of(row.get::<&str, _>("detail")),
     )
     .ok_or_else(|| refused("author"))?;
     let change = decode_change(
@@ -235,7 +236,7 @@ fn read_entry(
 impl IncidentTimeline for PostgresIncidentTimeline {
     async fn append(&self, entry: &TimelineEntry) -> Result<(), StoreError> {
         let (author_kind, author_id, author_label) = author_parts(&entry.author);
-        let (body, detail) = encode_change(&entry.change);
+        let (body, detail) = encode_entry(entry);
         let mut tx = self.tx.lock().await;
         sqlx::query(
             "INSERT INTO incident_events \
@@ -261,7 +262,7 @@ impl IncidentTimeline for PostgresIncidentTimeline {
 
     async fn append_once(&self, entry: &TimelineEntry) -> Result<bool, StoreError> {
         let (author_kind, author_id, author_label) = author_parts(&entry.author);
-        let (body, detail) = encode_change(&entry.change);
+        let (body, detail) = encode_entry(entry);
         let mut tx = self.tx.lock().await;
         let done = sqlx::query(
             "INSERT INTO incident_events \

@@ -430,6 +430,7 @@ fn calling(client_id: &str, scopes: &[&str], jti: &str) -> Reader {
             scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
             jti: jti.into(),
             expires_at_unix_secs: NOW + 600,
+            delegated: None,
         },
         route: "/api/orgs/{org}/traces".into(),
     })

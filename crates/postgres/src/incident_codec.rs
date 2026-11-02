@@ -1,12 +1,14 @@
 use ferristrace_domain::{
     AccountId, AgentId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel,
     Author, Change, CommentBody, EntryKind, IncidentId, IncidentSeverity, IncidentStatus,
-    IncidentTitle, KeyId, PageId, Reference, RuleId,
+    IncidentTitle, KeyId, PageId, Reference, RuleId, TimelineEntry,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::alert_codec::{culprits_from, culprits_value, encode_labels, labels_of};
+
+const ON_BEHALF_OF: &str = "on_behalf_of";
 
 fn id_of(value: Option<Uuid>) -> Value {
     value.map_or(Value::Null, |id| Value::String(id.to_string()))
@@ -176,18 +178,45 @@ pub(crate) fn author_parts(author: &Author) -> (&'static str, Option<Uuid>, Opti
     match author {
         Author::Account(account) => ("account", Some(account.as_uuid()), None),
         Author::ApiKey(key) => ("api_key", Some(key.as_uuid()), None),
-        Author::Agent { id, name } => ("agent", id.map(AgentId::as_uuid), Some(name)),
+        Author::Agent { id, name, .. } => ("agent", id.map(AgentId::as_uuid), Some(name)),
         Author::System => ("system", None, None),
     }
 }
 
-pub(crate) fn author_of(kind: &str, id: Option<Uuid>, label: Option<&str>) -> Option<Author> {
+pub(crate) fn encode_entry(entry: &TimelineEntry) -> (Option<&str>, String) {
+    let (body, detail) = encode_change(&entry.change);
+    let Author::Agent {
+        on_behalf_of: Some(person),
+        ..
+    } = &entry.author
+    else {
+        return (body, detail);
+    };
+    let mut detail: Value = serde_json::from_str(&detail).unwrap_or_else(|_| json!({}));
+    if let Some(fields) = detail.as_object_mut() {
+        fields.insert(ON_BEHALF_OF.to_owned(), Value::String(person.to_string()));
+    }
+    (body, detail.to_string())
+}
+
+pub(crate) fn on_behalf_of(detail: &str) -> Option<Box<str>> {
+    let detail: Value = serde_json::from_str(detail).ok()?;
+    text(&detail, ON_BEHALF_OF).map(Into::into)
+}
+
+pub(crate) fn author_of(
+    kind: &str,
+    id: Option<Uuid>,
+    label: Option<&str>,
+    on_behalf_of: Option<Box<str>>,
+) -> Option<Author> {
     match (kind, id, label) {
         ("account", Some(id), _) => Some(Author::Account(AccountId::new(id))),
         ("api_key", Some(id), _) => Some(Author::ApiKey(KeyId::new(id))),
         ("agent", id, Some(name)) => Some(Author::Agent {
             id: id.map(AgentId::new),
             name: name.into(),
+            on_behalf_of,
         }),
         ("system", None, _) => Some(Author::System),
         _ => None,
@@ -201,11 +230,14 @@ mod tests {
     use ferristrace_domain::{
         AccountId, AgentId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel,
         Author, Change, CommentBody, CulpritPod, Culprits, IncidentId, IncidentSeverity,
-        IncidentStatus, IncidentTitle, KeyId, Labels, PageId, Reference, RuleId,
+        IncidentStatus, IncidentTitle, KeyId, Labels, PageId, Reference, RuleId, TenantId,
+        TimelineEntry, TimelineId,
     };
     use uuid::Uuid;
 
-    use super::{author_of, author_parts, decode_change, encode_change};
+    use super::{
+        author_of, author_parts, decode_change, encode_change, encode_entry, on_behalf_of,
+    };
 
     fn blamed() -> Culprits {
         Culprits::new(
@@ -330,15 +362,68 @@ mod tests {
             Author::Agent {
                 id: Some(AgentId::new(Uuid::from_u128(3))),
                 name: "triage".into(),
+                on_behalf_of: None,
             },
             Author::Agent {
                 id: None,
                 name: "legacy".into(),
+                on_behalf_of: None,
             },
             Author::System,
         ] {
             let (kind, id, label) = author_parts(&author);
-            assert_eq!(author_of(kind, id, label), Some(author));
+            assert_eq!(author_of(kind, id, label, None), Some(author));
         }
+    }
+
+    #[test]
+    fn the_person_an_agent_acts_for_travels_in_the_entry_detail_and_reads_back() {
+        let incident = IncidentId::new(Uuid::from_u128(1));
+        let comment = Change::Comment {
+            body: CommentBody::try_from("rolled back").expect("a body"),
+            public: false,
+        };
+        let entry = TimelineEntry {
+            id: TimelineId::new(Uuid::from_u128(9)),
+            incident,
+            org: TenantId::new(Uuid::from_u128(2)),
+            author: Author::Agent {
+                id: Some(AgentId::new(Uuid::from_u128(3))),
+                name: "mcp".into(),
+                on_behalf_of: Some("dana@example.com".into()),
+            },
+            change: comment.clone(),
+            at_ms: 1,
+        };
+
+        let (body, detail) = encode_entry(&entry);
+
+        assert_eq!(on_behalf_of(&detail).as_deref(), Some("dana@example.com"));
+        assert_eq!(
+            decode_change(comment.kind().as_str(), body, &detail, incident),
+            Some(comment)
+        );
+    }
+
+    #[test]
+    fn an_entry_nobody_was_acted_for_stores_no_person() {
+        let entry = TimelineEntry {
+            id: TimelineId::new(Uuid::from_u128(9)),
+            incident: IncidentId::new(Uuid::from_u128(1)),
+            org: TenantId::new(Uuid::from_u128(2)),
+            author: Author::Agent {
+                id: None,
+                name: "mcp".into(),
+                on_behalf_of: None,
+            },
+            change: Change::Acknowledged {
+                page: PageId::new(Uuid::from_u128(5)),
+            },
+            at_ms: 1,
+        };
+
+        let (_, detail) = encode_entry(&entry);
+
+        assert_eq!(on_behalf_of(&detail), None);
     }
 }

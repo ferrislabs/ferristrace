@@ -73,9 +73,7 @@ where
             actor: Actor::Agent(grant.agent),
             action: Action::AgentRead,
             target: Target::org(org),
-            detail: Detail::default()
-                .with("route", &call.route)
-                .with("jti", &call.token.jti),
+            detail: grant.stamp(Detail::default().with("route", &call.route)),
         };
         self.record(&grant, &entry).await?;
         Ok(grant)
@@ -111,6 +109,7 @@ where
             scopes,
             project: agent.project,
             jti: call.token.jti.clone(),
+            delegated: call.delegated().cloned(),
         })
     }
 

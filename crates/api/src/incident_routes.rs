@@ -155,6 +155,8 @@ struct AuthorBody {
     kind: &'static str,
     id: Option<Uuid>,
     label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_behalf_of: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -255,6 +257,12 @@ fn entry_of(chronicle: &Chronicle, entry: &TimelineEntry) -> EntryBody {
             kind: entry.author.kind(),
             id,
             label: chronicle.author_label(&entry.author).to_owned(),
+            on_behalf_of: match &entry.author {
+                Author::Agent { on_behalf_of, .. } => {
+                    on_behalf_of.as_deref().map(ToOwned::to_owned)
+                }
+                _ => None,
+            },
         },
         detail: detail_of(chronicle, &entry.change),
     }

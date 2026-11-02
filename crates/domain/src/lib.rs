@@ -36,7 +36,7 @@ pub use access::{
 pub use agents::{
     Agent as RegisteredAgent, AgentCall, AgentEnrolment, AgentError, AgentGrant, AgentId,
     AgentName, AgentRegistry, AgentScope, AgentScopes, AgentToken, AgentTokens, Agents,
-    BadAgentName, BadAgentScopes, BadClientId, ClientId, TokenRefusal, VerifiedToken,
+    BadAgentName, BadAgentScopes, BadClientId, ClientId, Delegation, TokenRefusal, VerifiedToken,
 };
 pub use alerts::{
     AlertBook, AlertChannels, AlertDuty, AlertError, AlertEvent, AlertEvents, AlertMailer,

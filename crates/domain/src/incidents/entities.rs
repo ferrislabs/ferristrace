@@ -32,7 +32,11 @@ pub struct Incident {
 pub enum Author {
     Account(AccountId),
     ApiKey(KeyId),
-    Agent { id: Option<AgentId>, name: Box<str> },
+    Agent {
+        id: Option<AgentId>,
+        name: Box<str>,
+        on_behalf_of: Option<Box<str>>,
+    },
     System,
 }
 

@@ -13,5 +13,6 @@ pub use errors::{AgentError, BadAgentName, BadAgentScopes, BadClientId, TokenRef
 pub use ports::{AgentTokens, Agents};
 pub use registry::AgentRegistry;
 pub use value_objects::{
-    AgentCall, AgentId, AgentName, AgentScope, AgentScopes, AgentToken, ClientId, VerifiedToken,
+    AgentCall, AgentId, AgentName, AgentScope, AgentScopes, AgentToken, ClientId, Delegation,
+    VerifiedToken,
 };

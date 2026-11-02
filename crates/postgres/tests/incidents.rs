@@ -208,6 +208,7 @@ async fn incidents_timelines_and_attachments_read_back_whole() {
             Author::Agent {
                 id: Some(AgentId::new(Uuid::from_u128(8))),
                 name: "triage".into(),
+                on_behalf_of: Some("dana@example.com".into()),
             },
             Change::Comment {
                 body: CommentBody::try_from("rolled back").expect("a body"),
@@ -220,6 +221,7 @@ async fn incidents_timelines_and_attachments_read_back_whole() {
             Author::Agent {
                 id: None,
                 name: "before ids".into(),
+                on_behalf_of: None,
             },
             Change::Comment {
                 body: CommentBody::try_from("an old row").expect("a body"),

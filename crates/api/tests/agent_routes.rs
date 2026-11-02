@@ -484,6 +484,7 @@ impl Tokens {
                 scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
                 jti: jti.into(),
                 expires_at_unix_secs: 4_000_000_000,
+                delegated: None,
             }),
         );
         token

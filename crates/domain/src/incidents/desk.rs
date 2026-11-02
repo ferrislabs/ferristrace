@@ -629,7 +629,7 @@ where
                         actor: Actor::Agent(grant.agent),
                         action,
                         target,
-                        detail: detail.with("jti", &grant.jti),
+                        detail: grant.stamp(detail),
                     },
                 )
                 .await?),
@@ -661,6 +661,10 @@ impl Hand {
             Self::Agent(grant) => Author::Agent {
                 id: Some(grant.agent),
                 name: grant.name.clone(),
+                on_behalf_of: grant
+                    .delegated
+                    .as_ref()
+                    .map(|delegation| delegation.label().into()),
             },
         }
     }
