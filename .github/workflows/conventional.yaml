@@ -17,8 +17,12 @@ jobs:
       - name: the title reads as a conventional commit
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -eu
+          if [ "$AUTHOR" = "dependabot[bot]" ]; then
+            TITLE=$(printf '%s' "$TITLE" | sed -E 's/^([a-z]+(\([^)]*\))?!?: )Bump /\1bump /')
+          fi
           if printf '%s' "$TITLE" | grep -qE "^($TYPES)(\([a-z0-9._/-]+\))?!?: [a-z0-9].*"; then
             echo "ok   $TITLE"
             exit 0
