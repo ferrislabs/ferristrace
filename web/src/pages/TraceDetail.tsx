@@ -4,8 +4,10 @@ import { Link, useParams } from '@/lib/router'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { EmptyState, ServiceDot, svcBg } from '@/components/ft/bits'
+import { EmptyState, ServiceDot, SeverityBadge, svcBg } from '@/components/ft/bits'
+import { Switch } from '@/components/ui/switch'
 import { useTrace } from '@/data/traces'
+import { msOf, traceLogsFilter, useTraceLogs, type LogRecord } from '@/data/logs'
 import { because } from '@/auth/client'
 import { stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -16,11 +18,16 @@ export function TraceDetail() {
   const { row: t, spans, pending, failed } = useTrace(id)
   const [picked, setPicked] = useState<string | null>(null)
   const [panel, setPanel] = useState(true)
+  const [onlySpan, setOnlySpan] = useState(false)
+  const logs = useTraceLogs(t?.id, t?.startedAtMs ?? 0, t?.durationMs ?? 0)
   if (pending) return null
   if (failed) return <EmptyState title="The trace could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
   if (!t) return <NotFound />
   const s = spans.find((x) => x.id === picked) ?? spans.find((x) => x.err) ?? spans[0]
   const services = [...new Set(spans.map((x) => x.svc))]
+  const logsFilter = { f: traceLogsFilter(t.id, t.startedAtMs, t.durationMs) }
+  const spanLogs = logs.records.filter((record) => record.span_id === s?.id)
+  const shownLogs = onlySpan ? spanLogs : logs.records
   return (
     <>
       <nav aria-label="Breadcrumb" className="text-control"><Link to="/traces">Traces</Link><span className="text-faint-foreground"> / </span><span className="font-mono">{t.id.slice(0, 8)}…</span></nav>
@@ -29,7 +36,7 @@ export function TraceDetail() {
         {t.errors ? <Badge variant="destructive"><CircleX />{t.errors} errors</Badge> : <Badge variant="success">OK</Badge>}
         <span className="flex-1" />
         <Button size="sm" onClick={() => { void navigator.clipboard?.writeText(t.id); toast.success('Trace id copied') }}><Copy />Copy id</Button>
-        <Button asChild size="sm"><Link to="/logs"><ScrollText />Logs for this trace</Link></Button>
+        <Button asChild size="sm"><Link to="/logs" search={logsFilter}><ScrollText />Logs for this trace</Link></Button>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-control text-muted-foreground">
         <span>Duration <span className="font-mono font-semibold text-foreground">{t.dur}</span></span><span>Spans <span className="font-mono text-foreground">{t.spans}</span></span><span>Services <span className="font-mono text-foreground">{services.length}</span></span><span>Started <span className="font-mono text-foreground">{stamp(t.startedAtMs)}</span></span><span className="font-mono">{t.id}</span>
@@ -118,11 +125,49 @@ export function TraceDetail() {
                   </ol>
                 </>
               ) : null}
+              <h3 className="m-0 text-caption font-semibold uppercase tracking-[.05em] text-muted-foreground">Logs</h3>
+              {spanLogs.length ? (
+                <div className="flex flex-col gap-1.5">
+                  {spanLogs.slice(0, 5).map((record, at) => <LogLine key={`${record.time_ns}-${at}`} record={record} filter={logsFilter} />)}
+                  <Button size="sm" variant="ghost" className="self-start" onClick={() => setOnlySpan(true)}>Show the {spanLogs.length} logs of this span below</Button>
+                </div>
+              ) : <span className="text-caption text-muted-foreground">No log record carries this span id.</span>}
               <span className="font-mono text-[11px] text-faint-foreground">span_id {s.id}</span>
             </div>
           </aside>
         ) : null}
       </div>
+      <section aria-label="Logs of this trace" className="flex flex-col overflow-hidden rounded-lg border">
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5">
+          <h2 className="m-0 text-control font-semibold">Logs of this trace</h2>
+          <span className="text-caption text-muted-foreground">{logs.pending ? 'reading…' : `${logs.records.length}${logs.more ? '+' : ''} records, trace ±5 min`}</span>
+          <span className="flex-1" />
+          {s ? <Switch checked={onlySpan} onCheckedChange={setOnlySpan} label={<>Only span <span className="font-mono">{s.name}</span></>} /> : null}
+          <Link to="/logs" search={logsFilter} className="text-control">Open in Logs</Link>
+        </div>
+        {logs.failed ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{because(logs.failed, 'The logs could not be read.')}</p> : null}
+        {!logs.failed && !logs.pending && shownLogs.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{onlySpan ? 'No log record carries the selected span id.' : 'No log record carries this trace id.'}</p> : null}
+        {shownLogs.map((record, at) => <LogLine key={`${record.time_ns}-${at}`} record={record} filter={logsFilter} wide />)}
+      </section>
     </>
+  )
+}
+
+const pad = (n: number, width = 2) => String(n).padStart(width, '0')
+
+function clock(ns: number): string {
+  const ms = msOf(ns)
+  const at = new Date(ms)
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}.${pad(ms % 1000, 3)}`
+}
+
+function LogLine({ record, filter, wide = false }: { record: LogRecord; filter: { f: string }; wide?: boolean }) {
+  return (
+    <Link to="/logs" search={filter} className={cn('grid items-center gap-2.5 text-foreground no-underline hover:bg-row-hover', wide ? 'grid-cols-[96px_62px_140px_minmax(0,1fr)] border-b border-border-subtle px-4 py-1.5' : 'grid-cols-[62px_minmax(0,1fr)] rounded-sm py-0.5')}>
+      {wide ? <time className="font-mono text-caption text-muted-foreground">{clock(record.time_ns)}</time> : null}
+      <SeverityBadge level={record.severity} />
+      {wide ? <span className="truncate text-caption text-muted-foreground">{record.service}</span> : null}
+      <span className="truncate font-mono text-caption">{record.body}</span>
+    </Link>
   )
 }

@@ -4,7 +4,7 @@ import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
 
-export type TraceRow = { id: string; root: string; svc: string; start: string; startedAtMs: number; dur: string; spans: number; errors: number }
+export type TraceRow = { id: string; root: string; svc: string; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
 
 type Listed = {
@@ -69,6 +69,7 @@ export const listed = (trace: Listed): TraceRow => ({
   svc: trace.root_service,
   start: clock(trace.started_at_ms),
   startedAtMs: trace.started_at_ms,
+  durationMs: trace.duration_us / 1000,
   dur: dur(trace.duration_us / 1000),
   spans: trace.spans,
   errors: trace.errors,
@@ -193,6 +194,7 @@ export function useTrace(id: string | undefined): { row: TraceRow | undefined; s
       svc: spans[0]?.svc ?? '',
       start: clock(data.started_at_ms),
       startedAtMs: data.started_at_ms,
+      durationMs: data.duration_us / 1000,
       dur: dur(data.duration_us / 1000),
       spans: data.spans.length,
       errors: data.spans.filter((span) => span.status === 'error').length,

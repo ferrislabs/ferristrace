@@ -113,7 +113,7 @@ const routeTree = rootRoute.addChildren([
   resetPasswordRoute,
   publicStatusRoute,
   shellRoute.addChildren([
-    inShell('/', Overview),
+    inShell('/', Overview, {}),
     inShell('/onboarding', Onboarding, real),
     inShell('/services', Services, {}),
     inShell('/services/$name', ServiceDetail, {}),

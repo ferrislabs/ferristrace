@@ -45,7 +45,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               <Command.Group heading="Services">
                 {services.map((s) => (
                   <Command.Item key={s.name} value={`service ${s.name}`} onSelect={() => go(`/services/${s.name}`)} className={item}>
-                    <span className="font-mono">{s.name}</span><span className="ml-auto text-caption text-muted-foreground">{s.project}</span>
+                    <span className="font-mono">{s.name}</span><span className="ml-auto text-caption text-muted-foreground">{s.rps}</span>
                   </Command.Item>
                 ))}
               </Command.Group>

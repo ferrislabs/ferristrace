@@ -6,8 +6,8 @@ export type Marker = { at: number; label: string; to?: string }
 const pts = (vals: number[], lo: number, hi: number, h: number) =>
   vals.map((v, i) => `${((i * 600) / Math.max(1, vals.length - 1)).toFixed(1)},${(h - ((Math.min(Math.max(v, lo), hi) - lo) / (hi - lo || 1)) * h).toFixed(1)}`).join(' ')
 
-export function LineChart({ title, legend, values, second, threshold, lo = 0, hi, yLabels, aria, height = 140, markers = [] }: {
-  title: string; legend?: string; values: number[]; second?: number[]; threshold?: number; lo?: number; hi: number; yLabels: [string, string, string]; aria: string; height?: number; markers?: Marker[]
+export function LineChart({ title, legend, values, second, threshold, lo = 0, hi, yLabels, aria, height = 140, markers = [], xLabels = TIME_LABELS }: {
+  title: string; legend?: string; values: number[]; second?: number[]; threshold?: number; lo?: number; hi: number; yLabels: [string, string, string]; aria: string; height?: number; markers?: Marker[]; xLabels?: string[]
 }) {
   const p = pts(values, lo, hi, height)
   const ty = threshold !== undefined ? height - ((threshold - lo) / (hi - lo)) * height : null
@@ -42,17 +42,17 @@ export function LineChart({ title, legend, values, second, threshold, lo = 0, hi
         })}
         </div>
       </div>
-      <div className="flex justify-between pl-[46px] font-mono text-[10px] text-faint-foreground">{TIME_LABELS.map((t) => <span key={t}>{t}</span>)}</div>
+      <div className="flex justify-between pl-[46px] font-mono text-[10px] text-faint-foreground">{xLabels.map((t, at) => <span key={`${at}-${t}`}>{t}</span>)}</div>
     </figure>
   )
 }
 
-export function Sparkline({ values }: { values: number[] }) {
+export function Sparkline({ values, warn = false }: { values: number[]; warn?: boolean }) {
   if (!values.length) return <svg width="100" height="20" aria-hidden><line x1="0" y1="19" x2="100" y2="19" stroke="var(--border)" /></svg>
-  const p = values.map((v, i) => `${((i * 100) / (values.length - 1)).toFixed(1)},${(19 - Math.max(0, Math.min(1, v)) * 18).toFixed(1)}`).join(' ')
+  const p = values.map((v, i) => `${((i * 100) / Math.max(1, values.length - 1)).toFixed(1)},${(19 - Math.max(0, Math.min(1, v)) * 18).toFixed(1)}`).join(' ')
   return (
     <svg viewBox="0 0 100 20" preserveAspectRatio="none" width="100" height="20" aria-hidden className="block">
-      <polyline points={p} fill="none" stroke="var(--chart-line)" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <polyline points={p} fill="none" stroke={warn ? 'var(--warning-text)' : 'var(--chart-line)'} strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }

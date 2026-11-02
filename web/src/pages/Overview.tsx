@@ -1,74 +1,144 @@
-import { CircleCheck, CircleMinus, CircleX, Rocket, TriangleAlert } from 'lucide-react'
+import { CircleCheck, CircleX, Rocket, TriangleAlert } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
-import { EmptyState, Kpi, PageHeader, ServiceDot, SeverityBadge } from '@/components/ft/bits'
-import { LineChart } from '@/components/ft/charts'
-import { DEPLOY_MARKERS, useOverviewSeries } from '@/data/series'
-import { useMock } from '@/data/seam'
-import { useServices } from '@/data/services'
-import { AN_HOUR, ANY, useTraces } from '@/data/traces'
+import { Segmented } from '@/components/ui/segmented'
+import { EmptyState, PageHeader, ServiceDot, SeverityBadge } from '@/components/ft/bits'
+import { LineChart, Sparkline } from '@/components/ft/charts'
+import { ceiling, timeLabels, useDeployMarkers } from '@/data/series'
+import { ERROR_THRESHOLD, charted, perSecond, relative, useServiceSeries, useServiceTable } from '@/data/services'
+import { ANY as ANY_TRACE, useTraces } from '@/data/traces'
+import { ANY as ANY_LOG, msOf, useLogs } from '@/data/logs'
+import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
+import { useProjects } from '@/data/projects'
 import { otlpEndpoint } from '@/data/onboarding'
-import { LOGS, PROJECTS } from '@/mocks/mock'
+import { useScope } from '@/lib/scope'
+import { dur, num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+const WINDOWS: { value: string; label: string; ms: number }[] = [
+  { value: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
+  { value: '6h', label: '6 hours', ms: 6 * 60 * 60 * 1000 },
+  { value: '24h', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
+]
+
+const pad = (n: number, width = 2) => String(n).padStart(width, '0')
+
+function clock(ns: number): string {
+  const at = new Date(msOf(ns))
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+}
+
+const axis = (hi: number, shown: (v: number) => string): [string, string, string] => [shown(hi), shown(hi / 2), '0']
+
+function Tile({ label, value, sub, spark, warn, to }: { label: string; value: string; sub?: string; spark?: number[]; warn?: boolean; to: string }) {
+  return (
+    <Link to={to} className="flex flex-col gap-0.5 rounded-lg border bg-card px-3.5 py-3 text-inherit no-underline hover:bg-row-hover">
+      <span className="text-caption text-muted-foreground">{label}</span>
+      <span className={cn('font-mono text-[22px] font-semibold leading-[30px]', warn && 'text-warning-text')}>{value}</span>
+      {sub ? <span className={cn('text-caption', warn ? 'text-warning-text' : 'text-muted-foreground')}>{sub}</span> : null}
+      {spark ? <span className="pt-1"><Sparkline values={relative(spark)} warn={warn} /></span> : null}
+    </Link>
+  )
+}
+
 export function Overview() {
-  const all = useServices()
-  const logs = useMock(['logs'], () => LOGS)
-  const { rows: slow } = useTraces({ ...ANY, rangeMs: AN_HOUR, order: 'duration', limit: 5 })
-  const projects = useMock(['organisation', 'projects'], () => PROJECTS)
-  const series = useOverviewSeries()
-  if (!all.length) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
-  const services = [...all].filter((s) => s.err !== null).sort((a, b) => (b.err ?? 0) - (a.err ?? 0)).slice(0, 5)
-  const errorLogs = logs.filter((l) => l.sev === 'error' || l.sev === 'fatal').slice(0, 5)
+  const [range, setRange] = useState('1h')
+  const windowMs = WINDOWS.find((w) => w.value === range)?.ms ?? WINDOWS[0].ms
+  const { project, chooseProject } = useScope()
+  const projects = useProjects()
+  const { services: all, pending } = useServiceTable('', windowMs)
+  const { series } = useServiceSeries(null, '', windowMs)
+  const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: windowMs, limit: 200 })
+  const { records: errorLogs } = useLogs({ ...ANY_LOG, rangeMs: windowMs, severities: ['error', 'fatal'], limit: 10 })
+  const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 })
+  const markers = useDeployMarkers()
+  const label = WINDOWS.find((w) => w.value === range)?.label ?? ''
+  const scope = projects.find((p) => p.id === project)?.name ?? 'all projects'
+  if (!pending && !all.length && !series?.requests) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
+  const lines = charted(series)
+  const requests = series?.requests ?? 0
+  const errorRate = requests ? ((series?.errors ?? 0) / requests) * 100 : null
+  const hot = errorRate !== null && errorRate >= ERROR_THRESHOLD
+  const open = issues.filter((issue) => issue.status === 'unresolved')
+  const recent = [...open].sort((a, b) => b.last_seen_at_ms - a.last_seen_at_ms).slice(0, 5)
+  const worst = [...all].filter((s) => s.err !== null).sort((a, b) => (b.err ?? 0) - (a.err ?? 0))
+  const troubled = worst.find((s) => (s.err ?? 0) >= ERROR_THRESHOLD)
+  const to = series?.points.length ? series.points[series.points.length - 1].atMs + series.stepMs : Date.now()
+  const labels = timeLabels(to - windowMs, to)
+  const rateHi = ceiling(lines.perSecond)
+  const errHi = Math.max(ceiling(lines.errorRate), ERROR_THRESHOLD * 2)
+  const p95Hi = ceiling(lines.p95)
   return (
     <>
-      <PageHeader title="Overview" meta="all projects · last hour" />
-      <section className="flex flex-wrap items-center gap-3 rounded-lg border border-warning-border bg-card px-4 py-3" aria-label="Needs attention">
-        <TriangleAlert className="size-5 text-warning-text" aria-hidden />
-        <div className="flex min-w-0 flex-[1_1_320px] flex-col">
-          <span className="font-semibold"><span className="font-mono">checkout-api</span> error rate 4.1 % since 14:05</span>
-          <span className="text-control text-muted-foreground">Most errors come from its calls to <span className="font-mono">payments</span>. Your status page shows Degraded on Checkout.</span>
-        </div>
-        <Button asChild variant="primary" size="sm"><Link to="/services/checkout-api">Open service</Link></Button>
-        <Button asChild size="sm"><Link to="/issues/iss_142">Issue STOREFRONT-142</Link></Button>
-        <Button asChild size="sm"><Link to="/status-page">Status page</Link></Button>
-      </section>
+      <PageHeader title="Overview" meta={`${scope} · last ${label}`}>
+        <Segmented label="Window" value={range} onChange={setRange} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
+      </PageHeader>
+      {troubled ? (
+        <section className="flex flex-wrap items-center gap-3 rounded-lg border border-warning-border bg-card px-4 py-3" aria-label="Needs attention">
+          <TriangleAlert className="size-5 text-warning-text" aria-hidden />
+          <div className="flex min-w-0 flex-[1_1_320px] flex-col">
+            <span className="font-semibold"><span className="font-mono">{troubled.name}</span> error rate {troubled.err?.toFixed(1)} % over the last {label}</span>
+            <span className="text-control text-muted-foreground">Above the {ERROR_THRESHOLD} % threshold. {open.length ? `${open.length} unresolved issues were seen in the window.` : ''}</span>
+          </div>
+          <Button asChild variant="primary" size="sm"><Link to={`/services/${troubled.name}`}>Open service</Link></Button>
+          {recent[0] ? <Button asChild size="sm"><Link to={`/issues/${recent[0].fingerprint}`}>Latest issue</Link></Button> : null}
+        </section>
+      ) : null}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
-        <Kpi label="Services" value={String(all.length)} sub="1 degraded · 1 no data" tone="warn" to="/services" />
-        <Kpi label="Spans" value="1,820/s" sub="6.5 M in range" to="/traces" />
-        <Kpi label="Span error rate" value="0.9 %" sub="+0.6 pts vs previous hour" tone="warn" to="/traces" />
-        <Kpi label="Log records" value="4,310/s" sub="38/s error or fatal" to="/logs" />
-        <Kpi label="Metric points" value="2,200/s" sub="312 series" to="/metrics" />
+        <Tile label="Request rate" value={perSecond(requests / (windowMs / 1000))} sub={`${num(requests)} requests`} spark={lines.perSecond} to="/services" />
+        <Tile label="Error rate" value={errorRate === null ? '—' : `${errorRate.toFixed(1)} %`} sub={`${num(series?.errors ?? 0)} errors · amber from ${ERROR_THRESHOLD} %`} spark={lines.errorRate} warn={hot} to="/traces" />
+        <Tile label="p95 latency" value={series?.p95Ms == null ? '—' : dur(series.p95Ms)} sub="server and consumer spans" spark={lines.p95} to="/services" />
+        <Tile label="Open issues" value={num(open.length)} sub={`unresolved, seen in the last ${label}`} warn={open.length > 0} to="/issues" />
+        <Tile label="Services" value={num(all.length)} sub={`${worst.filter((s) => (s.err ?? 0) >= ERROR_THRESHOLD).length} above ${ERROR_THRESHOLD} % errors`} to="/services" />
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] gap-3">
-        <LineChart title="Spans received" legend="per second, all projects" values={series.spans} hi={2400} yLabels={['2.4k', '1.2k', '0']} aria="Spans per second, steady around 1,800" height={120} markers={DEPLOY_MARKERS} />
-        <LineChart title="Errors" legend="solid: error spans/s · dashed: error logs/s" values={series.errorSpans} second={series.errorLogs} markers={DEPLOY_MARKERS} hi={50} yLabels={['50', '25', '0']} aria="Error spans rise from 3 to 17 per second at 14:05" height={120} />
+        <LineChart title="Requests" legend="per second" values={lines.perSecond} hi={rateHi} yLabels={axis(rateHi, (v) => perSecond(v).replace('/s', ''))} xLabels={labels} aria={`Requests per second over the last ${label}`} height={120} markers={markers} />
+        <LineChart title="Error rate" legend={`dashed: ${ERROR_THRESHOLD} % threshold`} values={lines.errorRate} threshold={ERROR_THRESHOLD} hi={errHi} yLabels={axis(errHi, (v) => `${v.toFixed(v < 10 ? 1 : 0)} %`)} xLabels={labels} aria={`Error rate over the last ${label}`} height={120} markers={markers} />
+        <LineChart title="Latency" legend="p95" values={lines.p95} hi={p95Hi} yLabels={axis(p95Hi, dur)} xLabels={labels} aria={`p95 latency over the last ${label}`} height={120} markers={markers} />
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] items-start gap-3">
         <Card className="overflow-hidden">
+          <CardHeader><CardTitle className="flex-1">Recent issues</CardTitle><Link to="/issues" className="text-control">All issues</Link></CardHeader>
+          {recent.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">No unresolved issue in the last {label}.</p> : null}
+          {recent.map((issue) => (
+            <Link key={issue.fingerprint} to={`/issues/${issue.fingerprint}`} className="flex flex-col gap-0.5 border-b border-border-subtle px-4 py-2 text-foreground no-underline hover:bg-row-hover">
+              <span className="flex items-baseline gap-2"><span className="flex-1 truncate font-mono text-control font-semibold text-destructive-text">{issue.exception_type}</span><span className="font-mono text-caption">{num(issue.events)}</span></span>
+              <span className="flex gap-2 text-caption text-muted-foreground"><span className="truncate font-mono">{issue.message}</span><span className="ml-auto shrink-0">{issue.service}</span></span>
+            </Link>
+          ))}
+        </Card>
+        <Card className="overflow-hidden">
           <CardHeader><CardTitle className="flex-1">Services by error rate</CardTitle><Link to="/services" className="text-control">All {all.length} services</Link></CardHeader>
-          {services.map((s) => (
+          {worst.slice(0, 5).map((s) => (
             <Link key={s.name} to={`/services/${s.name}`} className="flex items-center gap-2.5 border-b border-border-subtle px-4 py-2 text-control text-foreground no-underline hover:bg-row-hover">
               <ServiceDot name={s.name} /><span className="flex-1 truncate font-mono">{s.name}</span>
               <span className="w-[70px] text-right font-mono text-muted-foreground">{s.rps}</span>
               <span className="w-[70px] text-right font-mono text-muted-foreground">{s.p95}</span>
-              <span className={cn('inline-flex w-[72px] items-center justify-end gap-1 font-mono', (s.err ?? 0) >= 2 && 'font-semibold text-warning-text')}>
-                {(s.err ?? 0) >= 2 ? <TriangleAlert className="size-3.5" aria-hidden /> : null}{s.err!.toFixed(1)} %
+              <span className={cn('inline-flex w-[72px] items-center justify-end gap-1 font-mono', (s.err ?? 0) >= ERROR_THRESHOLD && 'font-semibold text-warning-text')}>
+                {(s.err ?? 0) >= ERROR_THRESHOLD ? <TriangleAlert className="size-3.5" aria-hidden /> : null}{(s.err ?? 0).toFixed(1)} %
               </span>
             </Link>
           ))}
           <div className="flex justify-end gap-10 px-4 py-2 text-caption text-muted-foreground"><span>req/s</span><span>p95</span><span>errors</span></div>
         </Card>
         <Card className="overflow-hidden">
-          <CardHeader><CardTitle className="flex-1">Recent error logs</CardTitle><Link to="/logs" className="text-control">Open in Logs</Link></CardHeader>
-          {errorLogs.map((l) => (
-            <Link key={l.time + l.body} to="/logs" className="grid grid-cols-[86px_62px_minmax(0,1fr)] items-center gap-2.5 border-b border-border-subtle px-4 py-2 text-foreground no-underline hover:bg-row-hover">
-              <time className="font-mono text-caption text-muted-foreground">{l.time}</time>
-              <SeverityBadge level={l.sev} />
-              <span className="flex min-w-0 flex-col"><span className="truncate font-mono text-caption">{l.body}</span><span className="truncate text-caption text-muted-foreground">{l.svc}</span></span>
-            </Link>
-          ))}
+          <CardHeader><CardTitle className="flex-1">Recent error logs</CardTitle><Link to="/logs" search={{ f: 'severity=error&severity=fatal' }} className="text-control">Open in Logs</Link></CardHeader>
+          {errorLogs.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">No error or fatal record in the last {label}.</p> : null}
+          {errorLogs.map((l, at) => {
+            const row = (
+              <>
+                <time className="font-mono text-caption text-muted-foreground">{clock(l.time_ns)}</time>
+                <SeverityBadge level={l.severity} />
+                <span className="flex min-w-0 flex-col"><span className="truncate font-mono text-caption">{l.body}</span><span className="truncate text-caption text-muted-foreground">{l.service}</span></span>
+              </>
+            )
+            const cls = 'grid grid-cols-[70px_62px_minmax(0,1fr)] items-center gap-2.5 border-b border-border-subtle px-4 py-2 text-foreground no-underline hover:bg-row-hover'
+            return l.trace_id
+              ? <Link key={`${l.time_ns}-${at}`} to={`/traces/${l.trace_id}`} className={cls}>{row}</Link>
+              : <Link key={`${l.time_ns}-${at}`} to="/logs" search={{ f: new URLSearchParams({ service: l.service, severity: l.severity }).toString() }} className={cls}>{row}</Link>
+          })}
         </Card>
         <Card className="overflow-hidden">
           <CardHeader><CardTitle className="flex-1">Slowest traces</CardTitle><Link to="/traces" className="text-control">All traces</Link></CardHeader>
@@ -82,20 +152,13 @@ export function Overview() {
           ))}
         </Card>
         <Card className="overflow-hidden">
-          <CardHeader><CardTitle className="flex-1">Ingest by project</CardTitle><Link to="/settings/projects" className="text-control">Projects</Link></CardHeader>
-          {projects.map((p, i) => (
-            <div key={p.name} className="flex flex-col gap-1 border-b border-border-subtle px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <span className="flex-1 text-control font-semibold">{p.name}</span>
-                {i < 2 ? <span className="inline-flex items-center gap-1 text-caption font-semibold text-success-text"><CircleCheck className="size-3.5" aria-hidden />Receiving</span> : <span className="inline-flex items-center gap-1 text-caption font-semibold text-warning-text"><CircleMinus className="size-3.5" aria-hidden />1 service silent 23 min</span>}
-              </div>
-              <div className="flex flex-wrap gap-x-3.5 font-mono text-caption text-muted-foreground"><span>spans {['1,410/s', '340/s', '70/s'][i]}</span><span>logs {['3,120/s', '980/s', '210/s'][i]}</span><span>last {['now', '1 s ago', '4 s ago'][i]}</span></div>
-            </div>
+          <CardHeader><CardTitle className="flex-1">Projects</CardTitle><Link to="/settings/projects" className="text-control">Manage</Link></CardHeader>
+          {[{ id: undefined as string | undefined, name: 'All projects' }, ...projects.map((p) => ({ id: p.id as string | undefined, name: p.name }))].map((p) => (
+            <button key={p.id ?? 'all'} type="button" onClick={() => chooseProject(p.id)} aria-pressed={project === p.id} className={cn('flex w-full items-center gap-2 border-b border-border-subtle px-4 py-2.5 text-left text-control hover:bg-row-hover', project === p.id && 'bg-accent-subtle')}>
+              <span className="flex-1 font-semibold">{p.name}</span>
+              {project === p.id ? <span className="inline-flex items-center gap-1 text-caption font-semibold text-success-text"><CircleCheck className="size-3.5" aria-hidden />Shown</span> : null}
+            </button>
           ))}
-          <div className="flex flex-col gap-1.5 px-4 py-3">
-            <div className="flex items-baseline gap-2 text-control"><span className="flex-1 font-semibold">Usage this month</span><span className="font-mono">54.6 %</span><span className="text-caption text-muted-foreground">of included</span></div>
-            <div className="relative h-2 rounded bg-muted"><div className="absolute inset-y-0 left-0 w-[54.6%] rounded bg-primary" /></div>
-          </div>
         </Card>
       </div>
     </>
