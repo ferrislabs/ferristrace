@@ -8,8 +8,8 @@ use ferristrace_api::me_router;
 use ferristrace_application::testing::Inert;
 use ferristrace_domain::{
     AccountId, AccountName, Accounts, Agent, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos,
-    OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ReadError, Session,
-    SessionError, SessionStore, SessionToken, TenantId, UnixSeconds, WhoamiError,
+    OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Session, SessionError,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -56,7 +56,7 @@ impl Accounts for Kept {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         assert_eq!(
             account,
             AccountId::new(Uuid::from_u128(ACCOUNT)),
@@ -68,7 +68,7 @@ impl Accounts for Kept {
         Ok(())
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         if account != AccountId::new(Uuid::from_u128(ACCOUNT)) {
             return Ok(None);
         }
@@ -79,7 +79,7 @@ impl Accounts for Kept {
         &self,
         _account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         *self.portrait.lock().expect("the lock") = portrait.cloned();
         Ok(())
     }

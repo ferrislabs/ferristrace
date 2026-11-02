@@ -1,7 +1,7 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PasswordHash, PhotoKind,
-    Portrait, ProvisionPolicy, ReadError, ResolvedIdentity,
+    Portrait, ProvisionPolicy, ResolvedIdentity, StoreError,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -155,7 +155,7 @@ impl Accounts for PostgresAccounts {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE accounts SET name = $2 WHERE id = $1")
             .bind(account.as_uuid())
@@ -164,12 +164,12 @@ impl Accounts for PostgresAccounts {
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to rename an account");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })?;
         Ok(())
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT photo_token AS photo_token, photo_type AS photo_type \
@@ -180,7 +180,7 @@ impl Accounts for PostgresAccounts {
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read a photo");
-            ReadError::StoreUnreachable
+            StoreError::Unreachable
         })?;
         Ok(found.as_ref().and_then(read_portrait))
     }
@@ -189,7 +189,7 @@ impl Accounts for PostgresAccounts {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE accounts SET photo_token = $2, photo_type = $3 WHERE id = $1")
             .bind(account.as_uuid())
@@ -199,7 +199,7 @@ impl Accounts for PostgresAccounts {
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to keep a photo");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })?;
         Ok(())
     }

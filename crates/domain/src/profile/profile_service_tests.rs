@@ -6,10 +6,10 @@ use super::ports::{Accounts, NoPhotos, Photos};
 use super::profile_service::Profile;
 use super::value_objects::{AccountName, MAX_NAME_BYTES, Photo, PhotoKind, Pictured, Portrait};
 use crate::clock::UnixSeconds;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 const TOKEN: &str = "ct_ss_live";
@@ -79,7 +79,7 @@ impl Accounts for &Kept {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         assert_eq!(account, an_account(ACCOUNT));
         let chosen = name.map(|name| name.as_str().to_owned());
         self.writes.lock().expect("the lock").push(chosen.clone());
@@ -87,7 +87,7 @@ impl Accounts for &Kept {
         Ok(())
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         Ok(self.column_of(account).lock().expect("the lock").clone())
     }
 
@@ -95,7 +95,7 @@ impl Accounts for &Kept {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         *self.column_of(account).lock().expect("the lock") = portrait.cloned();
         Ok(())
     }

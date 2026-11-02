@@ -1,5 +1,5 @@
 use ferristrace_application::repository;
-use ferristrace_domain::{Consumed, DecompressedBytes, ReadError, TenantId, UsageHistory, Window};
+use ferristrace_domain::{Consumed, DecompressedBytes, StoreError, TenantId, UsageHistory, Window};
 use sqlx::Row;
 
 use crate::postgres::gigabytes_to_bytes;
@@ -18,7 +18,7 @@ impl PostgresUsage {
 }
 
 impl UsageHistory for PostgresUsage {
-    async fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, ReadError> {
+    async fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT hour_start AS hour_start, ingested_bytes AS ingested_bytes \
@@ -43,7 +43,7 @@ impl UsageHistory for PostgresUsage {
             .collect())
     }
 
-    async fn included(&self, org: TenantId) -> Result<Option<DecompressedBytes>, ReadError> {
+    async fn included(&self, org: TenantId) -> Result<Option<DecompressedBytes>, StoreError> {
         let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT p.ingest_gb AS ingest_gb FROM orgs o JOIN plans p ON p.id = o.plan_id \
@@ -64,7 +64,7 @@ fn as_nanos(unsigned: u64) -> i64 {
     i64::try_from(unsigned).unwrap_or(i64::MAX)
 }
 
-fn unreachable(error: &sqlx::Error, what: &str) -> ReadError {
+fn unreachable(error: &sqlx::Error, what: &str) -> StoreError {
     tracing::error!(%error, "the control plane refused to {what}");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }

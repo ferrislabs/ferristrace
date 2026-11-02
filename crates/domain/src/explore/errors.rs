@@ -1,10 +1,5 @@
 use crate::organisation::WhoamiError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum ReadError {
-    #[error("the span store could not be reached")]
-    StoreUnreachable,
-}
+use crate::store::StoreError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BadWindow {
@@ -31,10 +26,10 @@ impl From<WhoamiError> for ExploreError {
     }
 }
 
-impl From<ReadError> for ExploreError {
-    fn from(error: ReadError) -> Self {
+impl From<StoreError> for ExploreError {
+    fn from(error: StoreError) -> Self {
         match error {
-            ReadError::StoreUnreachable => Self::StoreUnreachable,
+            StoreError::Unreachable => Self::StoreUnreachable,
         }
     }
 }

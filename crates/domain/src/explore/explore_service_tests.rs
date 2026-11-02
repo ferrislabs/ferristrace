@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::errors::{BadWindow, ExploreError, ReadError};
+use super::errors::{BadWindow, ExploreError};
 use super::explore_service::Explore;
 use super::ports::SpanReader;
 use super::value_objects::{ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window};
@@ -11,6 +11,7 @@ use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 use crate::telemetry::{Span, SpanId, SpanKind, SpanStatus, TenantId, TraceId};
 
 const TOKEN: &str = "ct_ss_live";
@@ -84,7 +85,7 @@ impl SpanReader for &Asked {
         tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         Ok(Vec::new())
     }
@@ -93,7 +94,7 @@ impl SpanReader for &Asked {
         &self,
         tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         Ok(vec![TraceSummary {
             trace_id: a_trace_id(),
@@ -106,7 +107,7 @@ impl SpanReader for &Asked {
         }])
     }
 
-    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         Ok(vec![Span {
             trace_id: id,
@@ -132,20 +133,20 @@ impl SpanReader for Unreachable {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
-        Err(ReadError::StoreUnreachable)
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
     }
 
     async fn traces(
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
-        Err(ReadError::StoreUnreachable)
+    ) -> Result<Vec<TraceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
-        Err(ReadError::StoreUnreachable)
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+        Err(StoreError::Unreachable)
     }
 }
 

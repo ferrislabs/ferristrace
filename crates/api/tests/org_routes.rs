@@ -10,8 +10,8 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole,
     Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProvisionPolicy,
-    ReadError, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, TenantId,
-    UnixSeconds, WhoamiError,
+    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError,
+    TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -91,7 +91,7 @@ impl Memberships for MemberOfMine {
 struct Kept(Mutex<String>, Mutex<Option<Portrait>>);
 
 impl Orgs for Kept {
-    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
         Ok(Some(Organisation {
             id: org,
             name: self.0.lock().expect("the lock").clone().into(),
@@ -101,14 +101,14 @@ impl Orgs for Kept {
         }))
     }
 
-    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), StoreError> {
         let mut held = self.0.lock().expect("the lock");
         held.clear();
         held.push_str(name.as_str());
         Ok(())
     }
 
-    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError> {
+    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         *self.1.lock().expect("the lock") = logo.cloned();
         Ok(())
     }

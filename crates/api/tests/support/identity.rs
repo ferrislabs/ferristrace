@@ -9,9 +9,9 @@ use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, Authorizer,
     Email, FactorError, FactorKind, FactorStore, FlowError, Gate, Kept, LiveSession, Mailer,
     Membership, Memberships, OidcFlows, PasswordHash, PasswordHasher, Pending, PendingFlow, Photos,
-    Portrait, ProvisionPolicy, ReadError, ResetError, ResetStore, ResolvedIdentity, SecretHash,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SignInProof, Step,
-    TenantId, TotpSecret, WhoamiError,
+    Portrait, ProvisionPolicy, ResetError, ResetStore, ResolvedIdentity, SecretHash, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SignInProof, Step,
+    StoreError, TenantId, TotpSecret, WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -47,20 +47,20 @@ impl Accounts for Nowhere {
         &self,
         _account: AccountId,
         _name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
-        Err(ReadError::StoreUnreachable)
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unreachable)
     }
 
-    async fn portrait_of(&self, _account: AccountId) -> Result<Option<Portrait>, ReadError> {
-        Err(ReadError::StoreUnreachable)
+    async fn portrait_of(&self, _account: AccountId) -> Result<Option<Portrait>, StoreError> {
+        Err(StoreError::Unreachable)
     }
 
     async fn set_portrait(
         &self,
         _account: AccountId,
         _portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
-        Err(ReadError::StoreUnreachable)
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unreachable)
     }
 }
 
@@ -188,11 +188,11 @@ impl<T: Send + Sync> Accounts for Directed<T> {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         Nowhere.rename(account, name).await
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         Nowhere.portrait_of(account).await
     }
 
@@ -200,7 +200,7 @@ impl<T: Send + Sync> Accounts for Directed<T> {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         Nowhere.set_portrait(account, portrait).await
     }
 }
@@ -213,11 +213,11 @@ impl<T: Accounts + Send + Sync> Accounts for Profiled<T> {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         self.0.rename(account, name).await
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         self.0.portrait_of(account).await
     }
 
@@ -225,7 +225,7 @@ impl<T: Accounts + Send + Sync> Accounts for Profiled<T> {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         self.0.set_portrait(account, portrait).await
     }
 }

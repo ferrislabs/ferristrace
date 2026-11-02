@@ -2,8 +2,9 @@ use core::future::Future;
 
 use super::value_objects::{Counted, Fingerprint, IssueFilter, Occurrence, Recorded, Status};
 use crate::catalogue::ProjectId;
-use crate::explore::{ReadError, Window};
+use crate::explore::Window;
 use crate::identity::AccountId;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 pub trait IssueReader {
@@ -11,7 +12,7 @@ pub trait IssueReader {
         &self,
         tenant: TenantId,
         filter: &IssueFilter,
-    ) -> impl Future<Output = Result<Vec<Counted>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Counted>, StoreError>> + Send;
 
     fn occurrences(
         &self,
@@ -20,7 +21,7 @@ pub trait IssueReader {
         print: Fingerprint,
         window: Window,
         limit: u32,
-    ) -> impl Future<Output = Result<Vec<Occurrence>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Occurrence>, StoreError>> + Send;
 }
 
 impl<T: IssueReader + Sync> IssueReader for &T {
@@ -28,7 +29,7 @@ impl<T: IssueReader + Sync> IssueReader for &T {
         &self,
         tenant: TenantId,
         filter: &IssueFilter,
-    ) -> impl Future<Output = Result<Vec<Counted>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Counted>, StoreError>> + Send {
         (*self).issues(tenant, filter)
     }
 
@@ -39,7 +40,7 @@ impl<T: IssueReader + Sync> IssueReader for &T {
         print: Fingerprint,
         window: Window,
         limit: u32,
-    ) -> impl Future<Output = Result<Vec<Occurrence>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Occurrence>, StoreError>> + Send {
         (*self).occurrences(tenant, project, print, window, limit)
     }
 }
@@ -48,7 +49,7 @@ pub trait IssueDecisions {
     fn read_many(
         &self,
         of: &[(ProjectId, Fingerprint)],
-    ) -> impl Future<Output = Result<Vec<Recorded>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Recorded>, StoreError>> + Send;
 
     fn decide(
         &self,
@@ -57,7 +58,7 @@ pub trait IssueDecisions {
         status: Status,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     fn assign(
         &self,
@@ -66,14 +67,14 @@ pub trait IssueDecisions {
         owner: Option<AccountId>,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 impl<T: IssueDecisions + Sync> IssueDecisions for &T {
     fn read_many(
         &self,
         of: &[(ProjectId, Fingerprint)],
-    ) -> impl Future<Output = Result<Vec<Recorded>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Recorded>, StoreError>> + Send {
         (*self).read_many(of)
     }
 
@@ -84,7 +85,7 @@ impl<T: IssueDecisions + Sync> IssueDecisions for &T {
         status: Status,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).decide(project, print, status, by, at_unix_nanos)
     }
 
@@ -95,7 +96,7 @@ impl<T: IssueDecisions + Sync> IssueDecisions for &T {
         owner: Option<AccountId>,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).assign(project, print, owner, by, at_unix_nanos)
     }
 }

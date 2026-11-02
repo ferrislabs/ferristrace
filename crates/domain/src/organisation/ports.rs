@@ -4,36 +4,36 @@ use super::entities::{Member, Membership, Organisation, Team};
 use super::errors::WhoamiError;
 use super::value_objects::{Admitted, Named, OrgName, OrgRole, TeamId, TeamName};
 use crate::catalogue::ProjectId;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
 use crate::secret::SecretHash;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 pub trait Orgs {
     fn only(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<Organisation>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Option<Organisation>, StoreError>> + Send;
 
     fn rename(
         &self,
         org: TenantId,
         name: &OrgName,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     fn set_logo(
         &self,
         org: TenantId,
         logo: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 impl<T: Orgs + Sync> Orgs for &T {
     fn only(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<Organisation>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Organisation>, StoreError>> + Send {
         (*self).only(org)
     }
 
@@ -41,7 +41,7 @@ impl<T: Orgs + Sync> Orgs for &T {
         &self,
         org: TenantId,
         name: &OrgName,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).rename(org, name)
     }
 
@@ -49,7 +49,7 @@ impl<T: Orgs + Sync> Orgs for &T {
         &self,
         org: TenantId,
         logo: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).set_logo(org, logo)
     }
 }
@@ -58,7 +58,7 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
     fn only(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<Organisation>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Organisation>, StoreError>> + Send {
         self.as_ref().only(org)
     }
 
@@ -66,7 +66,7 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
         &self,
         org: TenantId,
         name: &OrgName,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().rename(org, name)
     }
 
@@ -74,7 +74,7 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
         &self,
         org: TenantId,
         logo: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().set_logo(org, logo)
     }
 }
@@ -105,20 +105,20 @@ impl<T: Memberships + Send + Sync> Memberships for std::sync::Arc<T> {
 }
 
 pub trait Roll {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, ReadError>> + Send;
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, StoreError>> + Send;
 
     fn grant(
         &self,
         org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> impl Future<Output = Result<Option<Member>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Option<Member>, StoreError>> + Send;
 
     fn remove(
         &self,
         org: TenantId,
         account: AccountId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send;
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     fn admit(
         &self,
@@ -126,11 +126,11 @@ pub trait Roll {
         email: &Email,
         role: OrgRole,
         way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send;
 }
 
 impl<T: Roll + Sync> Roll for &T {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, ReadError>> + Send {
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, StoreError>> + Send {
         (*self).of(org)
     }
 
@@ -139,7 +139,7 @@ impl<T: Roll + Sync> Roll for &T {
         org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> impl Future<Output = Result<Option<Member>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Member>, StoreError>> + Send {
         (*self).grant(org, account, role)
     }
 
@@ -147,7 +147,7 @@ impl<T: Roll + Sync> Roll for &T {
         &self,
         org: TenantId,
         account: AccountId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         (*self).remove(org, account)
     }
 
@@ -157,13 +157,13 @@ impl<T: Roll + Sync> Roll for &T {
         email: &Email,
         role: OrgRole,
         way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send {
         (*self).admit(org, email, role, way_in)
     }
 }
 
 impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, ReadError>> + Send {
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Member>, StoreError>> + Send {
         self.as_ref().of(org)
     }
 
@@ -172,7 +172,7 @@ impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
         org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> impl Future<Output = Result<Option<Member>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Member>, StoreError>> + Send {
         self.as_ref().grant(org, account, role)
     }
 
@@ -180,7 +180,7 @@ impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
         &self,
         org: TenantId,
         account: AccountId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         self.as_ref().remove(org, account)
     }
 
@@ -190,50 +190,50 @@ impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
         email: &Email,
         role: OrgRole,
         way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send {
         self.as_ref().admit(org, email, role, way_in)
     }
 }
 
 pub trait Squads {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, ReadError>> + Send;
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, StoreError>> + Send;
 
     fn create(
         &self,
         org: TenantId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send;
 
     fn rename(
         &self,
         org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send;
 
     fn disband(
         &self,
         org: TenantId,
         team: TeamId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send;
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     fn seat(
         &self,
         org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send;
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     fn own(
         &self,
         org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send;
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }
 
 impl<T: Squads + Sync> Squads for &T {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, ReadError>> + Send {
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, StoreError>> + Send {
         (*self).of(org)
     }
 
@@ -241,7 +241,7 @@ impl<T: Squads + Sync> Squads for &T {
         &self,
         org: TenantId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send {
         (*self).create(org, name)
     }
 
@@ -250,7 +250,7 @@ impl<T: Squads + Sync> Squads for &T {
         org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send {
         (*self).rename(org, team, name)
     }
 
@@ -258,7 +258,7 @@ impl<T: Squads + Sync> Squads for &T {
         &self,
         org: TenantId,
         team: TeamId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         (*self).disband(org, team)
     }
 
@@ -267,7 +267,7 @@ impl<T: Squads + Sync> Squads for &T {
         org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         (*self).seat(org, team, members)
     }
 
@@ -276,13 +276,13 @@ impl<T: Squads + Sync> Squads for &T {
         org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         (*self).own(org, team, projects)
     }
 }
 
 impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
-    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, ReadError>> + Send {
+    fn of(&self, org: TenantId) -> impl Future<Output = Result<Vec<Team>, StoreError>> + Send {
         self.as_ref().of(org)
     }
 
@@ -290,7 +290,7 @@ impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
         &self,
         org: TenantId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send {
         self.as_ref().create(org, name)
     }
 
@@ -299,7 +299,7 @@ impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
         org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> impl Future<Output = Result<Named, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Named, StoreError>> + Send {
         self.as_ref().rename(org, team, name)
     }
 
@@ -307,7 +307,7 @@ impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
         &self,
         org: TenantId,
         team: TeamId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         self.as_ref().disband(org, team)
     }
 
@@ -316,7 +316,7 @@ impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
         org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         self.as_ref().seat(org, team, members)
     }
 
@@ -325,7 +325,7 @@ impl<T: Squads + Send + Sync> Squads for std::sync::Arc<T> {
         org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         self.as_ref().own(org, team, projects)
     }
 }

@@ -1,5 +1,6 @@
 mod clock;
 mod secret;
+mod store;
 
 pub mod catalogue;
 pub mod explore;
@@ -19,8 +20,8 @@ pub use catalogue::{
 };
 pub use clock::{Clock, UnixSeconds};
 pub use explore::{
-    BadWindow, Explore, ExploreError, ReadError, ServiceSummary, SpanReader, TraceFilter,
-    TraceOrder, TraceSummary, Window,
+    BadWindow, Explore, ExploreError, ServiceSummary, SpanReader, TraceFilter, TraceOrder,
+    TraceSummary, Window,
 };
 pub use identity::{
     AccountDirectory, AccountId, Agent, Answer, AuthError, AuthProvider, AuthSources, Authorizer,
@@ -51,6 +52,7 @@ pub use provisioning::{
     Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, ProvisionError, Provisioning,
 };
 pub use secret::{RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
+pub use store::StoreError;
 pub use telemetry::{
     Admission, Consumed, Consumption, DecompressedBytes, Ingest, IngestError, IngestKey, InvalidId,
     Metering, Payload, QuotaPolicy, Scope, SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink,

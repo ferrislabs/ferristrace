@@ -9,8 +9,8 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, Assigned, Created, LiveSession, Membership, Memberships, NoPhotos, OrgRole,
-    OwnerTeam, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, ReadError, Renamed,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, TeamId, TenantId,
+    OwnerTeam, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, Renamed, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId,
     UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
@@ -167,7 +167,7 @@ impl Kept {
 }
 
 impl Projects for Kept {
-    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError> {
+    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError> {
         Ok(vec![Project {
             id: ProjectId::new(Uuid::from_u128(STOREFRONT)),
             org: tenant,
@@ -178,7 +178,7 @@ impl Projects for Kept {
         }])
     }
 
-    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, ReadError> {
+    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, StoreError> {
         self.written().created.push(name.as_str().to_owned());
         Ok(self.created)
     }
@@ -188,14 +188,14 @@ impl Projects for Kept {
         _org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> Result<Renamed, ReadError> {
+    ) -> Result<Renamed, StoreError> {
         self.written()
             .renamed
             .push((project, name.as_str().to_owned()));
         Ok(self.renamed)
     }
 
-    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, ReadError> {
+    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, StoreError> {
         self.written().forgotten.push(project);
         Ok(self.forgotten)
     }
@@ -205,7 +205,7 @@ impl Projects for Kept {
         _org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> Result<Assigned, ReadError> {
+    ) -> Result<Assigned, StoreError> {
         self.written().assigned.push((project, team));
         Ok(self.assigned)
     }

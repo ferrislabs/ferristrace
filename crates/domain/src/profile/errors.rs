@@ -1,5 +1,5 @@
-use crate::explore::ReadError;
 use crate::organisation::WhoamiError;
+use crate::store::StoreError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BadAccountName {
@@ -30,10 +30,10 @@ impl From<WhoamiError> for ProfileError {
     }
 }
 
-impl From<ReadError> for ProfileError {
-    fn from(error: ReadError) -> Self {
+impl From<StoreError> for ProfileError {
+    fn from(error: StoreError) -> Self {
         match error {
-            ReadError::StoreUnreachable => Self::StoreUnreachable,
+            StoreError::Unreachable => Self::StoreUnreachable,
         }
     }
 }

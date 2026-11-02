@@ -9,8 +9,8 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, Named, NoPhotos, OrgRole, Owned,
-    ProjectId, ProvisionPolicy, ReadError, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, Squads, Team, TeamId, TeamName, TenantId, UnixSeconds, WhoamiError,
+    ProjectId, ProvisionPolicy, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, Squads, StoreError, Team, TeamId, TeamName, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -134,11 +134,11 @@ impl Kept {
 }
 
 impl Squads for Kept {
-    async fn of(&self, _org: TenantId) -> Result<Vec<Team>, ReadError> {
+    async fn of(&self, _org: TenantId) -> Result<Vec<Team>, StoreError> {
         Ok(self.teams.lock().expect("the lock").clone())
     }
 
-    async fn create(&self, _org: TenantId, name: &TeamName) -> Result<Named, ReadError> {
+    async fn create(&self, _org: TenantId, name: &TeamName) -> Result<Named, StoreError> {
         if self.taken {
             return Ok(Named::Taken);
         }
@@ -162,7 +162,7 @@ impl Squads for Kept {
         _org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> Result<Named, ReadError> {
+    ) -> Result<Named, StoreError> {
         if self.taken {
             return Ok(Named::Taken);
         }
@@ -174,7 +174,7 @@ impl Squads for Kept {
         Ok(Named::Free)
     }
 
-    async fn disband(&self, _org: TenantId, team: TeamId) -> Result<bool, ReadError> {
+    async fn disband(&self, _org: TenantId, team: TeamId) -> Result<bool, StoreError> {
         self.written.lock().expect("the lock").disbanded.push(team);
         let there = self.holds(team);
         self.teams
@@ -189,7 +189,7 @@ impl Squads for Kept {
         _org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -203,7 +203,7 @@ impl Squads for Kept {
         _org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         self.written
             .lock()
             .expect("the lock")

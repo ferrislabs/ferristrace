@@ -1,6 +1,6 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, Decision, Fingerprint, IssueDecisions, ProjectId, ReadError, Recorded, Status,
+    AccountId, Decision, Fingerprint, IssueDecisions, ProjectId, Recorded, Status, StoreError,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -36,7 +36,10 @@ impl PostgresDecisions {
 }
 
 impl IssueDecisions for PostgresDecisions {
-    async fn read_many(&self, of: &[(ProjectId, Fingerprint)]) -> Result<Vec<Recorded>, ReadError> {
+    async fn read_many(
+        &self,
+        of: &[(ProjectId, Fingerprint)],
+    ) -> Result<Vec<Recorded>, StoreError> {
         let mut tx = self.tx.lock().await;
         if of.is_empty() {
             return Ok(Vec::new());
@@ -52,14 +55,14 @@ impl IssueDecisions for PostgresDecisions {
             .bind(&prints)
             .fetch_all(&mut **tx)
             .await
-            .map_err(|_| ReadError::StoreUnreachable)?;
+            .map_err(|_| StoreError::Unreachable)?;
 
         rows.iter()
             .map(|row| {
                 let print: Vec<u8> = row.get("fingerprint");
                 let bytes = print
                     .try_into()
-                    .map_err(|_| ReadError::StoreUnreachable)
+                    .map_err(|_| StoreError::Unreachable)
                     .map(Fingerprint::new)?;
                 Ok(Recorded {
                     project: ProjectId::new(row.get("project_id")),
@@ -83,7 +86,7 @@ impl IssueDecisions for PostgresDecisions {
         status: Status,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query(DECIDE)
             .bind(project.as_uuid())
@@ -94,7 +97,7 @@ impl IssueDecisions for PostgresDecisions {
             .execute(&mut **tx)
             .await
             .map(|_| ())
-            .map_err(|_| ReadError::StoreUnreachable)
+            .map_err(|_| StoreError::Unreachable)
     }
 
     async fn assign(
@@ -104,7 +107,7 @@ impl IssueDecisions for PostgresDecisions {
         owner: Option<AccountId>,
         by: AccountId,
         at_unix_nanos: u64,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query(ASSIGN)
             .bind(project.as_uuid())
@@ -116,7 +119,7 @@ impl IssueDecisions for PostgresDecisions {
             .execute(&mut **tx)
             .await
             .map(|_| ())
-            .map_err(|_| ReadError::StoreUnreachable)
+            .map_err(|_| StoreError::Unreachable)
     }
 }
 

@@ -8,10 +8,10 @@ use super::ports::{Memberships, Orgs};
 use super::value_objects::{MAX_ORG_NAME_BYTES, OrgName, OrgRole};
 use super::whoami::Whoami;
 use crate::clock::UnixSeconds;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::profile::{NoPhotos, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 const TOKEN: &str = "ct_ss_live";
@@ -101,7 +101,7 @@ impl Kept {
 }
 
 impl Orgs for &Kept {
-    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
         Ok(self
             .name
             .lock()
@@ -116,7 +116,7 @@ impl Orgs for &Kept {
             }))
     }
 
-    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), StoreError> {
         self.renames
             .lock()
             .expect("the lock")
@@ -125,7 +125,7 @@ impl Orgs for &Kept {
         Ok(())
     }
 
-    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError> {
+    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         *self.logo.lock().expect("the lock") = logo.cloned();
         Ok(())
     }

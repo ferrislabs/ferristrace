@@ -9,8 +9,8 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Admitted, Agent, Email, LiveSession, Member, Membership, Memberships, NoPhotos,
-    OrgRole, ProvisionPolicy, RESET_PREFIX, ReadError, Roll, SecretHash, Session, SessionError,
-    SessionId, SessionRoll, SessionStore, SessionToken, TenantId, UnixSeconds, WhoamiError,
+    OrgRole, ProvisionPolicy, RESET_PREFIX, Roll, SecretHash, Session, SessionError, SessionId,
+    SessionRoll, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -141,7 +141,7 @@ impl Kept {
 }
 
 impl Roll for Kept {
-    async fn of(&self, _org: TenantId) -> Result<Vec<Member>, ReadError> {
+    async fn of(&self, _org: TenantId) -> Result<Vec<Member>, StoreError> {
         Ok(self.roll())
     }
 
@@ -150,7 +150,7 @@ impl Roll for Kept {
         _org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> Result<Option<Member>, ReadError> {
+    ) -> Result<Option<Member>, StoreError> {
         let mut held = self.roll.lock().expect("the lock");
         Ok(held
             .iter_mut()
@@ -161,7 +161,7 @@ impl Roll for Kept {
             }))
     }
 
-    async fn remove(&self, _org: TenantId, account: AccountId) -> Result<bool, ReadError> {
+    async fn remove(&self, _org: TenantId, account: AccountId) -> Result<bool, StoreError> {
         let mut roll = self.roll.lock().expect("the lock");
         let before = roll.len();
         roll.retain(|member| member.account != account);
@@ -174,7 +174,7 @@ impl Roll for Kept {
         _email: &Email,
         _role: OrgRole,
         way_in: SecretHash,
-    ) -> Result<Admitted, ReadError> {
+    ) -> Result<Admitted, StoreError> {
         self.digests.lock().expect("the lock").push(way_in);
         Ok(self.admission.clone().expect("a scripted admission"))
     }

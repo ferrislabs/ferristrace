@@ -154,9 +154,9 @@ forward!(Memberships: Memberships {
 });
 
 forward!(Accounts: Accounts {
-    fn rename(&self, account: AccountId, name: Option<&AccountName>) -> Result<(), ReadError>;
-    fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError>;
-    fn set_portrait(&self, account: AccountId, portrait: Option<&Portrait>) -> Result<(), ReadError>;
+    fn rename(&self, account: AccountId, name: Option<&AccountName>) -> Result<(), StoreError>;
+    fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError>;
+    fn set_portrait(&self, account: AccountId, portrait: Option<&Portrait>) -> Result<(), StoreError>;
 });
 
 forward!(Accounts: AccountDirectory {
@@ -164,44 +164,44 @@ forward!(Accounts: AccountDirectory {
 });
 
 forward!(Orgs: Orgs {
-    fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError>;
-    fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), ReadError>;
-    fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError>;
+    fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError>;
+    fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), StoreError>;
+    fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError>;
 });
 
 forward!(Projects: Projects {
-    fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError>;
-    fn create(&self, org: TenantId, name: &ProjectName) -> Result<Created, ReadError>;
-    fn rename(&self, org: TenantId, project: ProjectId, name: &ProjectName) -> Result<Renamed, ReadError>;
-    fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, ReadError>;
-    fn assign(&self, org: TenantId, project: ProjectId, team: Option<TeamId>) -> Result<Assigned, ReadError>;
+    fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError>;
+    fn create(&self, org: TenantId, name: &ProjectName) -> Result<Created, StoreError>;
+    fn rename(&self, org: TenantId, project: ProjectId, name: &ProjectName) -> Result<Renamed, StoreError>;
+    fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, StoreError>;
+    fn assign(&self, org: TenantId, project: ProjectId, team: Option<TeamId>) -> Result<Assigned, StoreError>;
 });
 
 forward!(Roster: Roll {
-    fn of(&self, org: TenantId) -> Result<Vec<Member>, ReadError>;
-    fn grant(&self, org: TenantId, account: AccountId, role: OrgRole) -> Result<Option<Member>, ReadError>;
-    fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, ReadError>;
-    fn admit(&self, org: TenantId, email: &Email, role: OrgRole, way_in: SecretHash) -> Result<Admitted, ReadError>;
+    fn of(&self, org: TenantId) -> Result<Vec<Member>, StoreError>;
+    fn grant(&self, org: TenantId, account: AccountId, role: OrgRole) -> Result<Option<Member>, StoreError>;
+    fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, StoreError>;
+    fn admit(&self, org: TenantId, email: &Email, role: OrgRole, way_in: SecretHash) -> Result<Admitted, StoreError>;
 });
 
 forward!(Teams: Squads {
-    fn of(&self, org: TenantId) -> Result<Vec<Team>, ReadError>;
-    fn create(&self, org: TenantId, name: &TeamName) -> Result<Named, ReadError>;
-    fn rename(&self, org: TenantId, team: TeamId, name: &TeamName) -> Result<Named, ReadError>;
-    fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, ReadError>;
-    fn seat(&self, org: TenantId, team: TeamId, members: &[AccountId]) -> Result<bool, ReadError>;
-    fn own(&self, org: TenantId, team: TeamId, projects: &[ProjectId]) -> Result<bool, ReadError>;
+    fn of(&self, org: TenantId) -> Result<Vec<Team>, StoreError>;
+    fn create(&self, org: TenantId, name: &TeamName) -> Result<Named, StoreError>;
+    fn rename(&self, org: TenantId, team: TeamId, name: &TeamName) -> Result<Named, StoreError>;
+    fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, StoreError>;
+    fn seat(&self, org: TenantId, team: TeamId, members: &[AccountId]) -> Result<bool, StoreError>;
+    fn own(&self, org: TenantId, team: TeamId, projects: &[ProjectId]) -> Result<bool, StoreError>;
 });
 
 forward!(UsageHistory: UsageHistory {
-    fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, ReadError>;
-    fn included(&self, org: TenantId) -> Result<Option<DecompressedBytes>, ReadError>;
+    fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError>;
+    fn included(&self, org: TenantId) -> Result<Option<DecompressedBytes>, StoreError>;
 });
 
 forward!(Decisions: IssueDecisions {
-    fn read_many(&self, of: &[(ProjectId, Fingerprint)]) -> Result<Vec<Recorded>, ReadError>;
-    fn decide(&self, project: ProjectId, print: Fingerprint, status: Status, by: AccountId, at_unix_nanos: u64) -> Result<(), ReadError>;
-    fn assign(&self, project: ProjectId, print: Fingerprint, owner: Option<AccountId>, by: AccountId, at_unix_nanos: u64) -> Result<(), ReadError>;
+    fn read_many(&self, of: &[(ProjectId, Fingerprint)]) -> Result<Vec<Recorded>, StoreError>;
+    fn decide(&self, project: ProjectId, print: Fingerprint, status: Status, by: AccountId, at_unix_nanos: u64) -> Result<(), StoreError>;
+    fn assign(&self, project: ProjectId, print: Fingerprint, owner: Option<AccountId>, by: AccountId, at_unix_nanos: u64) -> Result<(), StoreError>;
 });
 
 forward!(Factors: FactorStore {

@@ -2,42 +2,46 @@ use core::future::Future;
 
 use super::entities::Project;
 use super::value_objects::{Assigned, Created, ProjectId, ProjectName, Renamed};
-use crate::explore::ReadError;
 use crate::organisation::TeamId;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 pub trait Projects {
-    fn of(&self, tenant: TenantId) -> impl Future<Output = Result<Vec<Project>, ReadError>> + Send;
+    fn of(&self, tenant: TenantId)
+    -> impl Future<Output = Result<Vec<Project>, StoreError>> + Send;
 
     fn create(
         &self,
         org: TenantId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Created, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Created, StoreError>> + Send;
 
     fn rename(
         &self,
         org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Renamed, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Renamed, StoreError>> + Send;
 
     fn forget(
         &self,
         org: TenantId,
         project: ProjectId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send;
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     fn assign(
         &self,
         org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> impl Future<Output = Result<Assigned, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Assigned, StoreError>> + Send;
 }
 
 impl<T: Projects + Sync> Projects for &T {
-    fn of(&self, tenant: TenantId) -> impl Future<Output = Result<Vec<Project>, ReadError>> + Send {
+    fn of(
+        &self,
+        tenant: TenantId,
+    ) -> impl Future<Output = Result<Vec<Project>, StoreError>> + Send {
         (*self).of(tenant)
     }
 
@@ -45,7 +49,7 @@ impl<T: Projects + Sync> Projects for &T {
         &self,
         org: TenantId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Created, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Created, StoreError>> + Send {
         (*self).create(org, name)
     }
 
@@ -54,7 +58,7 @@ impl<T: Projects + Sync> Projects for &T {
         org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Renamed, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Renamed, StoreError>> + Send {
         (*self).rename(org, project, name)
     }
 
@@ -62,7 +66,7 @@ impl<T: Projects + Sync> Projects for &T {
         &self,
         org: TenantId,
         project: ProjectId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         (*self).forget(org, project)
     }
 
@@ -71,13 +75,16 @@ impl<T: Projects + Sync> Projects for &T {
         org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> impl Future<Output = Result<Assigned, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Assigned, StoreError>> + Send {
         (*self).assign(org, project, team)
     }
 }
 
 impl<T: Projects + Send + Sync> Projects for std::sync::Arc<T> {
-    fn of(&self, tenant: TenantId) -> impl Future<Output = Result<Vec<Project>, ReadError>> + Send {
+    fn of(
+        &self,
+        tenant: TenantId,
+    ) -> impl Future<Output = Result<Vec<Project>, StoreError>> + Send {
         self.as_ref().of(tenant)
     }
 
@@ -85,7 +92,7 @@ impl<T: Projects + Send + Sync> Projects for std::sync::Arc<T> {
         &self,
         org: TenantId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Created, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Created, StoreError>> + Send {
         self.as_ref().create(org, name)
     }
 
@@ -94,7 +101,7 @@ impl<T: Projects + Send + Sync> Projects for std::sync::Arc<T> {
         org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> impl Future<Output = Result<Renamed, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Renamed, StoreError>> + Send {
         self.as_ref().rename(org, project, name)
     }
 
@@ -102,7 +109,7 @@ impl<T: Projects + Send + Sync> Projects for std::sync::Arc<T> {
         &self,
         org: TenantId,
         project: ProjectId,
-    ) -> impl Future<Output = Result<bool, ReadError>> + Send {
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send {
         self.as_ref().forget(org, project)
     }
 
@@ -111,7 +118,7 @@ impl<T: Projects + Send + Sync> Projects for std::sync::Arc<T> {
         org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> impl Future<Output = Result<Assigned, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Assigned, StoreError>> + Send {
         self.as_ref().assign(org, project, team)
     }
 }

@@ -9,8 +9,8 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, Consumed, DecompressedBytes, LiveSession, Membership, Memberships, NoPhotos,
-    OrgRole, ProvisionPolicy, ReadError, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, TenantId, UnixSeconds, UsageHistory, UsageMeter, UsageReader,
+    OrgRole, ProvisionPolicy, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, StoreError, TenantId, UnixSeconds, UsageHistory, UsageMeter, UsageReader,
     WhoamiError, Window,
 };
 use tower::ServiceExt;
@@ -109,14 +109,14 @@ struct Rolled {
 }
 
 impl UsageHistory for Rolled {
-    async fn hours(&self, _org: TenantId, window: Window) -> Result<Vec<Consumed>, ReadError> {
+    async fn hours(&self, _org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError> {
         Ok(vec![Consumed {
             started_at_unix_nanos: window.from_unix_nanos(),
             ingested_bytes: 4_096,
         }])
     }
 
-    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, ReadError> {
+    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, StoreError> {
         Ok(self.included.map(DecompressedBytes::new))
     }
 }

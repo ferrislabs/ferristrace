@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, Admitted, Clock, Email, Member, OrgRole, ReadError, Roll, SecretHash, TenantId,
+    AccountId, Admitted, Clock, Email, Member, OrgRole, Roll, SecretHash, StoreError, TenantId,
     UnixSeconds,
 };
 use sqlx::{Row, postgres::PgRow};
@@ -38,21 +38,21 @@ impl<C: Clock> PostgresRoster<C> {
         }
     }
 
-    async fn locked(&self) -> Result<String, ReadError> {
+    async fn locked(&self) -> Result<String, StoreError> {
         let hasher = self.hasher.clone();
         task::spawn_blocking(move || hasher.locked())
             .await
-            .map_err(|_| ReadError::StoreUnreachable)?
+            .map_err(|_| StoreError::Unreachable)?
             .map(|hash| hash.encoded().to_owned())
             .map_err(|error| {
                 tracing::error!(%error, "a new account could not be locked");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })
     }
 }
 
 impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
-    async fn of(&self, org: TenantId) -> Result<Vec<Member>, ReadError> {
+    async fn of(&self, org: TenantId) -> Result<Vec<Member>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT m.account_id AS account_id, a.email AS email, a.name AS name, \
@@ -66,7 +66,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read the members");
-            ReadError::StoreUnreachable
+            StoreError::Unreachable
         })?;
 
         rows.iter().map(read_member).collect()
@@ -77,7 +77,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> Result<Option<Member>, ReadError> {
+    ) -> Result<Option<Member>, StoreError> {
         let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "UPDATE org_members m SET role = $3::org_role FROM accounts a \
@@ -93,13 +93,13 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to change a role");
-            ReadError::StoreUnreachable
+            StoreError::Unreachable
         })?;
 
         found.as_ref().map(read_member).transpose()
     }
 
-    async fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, ReadError> {
+    async fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM org_members WHERE org_id = $1 AND account_id = $2")
             .bind(org.as_uuid())
@@ -109,7 +109,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to remove a member");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })
     }
 
@@ -119,7 +119,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         email: &Email,
         role: OrgRole,
         way_in: SecretHash,
-    ) -> Result<Admitted, ReadError> {
+    ) -> Result<Admitted, StoreError> {
         let locked = self.locked().await?;
         let now = to_nanos(self.clock.now());
         let expires = to_nanos(
@@ -217,12 +217,12 @@ where
         .map(|_| account)
 }
 
-fn read_member(row: &PgRow) -> Result<Member, ReadError> {
+fn read_member(row: &PgRow) -> Result<Member, StoreError> {
     Ok(Member {
         account: AccountId::new(row.get("account_id")),
         email: Email::try_from(row.get::<String, _>("email").as_str()).map_err(|error| {
             tracing::error!(%error, "the control plane holds an address nothing can send to");
-            ReadError::StoreUnreachable
+            StoreError::Unreachable
         })?,
         name: row.get::<Option<String>, _>("name").map(Into::into),
         photo: read_portrait(row),
@@ -231,11 +231,11 @@ fn read_member(row: &PgRow) -> Result<Member, ReadError> {
     })
 }
 
-fn known_role(row: &PgRow) -> Result<OrgRole, ReadError> {
+fn known_role(row: &PgRow) -> Result<OrgRole, StoreError> {
     let spelling: String = row.get("role");
     read_role(&spelling).ok_or_else(|| {
         tracing::error!(role = %spelling, "the control plane holds an unknown role");
-        ReadError::StoreUnreachable
+        StoreError::Unreachable
     })
 }
 
@@ -249,7 +249,7 @@ fn to_nanos(instant: UnixSeconds) -> i64 {
         .saturating_mul(NANOS_PER_SECOND)
 }
 
-fn unreachable(error: &sqlx::Error) -> ReadError {
+fn unreachable(error: &sqlx::Error) -> StoreError {
     tracing::error!(%error, "the control plane refused an admission");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }

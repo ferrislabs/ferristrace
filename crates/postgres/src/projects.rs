@@ -1,6 +1,6 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    Assigned, Created, OwnerTeam, Project, ProjectId, ProjectName, Projects, ReadError, Renamed,
+    Assigned, Created, OwnerTeam, Project, ProjectId, ProjectName, Projects, Renamed, StoreError,
     TeamId, TenantId,
 };
 use sqlx::Row;
@@ -71,7 +71,7 @@ impl PostgresProjects {
 }
 
 impl Projects for PostgresProjects {
-    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError> {
+    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT p.id AS id, p.name AS name, p.created_at AS created_at, \
@@ -103,7 +103,7 @@ impl Projects for PostgresProjects {
             .collect())
     }
 
-    async fn create(&self, org: TenantId, name: &ProjectName) -> Result<Created, ReadError> {
+    async fn create(&self, org: TenantId, name: &ProjectName) -> Result<Created, StoreError> {
         let mut tx = self.tx.lock().await;
         let written = sqlx::query(
             "INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) \
@@ -128,7 +128,7 @@ impl Projects for PostgresProjects {
         org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> Result<Renamed, ReadError> {
+    ) -> Result<Renamed, StoreError> {
         let mut tx = self.tx.lock().await;
         match sqlx::query("UPDATE projects SET name = $3 WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
@@ -146,7 +146,7 @@ impl Projects for PostgresProjects {
         }
     }
 
-    async fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, ReadError> {
+    async fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM projects WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
@@ -162,7 +162,7 @@ impl Projects for PostgresProjects {
         org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> Result<Assigned, ReadError> {
+    ) -> Result<Assigned, StoreError> {
         let mut tx = self.tx.lock().await;
         let wanted = team.map(TeamId::as_uuid);
         let done = sqlx::query(
@@ -196,7 +196,7 @@ impl Projects for PostgresProjects {
     }
 }
 
-fn unreachable(error: &sqlx::Error, what: &str) -> ReadError {
+fn unreachable(error: &sqlx::Error, what: &str) -> StoreError {
     tracing::error!(%error, "the control plane refused to {what}");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }

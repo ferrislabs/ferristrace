@@ -9,9 +9,9 @@ use super::value_objects::{MAX_TEAM_NAME_BYTES, Named, OrgRole, Owned, TeamId, T
 use super::whoami::Whoami;
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 const TOKEN: &str = "ct_ss_live";
@@ -131,11 +131,11 @@ impl Held {
 }
 
 impl Squads for &Held {
-    async fn of(&self, _org: TenantId) -> Result<Vec<Team>, ReadError> {
+    async fn of(&self, _org: TenantId) -> Result<Vec<Team>, StoreError> {
         Ok(self.teams.lock().expect("the lock").clone())
     }
 
-    async fn create(&self, _org: TenantId, name: &TeamName) -> Result<Named, ReadError> {
+    async fn create(&self, _org: TenantId, name: &TeamName) -> Result<Named, StoreError> {
         if self.taken {
             return Ok(Named::Taken);
         }
@@ -159,7 +159,7 @@ impl Squads for &Held {
         _org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> Result<Named, ReadError> {
+    ) -> Result<Named, StoreError> {
         if self.taken {
             return Ok(Named::Taken);
         }
@@ -171,7 +171,7 @@ impl Squads for &Held {
         Ok(Named::Free)
     }
 
-    async fn disband(&self, _org: TenantId, team: TeamId) -> Result<bool, ReadError> {
+    async fn disband(&self, _org: TenantId, team: TeamId) -> Result<bool, StoreError> {
         self.written.lock().expect("the lock").disbanded.push(team);
         Ok(self.holds(team))
     }
@@ -181,7 +181,7 @@ impl Squads for &Held {
         _org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -195,7 +195,7 @@ impl Squads for &Held {
         _org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         self.written
             .lock()
             .expect("the lock")

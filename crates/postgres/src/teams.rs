@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, Named, Owned, ProjectId, ReadError, Squads, Team, TeamId, TeamName, TenantId,
+    AccountId, Named, Owned, ProjectId, Squads, StoreError, Team, TeamId, TeamName, TenantId,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -22,7 +22,7 @@ impl PostgresTeams {
 }
 
 impl Squads for PostgresTeams {
-    async fn of(&self, org: TenantId) -> Result<Vec<Team>, ReadError> {
+    async fn of(&self, org: TenantId) -> Result<Vec<Team>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT id AS id, name AS name, created_at AS created_at \
@@ -83,7 +83,7 @@ impl Squads for PostgresTeams {
             .collect())
     }
 
-    async fn create(&self, org: TenantId, name: &TeamName) -> Result<Named, ReadError> {
+    async fn create(&self, org: TenantId, name: &TeamName) -> Result<Named, StoreError> {
         let mut tx = self.tx.lock().await;
         let written = sqlx::query(
             "INSERT INTO teams (id, org_id, name) VALUES ($1, $2, $3) \
@@ -104,7 +104,7 @@ impl Squads for PostgresTeams {
         org: TenantId,
         team: TeamId,
         name: &TeamName,
-    ) -> Result<Named, ReadError> {
+    ) -> Result<Named, StoreError> {
         let mut tx = self.tx.lock().await;
         let clash =
             sqlx::query("SELECT 1 AS one FROM teams WHERE org_id = $1 AND name = $2 AND id <> $3")
@@ -133,7 +133,7 @@ impl Squads for PostgresTeams {
         }
     }
 
-    async fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, ReadError> {
+    async fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM teams WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
@@ -149,7 +149,7 @@ impl Squads for PostgresTeams {
         org: TenantId,
         team: TeamId,
         members: &[AccountId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         let accounts: Vec<Uuid> = members.iter().map(|member| member.as_uuid()).collect();
 
         let mut tx = self.tx.lock().await;
@@ -185,7 +185,7 @@ impl Squads for PostgresTeams {
         org: TenantId,
         team: TeamId,
         projects: &[ProjectId],
-    ) -> Result<bool, ReadError> {
+    ) -> Result<bool, StoreError> {
         let claimed: Vec<Uuid> = projects.iter().map(|project| project.as_uuid()).collect();
 
         let mut tx = self.tx.lock().await;
@@ -217,7 +217,7 @@ impl Squads for PostgresTeams {
     }
 }
 
-async fn holds<'c, E>(executor: E, org: TenantId, team: TeamId) -> Result<bool, ReadError>
+async fn holds<'c, E>(executor: E, org: TenantId, team: TeamId) -> Result<bool, StoreError>
 where
     E: sqlx::Executor<'c, Database = sqlx::Postgres>,
 {
@@ -234,7 +234,7 @@ fn named(written: bool) -> Named {
     if written { Named::Free } else { Named::Taken }
 }
 
-fn unreachable(error: &sqlx::Error, what: &str) -> ReadError {
+fn unreachable(error: &sqlx::Error, what: &str) -> StoreError {
     tracing::error!(%error, "the control plane refused to {what}");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }

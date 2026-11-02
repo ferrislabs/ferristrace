@@ -5,10 +5,11 @@ use super::metering::Metering;
 use super::ports::{UsageHistory, UsageReader};
 use super::value_objects::{Consumed, DecompressedBytes, TenantId};
 use crate::clock::UnixSeconds;
-use crate::explore::{ExploreError, ReadError, Window};
+use crate::explore::{ExploreError, Window};
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 
 const TOKEN: &str = "ct_ss_live";
 const MINE: u128 = 1;
@@ -82,7 +83,7 @@ struct Rolled {
 }
 
 impl UsageHistory for &Rolled {
-    async fn hours(&self, org: TenantId, _window: Window) -> Result<Vec<Consumed>, ReadError> {
+    async fn hours(&self, org: TenantId, _window: Window) -> Result<Vec<Consumed>, StoreError> {
         self.asked.lock().expect("the lock").push(org);
         Ok(vec![
             Consumed {
@@ -96,7 +97,7 @@ impl UsageHistory for &Rolled {
         ])
     }
 
-    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, ReadError> {
+    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, StoreError> {
         Ok(self.included.map(DecompressedBytes::new))
     }
 }

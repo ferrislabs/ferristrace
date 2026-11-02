@@ -1,5 +1,5 @@
-use crate::explore::ReadError;
 use crate::organisation::WhoamiError;
+use crate::store::StoreError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("a fingerprint is 16 bytes, written as 32 hex characters")]
@@ -26,10 +26,10 @@ impl From<WhoamiError> for IssueError {
     }
 }
 
-impl From<ReadError> for IssueError {
-    fn from(error: ReadError) -> Self {
+impl From<StoreError> for IssueError {
+    fn from(error: StoreError) -> Self {
         match error {
-            ReadError::StoreUnreachable => Self::Unavailable,
+            StoreError::Unreachable => Self::Unavailable,
         }
     }
 }

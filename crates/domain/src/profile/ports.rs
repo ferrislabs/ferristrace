@@ -2,26 +2,26 @@ use core::future::Future;
 
 use super::errors::PhotoError;
 use super::value_objects::{AccountName, Photo, Pictured, Portrait};
-use crate::explore::ReadError;
 use crate::identity::AccountId;
+use crate::store::StoreError;
 
 pub trait Accounts {
     fn rename(
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     fn portrait_of(
         &self,
         account: AccountId,
-    ) -> impl Future<Output = Result<Option<Portrait>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Option<Portrait>, StoreError>> + Send;
 
     fn set_portrait(
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 impl<T: Accounts + Sync> Accounts for &T {
@@ -29,14 +29,14 @@ impl<T: Accounts + Sync> Accounts for &T {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).rename(account, name)
     }
 
     fn portrait_of(
         &self,
         account: AccountId,
-    ) -> impl Future<Output = Result<Option<Portrait>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Portrait>, StoreError>> + Send {
         (*self).portrait_of(account)
     }
 
@@ -44,7 +44,7 @@ impl<T: Accounts + Sync> Accounts for &T {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).set_portrait(account, portrait)
     }
 }
@@ -54,14 +54,14 @@ impl<T: Accounts + Send + Sync> Accounts for std::sync::Arc<T> {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().rename(account, name)
     }
 
     fn portrait_of(
         &self,
         account: AccountId,
-    ) -> impl Future<Output = Result<Option<Portrait>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<Portrait>, StoreError>> + Send {
         self.as_ref().portrait_of(account)
     }
 
@@ -69,7 +69,7 @@ impl<T: Accounts + Send + Sync> Accounts for std::sync::Arc<T> {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> impl Future<Output = Result<(), ReadError>> + Send {
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().set_portrait(account, portrait)
     }
 }

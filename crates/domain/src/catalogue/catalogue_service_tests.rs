@@ -7,10 +7,10 @@ use super::errors::{BadProjectName, CatalogueError};
 use super::ports::Projects;
 use super::value_objects::{Assigned, Created, MAX_NAME_BYTES, ProjectId, ProjectName, Renamed};
 use crate::clock::UnixSeconds;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, TeamId, Whoami, WhoamiError};
 use crate::secret::SessionToken;
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 const TOKEN: &str = "ct_ss_live";
@@ -117,7 +117,7 @@ impl Held {
 }
 
 impl Projects for &Held {
-    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError> {
+    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError> {
         self.written.lock().expect("the lock").asked.push(tenant);
         Ok(vec![Project {
             id: a_project(STOREFRONT),
@@ -129,7 +129,7 @@ impl Projects for &Held {
         }])
     }
 
-    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, ReadError> {
+    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -143,7 +143,7 @@ impl Projects for &Held {
         _org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> Result<Renamed, ReadError> {
+    ) -> Result<Renamed, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -152,7 +152,7 @@ impl Projects for &Held {
         Ok(self.renamed)
     }
 
-    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, ReadError> {
+    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -166,7 +166,7 @@ impl Projects for &Held {
         _org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> Result<Assigned, ReadError> {
+    ) -> Result<Assigned, StoreError> {
         self.written
             .lock()
             .expect("the lock")

@@ -10,9 +10,9 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
-    ProvisionPolicy, ReadError, ServiceSummary, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus,
-    TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window,
+    ProvisionPolicy, ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus, StoreError, TenantId,
+    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -131,7 +131,7 @@ impl SpanReader for TwoSpans {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(vec![ServiceSummary {
             name: "checkout".into(),
             requests: 10,
@@ -147,7 +147,7 @@ impl SpanReader for TwoSpans {
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         Ok(vec![TraceSummary {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
@@ -159,7 +159,7 @@ impl SpanReader for TwoSpans {
         }])
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(vec![
             a_span(
                 1,
@@ -188,7 +188,7 @@ impl SpanReader for NoSpans {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -196,11 +196,11 @@ impl SpanReader for NoSpans {
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -494,7 +494,7 @@ impl SpanReader for Remembering {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -502,12 +502,12 @@ impl SpanReader for Remembering {
         &self,
         _tenant: TenantId,
         filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         *self.0.lock().expect("the lock") = Some(filter.clone());
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }

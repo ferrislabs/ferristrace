@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    ProjectId, ReadError, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader,
-    SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    ProjectId, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus,
+    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -129,7 +129,7 @@ impl SpanReader for ClickhouseReader {
         tenant: TenantId,
         window: Window,
         project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         let rows: Vec<ServiceRow> = self
             .client
             .query(SERVICES)
@@ -149,7 +149,7 @@ impl SpanReader for ClickhouseReader {
         &self,
         tenant: TenantId,
         filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         let service = filter.service.as_deref().unwrap_or_default();
         let name = filter.name.as_deref().unwrap_or_default();
         let rows: Vec<SummaryRow> = self
@@ -174,7 +174,7 @@ impl SpanReader for ClickhouseReader {
         rows.into_iter().map(read_summary).collect()
     }
 
-    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, StoreError> {
         let rows: Vec<SpanRow> = self
             .client
             .query(ONE_TRACE)
@@ -239,7 +239,7 @@ fn ordering(order: TraceOrder) -> &'static str {
     }
 }
 
-fn read_summary(row: SummaryRow) -> Result<TraceSummary, ReadError> {
+fn read_summary(row: SummaryRow) -> Result<TraceSummary, StoreError> {
     Ok(TraceSummary {
         trace_id: a_trace(&row.trace_id)?,
         root_service: row.root_service.into(),
@@ -251,7 +251,7 @@ fn read_summary(row: SummaryRow) -> Result<TraceSummary, ReadError> {
     })
 }
 
-fn read_span(trace: TraceId, row: SpanRow, events: Vec<SpanEvent>) -> Result<Span, ReadError> {
+fn read_span(trace: TraceId, row: SpanRow, events: Vec<SpanEvent>) -> Result<Span, StoreError> {
     let parent = match row.parent_span_id.as_deref() {
         None | Some("") => None,
         Some(spelling) => Some(a_span(spelling)?),
@@ -278,21 +278,21 @@ fn map_of(pairs: Vec<(String, String)>) -> BTreeMap<Box<str>, Box<str>> {
         .collect()
 }
 
-pub(crate) fn a_trace(spelling: &str) -> Result<TraceId, ReadError> {
+pub(crate) fn a_trace(spelling: &str) -> Result<TraceId, StoreError> {
     TraceId::try_from(decoded(spelling)?.as_slice()).map_err(|error| held(&error))
 }
 
-pub(crate) fn a_span(spelling: &str) -> Result<SpanId, ReadError> {
+pub(crate) fn a_span(spelling: &str) -> Result<SpanId, StoreError> {
     SpanId::try_from(decoded(spelling)?.as_slice()).map_err(|error| held(&error))
 }
 
-fn decoded(spelling: &str) -> Result<Vec<u8>, ReadError> {
+fn decoded(spelling: &str) -> Result<Vec<u8>, StoreError> {
     hex::decode(spelling).map_err(|error| held(&error))
 }
 
-pub(crate) fn held(error: &dyn core::fmt::Display) -> ReadError {
+pub(crate) fn held(error: &dyn core::fmt::Display) -> StoreError {
     tracing::error!(%error, "the span store holds an identifier we cannot read");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }
 
 fn read_kind(spelling: &str) -> SpanKind {
@@ -326,9 +326,9 @@ pub(crate) fn unsigned(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
-pub(crate) fn refused(error: &clickhouse::error::Error) -> ReadError {
+pub(crate) fn refused(error: &clickhouse::error::Error) -> StoreError {
     tracing::error!(%error, "the span store refused a query");
-    ReadError::StoreUnreachable
+    StoreError::Unreachable
 }
 
 #[cfg(test)]

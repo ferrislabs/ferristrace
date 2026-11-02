@@ -1,7 +1,7 @@
 use backend::Each;
 use ferristrace_application::registry::domain;
 use ferristrace_domain::{
-    Assigned, Created, ProjectId, ProjectName, Projects, ReadError, Renamed, Squads, TeamId,
+    Assigned, Created, ProjectId, ProjectName, Projects, Renamed, Squads, StoreError, TeamId,
     TeamName, TenantId,
 };
 use ferristrace_infra::FixedClock;
@@ -415,7 +415,7 @@ async fn a_read_of_an_organisation_with_nothing_in_it_is_an_empty_catalogue() {
     let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
 
-    let held: Result<_, ReadError> = backend::projects(&pg).of(org).await;
+    let held: Result<_, StoreError> = backend::projects(&pg).of(org).await;
 
     assert!(held.expect("the projects").is_empty());
 }

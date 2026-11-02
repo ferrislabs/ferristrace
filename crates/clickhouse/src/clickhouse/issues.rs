@@ -1,6 +1,6 @@
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    Counted, Fingerprint, IssueFilter, IssueReader, Occurrence, ProjectId, ReadError, TenantId,
+    Counted, Fingerprint, IssueFilter, IssueReader, Occurrence, ProjectId, StoreError, TenantId,
     Window,
 };
 use serde::Deserialize;
@@ -89,7 +89,7 @@ impl IssueReader for ClickhouseIssues {
         &self,
         tenant: TenantId,
         filter: &IssueFilter,
-    ) -> Result<Vec<Counted>, ReadError> {
+    ) -> Result<Vec<Counted>, StoreError> {
         let service = filter.service.as_deref().unwrap_or_default();
         let text = filter.text.as_deref().unwrap_or_default();
         let print = filter
@@ -126,7 +126,7 @@ impl IssueReader for ClickhouseIssues {
         print: Fingerprint,
         window: Window,
         limit: u32,
-    ) -> Result<Vec<Occurrence>, ReadError> {
+    ) -> Result<Vec<Occurrence>, StoreError> {
         let rows: Vec<OccurrenceRow> = self
             .client
             .query(OCCURRENCES)
@@ -144,7 +144,7 @@ impl IssueReader for ClickhouseIssues {
     }
 }
 
-fn read_counted(row: CountedRow) -> Result<Counted, ReadError> {
+fn read_counted(row: CountedRow) -> Result<Counted, StoreError> {
     Ok(Counted {
         project: ProjectId::new(Uuid::parse_str(&row.project_id).map_err(|error| held(&error))?),
         print: Fingerprint::try_from(row.fingerprint.as_str()).map_err(|error| held(&error))?,
@@ -157,7 +157,7 @@ fn read_counted(row: CountedRow) -> Result<Counted, ReadError> {
     })
 }
 
-fn read_occurrence(row: OccurrenceRow) -> Result<Occurrence, ReadError> {
+fn read_occurrence(row: OccurrenceRow) -> Result<Occurrence, StoreError> {
     Ok(Occurrence {
         service: row.service.into(),
         exception_type: row.exception_type.into(),

@@ -1,5 +1,5 @@
 use ferristrace_application::repository;
-use ferristrace_domain::{OrgName, Organisation, Orgs, Portrait, ReadError, TenantId};
+use ferristrace_domain::{OrgName, Organisation, Orgs, Portrait, StoreError, TenantId};
 use sqlx::Row;
 
 use crate::accounts::read_portrait;
@@ -18,7 +18,7 @@ impl PostgresOrgs {
 }
 
 impl Orgs for PostgresOrgs {
-    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
         let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT o.name AS name, p.name AS plan, o.created_at AS created_at, \
@@ -31,7 +31,7 @@ impl Orgs for PostgresOrgs {
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read an organisation");
-            ReadError::StoreUnreachable
+            StoreError::Unreachable
         })?;
 
         Ok(found.map(|row| Organisation {
@@ -44,7 +44,7 @@ impl Orgs for PostgresOrgs {
         }))
     }
 
-    async fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+    async fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE orgs SET name = $2 WHERE id = $1")
             .bind(org.as_uuid())
@@ -53,12 +53,12 @@ impl Orgs for PostgresOrgs {
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to rename an organisation");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })?;
         Ok(())
     }
 
-    async fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError> {
+    async fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE orgs SET logo_token = $2, logo_type = $3 WHERE id = $1")
             .bind(org.as_uuid())
@@ -68,7 +68,7 @@ impl Orgs for PostgresOrgs {
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to keep a logo");
-                ReadError::StoreUnreachable
+                StoreError::Unreachable
             })?;
         Ok(())
     }

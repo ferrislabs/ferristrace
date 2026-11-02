@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use ferristrace_domain::{
     AccountId, Agent, ControlPlane, Email, IngestKey, LiveSession, Membership, Memberships,
     NoPhotos, OrgName, OrgRole, Organisation, Orgs, Portrait, ProjectId, ProjectName,
-    ProvisionError, ProvisionPolicy, ReadError, SecretHash, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, TenantId, UnixSeconds,
+    ProvisionError, ProvisionPolicy, SecretHash, Session, SessionError, SessionId, SessionRoll,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -142,7 +142,7 @@ impl FakeOrgs {
 }
 
 impl Orgs for FakeOrgs {
-    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
         let name = self
             .handle
             .ledger
@@ -159,13 +159,13 @@ impl Orgs for FakeOrgs {
         }))
     }
 
-    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), StoreError> {
         self.handle.write();
         *self.handle.ledger.org_name.lock().expect("the ledger lock") = name.as_str().to_owned();
         Ok(())
     }
 
-    async fn set_logo(&self, _org: TenantId, _logo: Option<&Portrait>) -> Result<(), ReadError> {
+    async fn set_logo(&self, _org: TenantId, _logo: Option<&Portrait>) -> Result<(), StoreError> {
         Ok(())
     }
 }

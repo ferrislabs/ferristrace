@@ -3,7 +3,8 @@ use core::future::Future;
 use super::entities::Span;
 use super::errors::{SinkError, UnknownKey};
 use super::value_objects::{Admission, Consumed, DecompressedBytes, IngestKey, Scope, TenantId};
-use crate::explore::{ReadError, Window};
+use crate::explore::Window;
+use crate::store::StoreError;
 
 pub trait SpanSink {
     fn accept(
@@ -135,12 +136,12 @@ pub trait UsageHistory {
         &self,
         org: TenantId,
         window: Window,
-    ) -> impl Future<Output = Result<Vec<Consumed>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Consumed>, StoreError>> + Send;
 
     fn included(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<DecompressedBytes>, ReadError>> + Send;
+    ) -> impl Future<Output = Result<Option<DecompressedBytes>, StoreError>> + Send;
 }
 
 impl<T: UsageHistory + Sync> UsageHistory for &T {
@@ -148,14 +149,14 @@ impl<T: UsageHistory + Sync> UsageHistory for &T {
         &self,
         org: TenantId,
         window: Window,
-    ) -> impl Future<Output = Result<Vec<Consumed>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Consumed>, StoreError>> + Send {
         (*self).hours(org, window)
     }
 
     fn included(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<DecompressedBytes>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<DecompressedBytes>, StoreError>> + Send {
         (*self).included(org)
     }
 }
@@ -165,14 +166,14 @@ impl<T: UsageHistory + Send + Sync> UsageHistory for std::sync::Arc<T> {
         &self,
         org: TenantId,
         window: Window,
-    ) -> impl Future<Output = Result<Vec<Consumed>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Consumed>, StoreError>> + Send {
         self.as_ref().hours(org, window)
     }
 
     fn included(
         &self,
         org: TenantId,
-    ) -> impl Future<Output = Result<Option<DecompressedBytes>, ReadError>> + Send {
+    ) -> impl Future<Output = Result<Option<DecompressedBytes>, StoreError>> + Send {
         self.as_ref().included(org)
     }
 }

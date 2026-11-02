@@ -8,9 +8,9 @@ use super::roster::Roster;
 use super::value_objects::{Admitted, Invitation, OrgRole};
 use super::whoami::Whoami;
 use crate::clock::UnixSeconds;
-use crate::explore::ReadError;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::secret::{SecretHash, SessionToken};
+use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
 const TOKEN: &str = "ct_ss_live";
@@ -128,7 +128,7 @@ impl Held {
 }
 
 impl Roll for &Held {
-    async fn of(&self, _org: TenantId) -> Result<Vec<Member>, ReadError> {
+    async fn of(&self, _org: TenantId) -> Result<Vec<Member>, StoreError> {
         Ok(self.roll())
     }
 
@@ -137,7 +137,7 @@ impl Roll for &Held {
         _org: TenantId,
         account: AccountId,
         role: OrgRole,
-    ) -> Result<Option<Member>, ReadError> {
+    ) -> Result<Option<Member>, StoreError> {
         self.written
             .lock()
             .expect("the lock")
@@ -153,7 +153,7 @@ impl Roll for &Held {
             }))
     }
 
-    async fn remove(&self, _org: TenantId, account: AccountId) -> Result<bool, ReadError> {
+    async fn remove(&self, _org: TenantId, account: AccountId) -> Result<bool, StoreError> {
         self.written.lock().expect("the lock").removed.push(account);
         let mut roll = self.roll.lock().expect("the lock");
         let before = roll.len();
@@ -167,7 +167,7 @@ impl Roll for &Held {
         email: &Email,
         role: OrgRole,
         _way_in: SecretHash,
-    ) -> Result<Admitted, ReadError> {
+    ) -> Result<Admitted, StoreError> {
         self.written
             .lock()
             .expect("the lock")

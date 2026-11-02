@@ -5,7 +5,7 @@ mod explore_service_tests;
 mod ports;
 mod value_objects;
 
-pub use errors::{BadWindow, ExploreError, ReadError};
+pub use errors::{BadWindow, ExploreError};
 pub use explore_service::Explore;
 pub use ports::SpanReader;
 pub use value_objects::{ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window};

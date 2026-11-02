@@ -3,9 +3,9 @@ use core::future::Future;
 use ferristrace_domain::{
     Admission, AuthError, AuthProvider, Authorizer, Clock, Counted, DecompressedBytes, Email,
     Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, Mailer, Occurrence, Password,
-    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadError,
-    ResetError, ResetToken, ResolvedIdentity, Scope, ServiceSummary, SignInProof, SinkError, Span,
-    SpanReader, SpanSink, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
+    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ResetError,
+    ResetToken, ResolvedIdentity, Scope, ServiceSummary, SignInProof, SinkError, Span, SpanReader,
+    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
     UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
 };
 
@@ -81,7 +81,7 @@ impl SpanReader for Inert {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -89,11 +89,11 @@ impl SpanReader for Inert {
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -103,7 +103,7 @@ impl IssueReader for Inert {
         &self,
         _tenant: TenantId,
         _filter: &IssueFilter,
-    ) -> Result<Vec<Counted>, ReadError> {
+    ) -> Result<Vec<Counted>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -114,7 +114,7 @@ impl IssueReader for Inert {
         _print: Fingerprint,
         _window: Window,
         _limit: u32,
-    ) -> Result<Vec<Occurrence>, ReadError> {
+    ) -> Result<Vec<Occurrence>, StoreError> {
         Ok(Vec::new())
     }
 }
