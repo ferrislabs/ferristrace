@@ -1,6 +1,6 @@
 # 0019. A second factor is answered behind a challenge
 
-Status: accepted
+Status: superseded by 0028
 Date: 2026-10-26
 
 ## Context

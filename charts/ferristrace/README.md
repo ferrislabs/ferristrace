@@ -26,7 +26,7 @@ them under `secrets.*`. Each entry is `{name, key}`.
 | `secrets.databaseUrl` | `FERRISTRACE_DATABASE_URL` | always (default: CloudNativePG `ferristrace-app`, key `uri`) |
 | `secrets.redisUrl` | `FERRISTRACE_REDIS_URL` | always |
 | `secrets.clickhousePassword` | `FERRISTRACE_SPANS__PASSWORD` | when `name` is set |
-| `secrets.atRestKey` | `FERRISTRACE_SECRETS__AT_REST_KEY` | when `name` is set; without it no second factor can be enrolled. Mint with `openssl rand -hex 32` and keep it: losing it forces every enrolled account to re-enrol |
+| `secrets.atRestKey` | `FERRISTRACE_SECRETS__AT_REST_KEY` | when `name` is set; without it no webhook channel secret can be kept. Mint with `openssl rand -hex 32` and keep it: losing it leaves every webhook secret unreadable |
 | `secrets.oidcClientSecret` | `FERRISTRACE_OIDC__CLIENT_SECRET` | `config.oidc.enabled` |
 | `secrets.smtpPassword` | `FERRISTRACE_MAIL__PASSWORD` | `config.mail.enabled` |
 | `secrets.objectsAccessKeyId`, `secrets.objectsSecretAccessKey` | `FERRISTRACE_OBJECTS__ACCESS_KEY_ID`, `..._SECRET_ACCESS_KEY` | `config.objects.enabled` |
@@ -55,7 +55,7 @@ appends `-ee`. `image.tag` overrides the version (default: chart appVersion).
 | `httpRoute.*` | disabled | Gateway API route to the HTTP port |
 | `podDisruptionBudget.*` | enabled, `minAvailable: 1` | Rendered only when replicas > 1 |
 | `networkPolicy.*` | disabled | Ingress on 4317/4318, optional `ingressFrom` peers |
-| `config.logLevel`, `config.cookieSecure`, `config.localPassword`, `config.afterSignIn`, `config.webRoot` | `info`, `true`, `true`, `/`, `""` | Server settings |
+| `config.logLevel`, `config.cookieSecure`, `config.afterSignIn`, `config.webRoot` | `info`, `true`, `/`, `""` | Server settings |
 | `config.spans.*` | `http://clickhouse:8123`, `ferristrace`, `ferristrace`, 30 days | ClickHouse |
 | `config.oidc.*`, `config.mail.*`, `config.objects.*` | disabled | Optional integrations |
 | `config.agents.issuer`, `config.agents.audience` | empty | Issuer and required audience of the access tokens AI agents present; agents stay off without the audience (`FERRISTRACE_AGENTS__*`) |

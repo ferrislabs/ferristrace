@@ -1,6 +1,6 @@
 # 0009 — A new account is created locked
 
-- Status: accepted
+- Status: superseded by 0028
 - Date: 2026-10-24
 
 ## Context

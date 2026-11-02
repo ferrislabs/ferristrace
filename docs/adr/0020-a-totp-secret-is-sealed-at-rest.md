@@ -1,6 +1,6 @@
 # 0020. A totp secret is sealed at rest
 
-Status: accepted
+Status: superseded by 0028
 Date: 2026-10-26
 
 ## Context

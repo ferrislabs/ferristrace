@@ -202,9 +202,6 @@
         "cookieSecure": {
           "type": "boolean"
         },
-        "localPassword": {
-          "type": "boolean"
-        },
         "afterSignIn": {
           "type": "string"
         },

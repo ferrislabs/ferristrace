@@ -8,7 +8,6 @@ metadata:
 data:
   RUST_LOG: {{ $c.logLevel | quote }}
   FERRISTRACE_COOKIE_SECURE: {{ $c.cookieSecure | quote }}
-  FERRISTRACE_LOCAL_PASSWORD: {{ $c.localPassword | quote }}
   FERRISTRACE_AFTER_SIGN_IN: {{ $c.afterSignIn | quote }}
   FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS: {{ $c.alerts.allowPrivateWebhooks | quote }}
   {{- with $c.alerts.baseUrl }}

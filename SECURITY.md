@@ -54,8 +54,8 @@ In scope, for both the community and the `-ee` builds:
 
 - the server: the OTLP endpoints on 4317 and 4318, the HTTP API, the web
   application it serves
-- authentication and authorisation: sessions, passwords, reset links, OIDC
-  flows, ingest keys, and the isolation of one organisation's traces from
+- authentication and authorisation: sessions, OIDC flows and the adoption of
+  an account by a verified address, ingest keys, and the isolation of one organisation's traces from
   another's
 - the published images on `ghcr.io/ferrislabs/ferristrace`
 - the self-hosted stack in `deploy/`, run as documented

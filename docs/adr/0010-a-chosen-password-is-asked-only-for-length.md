@@ -1,6 +1,6 @@
 # 0010 — A chosen password is asked only for length
 
-- Status: accepted
+- Status: superseded by 0028
 - Date: 2026-10-24
 
 ## Context

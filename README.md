@@ -5,14 +5,23 @@ gRPC or HTTP, ClickHouse keeps them, Postgres keeps the accounts, the
 organisations, the projects and the keys, and a web application reads the
 traces back.
 
-One command brings the whole thing up, and one more gives it a way in:
+One command brings the whole thing up, along with FerrisKey, the identity
+provider everybody signs in through, and one more founds the organisation:
 [deploy/README.md](deploy/README.md).
 
 ```sh
+echo '127.0.0.1 ferriskey' | sudo tee -a /etc/hosts
 cd deploy
 docker compose up --build --detach
 docker compose exec server ferristrace bootstrap --email you@example.com
 ```
+
+The hosts line is the one thing the stack cannot do for you: the browser and
+the server have to reach FerrisKey under the same name. Create a user with
+that address in the `ferristrace` realm of FerrisKey's console at
+<http://localhost:5555> (`admin` / `admin`, marking the address verified),
+then sign in with *Continue with FerrisKey*. `bootstrap` prints no token,
+and FerrisTrace stores no password.
 
 The server then answers OTLP over gRPC on 4317, and OTLP over HTTP, the API
 and the web application on <http://localhost:4318>. Keys that send or read
@@ -31,7 +40,7 @@ Organisation > Audit log.
 | `crates/postgres` | The control plane adapters and their migrations. |
 | `crates/clickhouse` | The span store adapters and their migrations. |
 | `crates/redis` | The usage counter. |
-| `crates/infra` | S3 photos, SMTP, OIDC, argon2, the secret seal, clocks, in-memory adapters. |
+| `crates/infra` | S3 photos, SMTP, OIDC, the secret seal, clocks, in-memory adapters. |
 | `crates/api` | The driving adapters: the HTTP routers, the OTLP gRPC service, the DTOs. |
 | `crates/ee` | The cloud build, behind the `ee` feature. Empty in this repository. |
 | `apps/server` | The binary: configuration, wiring, the CLI, the server. |

@@ -1049,7 +1049,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferristrace-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "bytes",
@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-application"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferristrace-domain",
  "ferristrace-macros",
@@ -1087,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-clickhouse"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clickhouse",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "hmac 0.13.0",
@@ -1129,11 +1129,11 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-ee"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "ferristrace-infra"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1162,7 +1162,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1171,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-otlp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferristrace-domain",
  "hex",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-postgres"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferristrace-application",
  "ferristrace-domain",
@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-redis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferristrace-application",
  "ferristrace-domain",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",

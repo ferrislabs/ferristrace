@@ -229,6 +229,113 @@ async fn the_migrations_reverse_and_reapply() {
     );
 }
 
+const BEFORE_THE_DROP: i64 = 20_261_113_000_001;
+const DROPPED_BY: &str =
+    include_str!("../migrations/postgres/20261114000001_drop_local_credentials.up.sql");
+
+async fn migrations_applied(pool: &PgPool) -> i64 {
+    sqlx::query("SELECT count(*) AS n FROM _sqlx_migrations WHERE success")
+        .fetch_one(pool)
+        .await
+        .expect("counting the migrations")
+        .get("n")
+}
+
+#[tokio::test]
+async fn no_table_or_column_holds_a_credential_after_the_migrations() {
+    let Some(pool) = migrated("control_no_credentials").await else {
+        return;
+    };
+
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text FROM information_schema.tables \
+         WHERE table_schema = 'control_no_credentials' \
+         AND table_name IN ('password_resets', 'auth_factors', 'recovery_codes', \
+                            'second_step_challenges')",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("listing the tables");
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text || '.' || column_name::text FROM information_schema.columns \
+         WHERE table_schema = 'control_no_credentials' \
+         AND (column_name ILIKE '%password%' OR column_name ILIKE '%totp%' \
+              OR column_name ILIKE '%recovery%')",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("listing the columns");
+
+    assert!(tables.is_empty(), "tables left behind: {tables:?}");
+    assert!(columns.is_empty(), "columns left behind: {columns:?}");
+}
+
+#[tokio::test]
+async fn applying_the_migrations_twice_changes_nothing() {
+    let Some(pool) = migrated("control_applied_twice").await else {
+        return;
+    };
+    let once = migrations_applied(&pool).await;
+
+    CONTROL_PLANE
+        .run(&pool)
+        .await
+        .expect("the migrator finds nothing left to apply");
+    sqlx::raw_sql(DROPPED_BY)
+        .execute(&pool)
+        .await
+        .expect("the drop is harmless when there is nothing to drop");
+
+    assert_eq!(migrations_applied(&pool).await, once);
+}
+
+#[tokio::test]
+async fn the_drop_takes_the_credential_rows_and_keeps_the_accounts() {
+    let Some(pool) = migrated("control_drop_rows").await else {
+        return;
+    };
+    CONTROL_PLANE
+        .undo(&pool, BEFORE_THE_DROP)
+        .await
+        .expect("the drop is reverted");
+    let account = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO accounts (id, email, password_hash) VALUES ($1, 'kept@example.com', 'x')",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("an account that still carried a hash");
+    sqlx::query(
+        "INSERT INTO auth_factors (account_id, kind, secret, created_at) VALUES ($1, 'app', '\\x00', 0)",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("a factor");
+    sqlx::query(
+        "INSERT INTO password_resets (digest, account_id, created_at, expires_at) \
+         VALUES ('\\x01', $1, 0, 1)",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("a reset");
+
+    CONTROL_PLANE
+        .run(&pool)
+        .await
+        .expect("the drop applies over populated tables");
+
+    let kept: i64 = sqlx::query("SELECT count(*) AS n FROM accounts WHERE id = $1")
+        .bind(account)
+        .fetch_one(&pool)
+        .await
+        .expect("counting the accounts")
+        .get("n");
+    assert_eq!(kept, 1, "the account outlives its credentials");
+}
+
 async fn seeded_org(pool: &PgPool) -> uuid::Uuid {
     let plan: uuid::Uuid = sqlx::query("SELECT id AS id FROM plans WHERE slug = $1")
         .bind(SELF_HOSTED_PLAN)

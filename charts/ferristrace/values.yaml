@@ -90,7 +90,6 @@ config:
   logLevel: info
   # -- Keep true behind TLS. Set false only for plain HTTP.
   cookieSecure: true
-  localPassword: true
   afterSignIn: /
   # -- Empty keeps the web root baked into the image.
   webRoot: ""
@@ -141,7 +140,7 @@ secrets:
   clickhousePassword:
     name: ""
     key: password
-  # -- Needed for second factor enrolment. 64 hex characters.
+  # -- Needed to keep a webhook channel secret. 64 hex characters.
   atRestKey:
     name: ""
     key: at-rest-key
