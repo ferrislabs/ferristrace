@@ -1,27 +1,34 @@
 use std::time::Duration;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Clock, Email, PasswordHash, ResetError, ResetStore, SecretHash, UnixSeconds,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
-const NANOS_PER_SECOND: i64 = 1_000_000_000;
-const DEFAULT_WINDOW: Duration = Duration::from_secs(3600);
+use crate::unit_of_work::{Postgres, SharedTx};
 
-#[derive(Debug, Clone)]
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
+pub(crate) const DEFAULT_WINDOW: Duration = Duration::from_secs(3600);
+
+#[repository(domain = Resets, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresResets<C> {
-    pool: PgPool,
+    tx: SharedTx,
     clock: C,
     window: Duration,
 }
 
 impl<C: Clock> PostgresResets<C> {
-    pub fn new(pool: PgPool, clock: C) -> Self {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
+    where
+        C: Clone,
+    {
         Self {
-            pool,
-            clock,
-            window: DEFAULT_WINDOW,
+            tx: tx.clone(),
+            clock: backend.clock().clone(),
+            window: backend.reset_window,
         }
     }
 
@@ -32,9 +39,10 @@ impl<C: Clock> PostgresResets<C> {
     }
 
     pub async fn prune(&self) -> Result<u64, ResetError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM password_resets WHERE expires_at <= $1")
             .bind(to_nanos(self.clock.now()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected())
             .map_err(|_| ResetError::StoreUnreachable)
@@ -43,15 +51,17 @@ impl<C: Clock> PostgresResets<C> {
 
 impl<C: Clock + Send + Sync> ResetStore for PostgresResets<C> {
     async fn account_for(&self, email: &Email) -> Result<Option<AccountId>, ResetError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
             .bind(email.as_str())
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|_| ResetError::StoreUnreachable)?;
         Ok(found.map(|row| AccountId::new(row.get("id"))))
     }
 
     async fn begin(&self, account: AccountId, digest: SecretHash) -> Result<(), ResetError> {
+        let mut tx = self.tx.lock().await;
         let now = self.clock.now();
         sqlx::query(
             "INSERT INTO password_resets (digest, account_id, created_at, expires_at) \
@@ -61,20 +71,21 @@ impl<C: Clock + Send + Sync> ResetStore for PostgresResets<C> {
         .bind(account.as_uuid())
         .bind(to_nanos(now))
         .bind(to_nanos(now.saturating_add_secs(self.window.as_secs())))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|_| ())
         .map_err(|_| ResetError::StoreUnreachable)
     }
 
     async fn take(&self, digest: SecretHash) -> Result<AccountId, ResetError> {
+        let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "DELETE FROM password_resets WHERE digest = $1 AND expires_at > $2 \
              RETURNING account_id AS account_id",
         )
         .bind(digest.as_bytes().as_slice())
         .bind(to_nanos(self.clock.now()))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|_| ResetError::StoreUnreachable)?
         .ok_or(ResetError::Unknown)?;
@@ -86,23 +97,25 @@ impl<C: Clock + Send + Sync> ResetStore for PostgresResets<C> {
         account: AccountId,
         hash: &PasswordHash,
     ) -> Result<(), ResetError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE accounts SET password_hash = $2 WHERE id = $1")
             .bind(account.as_uuid())
             .bind(hash.encoded())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|_| ())
             .map_err(|_| ResetError::StoreUnreachable)
     }
 
     async fn revoke_sessions(&self, account: AccountId) -> Result<u64, ResetError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query(
             "UPDATE sessions SET revoked_at = $2 \
              WHERE account_id = $1 AND revoked_at IS NULL",
         )
         .bind(account.as_uuid())
         .bind(to_nanos(self.clock.now()))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|done| done.rows_affected())
         .map_err(|_| ResetError::StoreUnreachable)

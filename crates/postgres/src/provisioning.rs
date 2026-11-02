@@ -1,71 +1,55 @@
 use core::fmt;
 use std::time::Duration;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, ControlPlane, Email, HashError, IngestKey, OrgName, OrgRole, ProjectId, ProjectName,
+    AccountId, Clock, ControlPlane, Email, IngestKey, OrgName, OrgRole, ProjectId, ProjectName,
     ProvisionError, ResetStore, SecretHash, TenantId,
 };
-use sqlx::PgPool;
+use ferristrace_infra::Argon2Hasher;
 
 use crate::accounts::{AccountError, PostgresAccounts};
-use crate::keys::PostgresDirectory;
+use crate::keys::{issue_on, revoke_on};
 use crate::memberships::{MembershipError, PostgresMemberships};
 use crate::projects::{PostgresProjects, ProjectError};
 use crate::resets::PostgresResets;
-use ferristrace_infra::Argon2Hasher;
-use ferristrace_infra::SystemClock;
+use crate::unit_of_work::{Postgres, SharedTx};
 
 pub const INVITE_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
-#[derive(Clone)]
-pub struct PostgresControlPlane {
-    pool: PgPool,
+#[repository(domain = ControlPlane, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
+pub struct PostgresControlPlane<C> {
+    tx: SharedTx,
+    clock: C,
     hasher: Argon2Hasher,
-    window: Duration,
+    memberships: PostgresMemberships,
+    projects: PostgresProjects,
+    accounts: PostgresAccounts,
+    resets: PostgresResets<C>,
 }
 
-impl fmt::Debug for PostgresControlPlane {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("PostgresControlPlane")
-            .field("window", &self.window)
-            .finish_non_exhaustive()
-    }
-}
-
-impl PostgresControlPlane {
-    pub fn new(pool: PgPool) -> Result<Self, HashError> {
-        Ok(Self {
-            pool,
-            hasher: Argon2Hasher::new()?,
-            window: INVITE_WINDOW,
-        })
-    }
-
-    fn memberships(&self) -> PostgresMemberships {
-        PostgresMemberships::new(self.pool.clone())
-    }
-
-    fn projects(&self) -> PostgresProjects {
-        PostgresProjects::new(self.pool.clone())
-    }
-
-    fn keys(&self) -> PostgresDirectory<SystemClock> {
-        PostgresDirectory::new(self.pool.clone(), SystemClock)
-    }
-
-    fn resets(&self) -> PostgresResets<SystemClock> {
-        PostgresResets::new(self.pool.clone(), SystemClock).with_window(self.window)
+impl<C: Clock + Clone> PostgresControlPlane<C> {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self {
+            tx: tx.clone(),
+            clock: backend.clock().clone(),
+            hasher: backend.hasher.clone(),
+            memberships: PostgresMemberships::new(backend, tx),
+            projects: PostgresProjects::new(backend, tx),
+            accounts: PostgresAccounts::new(backend, tx),
+            resets: PostgresResets::new(backend, tx).with_window(backend.invite_window),
+        }
     }
 }
 
-impl ControlPlane for PostgresControlPlane {
+impl<C: Clock + Clone + Send + Sync> ControlPlane for PostgresControlPlane<C> {
     async fn founded(&self) -> Result<Option<TenantId>, ProvisionError> {
-        self.memberships().founded().await.map_err(of_membership)
+        self.memberships.founded().await.map_err(of_membership)
     }
 
     async fn found(&self, name: &OrgName, owner: &Email) -> Result<TenantId, ProvisionError> {
-        self.memberships()
+        self.memberships
             .found(name.as_str(), owner.as_str())
             .await
             .map_err(of_membership)
@@ -77,14 +61,14 @@ impl ControlPlane for PostgresControlPlane {
         member: &Email,
         role: OrgRole,
     ) -> Result<(), ProvisionError> {
-        self.memberships()
+        self.memberships
             .grant(org, member.as_str(), role)
             .await
             .map_err(of_membership)
     }
 
     async fn account_for(&self, email: &Email) -> Result<Option<AccountId>, ProvisionError> {
-        self.resets()
+        self.resets
             .account_for(email)
             .await
             .map_err(|error| unreachable(&error))
@@ -92,14 +76,14 @@ impl ControlPlane for PostgresControlPlane {
 
     async fn create_locked_account(&self, email: &Email) -> Result<AccountId, ProvisionError> {
         let locked = self.hasher.locked().map_err(|error| unreachable(&error))?;
-        PostgresAccounts::new(self.pool.clone())
+        self.accounts
             .create(email, &locked)
             .await
             .map_err(of_account)
     }
 
     async fn invite(&self, account: AccountId, digest: SecretHash) -> Result<(), ProvisionError> {
-        self.resets()
+        self.resets
             .begin(account, digest)
             .await
             .map_err(|error| unreachable(&error))
@@ -110,11 +94,11 @@ impl ControlPlane for PostgresControlPlane {
         org: TenantId,
         name: &ProjectName,
     ) -> Result<ProjectId, ProvisionError> {
-        self.projects().claim(org, name).await.map_err(of_project)
+        self.projects.claim(org, name).await.map_err(of_project)
     }
 
     async fn only_project(&self, org: TenantId) -> Result<Option<ProjectId>, ProvisionError> {
-        self.projects().only(org).await.map_err(of_project)
+        self.projects.only(org).await.map_err(of_project)
     }
 
     async fn issue_key(
@@ -122,15 +106,15 @@ impl ControlPlane for PostgresControlPlane {
         org: TenantId,
         project: Option<ProjectId>,
     ) -> Result<IngestKey, ProvisionError> {
-        self.keys()
-            .issue(org, project.map(ProjectId::as_uuid))
+        let mut tx = self.tx.lock().await;
+        issue_on(&mut **tx, org, project.map(ProjectId::as_uuid))
             .await
             .map_err(|error| unreachable(&error))
     }
 
     async fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError> {
-        self.keys()
-            .revoke(prefix)
+        let mut tx = self.tx.lock().await;
+        revoke_on(&mut **tx, prefix, self.clock.now())
             .await
             .map_err(|error| unreachable(&error))
     }

@@ -1,21 +1,25 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{Consumed, DecompressedBytes, ReadError, TenantId, UsageHistory, Window};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use crate::postgres::gigabytes_to_bytes;
+use crate::unit_of_work::{Postgres, SharedTx};
 
-#[derive(Debug, Clone)]
+#[repository(domain = UsageHistory, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresUsage {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresUsage {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 }
 
 impl UsageHistory for PostgresUsage {
     async fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT hour_start AS hour_start, ingested_bytes AS ingested_bytes \
              FROM usage_hourly WHERE org_id = $1 AND hour_start >= $2 AND hour_start < $3 \
@@ -24,7 +28,7 @@ impl UsageHistory for PostgresUsage {
         .bind(org.as_uuid())
         .bind(as_nanos(window.from_unix_nanos()))
         .bind(as_nanos(window.to_unix_nanos()))
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read the usage history"))?;
 
@@ -40,12 +44,13 @@ impl UsageHistory for PostgresUsage {
     }
 
     async fn included(&self, org: TenantId) -> Result<Option<DecompressedBytes>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT p.ingest_gb AS ingest_gb FROM orgs o JOIN plans p ON p.id = o.plan_id \
              WHERE o.id = $1",
         )
         .bind(org.as_uuid())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read what a plan allows"))?;
 

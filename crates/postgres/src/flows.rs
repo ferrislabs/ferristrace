@@ -1,37 +1,39 @@
 use std::time::Duration;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{Clock, CodeVerifier, FlowError, OidcFlows, PendingFlow, UnixSeconds};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
+
+use crate::unit_of_work::{Postgres, SharedTx};
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
-const DEFAULT_WINDOW: Duration = Duration::from_secs(600);
+pub(crate) const DEFAULT_WINDOW: Duration = Duration::from_secs(600);
 
-#[derive(Debug, Clone)]
+#[repository(domain = Flows, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresFlows<C> {
-    pool: PgPool,
+    tx: SharedTx,
     clock: C,
     window: Duration,
 }
 
 impl<C: Clock> PostgresFlows<C> {
-    pub fn new(pool: PgPool, clock: C) -> Self {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
+    where
+        C: Clone,
+    {
         Self {
-            pool,
-            clock,
-            window: DEFAULT_WINDOW,
+            tx: tx.clone(),
+            clock: backend.clock().clone(),
+            window: backend.flow_window,
         }
     }
 
-    #[must_use]
-    pub fn with_window(mut self, window: Duration) -> Self {
-        self.window = window;
-        self
-    }
-
     pub async fn prune(&self) -> Result<u64, FlowError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM oidc_flows WHERE expires_at <= $1")
             .bind(to_nanos(self.clock.now()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected())
             .map_err(|_| FlowError::StoreUnreachable)
@@ -40,6 +42,7 @@ impl<C: Clock> PostgresFlows<C> {
 
 impl<C: Clock + Send + Sync> OidcFlows for PostgresFlows<C> {
     async fn begin(&self, flow: &PendingFlow) -> Result<(), FlowError> {
+        let mut tx = self.tx.lock().await;
         let now = self.clock.now();
         let expires = now.saturating_add_secs(self.window.as_secs());
 
@@ -54,13 +57,14 @@ impl<C: Clock + Send + Sync> OidcFlows for PostgresFlows<C> {
         .bind(&flow.redirect_uri)
         .bind(to_nanos(now))
         .bind(to_nanos(expires))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|_| ())
         .map_err(|_| FlowError::StoreUnreachable)
     }
 
     async fn take(&self, state: &str) -> Result<PendingFlow, FlowError> {
+        let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "DELETE FROM oidc_flows WHERE state = $1 AND expires_at > $2 \
              RETURNING nonce AS nonce, code_verifier AS code_verifier, \
@@ -68,7 +72,7 @@ impl<C: Clock + Send + Sync> OidcFlows for PostgresFlows<C> {
         )
         .bind(state)
         .bind(to_nanos(self.clock.now()))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|_| FlowError::StoreUnreachable)?
         .ok_or(FlowError::Unknown)?;

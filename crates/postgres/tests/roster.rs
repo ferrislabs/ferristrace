@@ -1,6 +1,6 @@
 use ferristrace_domain::{AccountId, Admitted, Email, Member, OrgRole, Roll, SecretHash, TenantId};
 use ferristrace_infra::{Argon2Hasher, FixedClock};
-use ferristrace_postgres::{CONTROL_PLANE, PostgresMemberships, PostgresRoster};
+use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
@@ -8,6 +8,7 @@ use uuid::Uuid;
 const NOW: u64 = 1_700_000_000;
 const A_DAY: i64 = 24 * 60 * 60 * 1_000_000_000;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -51,12 +52,9 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
     Some(scoped)
 }
 
-fn roster(pool: &PgPool) -> PostgresRoster<FixedClock> {
-    PostgresRoster::new(
-        pool.clone(),
-        Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"),
-        FixedClock::at(NOW),
-    )
+fn roster_backend(pool: &PgPool) -> Postgres<FixedClock> {
+    Postgres::new(pool.clone(), FixedClock::at(NOW))
+        .with_hasher(Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"))
 }
 
 async fn an_account(pool: &PgPool, email: &str) -> Uuid {
@@ -72,7 +70,7 @@ async fn an_account(pool: &PgPool, email: &str) -> Uuid {
 
 async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
     an_account(pool, owner).await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(NOW)))
         .found("Acme", owner)
         .await
         .expect("the organisation is founded")
@@ -136,8 +134,9 @@ async fn the_roll_reads_back_in_the_order_the_screen_wants_it() {
     let Some(pool) = control_plane("roster_order").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let memberships = PostgresMemberships::new(pool.clone());
+    let memberships = backend::memberships(&pg);
     for (email, role) in [
         ("zoe@example.com", OrgRole::Admin),
         ("ada@example.com", OrgRole::Member),
@@ -150,7 +149,10 @@ async fn the_roll_reads_back_in_the_order_the_screen_wants_it() {
             .expect("the grant");
     }
 
-    let roll = roster(&pool).of(org).await.expect("the roll is read");
+    let roll = backend::roster(&roster_backend(&pool))
+        .of(org)
+        .await
+        .expect("the roll is read");
 
     let addresses: Vec<&str> = roll.iter().map(|member| member.email.as_str()).collect();
     assert_eq!(
@@ -178,13 +180,16 @@ async fn the_roll_of_an_organisation_with_one_member_holds_only_that_one() {
     let org = an_org(&pool, "alone@example.com").await;
     let other = an_org(&pool, "elsewhere@example.com").await;
 
-    let roll = roster(&pool).of(org).await.expect("the roll is read");
+    let roll = backend::roster(&roster_backend(&pool))
+        .of(org)
+        .await
+        .expect("the roll is read");
 
     assert_eq!(roll.len(), 1);
     assert_eq!(roll[0].email.as_str(), "alone@example.com");
     assert_eq!(roll[0].role, OrgRole::Owner);
     assert_eq!(
-        roster(&pool)
+        backend::roster(&roster_backend(&pool))
             .of(other)
             .await
             .expect("the other roll is read")
@@ -201,12 +206,12 @@ async fn a_granted_role_replaces_the_one_held_and_answers_with_the_member() {
     };
     let org = an_org(&pool, "owner@example.com").await;
     let joiner = an_account(&pool, "joiner@example.com").await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(NOW)))
         .grant(org, "joiner@example.com", OrgRole::Member)
         .await
         .expect("the first grant");
 
-    let changed = roster(&pool)
+    let changed = backend::roster(&roster_backend(&pool))
         .grant(org, AccountId::new(joiner), OrgRole::Admin)
         .await
         .expect("the role is changed")
@@ -214,7 +219,10 @@ async fn a_granted_role_replaces_the_one_held_and_answers_with_the_member() {
 
     assert_eq!(changed.role, OrgRole::Admin);
     assert_eq!(changed.email.as_str(), "joiner@example.com");
-    let roll = roster(&pool).of(org).await.expect("the roll is read");
+    let roll = backend::roster(&roster_backend(&pool))
+        .of(org)
+        .await
+        .expect("the roll is read");
     assert_eq!(member_at(&roll, "joiner@example.com").role, OrgRole::Admin);
     assert_eq!(
         member_at(&roll, "owner@example.com").role,
@@ -231,14 +239,18 @@ async fn granting_a_role_in_an_organisation_that_holds_no_such_membership_change
     let org = an_org(&pool, "owner@example.com").await;
     let stranger = an_account(&pool, "stranger@example.com").await;
 
-    let changed = roster(&pool)
+    let changed = backend::roster(&roster_backend(&pool))
         .grant(org, AccountId::new(stranger), OrgRole::Admin)
         .await
         .expect("the control plane answers");
 
     assert!(changed.is_none());
     assert_eq!(
-        roster(&pool).of(org).await.expect("the roll is read").len(),
+        backend::roster(&roster_backend(&pool))
+            .of(org)
+            .await
+            .expect("the roll is read")
+            .len(),
         1
     );
 }
@@ -250,17 +262,17 @@ async fn a_membership_is_removed_once_and_then_there_is_nothing_left_to_remove()
     };
     let org = an_org(&pool, "owner@example.com").await;
     let joiner = an_account(&pool, "joiner@example.com").await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(NOW)))
         .grant(org, "joiner@example.com", OrgRole::Member)
         .await
         .expect("the grant");
     let account = AccountId::new(joiner);
 
-    let first = roster(&pool)
+    let first = backend::roster(&roster_backend(&pool))
         .remove(org, account)
         .await
         .expect("the removal");
-    let again = roster(&pool)
+    let again = backend::roster(&roster_backend(&pool))
         .remove(org, account)
         .await
         .expect("the second removal");
@@ -281,7 +293,7 @@ async fn an_unknown_address_is_given_an_account_a_membership_and_one_way_in() {
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = roster(&pool)
+    let admitted = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("new"), OrgRole::Member, a_digest(7))
         .await
         .expect("the admission");
@@ -320,7 +332,7 @@ async fn an_address_that_already_has_an_account_joins_without_a_way_in() {
     let org = an_org(&pool, "owner@example.com").await;
     let standing = an_account(&pool, "known@example.com").await;
 
-    let admitted = roster(&pool)
+    let admitted = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("known"), OrgRole::Admin, a_digest(9))
         .await
         .expect("the admission");
@@ -347,7 +359,7 @@ async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_wa
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    let first = roster(&pool)
+    let first = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("new"), OrgRole::Member, a_digest(1))
         .await
         .expect("the first admission");
@@ -355,7 +367,7 @@ async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_wa
         panic!("the first admission must create the account: {first:?}");
     };
 
-    let again = roster(&pool)
+    let again = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("new"), OrgRole::Admin, a_digest(2))
         .await
         .expect("the second admission");
@@ -366,7 +378,10 @@ async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_wa
         "a second invitation must not quietly change the role somebody holds"
     );
     assert_eq!(accounts_with(&pool, "new@example.com").await, 1);
-    let roll = roster(&pool).of(org).await.expect("the roll is read");
+    let roll = backend::roster(&roster_backend(&pool))
+        .of(org)
+        .await
+        .expect("the roll is read");
     assert_eq!(member_at(&roll, "new@example.com").role, OrgRole::Member);
     assert_eq!(
         resets_for(&pool, member.account.as_uuid()).await.len(),
@@ -381,7 +396,7 @@ async fn deleting_an_organisation_takes_the_roll_with_it_and_leaves_the_accounts
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    roster(&pool)
+    backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("new"), OrgRole::Member, a_digest(3))
         .await
         .expect("the admission");
@@ -393,7 +408,7 @@ async fn deleting_an_organisation_takes_the_roll_with_it_and_leaves_the_accounts
         .expect("deleting the organisation");
 
     assert!(
-        roster(&pool)
+        backend::roster(&roster_backend(&pool))
             .of(org)
             .await
             .expect("the roll is read")
@@ -409,13 +424,16 @@ async fn the_roll_carries_the_name_an_account_was_given() {
     };
     let org = an_org(&pool, "owner@example.com").await;
     let joiner = an_account(&pool, "joiner@example.com").await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(NOW)))
         .grant(org, "joiner@example.com", OrgRole::Member)
         .await
         .expect("the grant");
     named(&pool, joiner, "Ines Martin").await;
 
-    let roll = roster(&pool).of(org).await.expect("the roll is read");
+    let roll = backend::roster(&roster_backend(&pool))
+        .of(org)
+        .await
+        .expect("the roll is read");
 
     assert_eq!(
         member_at(&roll, "joiner@example.com").name.as_deref(),
@@ -437,7 +455,7 @@ async fn an_admitted_standing_account_brings_its_name_with_it() {
     let standing = an_account(&pool, "known@example.com").await;
     named(&pool, standing, "Ines Martin").await;
 
-    let admitted = roster(&pool)
+    let admitted = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("known"), OrgRole::Admin, a_digest(9))
         .await
         .expect("the admission");
@@ -455,7 +473,7 @@ async fn an_account_created_by_an_invitation_carries_no_name() {
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = roster(&pool)
+    let admitted = backend::roster(&roster_backend(&pool))
         .admit(org, &an_address("stranger"), OrgRole::Member, a_digest(4))
         .await
         .expect("the admission");

@@ -5,11 +5,12 @@ use ferristrace_domain::{
     SECRET_BYTES, SecretHash, Step, TotpSecret,
 };
 use ferristrace_infra::{FixedClock, SecretSeal};
-use ferristrace_postgres::{CONTROL_PLANE, PostgresFactors};
+use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 const NOW: u64 = 1_700_000_000;
@@ -67,12 +68,12 @@ async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     AccountId::new(id)
 }
 
-fn factors(pool: &PgPool, at: u64) -> PostgresFactors<FixedClock> {
-    PostgresFactors::new(pool.clone(), FixedClock::at(at), Some(seal()))
+fn factors(pool: &PgPool, at: u64) -> Postgres<FixedClock> {
+    Postgres::new(pool.clone(), FixedClock::at(at)).with_seal(Some(seal()))
 }
 
-fn unsealed(pool: &PgPool) -> PostgresFactors<FixedClock> {
-    PostgresFactors::new(pool.clone(), FixedClock::at(NOW), None)
+fn unsealed(pool: &PgPool) -> Postgres<FixedClock> {
+    Postgres::new(pool.clone(), FixedClock::at(NOW)).with_seal(None)
 }
 
 fn seal() -> SecretSeal {
@@ -98,7 +99,8 @@ async fn a_kept_secret_comes_back_and_the_row_holds_neither_form_of_it() {
         return;
     };
     let account = an_account(&pool, "sealed@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     let secret = a_secret();
 
     store.keep(account, APP, &secret).await.expect("it is kept");
@@ -126,7 +128,8 @@ async fn an_unconfirmed_factor_is_not_offered_and_a_confirmed_one_is() {
         return;
     };
     let account = an_account(&pool, "offered@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     store.keep(account, APP, &a_secret()).await.expect("kept");
 
     assert_eq!(store.live(account).await.expect("a lookup"), Vec::new());
@@ -148,7 +151,8 @@ async fn a_confirmed_factor_is_not_quietly_replaced_by_a_second_enrolment() {
         return;
     };
     let account = an_account(&pool, "replace@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     let first = a_secret();
     store.keep(account, APP, &first).await.expect("kept");
     let other = TotpSecret::from_bytes([9_u8; SECRET_BYTES]);
@@ -178,7 +182,8 @@ async fn the_last_spent_step_is_remembered() {
         return;
     };
     let account = an_account(&pool, "step@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     store.keep(account, APP, &a_secret()).await.expect("kept");
 
     store
@@ -200,7 +205,8 @@ async fn forgetting_says_whether_anything_was_there() {
         return;
     };
     let account = an_account(&pool, "forget@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     store.keep(account, APP, &a_secret()).await.expect("kept");
 
     assert!(store.forget(account, APP).await.expect("a delete"));
@@ -214,7 +220,8 @@ async fn recovery_codes_are_kept_spent_once_and_replaced_whole() {
         return;
     };
     let account = an_account(&pool, "recovery@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     let first = RecoveryCode::ten();
     let digests: Vec<SecretHash> = first.iter().map(RecoveryCode::hash).collect();
 
@@ -268,7 +275,8 @@ async fn a_recovery_code_belongs_to_the_account_that_was_given_it() {
     };
     let mine = an_account(&pool, "mine@example.com").await;
     let theirs = an_account(&pool, "theirs@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     let codes = RecoveryCode::ten();
     let digests: Vec<SecretHash> = codes.iter().map(RecoveryCode::hash).collect();
     store.keep_recovery(mine, &digests).await.expect("kept");
@@ -288,7 +296,8 @@ async fn a_challenge_counts_its_answers_and_is_closed_once() {
         return;
     };
     let account = an_account(&pool, "challenge@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     let challenge = ChallengeToken::random();
 
     store
@@ -316,14 +325,16 @@ async fn a_challenge_past_its_window_answers_nothing_and_prunes() {
         return;
     };
     let account = an_account(&pool, "window@example.com").await;
-    let opening = factors(&pool, NOW).with_window(Duration::from_secs(60));
+    let opening_pg = factors(&pool, NOW).with_factor_window(Duration::from_secs(60));
+    let opening = backend::factors(&opening_pg);
     let challenge = ChallengeToken::random();
     opening
         .open(account, challenge.hash())
         .await
         .expect("it opens");
 
-    let later = factors(&pool, NOW + 61);
+    let later_pg = factors(&pool, NOW + 61);
+    let later = backend::factors(&later_pg);
 
     assert_eq!(
         later.answered(challenge.hash()).await,
@@ -339,8 +350,10 @@ async fn a_deployment_without_a_key_keeps_no_factor_but_still_reads_what_is_offe
         return;
     };
     let account = an_account(&pool, "unsealed@example.com").await;
-    let sealed = factors(&pool, NOW);
-    let plain = unsealed(&pool);
+    let sealed_pg = factors(&pool, NOW);
+    let sealed = backend::factors(&sealed_pg);
+    let plain_pg = unsealed(&pool);
+    let plain = backend::factors(&plain_pg);
 
     assert_eq!(
         plain.keep(account, APP, &a_secret()).await,
@@ -369,7 +382,8 @@ async fn a_factor_leaves_with_the_account_that_kept_it() {
         return;
     };
     let account = an_account(&pool, "cascade@example.com").await;
-    let store = factors(&pool, NOW);
+    let store_pg = factors(&pool, NOW);
+    let store = backend::factors(&store_pg);
     store.keep(account, APP, &a_secret()).await.expect("kept");
     let digests: Vec<SecretHash> = RecoveryCode::ten().iter().map(RecoveryCode::hash).collect();
     store.keep_recovery(account, &digests).await.expect("kept");

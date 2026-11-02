@@ -1,36 +1,43 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Agent, Clock, Email, LiveSession, SESSION_PREFIX, Session, SessionError, SessionId,
     SessionLifetime, SessionRoll, SessionStore, SessionToken, TenantId, UnixSeconds,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::accounts::read_portrait;
+use crate::unit_of_work::{Postgres, SharedTx};
 
 const TOKEN_BYTES: usize = 32;
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
 
-#[derive(Debug, Clone)]
+#[repository(domain = Sessions, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresSessions<C> {
-    pool: PgPool,
+    tx: SharedTx,
     clock: C,
     lifetime: SessionLifetime,
 }
 
 impl<C: Clock> PostgresSessions<C> {
-    pub fn new(pool: PgPool, clock: C, lifetime: SessionLifetime) -> Self {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
+    where
+        C: Clone,
+    {
         Self {
-            pool,
-            clock,
-            lifetime,
+            tx: tx.clone(),
+            clock: backend.clock().clone(),
+            lifetime: backend.lifetime,
         }
     }
 
     pub async fn prune(&self) -> Result<u64, SessionError> {
+        let mut tx = self.tx.lock().await;
         let now = seconds_to_nanos(self.clock.now());
         sqlx::query("DELETE FROM sessions WHERE expires_at <= $1")
             .bind(now)
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected())
             .map_err(|_| SessionError::StoreUnreachable)
@@ -44,6 +51,7 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
         org: Option<TenantId>,
         from: Option<&Agent>,
     ) -> Result<SessionToken, SessionError> {
+        let mut tx = self.tx.lock().await;
         let token = mint();
         let now = self.clock.now();
         let expires = self.lifetime.expiry_from(now, now);
@@ -60,7 +68,7 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
         .bind(seconds_to_nanos(now))
         .bind(seconds_to_nanos(expires))
         .bind(from.map(Agent::as_str))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|_| SessionError::StoreUnreachable)?;
 
@@ -68,6 +76,7 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
     }
 
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
+        let mut tx = self.tx.lock().await;
         let now = self.clock.now();
         let row = sqlx::query(
             "SELECT s.account_id AS account_id, a.email AS email, a.name AS name, \
@@ -78,7 +87,7 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
         )
         .bind(token.hash().as_bytes().as_slice())
         .bind(seconds_to_nanos(now))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|_| SessionError::StoreUnreachable)?
         .ok_or(SessionError::Unknown)?;
@@ -90,7 +99,7 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
             .bind(token.hash().as_bytes().as_slice())
             .bind(seconds_to_nanos(now))
             .bind(seconds_to_nanos(expires))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|_| SessionError::StoreUnreachable)?;
 
@@ -109,10 +118,11 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
     }
 
     async fn revoke(&self, token: &SessionToken) -> Result<(), SessionError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE sessions SET revoked_at = $2 WHERE hash = $1 AND revoked_at IS NULL")
             .bind(token.hash().as_bytes().as_slice())
             .bind(seconds_to_nanos(self.clock.now()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|_| ())
             .map_err(|_| SessionError::StoreUnreachable)
@@ -125,6 +135,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
         account: AccountId,
         current: &SessionToken,
     ) -> Result<Vec<LiveSession>, SessionError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT id, created_at, last_seen_at, user_agent, (hash = $3) AS mine \
              FROM sessions \
@@ -134,7 +145,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
         .bind(account.as_uuid())
         .bind(seconds_to_nanos(self.clock.now()))
         .bind(current.hash().as_bytes().as_slice())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|_| SessionError::StoreUnreachable)?;
 
@@ -154,6 +165,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
     }
 
     async fn revoke_one(&self, account: AccountId, id: SessionId) -> Result<bool, SessionError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query(
             "UPDATE sessions SET revoked_at = $3 \
              WHERE account_id = $1 AND id = $2 AND revoked_at IS NULL",
@@ -161,7 +173,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
         .bind(account.as_uuid())
         .bind(id.as_uuid())
         .bind(seconds_to_nanos(self.clock.now()))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|done| done.rows_affected() > 0)
         .map_err(|_| SessionError::StoreUnreachable)
@@ -172,6 +184,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
         account: AccountId,
         current: &SessionToken,
     ) -> Result<u64, SessionError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query(
             "UPDATE sessions SET revoked_at = $3 \
              WHERE account_id = $1 AND hash <> $2 AND revoked_at IS NULL",
@@ -179,7 +192,7 @@ impl<C: Clock + Send + Sync> SessionRoll for PostgresSessions<C> {
         .bind(account.as_uuid())
         .bind(current.hash().as_bytes().as_slice())
         .bind(seconds_to_nanos(self.clock.now()))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|done| done.rows_affected())
         .map_err(|_| SessionError::StoreUnreachable)

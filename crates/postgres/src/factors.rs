@@ -1,39 +1,40 @@
 use std::time::Duration;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Clock, FactorError, FactorKind, FactorStore, Gate, Kept, Pending, SecretHash, Step,
     TotpSecret, UnixSeconds,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use ferristrace_infra::SecretSeal;
 
-const NANOS_PER_SECOND: i64 = 1_000_000_000;
-const DEFAULT_WINDOW: Duration = Duration::from_secs(300);
+use crate::unit_of_work::{Postgres, SharedTx};
 
-#[derive(Debug, Clone)]
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
+pub(crate) const DEFAULT_WINDOW: Duration = Duration::from_secs(300);
+
+#[repository(domain = Factors, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresFactors<C> {
-    pool: PgPool,
+    tx: SharedTx,
     clock: C,
     seal: Option<SecretSeal>,
     window: Duration,
 }
 
 impl<C: Clock> PostgresFactors<C> {
-    pub fn new(pool: PgPool, clock: C, seal: Option<SecretSeal>) -> Self {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
+    where
+        C: Clone,
+    {
         Self {
-            pool,
-            clock,
-            seal,
-            window: DEFAULT_WINDOW,
+            tx: tx.clone(),
+            clock: backend.clock().clone(),
+            seal: backend.seal.clone(),
+            window: backend.factor_window,
         }
-    }
-
-    #[must_use]
-    pub fn with_window(mut self, window: Duration) -> Self {
-        self.window = window;
-        self
     }
 
     pub fn sealed(&self) -> bool {
@@ -41,9 +42,10 @@ impl<C: Clock> PostgresFactors<C> {
     }
 
     pub async fn prune(&self) -> Result<u64, FactorError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM second_step_challenges WHERE expires_at <= $1")
             .bind(to_nanos(self.clock.now()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected())
             .map_err(|error| unreachable(&error))
@@ -61,12 +63,13 @@ impl<C: Clock> PostgresFactors<C> {
 
 impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
     async fn live(&self, account: AccountId) -> Result<Vec<FactorKind>, FactorError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT kind AS kind FROM auth_factors \
              WHERE account_id = $1 AND confirmed_at IS NOT NULL ORDER BY created_at",
         )
         .bind(account.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
         Ok(rows
@@ -81,6 +84,7 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         kind: FactorKind,
         secret: &TotpSecret,
     ) -> Result<(), FactorError> {
+        let mut tx = self.tx.lock().await;
         let sealed = self.key()?.seal(secret).ok_or(FactorError::NotOffered)?;
         let done = sqlx::query(
             "INSERT INTO auth_factors (account_id, kind, secret, created_at) \
@@ -93,7 +97,7 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         .bind(kind.as_str())
         .bind(sealed.as_slice())
         .bind(to_nanos(self.clock.now()))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
         if done.rows_affected() == 0 {
@@ -107,13 +111,14 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         account: AccountId,
         kind: FactorKind,
     ) -> Result<Option<Kept>, FactorError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT secret AS secret, confirmed_at AS confirmed_at, last_step AS last_step \
              FROM auth_factors WHERE account_id = $1 AND kind = $2",
         )
         .bind(account.as_uuid())
         .bind(kind.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
         let Some(row) = found else {
@@ -134,6 +139,7 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
     }
 
     async fn confirm(&self, account: AccountId, kind: FactorKind) -> Result<(), FactorError> {
+        let mut tx = self.tx.lock().await;
         let done = sqlx::query(
             "UPDATE auth_factors SET confirmed_at = $3 \
              WHERE account_id = $1 AND kind = $2 AND confirmed_at IS NULL",
@@ -141,7 +147,7 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         .bind(account.as_uuid())
         .bind(kind.as_str())
         .bind(to_nanos(self.clock.now()))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
         if done.rows_affected() == 0 {
@@ -151,10 +157,11 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
     }
 
     async fn forget(&self, account: AccountId, kind: FactorKind) -> Result<bool, FactorError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM auth_factors WHERE account_id = $1 AND kind = $2")
             .bind(account.as_uuid())
             .bind(kind.as_str())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| unreachable(&error))
@@ -166,11 +173,12 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         kind: FactorKind,
         step: Step,
     ) -> Result<(), FactorError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE auth_factors SET last_step = $3 WHERE account_id = $1 AND kind = $2")
             .bind(account.as_uuid())
             .bind(kind.as_str())
             .bind(i64::try_from(step.get()).unwrap_or(i64::MAX))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|_| ())
             .map_err(|error| unreachable(&error))
@@ -182,14 +190,10 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         digests: &[SecretHash],
     ) -> Result<(), FactorError> {
         let now = to_nanos(self.clock.now());
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| unreachable(&error))?;
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM recovery_codes WHERE account_id = $1")
             .bind(account.as_uuid())
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error))?;
         for digest in digests {
@@ -200,14 +204,11 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
             .bind(digest.as_bytes().as_slice())
             .bind(account.as_uuid())
             .bind(now)
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error))?;
         }
-        transaction
-            .commit()
-            .await
-            .map_err(|error| unreachable(&error))
+        Ok(())
     }
 
     async fn spend_recovery(
@@ -215,25 +216,28 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         account: AccountId,
         digest: SecretHash,
     ) -> Result<bool, FactorError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM recovery_codes WHERE account_id = $1 AND digest = $2")
             .bind(account.as_uuid())
             .bind(digest.as_bytes().as_slice())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| unreachable(&error))
     }
 
     async fn recovery_left(&self, account: AccountId) -> Result<u32, FactorError> {
+        let mut tx = self.tx.lock().await;
         let row = sqlx::query("SELECT count(*) AS held FROM recovery_codes WHERE account_id = $1")
             .bind(account.as_uuid())
-            .fetch_one(&self.pool)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|error| unreachable(&error))?;
         Ok(u32::try_from(row.get::<i64, _>("held")).unwrap_or(u32::MAX))
     }
 
     async fn answered(&self, digest: SecretHash) -> Result<Pending, FactorError> {
+        let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "UPDATE second_step_challenges SET answers = answers + 1 \
              WHERE digest = $1 AND expires_at > $2 \
@@ -241,7 +245,7 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
         )
         .bind(digest.as_bytes().as_slice())
         .bind(to_nanos(self.clock.now()))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?
         .ok_or(FactorError::NoChallenge)?;
@@ -252,9 +256,10 @@ impl<C: Clock + Send + Sync> FactorStore for PostgresFactors<C> {
     }
 
     async fn close(&self, digest: SecretHash) -> Result<(), FactorError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM second_step_challenges WHERE digest = $1")
             .bind(digest.as_bytes().as_slice())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|_| ())
             .map_err(|error| unreachable(&error))
@@ -267,6 +272,7 @@ impl<C: Clock + Send + Sync> Gate for PostgresFactors<C> {
     }
 
     async fn open(&self, account: AccountId, digest: SecretHash) -> Result<(), FactorError> {
+        let mut tx = self.tx.lock().await;
         let now = self.clock.now();
         sqlx::query(
             "INSERT INTO second_step_challenges (digest, account_id, created_at, expires_at) \
@@ -276,7 +282,7 @@ impl<C: Clock + Send + Sync> Gate for PostgresFactors<C> {
         .bind(account.as_uuid())
         .bind(to_nanos(now))
         .bind(to_nanos(now.saturating_add_secs(self.window.as_secs())))
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map(|_| ())
         .map_err(|error| unreachable(&error))

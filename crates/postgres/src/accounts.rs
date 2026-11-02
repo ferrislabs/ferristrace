@@ -1,10 +1,13 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PasswordHash, PhotoKind,
     Portrait, ProvisionPolicy, ReadError, ResolvedIdentity,
 };
+use sqlx::Row;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
 use uuid::Uuid;
+
+use crate::unit_of_work::{Postgres, SharedTx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AccountError {
@@ -16,14 +19,15 @@ pub enum AccountError {
     Taken,
 }
 
-#[derive(Debug, Clone)]
+#[repository(domain = Accounts, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresAccounts {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresAccounts {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 
     pub async fn create(
@@ -31,12 +35,13 @@ impl PostgresAccounts {
         email: &Email,
         locked: &PasswordHash,
     ) -> Result<AccountId, AccountError> {
+        let mut tx = self.tx.lock().await;
         let id = Uuid::new_v4();
         sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
             .bind(id)
             .bind(email.as_str())
             .bind(locked.encoded())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| match &error {
                 sqlx::Error::Database(refusal) if refusal.is_unique_violation() => {
@@ -51,13 +56,14 @@ impl PostgresAccounts {
         &self,
         identity: &ResolvedIdentity,
     ) -> Result<Option<AccountId>, AccountError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT account_id AS account_id FROM identity_links \
              WHERE issuer = $1 AND subject = $2",
         )
         .bind(identity.issuer.as_str())
         .bind(identity.subject.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await?;
         Ok(found.map(|row| AccountId::new(row.get("account_id"))))
     }
@@ -66,11 +72,12 @@ impl PostgresAccounts {
         &self,
         identity: &ResolvedIdentity,
     ) -> Result<AccountId, AccountError> {
+        let mut tx = self.tx.lock().await;
         let id =
             Uuid::parse_str(identity.subject.as_str()).map_err(|_| AccountError::NotProvisioned)?;
         let found = sqlx::query("SELECT id AS id FROM accounts WHERE id = $1")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await?;
         found
             .map(|row| AccountId::new(row.get("id")))
@@ -89,12 +96,12 @@ impl PostgresAccounts {
             return Ok(account);
         }
 
-        let mut transaction = self.pool.begin().await?;
+        let mut tx = self.tx.lock().await;
 
         let existing: Option<Uuid> = if policy.link_by_email {
             sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
                 .bind(identity.email.as_str())
-                .fetch_optional(&mut *transaction)
+                .fetch_optional(&mut **tx)
                 .await?
                 .map(|row| row.get("id"))
         } else {
@@ -108,7 +115,7 @@ impl PostgresAccounts {
                 sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
                     .bind(account)
                     .bind(identity.email.as_str())
-                    .execute(&mut *transaction)
+                    .execute(&mut **tx)
                     .await?;
                 account
             }
@@ -119,10 +126,9 @@ impl PostgresAccounts {
             .bind(identity.issuer.as_str())
             .bind(identity.subject.as_str())
             .bind(account)
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await?;
 
-        transaction.commit().await?;
         Ok(AccountId::new(account))
     }
 }
@@ -150,10 +156,11 @@ impl Accounts for PostgresAccounts {
         account: AccountId,
         name: Option<&AccountName>,
     ) -> Result<(), ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE accounts SET name = $2 WHERE id = $1")
             .bind(account.as_uuid())
             .bind(name.map(AccountName::as_str))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to rename an account");
@@ -163,12 +170,13 @@ impl Accounts for PostgresAccounts {
     }
 
     async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT photo_token AS photo_token, photo_type AS photo_type \
              FROM accounts WHERE id = $1",
         )
         .bind(account.as_uuid())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read a photo");
@@ -182,11 +190,12 @@ impl Accounts for PostgresAccounts {
         account: AccountId,
         portrait: Option<&Portrait>,
     ) -> Result<(), ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE accounts SET photo_token = $2, photo_type = $3 WHERE id = $1")
             .bind(account.as_uuid())
             .bind(portrait.map(|kept| kept.token.as_ref()))
             .bind(portrait.map(|kept| kept.kind.as_str()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to keep a photo");

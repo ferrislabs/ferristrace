@@ -1,8 +1,10 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{AccountId, Membership, Memberships, OrgRole, TenantId, WhoamiError};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::postgres::SELF_HOSTED_PLAN;
+use crate::unit_of_work::{Postgres, SharedTx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MembershipError {
@@ -14,36 +16,38 @@ pub enum MembershipError {
     NoSuchPlan(&'static str),
 }
 
-#[derive(Debug, Clone)]
+#[repository(domain = Memberships, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresMemberships {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresMemberships {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 
     pub async fn founded(&self) -> Result<Option<TenantId>, MembershipError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query("SELECT id AS id FROM orgs ORDER BY created_at LIMIT 1")
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await?;
         Ok(found.map(|row| TenantId::new(row.get("id"))))
     }
 
     pub async fn found(&self, name: &str, owner: &str) -> Result<TenantId, MembershipError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut tx = self.tx.lock().await;
 
         let account: Uuid = sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
             .bind(owner)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(&mut **tx)
             .await?
             .map(|row| row.get("id"))
             .ok_or_else(|| MembershipError::NoSuchAccount(owner.to_owned()))?;
 
         let plan: Uuid = sqlx::query("SELECT id AS id FROM plans WHERE slug = $1")
             .bind(SELF_HOSTED_PLAN)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(&mut **tx)
             .await?
             .map(|row| row.get("id"))
             .ok_or_else(|| MembershipError::NoSuchPlan(SELF_HOSTED_PLAN))?;
@@ -53,11 +57,10 @@ impl PostgresMemberships {
             .bind(org)
             .bind(name)
             .bind(plan)
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await?;
 
-        grant_in(&mut *transaction, org, account, OrgRole::Owner).await?;
-        transaction.commit().await?;
+        grant_in(&mut **tx, org, account, OrgRole::Owner).await?;
 
         Ok(TenantId::new(org))
     }
@@ -68,14 +71,15 @@ impl PostgresMemberships {
         member: &str,
         role: OrgRole,
     ) -> Result<(), MembershipError> {
+        let mut tx = self.tx.lock().await;
         let account: Uuid = sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
             .bind(member)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await?
             .map(|row| row.get("id"))
             .ok_or_else(|| MembershipError::NoSuchAccount(member.to_owned()))?;
 
-        grant_in(&self.pool, org.as_uuid(), account, role).await?;
+        grant_in(&mut **tx, org.as_uuid(), account, role).await?;
 
         Ok(())
     }
@@ -83,13 +87,14 @@ impl PostgresMemberships {
 
 impl Memberships for PostgresMemberships {
     async fn of(&self, account: AccountId) -> Result<Vec<Membership>, WhoamiError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT m.org_id AS org_id, o.name AS name, m.role::text AS role \
              FROM org_members m JOIN orgs o ON o.id = m.org_id \
              WHERE m.account_id = $1 ORDER BY o.name, m.org_id",
         )
         .bind(account.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read memberships");

@@ -1,16 +1,19 @@
+use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
-    DecompressedBytes, Email, IngestKey, Issuer, ProjectName, Projects, ProvisionPolicy,
-    ResolvedIdentity, Scope, SecretHash, Subject, TenantDirectory, TenantId, UnknownKey, testing,
+    ControlPlane, DecompressedBytes, Email, IngestKey, Issuer, OrgName, ProjectName, Projects,
+    ProvisionPolicy, ResolvedIdentity, Scope, SecretHash, Subject, TenantDirectory, TenantId,
+    UnknownKey, testing,
 };
 use ferristrace_infra::{Allowance, FixedClock};
 use ferristrace_postgres::{
-    AccountError, CONTROL_PLANE, OVERAGE_FEATURE, PostgresAccounts, PostgresDirectory,
-    PostgresProjects, ProjectError, SELF_HOSTED_PLAN,
+    AccountError, CONTROL_PLANE, OVERAGE_FEATURE, Postgres, PostgresDirectory, ProjectError,
+    SELF_HOSTED_PLAN,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 fn a_slug(name: &str) -> ProjectName {
@@ -390,7 +393,8 @@ async fn provisioning_creates_an_account_and_its_link_together() {
     let Some(pool) = migrated("identity_provision").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let identity = a_federated_identity("https://id.example", "sub-1", "person@example.com");
 
     let account = accounts
@@ -410,7 +414,8 @@ async fn provisioning_the_same_identity_twice_returns_the_same_account() {
     let Some(pool) = migrated("identity_twice").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let identity = a_federated_identity("https://id.example", "sub-1", "person@example.com");
 
     let first = accounts
@@ -431,7 +436,8 @@ async fn two_providers_may_carry_the_same_subject() {
     let Some(pool) = migrated("identity_two_providers").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let one = a_federated_identity("https://one.example", "shared", "one@example.com");
     let other = a_federated_identity("https://other.example", "shared", "other@example.com");
 
@@ -456,7 +462,8 @@ async fn linking_by_email_joins_an_existing_account() {
     let Some(pool) = migrated("identity_by_email").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let first_provider = a_federated_identity("https://one.example", "sub-1", "person@example.com");
     let second_provider =
         a_federated_identity("https://other.example", "sub-2", "person@example.com");
@@ -485,7 +492,8 @@ async fn a_local_identity_is_the_account_it_names_and_needs_no_link() {
     let Some(pool) = migrated("identity_local").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'x')")
         .bind(id)
@@ -514,8 +522,9 @@ async fn a_local_subject_that_is_not_an_account_id_is_refused() {
     let Some(pool) = migrated("identity_local_nonsense").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
 
-    let refused = PostgresAccounts::new(pool.clone())
+    let refused = backend::accounts(&pg)
         .provision(
             &an_identity(Issuer::Local, "not-a-uuid", "person@example.com"),
             ProvisionPolicy::default(),
@@ -531,7 +540,8 @@ async fn an_unknown_identity_is_refused_when_provisioning_is_off() {
     let Some(pool) = migrated("identity_closed").await else {
         return;
     };
-    let accounts = PostgresAccounts::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
     let identity = a_federated_identity("https://id.example", "sub-1", "stranger@example.com");
 
     let refused = accounts
@@ -769,8 +779,9 @@ async fn an_organisation_holds_the_projects_it_was_given() {
     let Some(pool) = migrated("projects_held").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = TenantId::new(seeded_org(&pool).await);
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
 
     let storefront = projects
         .claim(org, &a_slug("storefront"))
@@ -798,9 +809,10 @@ async fn two_organisations_may_each_hold_a_project_of_the_same_name() {
     let Some(pool) = migrated("projects_same_name").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = TenantId::new(seeded_org(&pool).await);
     let theirs = TenantId::new(seeded_org(&pool).await);
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
 
     projects
         .claim(mine, &a_slug("storefront"))
@@ -827,8 +839,9 @@ async fn a_project_of_an_organisation_nobody_holds_is_refused() {
     let Some(pool) = migrated("projects_no_org").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
 
-    let refused = PostgresProjects::new(pool.clone())
+    let refused = backend::projects(&pg)
         .claim(TenantId::new(Uuid::new_v4()), &a_slug("storefront"))
         .await;
 
@@ -840,8 +853,9 @@ async fn the_only_project_is_named_only_when_there_is_exactly_one() {
     let Some(pool) = migrated("projects_only").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = TenantId::new(seeded_org(&pool).await);
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
 
     assert_eq!(projects.only(org).await.expect("a read"), None, "none yet");
 
@@ -867,8 +881,9 @@ async fn a_key_resolves_to_the_project_it_was_issued_for() {
     let Some(pool) = migrated("keys_project").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = TenantId::new(seeded_org(&pool).await);
-    let project = PostgresProjects::new(pool.clone())
+    let project = backend::projects(&pg)
         .claim(org, &a_slug("storefront"))
         .await
         .expect("a project");
@@ -912,4 +927,45 @@ async fn a_postgres_directory_honours_the_directory_contract() {
     testing::a_directory_resolves_the_key_it_holds(&directory, &held, TenantId::new(org)).await;
     testing::a_directory_refuses_a_key_it_does_not_hold(&directory, &absent).await;
     testing::a_directory_answers_the_same_key_the_same_way_twice(&directory, &held).await;
+}
+
+#[tokio::test]
+async fn an_organisation_founded_in_a_transaction_that_fails_does_not_exist() {
+    let Some(pool) = migrated("control_plane_rollback").await else {
+        return;
+    };
+    sqlx::query(
+        "INSERT INTO accounts (id, email, password_hash) \
+         VALUES (gen_random_uuid(), 'founder@example.com', 'x')",
+    )
+    .execute(&pool)
+    .await
+    .expect("an account to own the organisation");
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let backend = &pg;
+    let name = OrgName::try_from("Acme").expect("a name");
+    let owner = Email::try_from("founder@example.com").expect("an address");
+
+    let interrupted: Result<TenantId, ()> = UnitOfWork::transaction(
+        backend,
+        || (),
+        Settle::OnSuccess,
+        |tx| async move {
+            let control_plane =
+                <Postgres<FixedClock> as RepoFor<domain::ControlPlane>>::build(backend, &tx);
+            control_plane
+                .found(&name, &owner)
+                .await
+                .expect("the organisation is founded");
+            Err(())
+        },
+    )
+    .await;
+
+    assert!(interrupted.is_err());
+    let founded = committed!(pg, |control_plane: ControlPlane| control_plane
+        .founded()
+        .await
+        .expect("the control plane answers"));
+    assert_eq!(founded, None, "the failed transaction left no organisation");
 }

@@ -1,7 +1,7 @@
 use ferristrace_domain::{
     Clock, IngestKey, ProjectId, Scope, SecretHash, TenantDirectory, TenantId, UnixSeconds,
 };
-use sqlx::{PgPool, Row};
+use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
@@ -52,23 +52,8 @@ pub enum KeyError {
 
 impl<C: Clock> PostgresDirectory<C> {
     pub async fn issue(&self, org: TenantId, project: Option<Uuid>) -> Result<IngestKey, KeyError> {
-        let prefix_bytes: [u8; PREFIX_BYTES] = rand::random();
-        let secret_bytes: [u8; SECRET_BYTES] = rand::random();
-        let prefix = format!("{PREFIX_LABEL}{}", hex::encode(prefix_bytes));
-        let secret = hex::encode(secret_bytes);
-
-        sqlx::query(
-            "INSERT INTO api_keys (id, org_id, project_id, prefix, hash, secret_digest) \
-             VALUES (gen_random_uuid(), $1, $2, $3, '', $4)",
-        )
-        .bind(org.as_uuid())
-        .bind(project)
-        .bind(&prefix)
-        .bind(SecretHash::of(&secret).as_bytes().as_slice())
-        .execute(&self.pool)
-        .await?;
-
-        Ok(IngestKey::from_plaintext(&format!("{prefix}.{secret}")))
+        let mut connection = self.pool.acquire().await?;
+        issue_on(&mut connection, org, project).await
     }
 
     pub async fn live_keys(&self, org: TenantId) -> Result<i64, KeyError> {
@@ -83,16 +68,49 @@ impl<C: Clock> PostgresDirectory<C> {
     }
 
     pub async fn revoke(&self, prefix: &str) -> Result<bool, KeyError> {
-        let done = sqlx::query(
-            "UPDATE api_keys SET revoked_at = $2 \
-             WHERE prefix = $1 AND revoked_at IS NULL",
-        )
-        .bind(prefix)
-        .bind(to_nanos(self.clock.now()))
-        .execute(&self.pool)
-        .await?;
-        Ok(done.rows_affected() > 0)
+        let mut connection = self.pool.acquire().await?;
+        revoke_on(&mut connection, prefix, self.clock.now()).await
     }
+}
+
+pub(crate) async fn issue_on(
+    connection: &mut PgConnection,
+    org: TenantId,
+    project: Option<Uuid>,
+) -> Result<IngestKey, KeyError> {
+    let prefix_bytes: [u8; PREFIX_BYTES] = rand::random();
+    let secret_bytes: [u8; SECRET_BYTES] = rand::random();
+    let prefix = format!("{PREFIX_LABEL}{}", hex::encode(prefix_bytes));
+    let secret = hex::encode(secret_bytes);
+
+    sqlx::query(
+        "INSERT INTO api_keys (id, org_id, project_id, prefix, hash, secret_digest) \
+         VALUES (gen_random_uuid(), $1, $2, $3, '', $4)",
+    )
+    .bind(org.as_uuid())
+    .bind(project)
+    .bind(&prefix)
+    .bind(SecretHash::of(&secret).as_bytes().as_slice())
+    .execute(connection)
+    .await?;
+
+    Ok(IngestKey::from_plaintext(&format!("{prefix}.{secret}")))
+}
+
+pub(crate) async fn revoke_on(
+    connection: &mut PgConnection,
+    prefix: &str,
+    now: UnixSeconds,
+) -> Result<bool, KeyError> {
+    let done = sqlx::query(
+        "UPDATE api_keys SET revoked_at = $2 \
+         WHERE prefix = $1 AND revoked_at IS NULL",
+    )
+    .bind(prefix)
+    .bind(to_nanos(now))
+    .execute(connection)
+    .await?;
+    Ok(done.rows_affected() > 0)
 }
 
 impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {

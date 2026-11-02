@@ -6,10 +6,7 @@ use ferristrace_domain::{
     SessionLifetime, SessionRoll, SessionStore, SignIn, SignInProof, Subject,
 };
 use ferristrace_infra::{Argon2Hasher, FixedClock};
-use ferristrace_postgres::{
-    AccountError, CONTROL_PLANE, LocalPasswordProvider, PostgresAccounts, PostgresFlows,
-    PostgresResets, PostgresSessions,
-};
+use ferristrace_postgres::{AccountError, CONTROL_PLANE, Postgres};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,6 +14,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 const NOW: u64 = 1_700_000_000;
@@ -34,6 +32,12 @@ fn lifetime() -> SessionLifetime {
         idle_seconds: 100,
         hard_seconds: 1000,
     }
+}
+
+fn at(pool: &PgPool, instant: u64) -> Postgres<FixedClock> {
+    Postgres::new(pool.clone(), FixedClock::at(instant))
+        .with_session_lifetime(lifetime())
+        .with_hasher(cheap())
 }
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -171,8 +175,9 @@ async fn a_session_resolves_to_its_account() {
     let Some(pool) = control_plane("auth_session").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
 
     let token = sessions
         .issue(account, None, None)
@@ -190,8 +195,9 @@ async fn a_revoked_session_resolves_no_longer() {
     let Some(pool) = control_plane("auth_revoked").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let token = sessions
         .issue(account, None, None)
         .await
@@ -208,8 +214,10 @@ async fn an_expired_session_resolves_no_longer() {
         return;
     };
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let early = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
-    let late = PostgresSessions::new(pool.clone(), FixedClock::at(NOW + 101), lifetime());
+    let early_pg = at(&pool, NOW);
+    let early = backend::sessions(&early_pg);
+    let late_pg = at(&pool, NOW + 101);
+    let late = backend::sessions(&late_pg);
     let token = early.issue(account, None, None).await.expect("a session");
 
     assert_eq!(late.resolve(&token).await, Err(SessionError::Unknown));
@@ -221,12 +229,14 @@ async fn resolving_slides_the_expiry_but_not_past_the_hard_life() {
         return;
     };
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let early = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let early_pg = at(&pool, NOW);
+    let early = backend::sessions(&early_pg);
     let token = early.issue(account, None, None).await.expect("a session");
 
     let mut expiry = 0;
     for step in (50..=950).step_by(90) {
-        let store = PostgresSessions::new(pool.clone(), FixedClock::at(NOW + step), lifetime());
+        let store_pg = at(&pool, NOW + step);
+        let store = backend::sessions(&store_pg);
         let session = store
             .resolve(&token)
             .await
@@ -250,15 +260,17 @@ async fn pruning_removes_only_what_has_expired() {
         return;
     };
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let early = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let early_pg = at(&pool, NOW);
+    let early = backend::sessions(&early_pg);
     early.issue(account, None, None).await.expect("a session");
-    let later = PostgresSessions::new(pool.clone(), FixedClock::at(NOW + 500), lifetime());
+    let later_pg = at(&pool, NOW + 500);
+    let later = backend::sessions(&later_pg);
     later
         .issue(account, None, None)
         .await
         .expect("a second session");
 
-    let removed = PostgresSessions::new(pool.clone(), FixedClock::at(NOW + 101), lifetime())
+    let removed = backend::sessions(&at(&pool, NOW + 101))
         .prune()
         .await
         .expect("a prune");
@@ -276,8 +288,9 @@ async fn a_correct_password_resolves_a_local_identity() {
     let Some(pool) = control_plane("auth_local_ok").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("correct horse")).await;
-    let provider = LocalPasswordProvider::new(pool.clone(), cheap());
+    let provider = backend::local(&pg);
 
     let identity = provider
         .sign_in(a_proof("person@example.com", "correct horse"))
@@ -294,9 +307,10 @@ async fn a_wrong_password_an_unknown_address_and_no_password_all_refuse() {
     let Some(pool) = control_plane("auth_local_refused").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     an_account(&pool, "person@example.com", Some("correct horse")).await;
     an_account(&pool, "federated@example.com", None).await;
-    let provider = LocalPasswordProvider::new(pool.clone(), cheap());
+    let provider = backend::local(&pg);
 
     for proof in [
         a_proof("person@example.com", "wrong horse"),
@@ -321,7 +335,8 @@ async fn an_attempt_comes_back_once_and_only_once() {
     let Some(pool) = control_plane("flows_once").await else {
         return;
     };
-    let flows = PostgresFlows::new(pool.clone(), FixedClock::at(NOW));
+    let pg = at(&pool, NOW);
+    let flows = backend::flows(&pg);
     flows.begin(&a_flow("state-1")).await.expect("it is kept");
 
     let first = flows.take("state-1").await.expect("it comes back");
@@ -342,7 +357,8 @@ async fn an_unknown_state_carries_no_attempt() {
     let Some(pool) = control_plane("flows_unknown").await else {
         return;
     };
-    let flows = PostgresFlows::new(pool.clone(), FixedClock::at(NOW));
+    let pg = at(&pool, NOW);
+    let flows = backend::flows(&pg);
 
     assert_eq!(flows.take("never-issued").await, Err(FlowError::Unknown));
 }
@@ -352,10 +368,10 @@ async fn an_attempt_past_its_window_is_gone() {
     let Some(pool) = control_plane("flows_expired").await else {
         return;
     };
-    let early =
-        PostgresFlows::new(pool.clone(), FixedClock::at(NOW)).with_window(Duration::from_secs(60));
-    let late = PostgresFlows::new(pool.clone(), FixedClock::at(NOW + 61))
-        .with_window(Duration::from_secs(60));
+    let early_pg = at(&pool, NOW).with_flow_window(Duration::from_secs(60));
+    let early = backend::flows(&early_pg);
+    let late_pg = at(&pool, NOW + 61).with_flow_window(Duration::from_secs(60));
+    let late = backend::flows(&late_pg);
     early.begin(&a_flow("state-1")).await.expect("it is kept");
 
     assert_eq!(late.take("state-1").await, Err(FlowError::Unknown));
@@ -366,7 +382,8 @@ async fn two_attempts_do_not_shadow_each_other() {
     let Some(pool) = control_plane("flows_two").await else {
         return;
     };
-    let flows = PostgresFlows::new(pool.clone(), FixedClock::at(NOW));
+    let pg = at(&pool, NOW);
+    let flows = backend::flows(&pg);
     flows.begin(&a_flow("state-1")).await.expect("the first");
     let mut second = a_flow("state-2");
     second.nonce = "another-nonce".to_owned();
@@ -386,14 +403,14 @@ async fn pruning_removes_only_attempts_past_their_window() {
     let Some(pool) = control_plane("flows_prune").await else {
         return;
     };
-    let early =
-        PostgresFlows::new(pool.clone(), FixedClock::at(NOW)).with_window(Duration::from_secs(60));
+    let early_pg = at(&pool, NOW).with_flow_window(Duration::from_secs(60));
+    let early = backend::flows(&early_pg);
     early.begin(&a_flow("state-1")).await.expect("the first");
-    let later = PostgresFlows::new(pool.clone(), FixedClock::at(NOW + 500))
-        .with_window(Duration::from_secs(60));
+    let later_pg = at(&pool, NOW + 500).with_flow_window(Duration::from_secs(60));
+    let later = backend::flows(&later_pg);
     later.begin(&a_flow("state-2")).await.expect("the second");
 
-    let removed = PostgresFlows::new(pool.clone(), FixedClock::at(NOW + 61))
+    let removed = backend::flows(&at(&pool, NOW + 61))
         .prune()
         .await
         .expect("a prune");
@@ -436,13 +453,10 @@ async fn a_reset_is_offered_only_to_an_address_we_know() {
     let Some(pool) = control_plane("reset_known").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     an_account(&pool, "person@example.com", Some("old secret")).await;
     let outbox = Outbox::default();
-    let reset = ResetPassword::new(
-        PostgresResets::new(pool.clone(), FixedClock::at(NOW)),
-        cheap(),
-        &outbox,
-    );
+    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
 
     let known = reset
         .request(
@@ -473,18 +487,15 @@ async fn a_confirmed_reset_changes_the_password_and_ends_every_session() {
     let Some(pool) = control_plane("reset_confirm").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("old secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let token = sessions
         .issue(account, None, None)
         .await
         .expect("a session");
     let outbox = Outbox::default();
-    let reset = ResetPassword::new(
-        PostgresResets::new(pool.clone(), FixedClock::at(NOW)),
-        cheap(),
-        &outbox,
-    );
+    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
     let address = Email::try_from("person@example.com").expect("an address");
     reset
         .request(&address, a_reset_token("one"))
@@ -500,7 +511,7 @@ async fn a_confirmed_reset_changes_the_password_and_ends_every_session() {
     assert_eq!(ended, 1, "the session it was signed in with is gone");
     assert_eq!(sessions.resolve(&token).await, Err(SessionError::Unknown));
 
-    let provider = LocalPasswordProvider::new(pool.clone(), cheap());
+    let provider = backend::local(&pg);
     assert!(
         provider
             .sign_in(a_proof("person@example.com", "a new secret"))
@@ -522,13 +533,10 @@ async fn a_reset_token_is_spent_by_its_first_use() {
     let Some(pool) = control_plane("reset_once").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     an_account(&pool, "person@example.com", Some("old secret")).await;
     let outbox = Outbox::default();
-    let reset = ResetPassword::new(
-        PostgresResets::new(pool.clone(), FixedClock::at(NOW)),
-        cheap(),
-        &outbox,
-    );
+    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
     let token = a_reset_token("one");
     reset
         .request(
@@ -558,7 +566,7 @@ async fn a_reset_past_its_window_is_gone() {
     let outbox = Outbox::default();
     let token = a_reset_token("one");
     ResetPassword::new(
-        PostgresResets::new(pool.clone(), FixedClock::at(NOW)).with_window(Duration::from_secs(60)),
+        backend::resets(&at(&pool, NOW).with_reset_window(Duration::from_secs(60))),
         cheap(),
         &outbox,
     )
@@ -570,8 +578,7 @@ async fn a_reset_past_its_window_is_gone() {
     .expect("the request");
 
     let late = ResetPassword::new(
-        PostgresResets::new(pool.clone(), FixedClock::at(NOW + 61))
-            .with_window(Duration::from_secs(60)),
+        backend::resets(&at(&pool, NOW + 61).with_reset_window(Duration::from_secs(60))),
         cheap(),
         &outbox,
     )
@@ -586,13 +593,14 @@ async fn a_created_account_is_locked_until_a_password_is_chosen() {
     let Some(pool) = control_plane("accounts_locked").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let address = Email::try_from("fresh@example.com").expect("an address");
     let locked = cheap().locked().expect("a locked hash");
-    let account = PostgresAccounts::new(pool.clone())
+    let account = backend::accounts(&pg)
         .create(&address, &locked)
         .await
         .expect("the account is created");
-    let provider = LocalPasswordProvider::new(pool.clone(), cheap());
+    let provider = backend::local(&pg);
 
     assert_eq!(
         provider.sign_in(a_proof("fresh@example.com", "")).await,
@@ -607,7 +615,7 @@ async fn a_created_account_is_locked_until_a_password_is_chosen() {
     );
 
     let outbox = Outbox::default();
-    let resets = PostgresResets::new(pool.clone(), FixedClock::at(NOW));
+    let resets = backend::resets(&pg);
     let invite = a_reset_token("invite");
     resets
         .begin(account, invite.hash())
@@ -632,8 +640,9 @@ async fn an_address_carries_at_most_one_account() {
     let Some(pool) = control_plane("accounts_taken").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let address = Email::try_from("twice@example.com").expect("an address");
-    let accounts = PostgresAccounts::new(pool.clone());
+    let accounts = backend::accounts(&pg);
     let locked = cheap().locked().expect("a locked hash");
     accounts
         .create(&address, &locked)
@@ -667,18 +676,12 @@ async fn a_local_password_opens_a_session_without_provisioning_anything() {
     let Some(pool) = control_plane("auth_local_end_to_end").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("correct horse")).await;
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        FixedClock::at(NOW),
-        lifetime(),
-    ));
+    let sessions = Arc::new(backend::sessions(&pg));
     let sign_in = SignIn::new(
-        AuthSources::new(
-            Some(LocalPasswordProvider::new(pool.clone(), cheap())),
-            None::<NoProvider>,
-        ),
-        PostgresAccounts::new(pool.clone()),
+        AuthSources::new(Some(backend::local(&pg)), None::<NoProvider>),
+        backend::accounts(&pg),
         Arc::clone(&sessions),
         NoSecondFactor,
         ProvisionPolicy::default(),
@@ -706,18 +709,12 @@ async fn a_wrong_local_password_opens_nothing_and_provisions_nothing() {
     let Some(pool) = control_plane("auth_local_refused_end_to_end").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     an_account(&pool, "person@example.com", Some("correct horse")).await;
     let sign_in = SignIn::new(
-        AuthSources::new(
-            Some(LocalPasswordProvider::new(pool.clone(), cheap())),
-            None::<NoProvider>,
-        ),
-        PostgresAccounts::new(pool.clone()),
-        Arc::new(PostgresSessions::new(
-            pool.clone(),
-            FixedClock::at(NOW),
-            lifetime(),
-        )),
+        AuthSources::new(Some(backend::local(&pg)), None::<NoProvider>),
+        backend::accounts(&pg),
+        Arc::new(backend::sessions(&pg)),
         NoSecondFactor,
         ProvisionPolicy::default(),
     );
@@ -735,6 +732,7 @@ async fn a_local_identity_naming_no_account_is_not_provisioned() {
     let Some(pool) = control_plane("auth_local_stranger").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let identity = ResolvedIdentity {
         issuer: Issuer::Local,
         subject: Subject::try_from(Uuid::new_v4().to_string().as_str()).expect("a subject"),
@@ -742,7 +740,7 @@ async fn a_local_identity_naming_no_account_is_not_provisioned() {
         email_verified: true,
     };
 
-    let refused = PostgresAccounts::new(pool.clone())
+    let refused = backend::accounts(&pg)
         .provision(&identity, ProvisionPolicy::default())
         .await;
 
@@ -759,8 +757,9 @@ async fn an_account_carries_no_name_until_somebody_writes_one() {
     let Some(pool) = control_plane("auth_unnamed").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
 
     let token = sessions
         .issue(account, None, None)
@@ -777,9 +776,10 @@ async fn a_chosen_name_travels_on_the_session() {
     let Some(pool) = control_plane("auth_named").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let accounts = PostgresAccounts::new(pool.clone());
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let accounts = backend::accounts(&pg);
+    let sessions = backend::sessions(&pg);
     let name = AccountName::try_from("Ines Martin").expect("an admitted name");
 
     accounts
@@ -800,8 +800,9 @@ async fn emptying_the_name_writes_a_null_rather_than_a_blank() {
     let Some(pool) = control_plane("auth_unnamed_again").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let accounts = PostgresAccounts::new(pool.clone());
+    let accounts = backend::accounts(&pg);
     let name = AccountName::try_from("Ines Martin").expect("an admitted name");
     accounts
         .rename(account, Some(&name))
@@ -843,9 +844,10 @@ async fn a_portrait_travels_on_the_session() {
     let Some(pool) = control_plane("auth_portrait").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let accounts = PostgresAccounts::new(pool.clone());
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let accounts = backend::accounts(&pg);
+    let sessions = backend::sessions(&pg);
     let portrait = Portrait {
         token: "deadbeefdeadbeef".into(),
         kind: PhotoKind::Png,
@@ -873,8 +875,9 @@ async fn a_dropped_portrait_leaves_both_columns_null() {
     let Some(pool) = control_plane("auth_portrait_gone").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let accounts = PostgresAccounts::new(pool.clone());
+    let accounts = backend::accounts(&pg);
     accounts
         .set_portrait(
             account,
@@ -926,6 +929,7 @@ async fn a_type_the_build_does_not_know_reads_as_no_photo() {
     let Some(pool) = control_plane("auth_portrait_odd").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
     sqlx::query(
         "UPDATE accounts SET photo_token = 'deadbeef', photo_type = 'image/gif' WHERE id = $1",
@@ -935,7 +939,7 @@ async fn a_type_the_build_does_not_know_reads_as_no_photo() {
     .await
     .expect("the control plane holds what it is given");
 
-    let read = PostgresAccounts::new(pool.clone())
+    let read = backend::accounts(&pg)
         .portrait_of(account)
         .await
         .expect("it is read");
@@ -948,8 +952,9 @@ async fn the_roll_names_every_live_session_and_marks_the_caller() {
     let Some(pool) = control_plane("auth_roll").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let phone = Agent::new("Mozilla/5.0 (iPhone)").expect("an agent");
     let here = sessions
         .issue(account, None, Some(&phone))
@@ -974,8 +979,9 @@ async fn one_session_is_revoked_by_its_public_id_and_the_others_are_left() {
     let Some(pool) = control_plane("auth_revoke_one").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let here = sessions
         .issue(account, None, None)
         .await
@@ -1010,9 +1016,10 @@ async fn an_account_cannot_revoke_a_session_it_does_not_keep() {
     let Some(pool) = control_plane("auth_revoke_theirs").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let mine = an_account(&pool, "person@example.com", Some("secret")).await;
     let theirs = an_account(&pool, "other@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let hers = sessions.issue(theirs, None, None).await.expect("a session");
     let here = sessions.issue(theirs, None, None).await.expect("another");
     let named = sessions
@@ -1042,9 +1049,10 @@ async fn signing_out_the_others_spares_the_session_that_asked() {
     let Some(pool) = control_plane("auth_revoke_others").await else {
         return;
     };
+    let pg = at(&pool, NOW);
     let account = an_account(&pool, "person@example.com", Some("secret")).await;
     let theirs = an_account(&pool, "other@example.com", Some("secret")).await;
-    let sessions = PostgresSessions::new(pool.clone(), FixedClock::at(NOW), lifetime());
+    let sessions = backend::sessions(&pg);
     let here = sessions
         .issue(account, None, None)
         .await

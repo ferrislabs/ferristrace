@@ -1,14 +1,19 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AuthError, AuthProvider, Email, Issuer, Password, PasswordCheck, PasswordHash, PasswordHasher,
     ResolvedIdentity, SignInProof, Subject,
 };
-use sqlx::{PgPool, Row};
+use ferristrace_infra::Argon2Hasher;
+use sqlx::Row;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
-pub struct LocalPasswordProvider<H> {
-    pool: PgPool,
-    hasher: H,
+use crate::unit_of_work::{Postgres, SharedTx};
+
+#[repository(domain = LocalPasswords, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
+pub struct LocalPasswordProvider {
+    tx: SharedTx,
+    hasher: Argon2Hasher,
 }
 
 struct Stored {
@@ -17,18 +22,22 @@ struct Stored {
     hash: Option<PasswordHash>,
 }
 
-impl<H: PasswordHasher> LocalPasswordProvider<H> {
-    pub fn new(pool: PgPool, hasher: H) -> Self {
-        Self { pool, hasher }
+impl LocalPasswordProvider {
+    pub fn new<C>(backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self {
+            tx: tx.clone(),
+            hasher: backend.hasher.clone(),
+        }
     }
 
     async fn stored(&self, email: &Email) -> Result<Option<Stored>, AuthError> {
+        let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "SELECT id AS id, email AS email, password_hash AS password_hash \
              FROM accounts WHERE email = $1",
         )
         .bind(email.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|_| AuthError::ProviderUnreachable)?;
 
@@ -46,10 +55,11 @@ impl<H: PasswordHasher> LocalPasswordProvider<H> {
     }
 
     async fn upgrade(&self, account: Uuid, hash: &PasswordHash) {
+        let mut tx = self.tx.lock().await;
         let done = sqlx::query("UPDATE accounts SET password_hash = $2 WHERE id = $1")
             .bind(account)
             .bind(hash.encoded())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await;
         if let Err(error) = done {
             tracing::error!(%error, "the password hash was not upgraded");
@@ -57,7 +67,7 @@ impl<H: PasswordHasher> LocalPasswordProvider<H> {
     }
 }
 
-impl<H: PasswordHasher + Send + Sync> AuthProvider for LocalPasswordProvider<H> {
+impl AuthProvider for LocalPasswordProvider {
     async fn sign_in(&self, proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
         let SignInProof::Password { email, password } = proof else {
             return Err(AuthError::SourceDisabled);

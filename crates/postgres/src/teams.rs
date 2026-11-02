@@ -1,30 +1,35 @@
 use std::collections::BTreeMap;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Named, Owned, ProjectId, ReadError, Squads, Team, TeamId, TeamName, TenantId,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+use crate::unit_of_work::{Postgres, SharedTx};
+
+#[repository(domain = Teams, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresTeams {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresTeams {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 }
 
 impl Squads for PostgresTeams {
     async fn of(&self, org: TenantId) -> Result<Vec<Team>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT id AS id, name AS name, created_at AS created_at \
              FROM teams WHERE org_id = $1 ORDER BY name, id",
         )
         .bind(org.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read the teams"))?;
 
@@ -33,7 +38,7 @@ impl Squads for PostgresTeams {
              FROM team_members WHERE org_id = $1 ORDER BY account_id",
         )
         .bind(org.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read who is on the teams"))?;
 
@@ -42,7 +47,7 @@ impl Squads for PostgresTeams {
              FROM projects WHERE org_id = $1 AND team_id IS NOT NULL ORDER BY name, id",
         )
         .bind(org.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read what the teams own"))?;
 
@@ -79,6 +84,7 @@ impl Squads for PostgresTeams {
     }
 
     async fn create(&self, org: TenantId, name: &TeamName) -> Result<Named, ReadError> {
+        let mut tx = self.tx.lock().await;
         let written = sqlx::query(
             "INSERT INTO teams (id, org_id, name) VALUES ($1, $2, $3) \
              ON CONFLICT (org_id, name) DO NOTHING RETURNING id AS id",
@@ -86,7 +92,7 @@ impl Squads for PostgresTeams {
         .bind(Uuid::new_v4())
         .bind(org.as_uuid())
         .bind(name.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "create a team"))?;
 
@@ -99,12 +105,13 @@ impl Squads for PostgresTeams {
         team: TeamId,
         name: &TeamName,
     ) -> Result<Named, ReadError> {
+        let mut tx = self.tx.lock().await;
         let clash =
             sqlx::query("SELECT 1 AS one FROM teams WHERE org_id = $1 AND name = $2 AND id <> $3")
                 .bind(org.as_uuid())
                 .bind(name.as_str())
                 .bind(team.as_uuid())
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(|error| unreachable(&error, "look a team name up"))?;
         if clash.is_some() {
@@ -115,7 +122,7 @@ impl Squads for PostgresTeams {
             .bind(org.as_uuid())
             .bind(team.as_uuid())
             .bind(name.as_str())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
         {
             Ok(_) => Ok(Named::Free),
@@ -127,10 +134,11 @@ impl Squads for PostgresTeams {
     }
 
     async fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM teams WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
             .bind(team.as_uuid())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| unreachable(&error, "disband a team"))
@@ -144,20 +152,16 @@ impl Squads for PostgresTeams {
     ) -> Result<bool, ReadError> {
         let accounts: Vec<Uuid> = members.iter().map(|member| member.as_uuid()).collect();
 
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| unreachable(&error, "begin seating a team"))?;
+        let mut tx = self.tx.lock().await;
 
-        if !holds(&mut *transaction, org, team).await? {
+        if !holds(&mut **tx, org, team).await? {
             return Ok(false);
         }
 
         sqlx::query("DELETE FROM team_members WHERE org_id = $1 AND team_id = $2")
             .bind(org.as_uuid())
             .bind(team.as_uuid())
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error, "clear a team"))?;
 
@@ -169,14 +173,10 @@ impl Squads for PostgresTeams {
         .bind(org.as_uuid())
         .bind(team.as_uuid())
         .bind(&accounts)
-        .execute(&mut *transaction)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "seat a team"))?;
 
-        transaction
-            .commit()
-            .await
-            .map_err(|error| unreachable(&error, "finish seating a team"))?;
         Ok(true)
     }
 
@@ -188,13 +188,9 @@ impl Squads for PostgresTeams {
     ) -> Result<bool, ReadError> {
         let claimed: Vec<Uuid> = projects.iter().map(|project| project.as_uuid()).collect();
 
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| unreachable(&error, "begin handing a team its projects"))?;
+        let mut tx = self.tx.lock().await;
 
-        if !holds(&mut *transaction, org, team).await? {
+        if !holds(&mut **tx, org, team).await? {
             return Ok(false);
         }
 
@@ -205,7 +201,7 @@ impl Squads for PostgresTeams {
         .bind(org.as_uuid())
         .bind(team.as_uuid())
         .bind(&claimed)
-        .execute(&mut *transaction)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "let a project go"))?;
 
@@ -213,14 +209,10 @@ impl Squads for PostgresTeams {
             .bind(org.as_uuid())
             .bind(team.as_uuid())
             .bind(&claimed)
-            .execute(&mut *transaction)
+            .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error, "hand a team its projects"))?;
 
-        transaction
-            .commit()
-            .await
-            .map_err(|error| unreachable(&error, "finish handing a team its projects"))?;
         Ok(true)
     }
 }

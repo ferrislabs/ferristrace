@@ -1,5 +1,6 @@
 use ferristrace_domain::{DecompressedBytes, TenantId, UsageHistory, Window};
-use ferristrace_postgres::{CONTROL_PLANE, PostgresMemberships, PostgresUsage};
+use ferristrace_infra::FixedClock;
+use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
@@ -7,6 +8,7 @@ use uuid::Uuid;
 const AN_HOUR: u64 = 3_600_000_000_000;
 const A_GIGABYTE: u64 = 1024 * 1024 * 1024;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -57,7 +59,7 @@ async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
         .execute(pool)
         .await
         .expect("inserting an account");
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(1_700_000_000)))
         .found("Acme", owner)
         .await
         .expect("the organisation is founded")
@@ -101,12 +103,13 @@ async fn the_hours_of_a_window_come_back_in_order() {
     let Some(pool) = control_plane("usage_hours").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     for (hour, bytes) in [(3, 300), (1, 100), (2, 200)] {
         an_hour(&pool, org, AN_HOUR * hour, bytes).await;
     }
 
-    let read = PostgresUsage::new(pool.clone())
+    let read = backend::usage(&pg)
         .hours(org, a_window(AN_HOUR, AN_HOUR * 4))
         .await
         .expect("the hours are read");
@@ -125,10 +128,11 @@ async fn the_hour_a_window_ends_on_belongs_to_the_next_one() {
     let Some(pool) = control_plane("usage_half_open").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     an_hour(&pool, org, AN_HOUR, 100).await;
     an_hour(&pool, org, AN_HOUR * 2, 200).await;
-    let usage = PostgresUsage::new(pool.clone());
+    let usage = backend::usage(&pg);
 
     let first = usage
         .hours(org, a_window(AN_HOUR, AN_HOUR * 2))
@@ -150,12 +154,13 @@ async fn the_hours_of_another_organisation_are_not_read() {
     let Some(pool) = control_plane("usage_theirs").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
     an_hour(&pool, mine, AN_HOUR, 100).await;
     an_hour(&pool, theirs, AN_HOUR, 900).await;
 
-    let read = PostgresUsage::new(pool.clone())
+    let read = backend::usage(&pg)
         .hours(mine, a_window(AN_HOUR, AN_HOUR * 2))
         .await
         .expect("the hours are read");
@@ -169,9 +174,10 @@ async fn a_window_nothing_arrived_in_reads_as_empty_rather_than_as_an_error() {
     let Some(pool) = control_plane("usage_quiet").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
 
-    let read = PostgresUsage::new(pool)
+    let read = backend::usage(&pg)
         .hours(org, a_window(AN_HOUR, AN_HOUR * 100))
         .await
         .expect("the hours are read");
@@ -184,10 +190,11 @@ async fn what_a_plan_allows_is_read_in_binary_gigabytes() {
     let Some(pool) = control_plane("usage_capped").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     capped(&pool, org, 5).await;
 
-    let included = PostgresUsage::new(pool)
+    let included = backend::usage(&pg)
         .included(org)
         .await
         .expect("the plan is read");
@@ -204,9 +211,10 @@ async fn a_plan_with_no_ceiling_includes_nothing() {
     let Some(pool) = control_plane("usage_unlimited").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
 
-    let included = PostgresUsage::new(pool)
+    let included = backend::usage(&pg)
         .included(org)
         .await
         .expect("the plan is read");
@@ -222,8 +230,9 @@ async fn an_organisation_nothing_carries_includes_nothing() {
     let Some(pool) = control_plane("usage_no_org").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
 
-    let included = PostgresUsage::new(pool)
+    let included = backend::usage(&pg)
         .included(TenantId::new(Uuid::new_v4()))
         .await
         .expect("the control plane answers");

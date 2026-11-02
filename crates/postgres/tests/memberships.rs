@@ -1,9 +1,11 @@
 use ferristrace_domain::{AccountId, Membership, Memberships, OrgName, OrgRole, Orgs, TenantId};
-use ferristrace_postgres::{CONTROL_PLANE, MembershipError, PostgresMemberships, PostgresOrgs};
+use ferristrace_infra::FixedClock;
+use ferristrace_postgres::{CONTROL_PLANE, MembershipError, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -73,8 +75,9 @@ async fn founding_an_organisation_makes_its_first_account_the_owner() {
     let Some(pool) = control_plane("memberships_founding").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let account = an_account(&pool, "founder@example.com").await;
-    let memberships = PostgresMemberships::new(pool.clone());
+    let memberships = backend::memberships(&pg);
 
     let org = memberships
         .found("Acme", "founder@example.com")
@@ -100,7 +103,8 @@ async fn founding_an_organisation_for_a_stranger_leaves_nothing_behind() {
     let Some(pool) = control_plane("memberships_stranger").await else {
         return;
     };
-    let memberships = PostgresMemberships::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let memberships = backend::memberships(&pg);
 
     let refused = memberships.found("Acme", "nobody@example.com").await;
 
@@ -121,9 +125,10 @@ async fn a_granted_role_replaces_the_one_already_held() {
     let Some(pool) = control_plane("memberships_regrant").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let owner = an_account(&pool, "owner@example.com").await;
     let joiner = an_account(&pool, "joiner@example.com").await;
-    let memberships = PostgresMemberships::new(pool.clone());
+    let memberships = backend::memberships(&pg);
     let org = memberships
         .found("Acme", "owner@example.com")
         .await
@@ -154,8 +159,9 @@ async fn an_account_carries_every_organisation_it_belongs_to() {
     let Some(pool) = control_plane("memberships_several").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let account = an_account(&pool, "both@example.com").await;
-    let memberships = PostgresMemberships::new(pool.clone());
+    let memberships = backend::memberships(&pg);
     let first = memberships
         .found("First", "both@example.com")
         .await
@@ -178,9 +184,10 @@ async fn an_account_in_no_organisation_carries_no_role() {
     let Some(pool) = control_plane("memberships_none").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let lonely = an_account(&pool, "lonely@example.com").await;
 
-    let held = PostgresMemberships::new(pool)
+    let held = backend::memberships(&pg)
         .of(lonely)
         .await
         .expect("the memberships");
@@ -193,8 +200,9 @@ async fn deleting_an_organisation_takes_its_memberships_with_it() {
     let Some(pool) = control_plane("memberships_cascade").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let account = an_account(&pool, "owner@example.com").await;
-    let memberships = PostgresMemberships::new(pool.clone());
+    let memberships = backend::memberships(&pg);
     let org = memberships
         .found("Acme", "owner@example.com")
         .await
@@ -220,13 +228,14 @@ async fn an_organisation_reads_back_with_its_name_its_plan_and_when_it_was_found
     let Some(pool) = control_plane("memberships_card").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     an_account(&pool, "card@example.com").await;
-    let org = PostgresMemberships::new(pool.clone())
+    let org = backend::memberships(&pg)
         .found("Acme", "card@example.com")
         .await
         .expect("the organisation is founded");
 
-    let card = PostgresOrgs::new(pool.clone())
+    let card = backend::orgs(&pg)
         .only(org)
         .await
         .expect("the organisation is read")
@@ -250,12 +259,13 @@ async fn renaming_an_organisation_leaves_its_id_and_its_founding_instant_alone()
     let Some(pool) = control_plane("memberships_rename").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     an_account(&pool, "rename@example.com").await;
-    let org = PostgresMemberships::new(pool.clone())
+    let org = backend::memberships(&pg)
         .found("Acme", "rename@example.com")
         .await
         .expect("the organisation is founded");
-    let orgs = PostgresOrgs::new(pool.clone());
+    let orgs = backend::orgs(&pg);
     let before = orgs
         .only(org)
         .await
@@ -281,8 +291,9 @@ async fn an_id_no_organisation_carries_reads_as_nothing() {
     let Some(pool) = control_plane("memberships_no_card").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
 
-    let found = PostgresOrgs::new(pool)
+    let found = backend::orgs(&pg)
         .only(TenantId::new(Uuid::new_v4()))
         .await
         .expect("the organisation is read");

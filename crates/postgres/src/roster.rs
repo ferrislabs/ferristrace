@@ -1,34 +1,40 @@
 use std::time::Duration;
 
+use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Admitted, Clock, Email, Member, OrgRole, ReadError, Roll, SecretHash, TenantId,
     UnixSeconds,
 };
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Row, postgres::PgRow};
 use tokio::task;
 use uuid::Uuid;
 
 use crate::accounts::read_portrait;
 use crate::memberships::read_role;
+use crate::unit_of_work::{Postgres, SharedTx};
 use ferristrace_infra::Argon2Hasher;
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
 
 const WAY_IN_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
-#[derive(Debug, Clone)]
+#[repository(domain = Roster, backend = Postgres<C>, generics = <C: Clock + Clone + Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresRoster<C> {
-    pool: PgPool,
+    tx: SharedTx,
     hasher: Argon2Hasher,
     clock: C,
 }
 
 impl<C: Clock> PostgresRoster<C> {
-    pub fn new(pool: PgPool, hasher: Argon2Hasher, clock: C) -> Self {
+    pub fn new(backend: &Postgres<C>, tx: &SharedTx) -> Self
+    where
+        C: Clone,
+    {
         Self {
-            pool,
-            hasher,
-            clock,
+            tx: tx.clone(),
+            hasher: backend.hasher.clone(),
+            clock: backend.clock().clone(),
         }
     }
 
@@ -47,6 +53,7 @@ impl<C: Clock> PostgresRoster<C> {
 
 impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
     async fn of(&self, org: TenantId) -> Result<Vec<Member>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT m.account_id AS account_id, a.email AS email, a.name AS name, \
              a.photo_token AS photo_token, a.photo_type AS photo_type, \
@@ -55,7 +62,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
              WHERE m.org_id = $1 ORDER BY m.role, a.email",
         )
         .bind(org.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read the members");
@@ -71,6 +78,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         account: AccountId,
         role: OrgRole,
     ) -> Result<Option<Member>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "UPDATE org_members m SET role = $3::org_role FROM accounts a \
              WHERE m.org_id = $1 AND m.account_id = $2 AND a.id = m.account_id \
@@ -81,7 +89,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .bind(org.as_uuid())
         .bind(account.as_uuid())
         .bind(role.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to change a role");
@@ -92,10 +100,11 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
     }
 
     async fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM org_members WHERE org_id = $1 AND account_id = $2")
             .bind(org.as_uuid())
             .bind(account.as_uuid())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| {
@@ -119,18 +128,14 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
                 .saturating_add_secs(WAY_IN_WINDOW.as_secs()),
         );
 
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| unreachable(&error))?;
+        let mut tx = self.tx.lock().await;
 
         let standing = sqlx::query(
             "SELECT id AS id, name AS name, photo_token AS photo_token, \
              photo_type AS photo_type FROM accounts WHERE email = $1",
         )
         .bind(email.as_str())
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
 
@@ -141,7 +146,7 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
                 read_portrait(row),
             ),
             None => (
-                locked_account(&mut *transaction, email, &locked)
+                locked_account(&mut **tx, email, &locked)
                     .await
                     .map_err(|error| unreachable(&error))?,
                 None,
@@ -157,15 +162,11 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .bind(org.as_uuid())
         .bind(account)
         .bind(role.as_str())
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
 
         let Some(row) = joined else {
-            transaction
-                .rollback()
-                .await
-                .map_err(|error| unreachable(&error))?;
             return Ok(Admitted::AlreadyIn);
         };
 
@@ -179,10 +180,6 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         };
 
         if standing.is_some() {
-            transaction
-                .commit()
-                .await
-                .map_err(|error| unreachable(&error))?;
             return Ok(Admitted::Standing(member));
         }
 
@@ -194,14 +191,10 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .bind(account)
         .bind(now)
         .bind(expires)
-        .execute(&mut *transaction)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
 
-        transaction
-            .commit()
-            .await
-            .map_err(|error| unreachable(&error))?;
         Ok(Admitted::Awaiting(member))
     }
 }

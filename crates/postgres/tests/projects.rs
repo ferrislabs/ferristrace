@@ -1,15 +1,16 @@
+use backend::Each;
+use ferristrace_application::registry::domain;
 use ferristrace_domain::{
     Assigned, Created, ProjectId, ProjectName, Projects, ReadError, Renamed, Squads, TeamId,
     TeamName, TenantId,
 };
 use ferristrace_infra::FixedClock;
-use ferristrace_postgres::{
-    CONTROL_PLANE, PostgresDirectory, PostgresMemberships, PostgresProjects, PostgresTeams,
-};
+use ferristrace_postgres::{CONTROL_PLANE, Postgres, PostgresDirectory};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -60,7 +61,7 @@ async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
         .execute(pool)
         .await
         .expect("inserting an account");
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(1_700_000_000)))
         .found("Acme", owner)
         .await
         .expect("the organisation is founded")
@@ -70,7 +71,11 @@ fn a_slug(name: &str) -> ProjectName {
     ProjectName::try_from(name).expect("an admitted name")
 }
 
-async fn a_project(projects: &PostgresProjects, org: TenantId, name: &str) -> ProjectId {
+async fn a_project(
+    projects: &Each<'_, domain::Projects, FixedClock>,
+    org: TenantId,
+    name: &str,
+) -> ProjectId {
     assert_eq!(
         projects.create(org, &a_slug(name)).await.expect("a create"),
         Created::Done
@@ -78,7 +83,11 @@ async fn a_project(projects: &PostgresProjects, org: TenantId, name: &str) -> Pr
     named(projects, org, name).await
 }
 
-async fn named(projects: &PostgresProjects, org: TenantId, name: &str) -> ProjectId {
+async fn named(
+    projects: &Each<'_, domain::Projects, FixedClock>,
+    org: TenantId,
+    name: &str,
+) -> ProjectId {
     projects
         .of(org)
         .await
@@ -90,7 +99,8 @@ async fn named(projects: &PostgresProjects, org: TenantId, name: &str) -> Projec
 }
 
 async fn a_team(pool: &PgPool, org: TenantId, name: &str) -> TeamId {
-    let teams = PostgresTeams::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let teams = backend::teams(&pg);
     teams
         .create(org, &TeamName::try_from(name).expect("a name"))
         .await
@@ -121,8 +131,9 @@ async fn a_created_project_reads_back_with_no_team_and_no_keys() {
     let Some(pool) = control_plane("projects_create").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
 
     projects
         .create(org, &a_slug("storefront"))
@@ -146,9 +157,10 @@ async fn a_name_one_organisation_holds_is_still_free_in_another() {
     let Some(pool) = control_plane("projects_names").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     a_project(&projects, mine, "storefront").await;
 
     let again = projects
@@ -169,8 +181,9 @@ async fn renaming_a_project_keeps_its_id_and_its_keys() {
     let Some(pool) = control_plane("projects_rename").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, org, "storefront").await;
     PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000))
         .issue(org, Some(storefront.as_uuid()))
@@ -192,8 +205,9 @@ async fn renaming_a_project_tells_a_clash_apart_from_a_project_that_is_not_there
     let Some(pool) = control_plane("projects_rename_refused").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, org, "storefront").await;
     a_project(&projects, org, "payments-eu").await;
 
@@ -216,8 +230,9 @@ async fn the_count_of_keys_is_the_count_that_still_authenticate() {
     let Some(pool) = control_plane("projects_keys").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, org, "storefront").await;
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
     let drawn = directory
@@ -246,8 +261,9 @@ async fn a_project_is_handed_to_a_team_and_taken_back_again() {
     let Some(pool) = control_plane("projects_assign").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, org, "storefront").await;
     let backend = a_team(&pool, org, "Backend").await;
 
@@ -278,9 +294,10 @@ async fn a_team_of_another_organisation_is_refused_the_project() {
     let Some(pool) = control_plane("projects_their_team").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, mine, "storefront").await;
     let theirteam = a_team(&pool, theirs, "Backend").await;
 
@@ -298,8 +315,9 @@ async fn assigning_a_project_the_organisation_does_not_hold_is_told_apart_from_a
     let Some(pool) = control_plane("projects_assign_gone").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
 
     let gone = projects
         .assign(org, ProjectId::new(Uuid::new_v4()), None)
@@ -314,9 +332,10 @@ async fn a_project_of_another_organisation_is_not_there_to_arrange() {
     let Some(pool) = control_plane("projects_theirs").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let ours = a_project(&projects, mine, "storefront").await;
 
     assert_eq!(
@@ -342,8 +361,9 @@ async fn forgetting_a_project_takes_its_keys_and_leaves_the_team_standing() {
     let Some(pool) = control_plane("projects_forget").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     let storefront = a_project(&projects, org, "storefront").await;
     let backend = a_team(&pool, org, "Backend").await;
     projects
@@ -372,8 +392,9 @@ async fn a_catalogue_reads_in_the_order_a_person_would_look_for_a_name_in() {
     let Some(pool) = control_plane("projects_order").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let projects = PostgresProjects::new(pool.clone());
+    let projects = backend::projects(&pg);
     for name in ["storefront", "ads", "payments-eu"] {
         a_project(&projects, org, name).await;
     }
@@ -391,9 +412,10 @@ async fn a_read_of_an_organisation_with_nothing_in_it_is_an_empty_catalogue() {
     let Some(pool) = control_plane("projects_none").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
 
-    let held: Result<_, ReadError> = PostgresProjects::new(pool).of(org).await;
+    let held: Result<_, ReadError> = backend::projects(&pg).of(org).await;
 
     assert!(held.expect("the projects").is_empty());
 }

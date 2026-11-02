@@ -1,14 +1,16 @@
+use backend::Each;
+use ferristrace_application::registry::domain;
 use ferristrace_domain::{
     AccountId, Named, OrgRole, ProjectId, ProjectName, Roll, Squads, Team, TeamId, TeamName,
     TenantId,
 };
-use ferristrace_postgres::{
-    CONTROL_PLANE, PostgresMemberships, PostgresProjects, PostgresRoster, PostgresTeams,
-};
+use ferristrace_infra::FixedClock;
+use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -65,7 +67,7 @@ async fn an_account(pool: &PgPool, email: &str) -> AccountId {
 
 async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
     an_account(pool, owner).await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(1_700_000_000)))
         .found("Acme", owner)
         .await
         .expect("the organisation is founded")
@@ -73,7 +75,7 @@ async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
 
 async fn a_member(pool: &PgPool, org: TenantId, email: &str) -> AccountId {
     let account = an_account(pool, email).await;
-    PostgresMemberships::new(pool.clone())
+    backend::memberships(&Postgres::new(pool.clone(), FixedClock::at(1_700_000_000)))
         .grant(org, email, OrgRole::Member)
         .await
         .expect("the grant");
@@ -81,7 +83,7 @@ async fn a_member(pool: &PgPool, org: TenantId, email: &str) -> AccountId {
 }
 
 async fn a_project(pool: &PgPool, org: TenantId, name: &str) -> ProjectId {
-    PostgresProjects::new(pool.clone())
+    backend::projects(&Postgres::new(pool.clone(), FixedClock::at(1_700_000_000)))
         .claim(org, &ProjectName::try_from(name).expect("an admitted name"))
         .await
         .expect("creating the project")
@@ -91,7 +93,7 @@ fn a_name(spelling: &str) -> TeamName {
     TeamName::try_from(spelling).expect("an admitted name")
 }
 
-async fn a_team(teams: &PostgresTeams, org: TenantId, name: &str) -> TeamId {
+async fn a_team(teams: &Each<'_, domain::Teams, FixedClock>, org: TenantId, name: &str) -> TeamId {
     assert_eq!(
         teams.create(org, &a_name(name)).await.expect("the create"),
         Named::Free
@@ -99,7 +101,7 @@ async fn a_team(teams: &PostgresTeams, org: TenantId, name: &str) -> TeamId {
     named(teams, org, name).await.id
 }
 
-async fn named(teams: &PostgresTeams, org: TenantId, name: &str) -> Team {
+async fn named(teams: &Each<'_, domain::Teams, FixedClock>, org: TenantId, name: &str) -> Team {
     teams
         .of(org)
         .await
@@ -123,8 +125,9 @@ async fn a_created_team_reads_back_with_nobody_on_it_and_nothing_owned() {
     let Some(pool) = control_plane("teams_create").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
 
     teams
         .create(org, &a_name("Backend"))
@@ -146,9 +149,10 @@ async fn a_name_one_organisation_holds_is_still_free_in_another() {
     let Some(pool) = control_plane("teams_names").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     a_team(&teams, mine, "Backend").await;
 
     let again = teams
@@ -170,8 +174,9 @@ async fn a_team_renamed_to_the_name_it_already_has_is_not_a_clash() {
     let Some(pool) = control_plane("teams_rename_self").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
 
     let again = teams
@@ -188,8 +193,9 @@ async fn renaming_a_team_onto_another_teams_name_is_refused() {
     let Some(pool) = control_plane("teams_rename_clash").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     a_team(&teams, org, "Payments").await;
 
@@ -207,10 +213,11 @@ async fn seating_writes_the_whole_list_and_a_second_one_replaces_it() {
     let Some(pool) = control_plane("teams_seat").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let first = a_member(&pool, org, "first@example.com").await;
     let second = a_member(&pool, org, "second@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
 
     assert!(
@@ -240,10 +247,11 @@ async fn leaving_the_organisation_takes_you_off_its_teams() {
     let Some(pool) = control_plane("teams_leaving").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let leaver = a_member(&pool, org, "leaver@example.com").await;
     let stayer = a_member(&pool, org, "stayer@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     teams
         .seat(org, backend, &[leaver, stayer])
@@ -265,11 +273,12 @@ async fn an_account_of_another_organisation_is_dropped_rather_than_seated() {
     let Some(pool) = control_plane("teams_stranger").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
     let ours = a_member(&pool, mine, "ours@example.com").await;
     let stranger = a_member(&pool, theirs, "stranger@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, mine, "Backend").await;
 
     teams
@@ -289,10 +298,11 @@ async fn a_project_has_one_owner_team_so_claiming_it_takes_it_off_the_other() {
     let Some(pool) = control_plane("teams_own").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let storefront = a_project(&pool, org, "storefront").await;
     let payments = a_project(&pool, org, "payments-eu").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     let mobile = a_team(&teams, org, "Mobile").await;
 
@@ -321,9 +331,10 @@ async fn a_project_left_off_the_list_asked_for_is_let_go() {
     let Some(pool) = control_plane("teams_disown").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let storefront = a_project(&pool, org, "storefront").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     teams
         .own(org, backend, &[storefront])
@@ -341,10 +352,11 @@ async fn disbanding_a_team_leaves_its_projects_behind_with_no_owner() {
     let Some(pool) = control_plane("teams_disband").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let storefront = a_project(&pool, org, "storefront").await;
     let member = a_member(&pool, org, "member@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     teams
         .own(org, backend, &[storefront])
@@ -372,9 +384,10 @@ async fn a_team_of_another_organisation_is_not_there_to_arrange() {
     let Some(pool) = control_plane("teams_theirs").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let mine = an_org(&pool, "mine@example.com").await;
     let theirs = an_org(&pool, "theirs@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let ours = a_team(&teams, mine, "Backend").await;
 
     assert!(!teams.seat(theirs, ours, &[]).await.expect("the seating"));
@@ -392,9 +405,10 @@ async fn deleting_an_organisation_takes_its_teams_with_it() {
     let Some(pool) = control_plane("teams_cascade").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let member = a_member(&pool, org, "member@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     teams
         .seat(org, backend, &[member])
@@ -424,23 +438,22 @@ async fn a_member_removed_through_the_roster_is_off_the_teams_too() {
     let Some(pool) = control_plane("teams_roster").await else {
         return;
     };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let org = an_org(&pool, "owner@example.com").await;
     let leaver = a_member(&pool, org, "leaver@example.com").await;
-    let teams = PostgresTeams::new(pool.clone());
+    let teams = backend::teams(&pg);
     let backend = a_team(&teams, org, "Backend").await;
     teams
         .seat(org, backend, &[leaver])
         .await
         .expect("the seating");
 
-    let removed = PostgresRoster::new(
-        pool.clone(),
-        ferristrace_infra::Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"),
-        ferristrace_infra::SystemClock,
-    )
-    .remove(org, leaver)
-    .await
-    .expect("the removal");
+    let roster_backend = Postgres::new(pool.clone(), ferristrace_infra::SystemClock)
+        .with_hasher(ferristrace_infra::Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher"));
+    let removed = backend::roster(&roster_backend)
+        .remove(org, leaver)
+        .await
+        .expect("the removal");
 
     assert!(removed);
     assert!(named(&teams, org, "Backend").await.members.is_empty());

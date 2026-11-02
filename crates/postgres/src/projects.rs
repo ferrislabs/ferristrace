@@ -1,9 +1,12 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{
     Assigned, Created, OwnerTeam, Project, ProjectId, ProjectName, Projects, ReadError, Renamed,
     TeamId, TenantId,
 };
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
+
+use crate::unit_of_work::{Postgres, SharedTx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -15,14 +18,15 @@ pub enum ProjectError {
     Taken(String),
 }
 
-#[derive(Debug, Clone)]
+#[repository(domain = Projects, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresProjects {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresProjects {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 
     pub async fn claim(
@@ -30,12 +34,13 @@ impl PostgresProjects {
         org: TenantId,
         name: &ProjectName,
     ) -> Result<ProjectId, ProjectError> {
+        let mut tx = self.tx.lock().await;
         let id = Uuid::new_v4();
         sqlx::query("INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3)")
             .bind(id)
             .bind(org.as_uuid())
             .bind(name.as_str())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| match &error {
                 sqlx::Error::Database(refusal) if refusal.is_unique_violation() => {
@@ -50,11 +55,12 @@ impl PostgresProjects {
     }
 
     pub async fn only(&self, org: TenantId) -> Result<Option<ProjectId>, ProjectError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT id AS id FROM projects WHERE org_id = $1 ORDER BY created_at LIMIT 2",
         )
         .bind(org.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await?;
         if found.len() == 1 {
             Ok(Some(ProjectId::new(found[0].get("id"))))
@@ -66,6 +72,7 @@ impl PostgresProjects {
 
 impl Projects for PostgresProjects {
     async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
             "SELECT p.id AS id, p.name AS name, p.created_at AS created_at, \
              t.id AS team_id, t.name AS team_name, \
@@ -75,7 +82,7 @@ impl Projects for PostgresProjects {
              WHERE p.org_id = $1 ORDER BY p.name, p.id",
         )
         .bind(tenant.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "read the projects"))?;
 
@@ -97,6 +104,7 @@ impl Projects for PostgresProjects {
     }
 
     async fn create(&self, org: TenantId, name: &ProjectName) -> Result<Created, ReadError> {
+        let mut tx = self.tx.lock().await;
         let written = sqlx::query(
             "INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) \
              ON CONFLICT (org_id, name) DO NOTHING RETURNING id AS id",
@@ -104,7 +112,7 @@ impl Projects for PostgresProjects {
         .bind(Uuid::new_v4())
         .bind(org.as_uuid())
         .bind(name.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "create a project"))?;
 
@@ -121,11 +129,12 @@ impl Projects for PostgresProjects {
         project: ProjectId,
         name: &ProjectName,
     ) -> Result<Renamed, ReadError> {
+        let mut tx = self.tx.lock().await;
         match sqlx::query("UPDATE projects SET name = $3 WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
             .bind(project.as_uuid())
             .bind(name.as_str())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
         {
             Ok(done) if done.rows_affected() > 0 => Ok(Renamed::Done),
@@ -138,10 +147,11 @@ impl Projects for PostgresProjects {
     }
 
     async fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("DELETE FROM projects WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
             .bind(project.as_uuid())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map(|done| done.rows_affected() > 0)
             .map_err(|error| unreachable(&error, "forget a project"))
@@ -153,6 +163,7 @@ impl Projects for PostgresProjects {
         project: ProjectId,
         team: Option<TeamId>,
     ) -> Result<Assigned, ReadError> {
+        let mut tx = self.tx.lock().await;
         let wanted = team.map(TeamId::as_uuid);
         let done = sqlx::query(
             "UPDATE projects SET team_id = $3 WHERE org_id = $1 AND id = $2 \
@@ -162,7 +173,7 @@ impl Projects for PostgresProjects {
         .bind(org.as_uuid())
         .bind(project.as_uuid())
         .bind(wanted)
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error, "hand a project to a team"))?;
 
@@ -173,7 +184,7 @@ impl Projects for PostgresProjects {
         let there = sqlx::query("SELECT 1 AS one FROM projects WHERE org_id = $1 AND id = $2")
             .bind(org.as_uuid())
             .bind(project.as_uuid())
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|error| unreachable(&error, "look a project up"))?;
 

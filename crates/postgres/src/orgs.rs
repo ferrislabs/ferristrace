@@ -1,21 +1,25 @@
+use ferristrace_application::repository;
 use ferristrace_domain::{OrgName, Organisation, Orgs, Portrait, ReadError, TenantId};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use crate::accounts::read_portrait;
+use crate::unit_of_work::{Postgres, SharedTx};
 
-#[derive(Debug, Clone)]
+#[repository(domain = Orgs, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
 pub struct PostgresOrgs {
-    pool: PgPool,
+    tx: SharedTx,
 }
 
 impl PostgresOrgs {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new<C>(_backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self { tx: tx.clone() }
     }
 }
 
 impl Orgs for PostgresOrgs {
     async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+        let mut tx = self.tx.lock().await;
         let found = sqlx::query(
             "SELECT o.name AS name, p.name AS plan, o.created_at AS created_at, \
              o.logo_token AS photo_token, o.logo_type AS photo_type \
@@ -23,7 +27,7 @@ impl Orgs for PostgresOrgs {
              WHERE o.id = $1",
         )
         .bind(org.as_uuid())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(%error, "the control plane refused to read an organisation");
@@ -41,10 +45,11 @@ impl Orgs for PostgresOrgs {
     }
 
     async fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE orgs SET name = $2 WHERE id = $1")
             .bind(org.as_uuid())
             .bind(name.as_str())
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to rename an organisation");
@@ -54,11 +59,12 @@ impl Orgs for PostgresOrgs {
     }
 
     async fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError> {
+        let mut tx = self.tx.lock().await;
         sqlx::query("UPDATE orgs SET logo_token = $2, logo_type = $3 WHERE id = $1")
             .bind(org.as_uuid())
             .bind(logo.map(|kept| kept.token.as_ref()))
             .bind(logo.map(|kept| kept.kind.as_str()))
-            .execute(&self.pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 tracing::error!(%error, "the control plane refused to keep a logo");

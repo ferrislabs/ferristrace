@@ -1,11 +1,15 @@
+use backend::Each;
+use ferristrace_application::registry::domain;
 use ferristrace_domain::{
     AccountId, Counted, Decision, Fingerprint, Issue, IssueDecisions, ProjectId, Status,
 };
-use ferristrace_postgres::{CONTROL_PLANE, PostgresDecisions};
+use ferristrace_infra::FixedClock;
+use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
+#[macro_use]
 mod backend;
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -89,7 +93,10 @@ fn seen_at(last_seen_unix_nanos: u64) -> Counted {
     }
 }
 
-async fn the_decision(decisions: &PostgresDecisions, project: ProjectId) -> Decision {
+async fn the_decision(
+    decisions: &Each<'_, domain::Decisions, FixedClock>,
+    project: ProjectId,
+) -> Decision {
     let found = decisions
         .read_many(&[(project, a_print())])
         .await
@@ -104,7 +111,8 @@ async fn an_issue_nobody_touched_has_no_row() {
     let Some(pool) = control_plane("decisions_untouched").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
 
     let found = decisions
         .read_many(&[(project(10), a_print())])
@@ -124,7 +132,8 @@ async fn resolving_writes_the_status_the_moment_and_the_account() {
     let Some(pool) = control_plane("decisions_resolve").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
 
     decisions
@@ -149,7 +158,8 @@ async fn deciding_again_replaces_the_status_and_keeps_the_owner() {
     let Some(pool) = control_plane("decisions_again").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
     let bob = an_account(&pool, "bob@acme.test").await;
 
@@ -187,7 +197,8 @@ async fn assigning_an_owner_keeps_the_moment_a_status_was_decided() {
     let Some(pool) = control_plane("decisions_assign").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
     let bob = an_account(&pool, "bob@acme.test").await;
 
@@ -234,7 +245,8 @@ async fn assigning_an_untouched_issue_leaves_it_unresolved() {
     let Some(pool) = control_plane("decisions_assign_first").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
     let bob = an_account(&pool, "bob@acme.test").await;
 
@@ -253,7 +265,8 @@ async fn a_decision_is_keyed_by_project_and_print() {
     let Some(pool) = control_plane("decisions_keyed").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
     let other = Fingerprint::of("payments", "DbError", "connection refused");
 
@@ -306,7 +319,8 @@ async fn a_deleted_account_leaves_the_decision_in_place() {
     let Some(pool) = control_plane("decisions_outlive_accounts").await else {
         return;
     };
-    let decisions = PostgresDecisions::new(pool.clone());
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let decisions = backend::decisions(&pg);
     let alice = an_account(&pool, "alice@acme.test").await;
 
     decisions
