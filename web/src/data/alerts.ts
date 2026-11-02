@@ -10,10 +10,17 @@ export type TraceMeasure = 'count' | 'error_rate' | 'p50' | 'p95' | 'p99'
 
 export type LogSeverity = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
+export type LlmMeasure = 'cost' | 'tokens' | 'calls' | 'p95'
+
+export type LlmGroup = 'none' | 'feature' | 'customer' | 'model'
+
+export type LlmFilter = { feature?: string; customer?: string; model?: string; project?: string }
+
 export type RuleSignal =
   | { kind: 'traces'; service: string | null; operation: string | null; environment: string | null; measure: TraceMeasure }
   | { kind: 'logs'; services: string[]; severities: LogSeverity[]; q: string | null; attrs: string[]; measure: 'count' }
   | { kind: 'metrics'; name: string; aggregation: Aggregation; group_by: string[]; filter: Record<string, string> }
+  | { kind: 'llm'; measure: LlmMeasure; group_by: LlmGroup; filter: LlmFilter }
 
 export type SignalKind = RuleSignal['kind']
 
@@ -81,6 +88,10 @@ export type Delivery = { channel: string; status: 'sent' | 'failed'; error: stri
 export type TestResult = { deliveries: Delivery[] }
 
 export const TRACE_MEASURES: TraceMeasure[] = ['count', 'error_rate', 'p50', 'p95', 'p99']
+
+export const LLM_MEASURES: LlmMeasure[] = ['cost', 'tokens', 'calls', 'p95']
+
+export const LLM_GROUPS: LlmGroup[] = ['none', 'feature', 'customer', 'model']
 
 export const OPS: Op[] = ['>', '>=', '<', '<=']
 
@@ -266,6 +277,12 @@ export function scopeOf(signal: RuleSignal): string {
     ].filter((part): part is string => part !== null)
     return parts.length ? parts.join(', ') : 'all logs'
   }
+  if (signal.kind === 'llm') {
+    const filters = Object.entries(signal.filter).map(([k, v]) => `${k} = ${v}`)
+    const grouped = signal.group_by === 'none' ? null : `by ${signal.group_by}`
+    const parts = [...filters, grouped].filter((part): part is string => part !== null)
+    return parts.length ? parts.join(', ') : 'all calls'
+  }
   const filters = Object.entries(signal.filter).map(([k, v]) => `${k} = ${v}`)
   const grouped = signal.group_by.length ? `by ${quoted(signal.group_by)}` : null
   const parts = [...filters, grouped].filter((part): part is string => part !== null)
@@ -275,7 +292,7 @@ export function scopeOf(signal: RuleSignal): string {
 export function conditionOf(rule: RuleDefinition, metricUnit = ''): string {
   const { signal, condition } = rule
   const what =
-    signal.kind === 'traces' ? `span ${signal.measure}` : signal.kind === 'logs' ? 'log count' : `${signal.aggregation}(${signal.name})`
+    signal.kind === 'traces' ? `span ${signal.measure}` : signal.kind === 'logs' ? 'log count' : signal.kind === 'llm' ? `llm ${signal.measure}` : `${signal.aggregation}(${signal.name})`
   return `${what} ${condition.op} ${withUnit(condition.threshold, unitOf(signal, metricUnit))} over ${duration(rule.window_s)}${rule.pending_s > 0 ? `, pending ${duration(rule.pending_s)}` : ''}`
 }
 
@@ -300,17 +317,25 @@ export function signalLink(signal: RuleSignal): SignalLink {
     const f = logsFilter(signal)
     return { to: '/logs', search: f ? { f } : undefined, label: 'Open these logs' }
   }
+  if (signal.kind === 'llm') return { to: '/ai', label: 'Open AI spend' }
   const p = new URLSearchParams({ metric: signal.name, agg: signal.aggregation })
   for (const by of signal.group_by) p.append('by', by)
   return { to: '/metrics', search: { f: p.toString() }, label: 'Open this metric' }
 }
 
+const LLM_UNITS: Record<LlmMeasure, string> = { cost: '$', tokens: 'tokens', calls: 'calls', p95: 'ms' }
+
 export function unitOf(signal: RuleSignal, metricUnit = ''): string {
   if (signal.kind === 'logs') return 'events'
   if (signal.kind === 'metrics') return metricUnit
+  if (signal.kind === 'llm') return LLM_UNITS[signal.measure]
   if (signal.measure === 'count') return 'events'
   return signal.measure === 'error_rate' ? '%' : 'ms'
 }
 
-export const withUnit = (value: number | null, unit: string): string =>
-  value === null ? 'no data' : `${value.toLocaleString('en-US', { maximumFractionDigits: 6 })}${unit ? ` ${unit}` : ''}`
+export const withUnit = (value: number | null, unit: string): string => {
+  if (value === null) return 'no data'
+  const shown = value.toLocaleString('en-US', { maximumFractionDigits: 6 })
+  if (unit === '$') return `$${shown}`
+  return `${shown}${unit ? ` ${unit}` : ''}`
+}

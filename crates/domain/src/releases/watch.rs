@@ -36,7 +36,7 @@ fn services_named(signal: &Signal) -> Option<Vec<&str>> {
         Signal::Logs(logs) if !logs.services.is_empty() => {
             Some(logs.services.iter().map(AsRef::as_ref).collect())
         }
-        Signal::Logs(_) | Signal::Metrics(_) => None,
+        Signal::Logs(_) | Signal::Metrics(_) | Signal::Llm(_) => None,
     }
 }
 

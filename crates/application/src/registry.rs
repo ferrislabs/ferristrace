@@ -289,12 +289,20 @@ impl<R> LlmRepos for R where
 }
 
 pub trait AlertRepos:
-    ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
+    ReadRepos
+    + RecordingRepos
+    + WatchRepos
+    + RepoFor<domain::Projects, Repo: Projects>
+    + RepoFor<domain::ModelPrices, Repo: ModelPriceBook>
 {
 }
 
 impl<R> AlertRepos for R where
-    R: ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
+    R: ReadRepos
+        + RecordingRepos
+        + WatchRepos
+        + RepoFor<domain::Projects, Repo: Projects>
+        + RepoFor<domain::ModelPrices, Repo: ModelPriceBook>
 {
 }
 

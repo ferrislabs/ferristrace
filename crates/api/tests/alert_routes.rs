@@ -7,8 +7,8 @@ use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, alert_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, IncidentLedger, Inert, Notebook, OncallLedger, StatusLedger,
-    Untransacted,
+    AlertLedger, Couriered, IncidentLedger, Inert, Notebook, OncallLedger, PriceLedger,
+    StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -312,6 +312,10 @@ repo!(AlertEvents, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertOutbox, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertChannels, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertDuty, AlertLedger, |fakes| fakes.ledger.clone());
+repo!(ModelPrices, PriceLedger, |fakes| {
+    let _ = fakes;
+    PriceLedger::default()
+});
 repo!(Incidents, IncidentLedger, |fakes| {
     let _ = fakes;
     IncidentLedger::default()
@@ -382,7 +386,7 @@ impl Harness {
             photos: NoPhotos,
             meter: Inert::default(),
             span_store: Some(Steady),
-            issue_store: None,
+            issue_store: Some(Inert::default()),
             log_store: None,
             metric_store: None,
             oidc: None,
@@ -1031,4 +1035,95 @@ async fn a_rule_watching_a_placement_that_is_no_kubernetes_name_is_refused_with_
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
         assert!(refused.to_string().contains("placement"), "{refused}");
     }
+}
+
+fn spend_rule(name: &str) -> Value {
+    let mut body = checkout(name, None, &[]);
+    body["signal"] = json!({
+        "kind": "llm",
+        "measure": "cost",
+        "group_by": "feature",
+        "filter": {"feature": " ticket-summary ", "customer": "acme", "project": id(30)},
+    });
+    body["condition"] = json!({"op": ">", "threshold": 10});
+    body["window_s"] = json!(3600);
+    body
+}
+
+#[tokio::test]
+async fn an_llm_rule_is_created_read_back_and_patched_in_the_frozen_shape() {
+    let harness = Harness::new();
+
+    let made = created(&harness, spend_rule("Ticket spend")).await;
+
+    assert_eq!(
+        made["signal"],
+        json!({
+            "kind": "llm",
+            "measure": "cost",
+            "group_by": "feature",
+            "filter": {"feature": "ticket-summary", "customer": "acme", "project": id(30)},
+        })
+    );
+    let uri = format!("{}/{}", alerts(MINE), made["id"].as_str().expect("an id"));
+    let (status, one) = harness.admin(Method::GET, &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{one}");
+    assert_eq!(one["signal"], made["signal"]);
+    let (status, patched) = harness
+        .admin(
+            Method::PATCH,
+            &uri,
+            Some(json!({"signal": {"kind": "llm", "measure": "p95"}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(
+        patched["signal"],
+        json!({"kind": "llm", "measure": "p95", "group_by": "none", "filter": {}})
+    );
+}
+
+#[tokio::test]
+async fn an_llm_rule_with_a_bad_measure_group_or_filter_is_refused_with_422() {
+    let harness = Harness::new();
+    let mut measure = spend_rule("Measure");
+    measure["signal"]["measure"] = json!("spend");
+    let mut group = spend_rule("Group");
+    group["signal"]["group_by"] = json!("user");
+    let mut blank = spend_rule("Blank");
+    blank["signal"]["filter"] = json!({"model": "  "});
+    let mut threshold = spend_rule("Threshold");
+    threshold["condition"]["op"] = json!("~");
+
+    for body in [measure, group, blank, threshold] {
+        let (status, refused) = harness.admin(Method::POST, &alerts(MINE), Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    }
+    assert!(harness.ledger.rules().is_empty());
+}
+
+#[tokio::test]
+async fn a_preview_charts_an_llm_rule_without_saving_it() {
+    let harness = Harness::new();
+    let mut body = spend_rule("Unsaved");
+    body.as_object_mut().expect("an object").remove("name");
+
+    let (status, preview) = harness
+        .served(
+            OrgRole::Member,
+            as_session(
+                Method::POST,
+                &format!("{}/preview", alerts(MINE)),
+                Some(body),
+            ),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let points = preview["points"].as_array().expect("points");
+    assert_eq!(points.len(), 30);
+    assert!(points.iter().all(|point| point[1].is_null()));
+    assert_eq!(preview["threshold"], 10.0);
+    assert_eq!(preview["would_fire"], false);
+    assert!(harness.ledger.rules().is_empty());
 }

@@ -10,6 +10,8 @@ import { Segmented } from '@/components/ui/segmented'
 import { Alert } from '@/components/ui/misc'
 import { MetricChart } from '@/components/ft/MetricChart'
 import {
+  LLM_GROUPS,
+  LLM_MEASURES,
   LOG_SEVERITIES,
   NO_DATA,
   OPS,
@@ -36,6 +38,7 @@ const KINDS: { value: SignalKind; label: string }[] = [
   { value: 'traces', label: 'Traces' },
   { value: 'logs', label: 'Logs' },
   { value: 'metrics', label: 'Metrics' },
+  { value: 'llm', label: 'LLM spend' },
 ]
 
 const HOUR_MS = 3_600_000
@@ -73,7 +76,7 @@ export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: b
     if (form.kind === 'metrics' && !allowed.includes(form.aggregation)) setForm((was) => ({ ...was, aggregation: allowed[0] }))
   }, [allowed, form.kind, form.aggregation])
   const built = definitionFrom(form)
-  const unit = 'definition' in built ? unitOf(built.definition.signal, metric?.unit) : form.kind === 'metrics' ? metric?.unit ?? '' : form.kind === 'logs' ? 'events' : form.traceMeasure === 'count' ? 'events' : form.traceMeasure === 'error_rate' ? '%' : 'ms'
+  const unit = 'definition' in built ? unitOf(built.definition.signal, metric?.unit) : form.kind === 'metrics' ? metric?.unit ?? '' : form.kind === 'llm' ? (form.llmMeasure === 'cost' ? '$' : form.llmMeasure === 'p95' ? 'ms' : form.llmMeasure) : form.kind === 'logs' ? 'events' : form.traceMeasure === 'count' ? 'events' : form.traceMeasure === 'error_rate' ? '%' : 'ms'
   const saving = create.isPending || update.isPending
 
   const toggle = <T,>(held: T[], one: T) => (held.includes(one) ? held.filter((x) => x !== one) : [...held, one])
@@ -165,6 +168,28 @@ export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: b
               <div className="flex flex-wrap gap-3">
                 <Field label="Group by" htmlFor="ar-mg" hint="Comma separated label keys. One state per series." className="flex-[1_1_220px]"><Input id="ar-mg" mono value={form.groupBy} onChange={(e) => set({ groupBy: e.target.value })} /></Field>
                 <Field label="Filter" htmlFor="ar-mf" hint="Comma separated key=value pairs." className="flex-[1_1_220px]"><Input id="ar-mf" mono value={form.filter} onChange={(e) => set({ filter: e.target.value })} /></Field>
+              </div>
+            </div>
+          ) : null}
+
+          {form.kind === 'llm' ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-3">
+                <Field label="Measure" htmlFor="ar-lm" hint={form.llmMeasure === 'cost' ? 'Priced calls only, in dollars. The threshold is in dollars.' : undefined} className="flex-[1_1_140px]">
+                  <NativeSelect id="ar-lm" value={form.llmMeasure} onChange={(e) => set({ llmMeasure: e.target.value as Form['llmMeasure'] })}>
+                    {LLM_MEASURES.map((one) => <option key={one} value={one}>{one}</option>)}
+                  </NativeSelect>
+                </Field>
+                <Field label="Group by" htmlFor="ar-lg" hint="One state per group." className="flex-[1_1_140px]">
+                  <NativeSelect id="ar-lg" value={form.llmGroup} onChange={(e) => set({ llmGroup: e.target.value as Form['llmGroup'] })}>
+                    {LLM_GROUPS.map((one) => <option key={one} value={one}>{one}</option>)}
+                  </NativeSelect>
+                </Field>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Field label="Feature" htmlFor="ar-lf" className="flex-[1_1_160px]"><Input id="ar-lf" mono value={form.llmFeature} placeholder="any" onChange={(e) => set({ llmFeature: e.target.value })} /></Field>
+                <Field label="Customer" htmlFor="ar-lc" className="flex-[1_1_160px]"><Input id="ar-lc" mono value={form.llmCustomer} placeholder="any" onChange={(e) => set({ llmCustomer: e.target.value })} /></Field>
+                <Field label="Model" htmlFor="ar-lmo" className="flex-[1_1_160px]"><Input id="ar-lmo" mono value={form.llmModel} placeholder="any" onChange={(e) => set({ llmModel: e.target.value })} /></Field>
               </div>
             </div>
           ) : null}

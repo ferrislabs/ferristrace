@@ -243,6 +243,7 @@ pub enum GroupBy {
     Customer,
     Environment,
     Provider,
+    Total,
 }
 
 impl TryFrom<&str> for GroupBy {

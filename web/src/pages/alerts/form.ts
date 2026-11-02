@@ -2,6 +2,9 @@ import {
   PENDING_MAX_S,
   WINDOW_MAX_S,
   WINDOW_MIN_S,
+  type LlmFilter,
+  type LlmGroup,
+  type LlmMeasure,
   type LogSeverity,
   type NoData,
   type Op,
@@ -30,6 +33,12 @@ export type Form = {
   aggregation: Aggregation
   groupBy: string
   filter: string
+  llmMeasure: LlmMeasure
+  llmGroup: LlmGroup
+  llmFeature: string
+  llmCustomer: string
+  llmModel: string
+  llmProject: string
   op: Op
   threshold: string
   windowMin: string
@@ -57,6 +66,12 @@ export const BLANK: Form = {
   aggregation: 'avg',
   groupBy: '',
   filter: '',
+  llmMeasure: 'cost',
+  llmGroup: 'none',
+  llmFeature: '',
+  llmCustomer: '',
+  llmModel: '',
+  llmProject: '',
   op: '>',
   threshold: '',
   windowMin: '5',
@@ -94,6 +109,17 @@ export function formOf(rule: Rule): Form {
   }
   if (signal.kind === 'logs') {
     return { ...base, logServices: signal.services.join(', '), logSeverities: signal.severities, logText: signal.q ?? '', logAttrs: signal.attrs.join(', ') }
+  }
+  if (signal.kind === 'llm') {
+    return {
+      ...base,
+      llmMeasure: signal.measure,
+      llmGroup: signal.group_by,
+      llmFeature: signal.filter.feature ?? '',
+      llmCustomer: signal.filter.customer ?? '',
+      llmModel: signal.filter.model ?? '',
+      llmProject: signal.filter.project ?? '',
+    }
   }
   return {
     ...base,
@@ -139,6 +165,14 @@ function signalOf(form: Form): RuleSignal | string {
       attrs,
       measure: 'count',
     }
+  }
+  if (form.kind === 'llm') {
+    const filter: LlmFilter = {}
+    if (form.llmFeature.trim()) filter.feature = form.llmFeature.trim()
+    if (form.llmCustomer.trim()) filter.customer = form.llmCustomer.trim()
+    if (form.llmModel.trim()) filter.model = form.llmModel.trim()
+    if (form.llmProject) filter.project = form.llmProject
+    return { kind: 'llm', measure: form.llmMeasure, group_by: form.llmGroup, filter }
   }
   if (!form.metricName.trim()) return 'Choose a metric'
   const filter = pairs(form.filter)

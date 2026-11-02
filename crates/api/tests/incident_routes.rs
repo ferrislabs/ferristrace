@@ -7,7 +7,8 @@ use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, incident_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, StatusLedger, Untransacted,
+    AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, PriceLedger, StatusLedger,
+    Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -235,6 +236,10 @@ repo!(AlertEvents, AlertLedger, |fakes| fakes.alerts.clone());
 repo!(AlertOutbox, AlertLedger, |fakes| fakes.alerts.clone());
 repo!(AlertChannels, AlertLedger, |fakes| fakes.alerts.clone());
 repo!(AlertDuty, AlertLedger, |fakes| fakes.alerts.clone());
+repo!(ModelPrices, PriceLedger, |fakes| {
+    let _ = fakes;
+    PriceLedger::default()
+});
 repo!(Incidents, IncidentLedger, |fakes| fakes.incidents.clone());
 repo!(IncidentTimeline, IncidentLedger, |fakes| fakes
     .incidents
