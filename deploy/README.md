@@ -341,3 +341,11 @@ on either one signs you in on both.
 
 Rebuild the image when you change Rust, or to check what the single
 container actually serves.
+
+## Kubernetes
+
+A Helm chart lives in [`charts/ferristrace`](../charts/ferristrace): one
+Deployment, with Postgres, ClickHouse and Redis supplied from outside and
+every credential read from an existing Secret by name. Published to
+`oci://ghcr.io/ferrislabs/charts/ferristrace`. An ArgoCD `Application`
+example is in [`argocd/ferristrace-application.yaml`](argocd/ferristrace-application.yaml).

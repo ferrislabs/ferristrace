@@ -1,0 +1,152 @@
+# -- Override the chart name.
+nameOverride: ""
+# -- Override the full resource name.
+fullnameOverride: ""
+
+image:
+  # -- Image repository.
+  repository: ghcr.io/ferrislabs/ferristrace
+  # -- Image tag. Empty means the chart appVersion.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Edition: `community` runs `X.Y.Z`, `ee` runs `X.Y.Z-ee`.
+edition: community
+
+# -- Pull secrets for a private registry.
+imagePullSecrets: []
+
+# -- Replicas. The PodDisruptionBudget exists only above 1.
+replicaCount: 1
+revisionHistoryLimit: 3
+# -- Must exceed the time the server needs to flush its span batch on SIGTERM.
+terminationGracePeriodSeconds: 60
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# -- Extra container env entries, raw Kubernetes syntax.
+extraEnv: []
+
+service:
+  type: ClusterIP
+  httpPort: 4318
+  grpcPort: 4317
+  annotations: {}
+
+# Gateway API route to the HTTP port (OTLP/HTTP, API, web app).
+httpRoute:
+  enabled: false
+  annotations: {}
+  # -- Gateways to attach to, e.g. [{name: shared, namespace: gateway}].
+  parentRefs: []
+  # -- Hostnames, e.g. [ferristrace.example.com].
+  hostnames: []
+  path: /
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  # -- Peers allowed to reach ports 4317 and 4318. Empty means any source.
+  ingressFrom: []
+
+# Non-secret settings, handed to the server as FERRISTRACE_* variables.
+config:
+  logLevel: info
+  # -- Keep true behind TLS. Set false only for plain HTTP.
+  cookieSecure: true
+  localPassword: true
+  afterSignIn: /
+  # -- Empty keeps the web root baked into the image.
+  webRoot: ""
+  spans:
+    # -- ClickHouse HTTP url.
+    url: http://clickhouse:8123
+    database: ferristrace
+    user: ferristrace
+    retentionDays: 30
+  oidc:
+    enabled: false
+    issuer: ""
+    clientId: ""
+    redirectUri: ""
+  mail:
+    enabled: false
+    relay: ""
+    username: ""
+    from: ""
+    baseUrl: ""
+  objects:
+    enabled: false
+    endpoint: ""
+    bucket: ""
+    region: ""
+
+# Existing Secrets, by name and key. This chart never creates or holds a value.
+# An empty name leaves the optional ones out.
+secrets:
+  # -- Required. Default matches a CloudNativePG cluster named `ferristrace`.
+  databaseUrl:
+    name: ferristrace-app
+    key: uri
+  # -- Required.
+  redisUrl:
+    name: ferristrace-redis
+    key: url
+  clickhousePassword:
+    name: ""
+    key: password
+  # -- Needed for second factor enrolment. 64 hex characters.
+  atRestKey:
+    name: ""
+    key: at-rest-key
+  # -- Read when config.oidc.enabled.
+  oidcClientSecret:
+    name: ferristrace-oidc
+    key: client-secret
+  # -- Read when config.mail.enabled.
+  smtpPassword:
+    name: ferristrace-smtp
+    key: password
+  # -- Read when config.objects.enabled.
+  objectsAccessKeyId:
+    name: ferristrace-objects
+    key: access-key-id
+  objectsSecretAccessKey:
+    name: ferristrace-objects
+    key: secret-access-key

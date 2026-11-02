@@ -1,0 +1,23 @@
+FerrisTrace {{ include "ferristrace.image" . }} is deployed as {{ include "ferristrace.fullname" . }}.
+
+It needs Postgres, ClickHouse and Redis that this chart does not create. The
+Secrets named under `secrets` must exist in namespace {{ .Release.Namespace }} before the pod can start:
+  database url    {{ .Values.secrets.databaseUrl.name }} / {{ .Values.secrets.databaseUrl.key }}
+  redis url       {{ .Values.secrets.redisUrl.name }} / {{ .Values.secrets.redisUrl.key }}
+
+The server applies the Postgres and ClickHouse migrations itself on start.
+
+{{- if .Values.httpRoute.enabled }}
+
+Reachable through the HTTPRoute at: {{ join ", " .Values.httpRoute.hostnames }}
+{{- else }}
+
+Reach it from your machine with:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "ferristrace.fullname" . }} 4318:{{ .Values.service.httpPort }}
+{{- end }}
+
+OTLP/HTTP is on /v1/traces ({{ .Values.service.httpPort }}), OTLP/gRPC on {{ .Values.service.grpcPort }}.
+{{- if not .Values.config.cookieSecure }}
+
+WARNING: config.cookieSecure is false; session cookies travel in the clear.
+{{- end }}
