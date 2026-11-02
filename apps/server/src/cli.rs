@@ -2,15 +2,15 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
+use ferristrace_application::registry::ProvisioningRepos;
+use ferristrace_application::{Ferristrace, Stack};
 use ferristrace_domain::{
-    Bootstrapped, ControlPlane, Email, OrgName, OrgRole, ProjectId, ProjectName, Provisioning,
-    ResetToken, TenantId,
+    Bootstrapped, Email, OrgName, OrgRole, ProjectId, ProjectName, ResetToken, TenantId,
 };
-use ferristrace_postgres::{INVITE_WINDOW, PostgresControlPlane};
 use uuid::Uuid;
 
+use crate::SECONDS_PER_HOUR;
 use crate::config::Config;
-use crate::{SECONDS_PER_HOUR, control_plane_pool};
 
 #[derive(Debug, Parser)]
 #[command(name = "comettrace", about = "OTLP ingestion and its control plane")]
@@ -85,10 +85,10 @@ impl From<Role> for OrgRole {
     }
 }
 
-fn print_the_way_in(token: &ResetToken) {
+fn print_the_way_in(token: &ResetToken, window: Duration) {
     eprintln!(
         "The token printed below lasts {} hours and can be spent once:",
-        INVITE_WINDOW.as_secs() / SECONDS_PER_HOUR
+        window.as_secs() / SECONDS_PER_HOUR
     );
     eprintln!(
         "  curl -X POST <base>/auth/reset/confirm -H 'x-requested-with: cli' \\\n    \
@@ -118,38 +118,42 @@ pub(crate) async fn health(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn run_command(command: Command, config: &Config) -> anyhow::Result<()> {
-    let pool = control_plane_pool(config)
-        .await?
-        .context("this command needs a control plane, so set database_url")?;
-    let provisioning = Provisioning::new(
-        PostgresControlPlane::new(pool).context("preparing the password hasher")?,
-    );
-
+pub(crate) async fn run_command<S: Stack>(
+    command: Command,
+    config: &Config,
+    app: &Ferristrace<S>,
+    invite_window: Duration,
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     match command {
         Command::Health => health(config).await,
-        Command::IssueKey { org, project } => issue_key(&provisioning, org, project).await,
-        Command::RevokeKey { prefix } => revoke_key(&provisioning, &prefix).await,
+        Command::IssueKey { org, project } => issue_key(app, org, project).await,
+        Command::RevokeKey { prefix } => revoke_key(app, &prefix).await,
         Command::Bootstrap { email, org } => {
-            bootstrap(&provisioning, &email, &org, config.local_password).await
+            bootstrap(app, &email, &org, config.local_password, invite_window).await
         }
-        Command::CreateAccount { email } => create_account(&provisioning, &email).await,
-        Command::ResetPassword { email } => reset_password(&provisioning, &email).await,
-        Command::CreateProject { org, name } => create_project(&provisioning, org, &name).await,
-        Command::CreateOrg { name, owner } => create_org(&provisioning, &name, &owner).await,
+        Command::CreateAccount { email } => create_account(app, &email, invite_window).await,
+        Command::ResetPassword { email } => reset_password(app, &email, invite_window).await,
+        Command::CreateProject { org, name } => create_project(app, org, &name).await,
+        Command::CreateOrg { name, owner } => create_org(app, &name, &owner).await,
         Command::GrantRole { org, member, role } => {
-            grant_role(&provisioning, org, &member, role.into()).await
+            grant_role(app, org, &member, role.into()).await
         }
     }
 }
 
-async fn issue_key<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
+async fn issue_key<S: Stack>(
+    app: &Ferristrace<S>,
     org: Uuid,
     project: Option<Uuid>,
-) -> anyhow::Result<()> {
-    let issued = provisioning
-        .issue_key(TenantId::new(org), project.map(ProjectId::new))
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
+    let issued = app
+        .issue_ingest_key(TenantId::new(org), project.map(ProjectId::new))
         .await
         .context("issuing the key")?;
 
@@ -164,12 +168,12 @@ async fn issue_key<C: ControlPlane>(
     Ok(())
 }
 
-async fn revoke_key<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
-    prefix: &str,
-) -> anyhow::Result<()> {
-    let stopped = provisioning
-        .revoke_key(prefix)
+async fn revoke_key<S: Stack>(app: &Ferristrace<S>, prefix: &str) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
+    let stopped = app
+        .revoke_ingest_key(prefix)
         .await
         .context("revoking the key")?;
 
@@ -181,16 +185,20 @@ async fn revoke_key<C: ControlPlane>(
     Ok(())
 }
 
-async fn bootstrap<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
+async fn bootstrap<S: Stack>(
+    app: &Ferristrace<S>,
     email: &str,
     org: &str,
     local_password: bool,
-) -> anyhow::Result<()> {
+    window: Duration,
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let email = Email::try_from(email).context("reading the address")?;
     let name = OrgName::try_from(org).context("reading the name")?;
 
-    let outcome = provisioning
+    let outcome = app
         .bootstrap(&name, &email, local_password)
         .await
         .context("founding the organisation")?;
@@ -220,7 +228,7 @@ async fn bootstrap<C: ControlPlane>(
                 founded.org, founded.project
             );
             match &founded.invitation {
-                Some(token) => print_the_way_in(token),
+                Some(token) => print_the_way_in(token, window),
                 None => {
                     eprintln!("Local passwords are off, so sign in through the identity provider.");
                 }
@@ -230,12 +238,16 @@ async fn bootstrap<C: ControlPlane>(
     Ok(())
 }
 
-async fn create_account<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
+async fn create_account<S: Stack>(
+    app: &Ferristrace<S>,
     email: &str,
-) -> anyhow::Result<()> {
+    window: Duration,
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let email = Email::try_from(email).context("reading the address")?;
-    let token = provisioning
+    let token = app
         .create_account(&email)
         .await
         .with_context(|| format!("creating an account for {}", email.as_str()))?;
@@ -244,17 +256,21 @@ async fn create_account<C: ControlPlane>(
         "{} cannot sign in until it carries a password.",
         email.as_str()
     );
-    print_the_way_in(&token);
+    print_the_way_in(&token, window);
     Ok(())
 }
 
-async fn reset_password<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
+async fn reset_password<S: Stack>(
+    app: &Ferristrace<S>,
     email: &str,
-) -> anyhow::Result<()> {
+    window: Duration,
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let email = Email::try_from(email).context("reading the address")?;
-    let token = provisioning
-        .reset_password(&email)
+    let token = app
+        .issue_reset_link(&email)
         .await
         .with_context(|| format!("resetting the password of {}", email.as_str()))?;
 
@@ -262,18 +278,17 @@ async fn reset_password<C: ControlPlane>(
         "Every session of {} ends once the password changes.",
         email.as_str()
     );
-    print_the_way_in(&token);
+    print_the_way_in(&token, window);
     Ok(())
 }
 
-async fn create_project<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
-    org: Uuid,
-    name: &str,
-) -> anyhow::Result<()> {
+async fn create_project<S: Stack>(app: &Ferristrace<S>, org: Uuid, name: &str) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let name = ProjectName::try_from(name).context("reading the name")?;
-    let project = provisioning
-        .create_project(TenantId::new(org), &name)
+    let project = app
+        .claim_project(TenantId::new(org), &name)
         .await
         .context("creating the project")?;
 
@@ -283,14 +298,13 @@ async fn create_project<C: ControlPlane>(
     Ok(())
 }
 
-async fn create_org<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
-    name: &str,
-    owner: &str,
-) -> anyhow::Result<()> {
+async fn create_org<S: Stack>(app: &Ferristrace<S>, name: &str, owner: &str) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let name = OrgName::try_from(name).context("reading the name")?;
     let owner = Email::try_from(owner).context("reading the address")?;
-    let org = provisioning
+    let org = app
         .create_org(&name, &owner)
         .await
         .context("creating the organisation")?;
@@ -305,15 +319,17 @@ async fn create_org<C: ControlPlane>(
     Ok(())
 }
 
-async fn grant_role<C: ControlPlane>(
-    provisioning: &Provisioning<C>,
+async fn grant_role<S: Stack>(
+    app: &Ferristrace<S>,
     org: Uuid,
     member: &str,
     role: OrgRole,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    S::Repos: ProvisioningRepos,
+{
     let member = Email::try_from(member).context("reading the address")?;
-    provisioning
-        .grant_role(TenantId::new(org), &member, role)
+    app.grant_org_role(TenantId::new(org), &member, role)
         .await
         .context("granting the role")?;
 

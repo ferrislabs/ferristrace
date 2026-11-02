@@ -1241,6 +1241,7 @@ dependencies = [
  "axum",
  "clap",
  "ferristrace-api",
+ "ferristrace-application",
  "ferristrace-clickhouse",
  "ferristrace-domain",
  "ferristrace-ee",

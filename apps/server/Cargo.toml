@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 ferristrace-api.workspace = true
+ferristrace-application.workspace = true
 ferristrace-domain.workspace = true
 ferristrace-clickhouse.workspace = true
 ferristrace-infra.workspace = true
