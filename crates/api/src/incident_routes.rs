@@ -9,8 +9,8 @@ use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::IncidentRepos;
 use ferristrace_domain::{
-    AccountId, AlertRef, Attachment, AttachmentKind, AttachmentLabel, Author, BadIncident, Briefed,
-    Change, Chronicle, CommentBody, Dossier, IncidentDraft, IncidentError, IncidentFilter,
+    AccountId, AgentId, AlertRef, Attachment, AttachmentKind, AttachmentLabel, Author, BadIncident,
+    Briefed, Change, Chronicle, CommentBody, Dossier, IncidentDraft, IncidentError, IncidentFilter,
     IncidentId, IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle,
     Person, ProjectId, Reference, RuleId, ScheduleId, TenantId, TimelineEntry,
 };
@@ -245,7 +245,8 @@ fn entry_of(chronicle: &Chronicle, entry: &TimelineEntry) -> EntryBody {
     let id = match &entry.author {
         Author::Account(account) => Some(account.as_uuid()),
         Author::ApiKey(key) => Some(key.as_uuid()),
-        Author::Agent(_) | Author::System => None,
+        Author::Agent { id, .. } => id.map(AgentId::as_uuid),
+        Author::System => None,
     };
     EntryBody {
         at_ms: entry.at_ms,

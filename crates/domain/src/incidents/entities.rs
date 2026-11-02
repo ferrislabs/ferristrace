@@ -3,6 +3,7 @@ use super::value_objects::{
     IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle, Reference, TimelineId,
 };
 use crate::access::KeyId;
+use crate::agents::AgentId;
 use crate::alerts::{AlertStatus, Culprits, Labels, RuleId};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
@@ -31,7 +32,7 @@ pub struct Incident {
 pub enum Author {
     Account(AccountId),
     ApiKey(KeyId),
-    Agent(Box<str>),
+    Agent { id: Option<AgentId>, name: Box<str> },
     System,
 }
 
@@ -40,7 +41,7 @@ impl Author {
         match self {
             Self::Account(_) => "account",
             Self::ApiKey(_) => "api_key",
-            Self::Agent(_) => "agent",
+            Self::Agent { .. } => "agent",
             Self::System => "system",
         }
     }
@@ -220,7 +221,7 @@ impl Chronicle {
         match author {
             Author::Account(account) => self.person(*account).map_or(FORMER_MEMBER, Person::label),
             Author::ApiKey(_) => "an API key",
-            Author::Agent(name) => name,
+            Author::Agent { name, .. } => name,
             Author::System => "FerrisTrace",
         }
     }

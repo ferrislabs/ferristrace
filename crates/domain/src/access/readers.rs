@@ -67,6 +67,26 @@ where
         org: TenantId,
         needs: Option<AgentScope>,
     ) -> Result<AgentGrant, ReadRefusal> {
+        let grant = self.standing(call, org, needs).await?;
+        let entry = AuditEntry {
+            org,
+            actor: Actor::Agent(grant.agent),
+            action: Action::AgentRead,
+            target: Target::org(org),
+            detail: Detail::default()
+                .with("route", &call.route)
+                .with("jti", &call.token.jti),
+        };
+        self.record(&grant, &entry).await?;
+        Ok(grant)
+    }
+
+    pub async fn standing(
+        &self,
+        call: &AgentCall,
+        org: TenantId,
+        needs: Option<AgentScope>,
+    ) -> Result<AgentGrant, ReadRefusal> {
         let agent = self
             .keys
             .agent_standing(org, &call.token.client_id)
@@ -83,16 +103,6 @@ where
         if !allowed {
             return Err(ReadRefusal::OutOfScope);
         }
-        let entry = AuditEntry {
-            org,
-            actor: Actor::Agent(agent.id),
-            action: Action::AgentRead,
-            target: Target::org(org),
-            detail: Detail::default()
-                .with("route", &call.route)
-                .with("jti", &call.token.jti),
-        };
-        self.keys.agent_used(org, agent.id, &entry).await?;
         Ok(AgentGrant {
             agent: agent.id,
             name: agent.name,
@@ -102,5 +112,9 @@ where
             project: agent.project,
             jti: call.token.jti.clone(),
         })
+    }
+
+    pub async fn record(&self, grant: &AgentGrant, entry: &AuditEntry) -> Result<(), ReadRefusal> {
+        Ok(self.keys.agent_used(grant.org, grant.agent, entry).await?)
     }
 }
