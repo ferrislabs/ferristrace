@@ -35,7 +35,7 @@ export function LineChart({ title, legend, values, second, threshold, lo = 0, hi
           const left = `${(m.at / Math.max(1, values.length - 1)) * 100}%`
           const tag = <span className="absolute -top-0.5 left-1 whitespace-nowrap rounded-sm border bg-background px-1 font-mono text-[10px] leading-4 text-foreground shadow-sm">▲ {m.label}</span>
           return (
-            <span key={m.label} className="absolute inset-y-0 border-l border-dashed border-foreground/60" style={{ left }}>
+            <span key={`${m.label}-${m.at}`} className="absolute inset-y-0 border-l border-dashed border-foreground/60" style={{ left }}>
               {m.to ? <Link to={m.to} aria-label={`Release ${m.label}`} className="no-underline">{tag}</Link> : tag}
             </span>
           )

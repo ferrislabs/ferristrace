@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { EmptyState } from '@/components/ft/bits'
 import { AttachToIncident } from '@/components/ft/AttachToIncident'
-import { MetricChart, labelOf } from '@/components/ft/MetricChart'
+import { MetricChart, labelOf, type DeployMark } from '@/components/ft/MetricChart'
+import { firstDeploys, releasePath, useDeploys } from '@/data/releases'
 import {
   AGGREGATIONS,
   DEFAULT_AGG,
@@ -132,6 +133,9 @@ export function Metrics() {
   const unconfigured = catalogueUnconfigured || status === 503
   const result = series.result
   const hasPoints = result ? result.series.some((s) => s.points.some((p) => p[1] !== null)) : false
+  const times = result ? result.series.flatMap((s) => s.points.map((p) => p[0])) : []
+  const deploys = firstDeploys(useDeploys(times.length ? Math.floor(Math.min(...times) / 1_000_000) : null, times.length ? Math.ceil(Math.max(...times) / 1_000_000) + 1 : null))
+  const marks: DeployMark[] = deploys.map((d) => ({ atNs: d.atMs * 1_000_000, label: `${d.service} ${d.version}`, to: releasePath(d.service, d.version) }))
 
   return (
     <div className="-mx-4 -my-4 flex min-h-[calc(100vh-48px)] md:-mx-5">
@@ -204,7 +208,7 @@ export function Metrics() {
             ) : !hasPoints ? (
               <EmptyState title="No data in this window">Nothing was recorded for this metric in the window. Try a wider one.</EmptyState>
             ) : (
-              <MetricChart series={result.series} exemplars={result.exemplars} unit={metric.unit} aria={`Line chart of ${metric.name}, ${agg}, ${result.series.map((s) => labelOf(s.labels)).join('; ')}`} />
+              <MetricChart series={result.series} exemplars={result.exemplars} deploys={marks} unit={metric.unit} aria={`Line chart of ${metric.name}, ${agg}, ${result.series.map((s) => labelOf(s.labels)).join('; ')}`} />
             )}
           </>
         ) : (
