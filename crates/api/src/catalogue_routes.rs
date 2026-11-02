@@ -1,19 +1,19 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, put};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::CatalogueRepos;
 use ferristrace_domain::{
-    BadProjectName, Catalogue, CatalogueError, Memberships, Project, ProjectId, ProjectName,
-    Projects, SessionStore, TeamId, TenantId,
+    BadProjectName, CatalogueError, Project, ProjectId, ProjectName, TeamId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 
@@ -68,113 +68,106 @@ pub struct Owning {
     team: Option<Uuid>,
 }
 
-pub fn catalogue_router<S, G, P>(catalogue: Arc<Catalogue<S, G, P>>) -> Router
+pub fn catalogue_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     Router::new()
         .route(
             "/api/orgs/{org}/projects",
-            get(projects::<S, G, P>).post(create::<S, G, P>),
+            get(projects::<S>).post(create::<S>),
         )
         .route(
             "/api/orgs/{org}/projects/{project}",
-            patch(rename::<S, G, P>).delete(forget::<S, G, P>),
+            patch(rename::<S>).delete(forget::<S>),
         )
-        .route(
-            "/api/orgs/{org}/projects/{project}/team",
-            put(assign::<S, G, P>),
-        )
-        .with_state(catalogue)
+        .route("/api/orgs/{org}/projects/{project}/team", put(assign::<S>))
+        .with_state(state)
 }
 
-async fn projects<S, G, P>(
-    State(catalogue): State<Arc<Catalogue<S, G, P>>>,
+async fn projects<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<Held>, ProjectRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     let token = carried(&headers)?;
-    Ok(held(catalogue.projects(&token, TenantId::new(org)).await?))
+    Ok(held(
+        state.app.list_projects(&token, TenantId::new(org)).await?,
+    ))
 }
 
-async fn create<S, G, P>(
-    State(catalogue): State<Arc<Catalogue<S, G, P>>>,
+async fn create<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
     Json(asked): Json<Naming>,
 ) -> Result<(StatusCode, Json<Held>), ProjectRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     let token = carried(&headers)?;
     let name = ProjectName::try_from(asked.name.as_str())?;
-    let kept = catalogue.create(&token, TenantId::new(org), &name).await?;
+    let kept = state
+        .app
+        .create_project(&token, TenantId::new(org), &name)
+        .await?;
     tracing::info!(org = %org, "a project was created");
     Ok((StatusCode::CREATED, held(kept)))
 }
 
-async fn rename<S, G, P>(
-    State(catalogue): State<Arc<Catalogue<S, G, P>>>,
+async fn rename<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, project)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Naming>,
 ) -> Result<Json<Held>, ProjectRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     let token = carried(&headers)?;
     let name = ProjectName::try_from(asked.name.as_str())?;
-    let kept = catalogue
-        .rename(&token, TenantId::new(org), ProjectId::new(project), &name)
+    let kept = state
+        .app
+        .rename_project(&token, TenantId::new(org), ProjectId::new(project), &name)
         .await?;
     tracing::info!(org = %org, project = %project, "a project was renamed");
     Ok(held(kept))
 }
 
-async fn forget<S, G, P>(
-    State(catalogue): State<Arc<Catalogue<S, G, P>>>,
+async fn forget<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, project)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Json<Held>, ProjectRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     let token = carried(&headers)?;
-    let kept = catalogue
-        .forget(&token, TenantId::new(org), ProjectId::new(project))
+    let kept = state
+        .app
+        .forget_project(&token, TenantId::new(org), ProjectId::new(project))
         .await?;
     tracing::info!(org = %org, project = %project, "a project was forgotten");
     Ok(held(kept))
 }
 
-async fn assign<S, G, P>(
-    State(catalogue): State<Arc<Catalogue<S, G, P>>>,
+async fn assign<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, project)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Owning>,
 ) -> Result<Json<Held>, ProjectRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    P: Projects + Send + Sync + 'static,
+    S::Repos: CatalogueRepos,
 {
     let token = carried(&headers)?;
     let team = asked.team.map(TeamId::new);
-    let kept = catalogue
-        .assign(&token, TenantId::new(org), ProjectId::new(project), team)
+    let kept = state
+        .app
+        .assign_project(&token, TenantId::new(org), ProjectId::new(project), team)
         .await?;
     tracing::info!(org = %org, project = %project, owned = team.is_some(), "a project changed hands");
     Ok(held(kept))

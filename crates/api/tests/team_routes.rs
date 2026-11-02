@@ -3,11 +3,14 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::team_router;
+use ferristrace_api::{AppState, SessionCookie, team_router};
+use ferristrace_application::registry::{RepoFor, domain};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, Membership, Memberships, Named, OrgRole, Owned, ProjectId, ReadError,
-    Session, SessionError, SessionStore, SessionToken, Squad, Squads, Team, TeamId, TeamName,
-    TenantId, UnixSeconds, Whoami, WhoamiError,
+    AccountId, Agent, LiveSession, Membership, Memberships, Named, NoPhotos, OrgRole, Owned,
+    ProjectId, ProvisionPolicy, ReadError, Session, SessionError, SessionId, SessionRoll,
+    SessionStore, SessionToken, Squads, Team, TeamId, TeamName, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -51,6 +54,28 @@ impl SessionStore for OneSession {
 
     async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
         Ok(())
+    }
+}
+
+impl SessionRoll for OneSession {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
     }
 }
 
@@ -217,12 +242,78 @@ fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Requ
         .expect("a request")
 }
 
+struct Fakes {
+    role: OrgRole,
+    kept: Arc<Kept>,
+}
+
+impl Untransacted for Fakes {}
+
+impl RepoFor<domain::Sessions> for Fakes {
+    type Repo = OneSession;
+
+    fn build(&self, _: &()) -> Self::Repo {
+        OneSession
+    }
+}
+
+impl RepoFor<domain::Memberships> for Fakes {
+    type Repo = MemberOfMine;
+
+    fn build(&self, _: &()) -> Self::Repo {
+        MemberOfMine(self.role)
+    }
+}
+
+impl RepoFor<domain::Teams> for Fakes {
+    type Repo = Arc<Kept>;
+
+    fn build(&self, _: &()) -> Self::Repo {
+        Arc::clone(&self.kept)
+    }
+}
+
+struct TestStack;
+
+impl Stack for TestStack {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = Inert;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
+    let fakes = Fakes {
+        role,
+        kept: Arc::clone(kept),
+    };
+    let adapters = Adapters {
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
+        photos: NoPhotos,
+        meter: Inert::default(),
+        span_store: None,
+        issue_store: None,
+        oidc: None,
+        provision: ProvisionPolicy::default(),
+    };
+    AppState::new(
+        Arc::new(Ferristrace::new(fakes, adapters)),
+        SessionCookie::default(),
+    )
+}
+
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
-    let squad = Arc::new(Squad::new(
-        Whoami::new(OneSession, MemberOfMine(role)),
-        Arc::clone(kept),
-    ));
-    let response = team_router(squad)
+    let response = team_router(state(role, kept))
         .oneshot(request)
         .await
         .expect("a response");

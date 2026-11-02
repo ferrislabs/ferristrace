@@ -1,18 +1,16 @@
-use std::sync::Arc;
-
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use ferristrace_domain::{
-    AccountDirectory, AuthError, AuthProvider, Authorizer, FederatedError, FederatedSignIn,
-    FlowError, OidcFlows, SessionStore,
-};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
+use ferristrace_domain::{AuthError, FederatedError, FlowError};
 use serde::Deserialize;
 
-use crate::session_cookie::{self, SessionCookie};
+use crate::session_cookie;
+use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct Callback {
@@ -22,65 +20,49 @@ pub struct Callback {
 
 #[derive(Debug, Clone)]
 struct Landing {
-    cookie: SessionCookie,
     after_sign_in: String,
 }
 
-pub fn oidc_router<Z, W, A, S>(
-    federated: Arc<FederatedSignIn<Z, W, A, S>>,
-    cookie: SessionCookie,
-    after_sign_in: impl Into<String>,
-) -> Router
+pub fn oidc_router<S: Stack>(state: AppState<S>, after_sign_in: impl Into<String>) -> Router
 where
-    Z: Authorizer + AuthProvider + Send + Sync + 'static,
-    W: OidcFlows + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let landing = Landing {
-        cookie,
         after_sign_in: after_sign_in.into(),
     };
     Router::new()
-        .route("/auth/oidc/start", get(start::<Z, W, A, S>))
-        .route("/auth/oidc/callback", get(callback::<Z, W, A, S>))
+        .route("/auth/oidc/start", get(start::<S>))
+        .route("/auth/oidc/callback", get(callback::<S>))
         .layer(axum::Extension(landing))
-        .with_state(federated)
+        .with_state(state)
 }
 
-async fn start<Z, W, A, S>(
-    State(federated): State<Arc<FederatedSignIn<Z, W, A, S>>>,
-) -> Result<Response, FederatedRefused>
+async fn start<S: Stack>(State(state): State<AppState<S>>) -> Result<Response, FederatedRefused>
 where
-    Z: Authorizer + AuthProvider + Send + Sync + 'static,
-    W: OidcFlows + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
-    let url = federated.start().await?;
+    let url = state.app.start_federated_sign_in().await?;
     redirect(&url)
 }
 
-async fn callback<Z, W, A, S>(
-    State(federated): State<Arc<FederatedSignIn<Z, W, A, S>>>,
+async fn callback<S: Stack>(
+    State(state): State<AppState<S>>,
     axum::Extension(landing): axum::Extension<Landing>,
     headers: HeaderMap,
     Query(callback): Query<Callback>,
 ) -> Result<Response, FederatedRefused>
 where
-    Z: Authorizer + AuthProvider + Send + Sync + 'static,
-    W: OidcFlows + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
-    let token = federated
-        .finish(
+    let token = state
+        .app
+        .finish_federated_sign_in(
             callback.code,
             &callback.state,
             session_cookie::agent(&headers).as_ref(),
         )
         .await?;
-    let Some(cookie) = session_cookie::opened(&token, landing.cookie) else {
+    let Some(cookie) = session_cookie::opened(&token, state.cookie) else {
         return Err(FederatedRefused::Unavailable);
     };
     let Ok(location) = axum::http::HeaderValue::from_str(&landing.after_sign_in) else {

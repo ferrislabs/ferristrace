@@ -5,7 +5,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use ferristrace_api::router;
-use ferristrace_domain::{DecompressedBytes, Ingest, QuotaPolicy, TenantId, Unmetered};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Ingestion, Stack};
+use ferristrace_domain::{DecompressedBytes, NoPhotos, QuotaPolicy, TenantId, Unmetered};
 use ferristrace_infra::{Allowance, MemoryMeter, MemorySink, StaticDirectory, StaticQuota};
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -22,6 +24,27 @@ const TENANT: u128 = 11;
 const PROTOBUF: &str = "application/x-protobuf";
 const TRACES: &str = "/v1/traces";
 
+struct Fakes;
+
+impl Untransacted for Fakes {}
+
+struct TestStack<Q>(std::marker::PhantomData<Q>);
+
+impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = Arc<MemoryMeter>;
+    type Oidc = Inert;
+    type Sink = Arc<MemorySink>;
+    type Quota = Q;
+    type Directory = StaticDirectory;
+}
+
 struct Harness {
     router: Router,
     sink: Arc<MemorySink>,
@@ -37,7 +60,7 @@ fn harness_with<Q: QuotaPolicy + Send + Sync + 'static>(quota: Q) -> Harness {
     let tenant = TenantId::new(Uuid::from_u128(TENANT));
     let sink = Arc::new(MemorySink::default());
     let meter = Arc::new(MemoryMeter::default());
-    let ingest = Arc::new(Ingest::new(
+    let ingest = Arc::new(Ingestion::<TestStack<Q>>::new(
         StaticDirectory::from_plaintext([(KEY, tenant)]),
         quota,
         Arc::clone(&sink),

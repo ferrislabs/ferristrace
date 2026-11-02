@@ -76,46 +76,39 @@ where
     }
 
     #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
-    pub async fn decide_issue(
+    pub async fn rule_on_issue(
         &self,
         token: &SessionToken,
         org: TenantId,
-        project: ProjectId,
-        print: Fingerprint,
-        status: Status,
+        ruling: IssueRuling,
     ) -> Result<(), IssueError> {
         let Some(reader) = &self.issue_store else {
             return Err(IssueError::Unavailable);
         };
-        Issues::new(
+        let issues = Issues::new(
             Whoami::new(sessions, memberships),
             reader,
             decisions,
             &self.clock,
-        )
-        .decide(token, org, project, print, status)
-        .await
+        );
+        if let Some(status) = ruling.status {
+            issues
+                .decide(token, org, ruling.project, ruling.print, status)
+                .await?;
+        }
+        if let Some(owner) = ruling.owner {
+            issues
+                .assign(token, org, ruling.project, ruling.print, owner)
+                .await?;
+        }
+        Ok(())
     }
+}
 
-    #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
-    pub async fn assign_issue(
-        &self,
-        token: &SessionToken,
-        org: TenantId,
-        project: ProjectId,
-        print: Fingerprint,
-        owner: Option<AccountId>,
-    ) -> Result<(), IssueError> {
-        let Some(reader) = &self.issue_store else {
-            return Err(IssueError::Unavailable);
-        };
-        Issues::new(
-            Whoami::new(sessions, memberships),
-            reader,
-            decisions,
-            &self.clock,
-        )
-        .assign(token, org, project, print, owner)
-        .await
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IssueRuling {
+    pub project: ProjectId,
+    pub print: Fingerprint,
+    pub status: Option<Status>,
+    pub owner: Option<Option<AccountId>>,
 }

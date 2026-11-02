@@ -4,13 +4,20 @@ use axum::body::Body;
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{Request, StatusCode};
 use ferristrace_api::{SessionCookie, oidc_router};
+use ferristrace_application::testing::Inert;
 use ferristrace_domain::{
     AccountDirectory, AccountId, Agent, AuthError, AuthProvider, Authorizer, CodeVerifier,
-    FederatedSignIn, FlowError, Issuer, OidcFlows, PendingFlow, ProvisionPolicy, ResolvedIdentity,
+    FlowError, Issuer, NoPhotos, OidcFlows, PendingFlow, ProvisionPolicy, ResolvedIdentity,
     Session, SessionError, SessionStore, SessionToken, SignInProof, Subject, TenantId,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
+
+#[allow(dead_code)]
+#[path = "support/identity.rs"]
+mod identity;
+
+use identity::{Directed, Fakes, Nowhere, state};
 
 const AUTHORIZE: &str = "https://id.example/authorize?state=the-state";
 const STATE: &str = "the-state";
@@ -76,6 +83,7 @@ impl OidcFlows for MemoryFlows {
     }
 }
 
+#[derive(Clone)]
 struct OneAccount;
 
 impl AccountDirectory for OneAccount {
@@ -126,19 +134,27 @@ impl SessionStore for MemorySessions {
     }
 }
 
-type Service = FederatedSignIn<Provider, Arc<MemoryFlows>, OneAccount, Arc<MemorySessions>>;
-
 fn harness(vouches: bool) -> (axum::Router, Arc<MemoryFlows>, Arc<MemorySessions>) {
     let flows = Arc::new(MemoryFlows::default());
     let sessions = Arc::new(MemorySessions::default());
-    let federated: Arc<Service> = Arc::new(FederatedSignIn::new(
-        Provider { vouches },
-        Arc::clone(&flows),
-        OneAccount,
-        Arc::clone(&sessions),
-        ProvisionPolicy::default(),
-    ));
-    let router = oidc_router(federated, SessionCookie::default(), LANDING);
+    let fakes = Fakes {
+        sessions: Arc::clone(&sessions),
+        memberships: Nowhere,
+        accounts: Directed(OneAccount),
+        gate: Nowhere,
+        resets: Nowhere,
+        flows: Arc::clone(&flows),
+        local: Nowhere,
+    };
+    let app = state(
+        fakes,
+        Inert::default(),
+        Inert::default(),
+        NoPhotos,
+        Some(Provider { vouches }),
+        SessionCookie::default(),
+    );
+    let router = oidc_router(app, LANDING);
     (router, flows, sessions)
 }
 

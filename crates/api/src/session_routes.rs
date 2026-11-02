@@ -1,16 +1,17 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
-use ferristrace_domain::{LiveSession, RollError, SessionId, SessionRoll, SessionStore, Sessions};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
+use ferristrace_domain::{LiveSession, RollError, SessionId};
 use serde::Serialize;
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 
@@ -28,60 +29,51 @@ struct Ended {
     ended: u64,
 }
 
-type Rolling<S, R> = Arc<Sessions<S, R>>;
-
-pub fn session_router<S, R>(sessions: Rolling<S, R>) -> Router
+pub fn session_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    R: SessionRoll + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     Router::new()
-        .route(
-            "/auth/sessions",
-            get(live::<S, R>).delete(end_others::<S, R>),
-        )
-        .route("/auth/sessions/{id}", delete(end_one::<S, R>))
-        .with_state(sessions)
+        .route("/auth/sessions", get(live::<S>).delete(end_others::<S>))
+        .route("/auth/sessions/{id}", delete(end_one::<S>))
+        .with_state(state)
 }
 
-async fn live<S, R>(
-    State(sessions): State<Rolling<S, R>>,
+async fn live<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SessionsRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    R: SessionRoll + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    let roll = sessions.live(&token).await?;
+    let roll = state.app.live_sessions(&token).await?;
     Ok(Json(roll.iter().map(said).collect::<Vec<_>>()).into_response())
 }
 
-async fn end_one<S, R>(
-    State(sessions): State<Rolling<S, R>>,
+async fn end_one<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Response, SessionsRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    R: SessionRoll + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    sessions.end_one(&token, SessionId::new(id)).await?;
+    state.app.end_session(&token, SessionId::new(id)).await?;
     tracing::info!("a session was signed out by its owner");
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn end_others<S, R>(
-    State(sessions): State<Rolling<S, R>>,
+async fn end_others<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SessionsRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    R: SessionRoll + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    let ended = sessions.end_others(&token).await?;
+    let ended = state.app.end_other_sessions(&token).await?;
     tracing::info!(sessions = ended, "every other session was signed out");
     Ok(Json(Ended { ended }).into_response())
 }

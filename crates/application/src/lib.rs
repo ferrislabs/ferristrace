@@ -20,6 +20,7 @@ pub mod testing;
 
 pub use ferristrace_macros::{repository, transactional};
 pub use ingestion::Ingestion;
+pub use issues::IssueRuling;
 pub use stack::{Adapters, Ferristrace, Stack};
 
 #[cfg(test)]

@@ -1,19 +1,19 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, put};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::TeamRepos;
 use ferristrace_domain::{
-    AccountId, BadTeamName, Memberships, ProjectId, SessionStore, Squad, Squads, Team, TeamError,
-    TeamId, TeamName, TenantId,
+    AccountId, BadTeamName, ProjectId, Team, TeamError, TeamId, TeamName, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 
@@ -77,131 +77,123 @@ pub struct Owning {
     projects: Vec<Uuid>,
 }
 
-pub fn team_router<S, G, Q>(squad: Arc<Squad<S, G, Q>>) -> Router
+pub fn team_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     Router::new()
-        .route(
-            "/api/orgs/{org}/teams",
-            get(teams::<S, G, Q>).post(create::<S, G, Q>),
-        )
+        .route("/api/orgs/{org}/teams", get(teams::<S>).post(create::<S>))
         .route(
             "/api/orgs/{org}/teams/{team}",
-            patch(rename::<S, G, Q>).delete(disband::<S, G, Q>),
+            patch(rename::<S>).delete(disband::<S>),
         )
-        .route("/api/orgs/{org}/teams/{team}/members", put(seat::<S, G, Q>))
-        .route("/api/orgs/{org}/teams/{team}/projects", put(own::<S, G, Q>))
-        .with_state(squad)
+        .route("/api/orgs/{org}/teams/{team}/members", put(seat::<S>))
+        .route("/api/orgs/{org}/teams/{team}/projects", put(own::<S>))
+        .with_state(state)
 }
 
-async fn teams<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn teams<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<Arranged>, TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
-    Ok(arranged(squad.teams(&token, TenantId::new(org)).await?))
+    Ok(arranged(
+        state.app.list_teams(&token, TenantId::new(org)).await?,
+    ))
 }
 
-async fn create<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn create<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
     Json(asked): Json<Naming>,
 ) -> Result<(StatusCode, Json<Arranged>), TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
     let name = TeamName::try_from(asked.name.as_str())?;
-    let teams = squad.create(&token, TenantId::new(org), &name).await?;
+    let teams = state
+        .app
+        .create_team(&token, TenantId::new(org), &name)
+        .await?;
     tracing::info!(org = %org, "a team was created");
     Ok((StatusCode::CREATED, arranged(teams)))
 }
 
-async fn rename<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn rename<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, team)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Naming>,
 ) -> Result<Json<Arranged>, TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
     let name = TeamName::try_from(asked.name.as_str())?;
-    let teams = squad
-        .rename(&token, TenantId::new(org), TeamId::new(team), &name)
+    let teams = state
+        .app
+        .rename_team(&token, TenantId::new(org), TeamId::new(team), &name)
         .await?;
     tracing::info!(org = %org, team = %team, "a team was renamed");
     Ok(arranged(teams))
 }
 
-async fn disband<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn disband<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, team)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Json<Arranged>, TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
-    let teams = squad
-        .disband(&token, TenantId::new(org), TeamId::new(team))
+    let teams = state
+        .app
+        .disband_team(&token, TenantId::new(org), TeamId::new(team))
         .await?;
     tracing::info!(org = %org, team = %team, "a team was disbanded");
     Ok(arranged(teams))
 }
 
-async fn seat<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn seat<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, team)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Seating>,
 ) -> Result<Json<Arranged>, TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
     let members: Vec<AccountId> = asked.members.into_iter().map(AccountId::new).collect();
-    let teams = squad
-        .seat(&token, TenantId::new(org), TeamId::new(team), &members)
+    let teams = state
+        .app
+        .seat_team(&token, TenantId::new(org), TeamId::new(team), &members)
         .await?;
     tracing::info!(org = %org, team = %team, members = members.len(), "a team was seated");
     Ok(arranged(teams))
 }
 
-async fn own<S, G, Q>(
-    State(squad): State<Arc<Squad<S, G, Q>>>,
+async fn own<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, team)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Owning>,
 ) -> Result<Json<Arranged>, TeamRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    Q: Squads + Send + Sync + 'static,
+    S::Repos: TeamRepos,
 {
     let token = carried(&headers)?;
     let projects: Vec<ProjectId> = asked.projects.into_iter().map(ProjectId::new).collect();
-    let teams = squad
-        .own(&token, TenantId::new(org), TeamId::new(team), &projects)
+    let teams = state
+        .app
+        .own_projects(&token, TenantId::new(org), TeamId::new(team), &projects)
         .await?;
     tracing::info!(org = %org, team = %team, projects = projects.len(), "a team was handed its projects");
     Ok(arranged(teams))

@@ -1,8 +1,8 @@
+use std::fmt;
 use std::sync::Arc;
 
-use ferristrace_domain::{
-    DecompressedBytes, Ingest, Payload, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter,
-};
+use ferristrace_application::{Ingestion, Stack};
+use ferristrace_domain::{DecompressedBytes, Payload};
 use ferristrace_otlp::spans_of;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
     TraceService, TraceServiceServer,
@@ -17,37 +17,30 @@ use tonic::{Request, Response, Status};
 use crate::auth;
 use crate::error::ApiError;
 
-#[derive(Debug)]
-pub struct TraceGateway<D, Q, S, M> {
-    ingest: Arc<Ingest<D, Q, S, M>>,
+pub struct TraceGateway<S: Stack> {
+    ingest: Arc<Ingestion<S>>,
 }
 
-impl<D, Q, S, M> TraceGateway<D, Q, S, M> {
-    pub fn new(ingest: Arc<Ingest<D, Q, S, M>>) -> Self {
+impl<S: Stack> TraceGateway<S> {
+    pub fn new(ingest: Arc<Ingestion<S>>) -> Self {
         Self { ingest }
     }
 }
 
-pub fn trace_server<D, Q, S, M>(
-    ingest: Arc<Ingest<D, Q, S, M>>,
-) -> TraceServiceServer<TraceGateway<D, Q, S, M>>
-where
-    D: TenantDirectory + Send + Sync + 'static,
-    Q: QuotaPolicy + Send + Sync + 'static,
-    S: SpanSink + Send + Sync + 'static,
-    M: UsageMeter + Send + Sync + 'static,
-{
+pub fn trace_server<S: Stack>(ingest: Arc<Ingestion<S>>) -> TraceServiceServer<TraceGateway<S>> {
     TraceServiceServer::new(TraceGateway::new(ingest)).accept_compressed(CompressionEncoding::Gzip)
 }
 
+impl<S: Stack> fmt::Debug for TraceGateway<S> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TraceGateway")
+            .finish_non_exhaustive()
+    }
+}
+
 #[tonic::async_trait]
-impl<D, Q, S, M> TraceService for TraceGateway<D, Q, S, M>
-where
-    D: TenantDirectory + Send + Sync + 'static,
-    Q: QuotaPolicy + Send + Sync + 'static,
-    S: SpanSink + Send + Sync + 'static,
-    M: UsageMeter + Send + Sync + 'static,
-{
+impl<S: Stack> TraceService for TraceGateway<S> {
     async fn export(
         &self,
         request: Request<ExportTraceServiceRequest>,

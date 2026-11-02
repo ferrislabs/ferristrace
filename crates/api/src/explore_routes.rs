@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
@@ -7,14 +6,17 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use ferristrace_application::Stack;
+use ferristrace_application::registry::StandingRepos;
 use ferristrace_domain::{
-    Explore, ExploreError, Memberships, ProjectId, ServiceSummary, SessionStore, Span, SpanKind,
-    SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    ExploreError, ProjectId, ServiceSummary, Span, SpanKind, SpanStatus, TenantId, TraceFilter,
+    TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 const NANOS_PER_MICRO: u64 = 1_000;
@@ -185,29 +187,25 @@ fn named_status(status: SpanStatus) -> &'static str {
     }
 }
 
-pub fn explore_router<S, G, R>(explore: Arc<Explore<S, G, R>>) -> Router
+pub fn explore_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: SpanReader + Send + Sync + 'static,
+    S::Repos: StandingRepos,
 {
     Router::new()
-        .route("/api/orgs/{org}/services", get(services::<S, G, R>))
-        .route("/api/orgs/{org}/traces", get(traces::<S, G, R>))
-        .route("/api/orgs/{org}/traces/{trace}", get(one::<S, G, R>))
-        .with_state(explore)
+        .route("/api/orgs/{org}/services", get(services::<S>))
+        .route("/api/orgs/{org}/traces", get(traces::<S>))
+        .route("/api/orgs/{org}/traces/{trace}", get(one::<S>))
+        .with_state(state)
 }
 
-async fn traces<S, G, R>(
-    State(explore): State<Arc<Explore<S, G, R>>>,
+async fn traces<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     Query(asked): Query<Asked>,
     headers: HeaderMap,
 ) -> Result<Json<Found>, LookRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: SpanReader + Send + Sync + 'static,
+    S::Repos: StandingRepos,
 {
     let token = carried(&headers)?;
     let window = Window::new(
@@ -231,7 +229,8 @@ where
         filter = filter.at_most(limit);
     }
 
-    let found = explore
+    let found = state
+        .app
         .traces(&token, TenantId::new(org), &filter)
         .await?
         .into_iter()
@@ -240,15 +239,13 @@ where
     Ok(Json(Found { traces: found }))
 }
 
-async fn one<S, G, R>(
-    State(explore): State<Arc<Explore<S, G, R>>>,
+async fn one<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, trace)): Path<(Uuid, String)>,
     headers: HeaderMap,
 ) -> Result<Json<Waterfall>, LookRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: SpanReader + Send + Sync + 'static,
+    S::Repos: StandingRepos,
 {
     let token = carried(&headers)?;
     let id = hex::decode(&trace)
@@ -256,7 +253,7 @@ where
         .and_then(|bytes| TraceId::try_from(bytes.as_slice()).ok())
         .ok_or(LookRefused::TraceId)?;
 
-    let spans = explore.trace(&token, TenantId::new(org), id).await?;
+    let spans = state.app.trace(&token, TenantId::new(org), id).await?;
     if spans.is_empty() {
         return Err(LookRefused::NoSuchTrace);
     }
@@ -345,16 +342,14 @@ fn serving(summary: ServiceSummary, seconds: f64) -> Serving {
     }
 }
 
-async fn services<S, G, R>(
-    State(explore): State<Arc<Explore<S, G, R>>>,
+async fn services<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     Query(over): Query<Spanning>,
     headers: HeaderMap,
 ) -> Result<Json<Running>, LookRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: SpanReader + Send + Sync + 'static,
+    S::Repos: StandingRepos,
 {
     let token = carried(&headers)?;
     let window = Window::new(
@@ -365,7 +360,8 @@ where
     #[allow(clippy::cast_precision_loss)]
     let seconds = (over.to.saturating_sub(over.from) as f64) / 1000.0;
 
-    let found = explore
+    let found = state
+        .app
         .services(
             &token,
             TenantId::new(org),

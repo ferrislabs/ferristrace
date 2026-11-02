@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -7,14 +5,16 @@ use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{get, post};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
 use ferristrace_domain::{
-    Answer, Clock, Confirmed, FactorError, FactorKind, FactorStore, NotACode, RecoveryCode,
-    SecondFactors, SecondStep, SessionStore, TotpCode, TotpSecret,
+    Answer, Confirmed, FactorError, FactorKind, NotACode, RecoveryCode, TotpCode, TotpSecret,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::carried::{NotCarried, carried};
-use crate::session_cookie::{self, SessionCookie};
+use crate::session_cookie;
+use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 struct StandingSaid {
@@ -47,48 +47,28 @@ pub struct Answered {
     recovery: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Shape {
-    cookie: SessionCookie,
-}
-
-pub fn second_factor_router<P, S, C>(
-    factors: Arc<SecondFactors<P, S, C>>,
-    step: Arc<SecondStep<P, S, C>>,
-    cookie: SessionCookie,
-) -> Router
+pub fn second_factor_router<S: Stack>(state: AppState<S>) -> Router
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
-    let settings = Router::new()
-        .route("/auth/2fa", get(standing::<P, S, C>))
-        .route(
-            "/auth/2fa/app",
-            post(enrol::<P, S, C>).delete(forget::<P, S, C>),
-        )
-        .route("/auth/2fa/app/confirm", post(confirm::<P, S, C>))
-        .route("/auth/2fa/recovery", post(regenerate::<P, S, C>))
-        .with_state(factors);
-    let verifying = Router::new()
-        .route("/auth/2fa/verify", post(verify::<P, S, C>))
-        .layer(axum::Extension(Shape { cookie }))
-        .with_state(step);
-    settings.merge(verifying)
+    Router::new()
+        .route("/auth/2fa", get(standing::<S>))
+        .route("/auth/2fa/app", post(enrol::<S>).delete(forget::<S>))
+        .route("/auth/2fa/app/confirm", post(confirm::<S>))
+        .route("/auth/2fa/recovery", post(regenerate::<S>))
+        .route("/auth/2fa/verify", post(verify::<S>))
+        .with_state(state)
 }
 
-async fn standing<P, S, C>(
-    State(factors): State<Arc<SecondFactors<P, S, C>>>,
+async fn standing<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    let standing = factors.standing(&token).await?;
+    let standing = state.app.factor_standing(&token).await?;
     Ok(Json(StandingSaid {
         live: standing.live.iter().map(|kind| kind.as_str()).collect(),
         recovery_left: standing.recovery_left,
@@ -96,17 +76,18 @@ where
     .into_response())
 }
 
-async fn enrol<P, S, C>(
-    State(factors): State<Arc<SecondFactors<P, S, C>>>,
+async fn enrol<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    let enrolment = factors.enrol(&token, &TotpSecret::random()).await?;
+    let enrolment = state
+        .app
+        .enrol_factor(&token, &TotpSecret::random())
+        .await?;
     Ok(Json(EnrolmentSaid {
         kind: enrolment.kind.as_str(),
         key: enrolment.key,
@@ -115,19 +96,21 @@ where
     .into_response())
 }
 
-async fn confirm<P, S, C>(
-    State(factors): State<Arc<SecondFactors<P, S, C>>>,
+async fn confirm<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(offered): Json<Offered>,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
     let code = TotpCode::try_from(offered.code.as_str())?;
-    match factors.confirm(&token, code, RecoveryCode::ten()).await? {
+    match state
+        .app
+        .confirm_factor(&token, code, RecoveryCode::ten())
+        .await?
+    {
         Confirmed::First { recovery } => {
             tracing::info!("a second factor was confirmed and recovery codes were minted");
             Ok(Json(MintedSaid {
@@ -139,62 +122,62 @@ where
     }
 }
 
-async fn forget<P, S, C>(
-    State(factors): State<Arc<SecondFactors<P, S, C>>>,
+async fn forget<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    factors.forget(&token, FactorKind::Authenticator).await?;
+    state
+        .app
+        .forget_factor(&token, FactorKind::Authenticator)
+        .await?;
     tracing::info!("a second factor was forgotten by its owner");
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn regenerate<P, S, C>(
-    State(factors): State<Arc<SecondFactors<P, S, C>>>,
+async fn regenerate<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers)?;
-    let minted = factors.regenerate(&token, RecoveryCode::ten()).await?;
+    let minted = state
+        .app
+        .regenerate_recovery_codes(&token, RecoveryCode::ten())
+        .await?;
     Ok(Json(MintedSaid {
         recovery: exposed(&minted),
     })
     .into_response())
 }
 
-async fn verify<P, S, C>(
-    State(step): State<Arc<SecondStep<P, S, C>>>,
-    axum::Extension(shape): axum::Extension<Shape>,
+async fn verify<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(answered): Json<Answered>,
 ) -> Result<Response, SecondFactorRefused>
 where
-    P: FactorStore + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let challenge =
         session_cookie::challenged(&headers).ok_or(SecondFactorRefused::NoChallengeCarried)?;
     let answer = answer_of(&answered)?;
-    let session = step
-        .verify(
+    let session = state
+        .app
+        .verify_second_step(
             &challenge,
             &answer,
             session_cookie::agent(&headers).as_ref(),
         )
         .await?;
     let (Some(opened), Some(cleared)) = (
-        session_cookie::opened(&session, shape.cookie),
-        session_cookie::answered(shape.cookie),
+        session_cookie::opened(&session, state.cookie),
+        session_cookie::answered(state.cookie),
     ) else {
         return Err(SecondFactorRefused::Refused(FactorError::StoreUnreachable));
     };
