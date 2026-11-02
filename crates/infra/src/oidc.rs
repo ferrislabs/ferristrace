@@ -10,6 +10,7 @@ use openidconnect::{
 };
 
 const EMAIL: &str = "email";
+const PROFILE: &str = "profile";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcSettings {
@@ -73,6 +74,7 @@ impl OidcProvider {
                 Nonce::new_random,
             )
             .add_scope(Scope::new(EMAIL.to_owned()))
+            .add_scope(Scope::new(PROFILE.to_owned()))
             .set_pkce_challenge(challenge)
             .url();
 
@@ -160,5 +162,62 @@ impl Authorizer for OidcProvider {
             tracing::error!(%error, "an authorization url could not be built");
             AuthError::ProviderUnreachable
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openidconnect::core::{
+        CoreJwsSigningAlgorithm, CoreResponseType, CoreSubjectIdentifierType,
+    };
+    use openidconnect::{
+        AuthUrl, EmptyAdditionalProviderMetadata, JsonWebKeySetUrl, ResponseTypes,
+    };
+
+    fn provider() -> OidcProvider {
+        let metadata = CoreProviderMetadata::new(
+            IssuerUrl::new("https://ferriskey.test".to_owned()).unwrap(),
+            AuthUrl::new("https://ferriskey.test/authorize".to_owned()).unwrap(),
+            JsonWebKeySetUrl::new("https://ferriskey.test/jwks".to_owned()).unwrap(),
+            vec![ResponseTypes::new(vec![CoreResponseType::Code])],
+            vec![CoreSubjectIdentifierType::Public],
+            vec![CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256],
+            EmptyAdditionalProviderMetadata {},
+        );
+        let settings = OidcSettings {
+            issuer: "https://ferriskey.test".to_owned(),
+            client_id: "ferristrace".to_owned(),
+            client_secret: "secret".to_owned(),
+            redirect_uri: "https://ferristrace.test/callback".to_owned(),
+        };
+        let http = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let issuer = Issuer::federated(&settings.issuer).unwrap();
+
+        OidcProvider {
+            metadata,
+            settings,
+            http,
+            issuer,
+        }
+    }
+
+    #[test]
+    fn begin_requests_the_email_and_profile_scopes_beside_openid() {
+        let (url, _) = provider().begin().unwrap();
+        let parsed = openidconnect::url::Url::parse(&url).unwrap();
+        let scope = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "scope")
+            .map(|(_, value)| value.into_owned())
+            .unwrap();
+        let requested: std::collections::HashSet<&str> = scope.split_whitespace().collect();
+
+        assert!(requested.contains("openid"));
+        assert!(requested.contains("email"));
+        assert!(requested.contains("profile"));
     }
 }
