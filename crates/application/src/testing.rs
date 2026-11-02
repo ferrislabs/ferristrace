@@ -9,9 +9,9 @@ use ferristrace_domain::{
     LogSink, Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink,
     Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow,
     ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet,
-    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
-    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
-    UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
+    ServiceFilter, ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor,
+    SpanPage, SpanPages, SpanReader, SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter,
+    TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -84,10 +84,27 @@ impl SpanReader for Inert {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        _service: &str,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        _filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        Ok(ServiceSeries::default())
     }
 
     async fn traces(

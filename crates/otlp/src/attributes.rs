@@ -14,6 +14,12 @@ pub(crate) fn collect(pairs: Vec<KeyValue>) -> Attributes {
         .collect()
 }
 
+pub(crate) fn merged(resource: &Attributes, pairs: Vec<KeyValue>) -> Attributes {
+    let mut attributes = resource.clone();
+    attributes.extend(collect(pairs));
+    attributes
+}
+
 pub(crate) fn lookup(pairs: &[KeyValue], key: &str) -> Option<Box<str>> {
     pairs
         .iter()

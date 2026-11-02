@@ -9,8 +9,8 @@ use axum::routing::get;
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    ExploreError, ProjectId, ServiceSummary, Span, SpanKind, SpanStatus, TenantId, TraceFilter,
-    TraceId, TraceOrder, TraceSummary, Window,
+    ExploreError, ProjectId, ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanKind,
+    SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -193,6 +193,15 @@ where
 {
     Router::new()
         .route("/api/orgs/{org}/services", get(services::<S>))
+        .route(
+            "/api/orgs/{org}/services/{service}/operations",
+            get(operations::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/services/{service}/series",
+            get(service_series::<S>),
+        )
+        .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/{trace}", get(one::<S>))
         .with_state(state)
@@ -318,27 +327,133 @@ struct Serving {
     requests: u64,
     errors: u64,
     per_second: f64,
+    error_rate: f64,
     p50_us: u64,
     p95_us: u64,
     p99_us: u64,
     last_seen_ms: u64,
 }
 
+#[allow(clippy::cast_precision_loss)]
+fn ratio(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        part as f64 / whole as f64
+    }
+}
+
 fn serving(summary: ServiceSummary, seconds: f64) -> Serving {
     Serving {
-        name: summary.name.into_string(),
-        requests: summary.requests,
-        errors: summary.errors,
         #[allow(clippy::cast_precision_loss)]
         per_second: if seconds > 0.0 {
             summary.requests as f64 / seconds
         } else {
             0.0
         },
+        error_rate: ratio(summary.errors, summary.requests),
+        name: summary.name.into_string(),
+        requests: summary.requests,
+        errors: summary.errors,
         p50_us: summary.p50_nanos / NANOS_PER_MICRO,
         p95_us: summary.p95_nanos / NANOS_PER_MICRO,
         p99_us: summary.p99_nanos / NANOS_PER_MICRO,
         last_seen_ms: summary.last_seen_unix_nanos / NANOS_PER_MILLI,
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Operations {
+    operations: Vec<Operation>,
+}
+
+#[derive(Debug, Serialize)]
+struct Operation {
+    name: String,
+    requests: u64,
+    errors: u64,
+    p50_ns: u64,
+    p95_ns: u64,
+    p99_ns: u64,
+    last_seen_ns: u64,
+}
+
+impl From<ServiceSummary> for Operation {
+    fn from(summary: ServiceSummary) -> Self {
+        Self {
+            name: summary.name.into_string(),
+            requests: summary.requests,
+            errors: summary.errors,
+            p50_ns: summary.p50_nanos,
+            p95_ns: summary.p95_nanos,
+            p99_ns: summary.p99_nanos,
+            last_seen_ns: summary.last_seen_unix_nanos,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Stepped {
+    step_ns: u64,
+    requests: u64,
+    errors: u64,
+    p95_ns: Option<u64>,
+    points: Vec<(u64, u64, u64, Option<u64>)>,
+}
+
+impl From<ServiceSeries> for Stepped {
+    fn from(series: ServiceSeries) -> Self {
+        Self {
+            step_ns: series.step_nanos,
+            requests: series.requests,
+            errors: series.errors,
+            p95_ns: series.p95_nanos,
+            points: series
+                .points
+                .into_iter()
+                .map(|point| {
+                    (
+                        point.start_unix_nanos,
+                        point.requests,
+                        point.errors,
+                        point.p95_nanos,
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Spanning {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    environment: Option<String>,
+}
+
+impl Spanning {
+    fn filter(self) -> Result<ServiceFilter, LookRefused> {
+        let window = Window::new(
+            self.from.saturating_mul(NANOS_PER_MILLI),
+            self.to.saturating_mul(NANOS_PER_MILLI),
+        )
+        .map_err(|_| LookRefused::Window)?;
+        let mut filter = ServiceFilter::over(window);
+        filter.project = self.project.map(ProjectId::new);
+        filter.environment = self
+            .environment
+            .map(|typed| typed.trim().to_owned())
+            .filter(|typed| !typed.is_empty())
+            .map(Into::into);
+        Ok(filter)
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn seconds(&self) -> f64 {
+        (self.to.saturating_sub(self.from) as f64) / 1000.0
     }
 }
 
@@ -352,22 +467,12 @@ where
     S::Repos: ReadRepos,
 {
     let who = reading(&headers)?;
-    let window = Window::new(
-        over.from.saturating_mul(NANOS_PER_MILLI),
-        over.to.saturating_mul(NANOS_PER_MILLI),
-    )
-    .map_err(|_| LookRefused::Window)?;
-    #[allow(clippy::cast_precision_loss)]
-    let seconds = (over.to.saturating_sub(over.from) as f64) / 1000.0;
+    let seconds = over.seconds();
+    let filter = over.filter()?;
 
     let found = state
         .app
-        .services(
-            &who,
-            TenantId::new(org),
-            window,
-            over.project.map(ProjectId::new),
-        )
+        .services(&who, TenantId::new(org), &filter)
         .await?
         .into_iter()
         .map(|summary| serving(summary, seconds))
@@ -375,10 +480,62 @@ where
     Ok(Json(Running { services: found }))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Spanning {
-    from: u64,
-    to: u64,
-    #[serde(default)]
-    project: Option<Uuid>,
+async fn operations<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, service)): Path<(Uuid, String)>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Operations>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&headers)?;
+    let filter = over.filter()?;
+
+    let found = state
+        .app
+        .operations(&who, TenantId::new(org), &service, &filter)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(Operations { operations: found }))
+}
+
+async fn service_series<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, service)): Path<(Uuid, String)>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Stepped>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&headers)?;
+    let filter = over.filter()?;
+
+    let series = state
+        .app
+        .service_series(&who, TenantId::new(org), Some(&service), &filter)
+        .await?;
+    Ok(Json(series.into()))
+}
+
+async fn org_series<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Stepped>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&headers)?;
+    let filter = over.filter()?;
+
+    let series = state
+        .app
+        .service_series(&who, TenantId::new(org), None, &filter)
+        .await?;
+    Ok(Json(series.into()))
 }

@@ -2,29 +2,48 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    ProjectId, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus,
-    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    ProjectId, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId,
+    SpanKind, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder,
+    TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
 
-const SERVICES: &str = "SELECT \
-     service_name AS name, \
-     count() AS requests, \
-     countIf(status = 'error') AS errors, \
-     quantiles(0.5, 0.95, 0.99)( \
-       toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
-     ) AS latency, \
-     toUnixTimestamp64Nano(max(start_time)) AS last_seen \
-   FROM spans FINAL \
+const SERVED: &str = "FROM spans FINAL \
    WHERE tenant_id = ? \
      AND start_time >= fromUnixTimestamp64Nano(?) \
      AND start_time < fromUnixTimestamp64Nano(?) \
      AND kind IN ('server', 'consumer') \
      AND (? = 0 OR project_id = ?) \
-   GROUP BY service_name \
-   ORDER BY requests DESC \
-   LIMIT 500";
+     AND (? = '' OR attributes['deployment.environment'] = ? \
+       OR attributes['deployment.environment.name'] = ?) \
+     AND (? = '' OR service_name = ?)";
+
+const MEASURED: &str = "count() AS requests, \
+     countIf(status = 'error') AS errors, \
+     quantiles(0.5, 0.95, 0.99)( \
+       toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
+     ) AS latency, \
+     toUnixTimestamp64Nano(max(start_time)) AS last_seen";
+
+const SERVICES: &str = "SELECT service_name AS name, {measured} {served} \
+   GROUP BY service_name ORDER BY requests DESC, name LIMIT 500";
+
+const OPERATIONS: &str = "SELECT name AS name, {measured} {served} \
+   GROUP BY name ORDER BY requests DESC, name LIMIT 500";
+
+const STEPS: &str = "SELECT \
+     toInt64(intDiv(toUnixTimestamp64Nano(start_time) - {from}, {step})) AS slot, \
+     count() AS requests, \
+     countIf(status = 'error') AS errors, \
+     quantile(0.95)(toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time)) AS p95 \
+   {served} GROUP BY slot ORDER BY slot";
+
+const WHOLE: &str = "SELECT \
+     count() AS requests, \
+     countIf(status = 'error') AS errors, \
+     quantile(0.95)(toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time)) AS p95 \
+   {served}";
 
 const SUMMARIES: &str = "SELECT \
      lower(hex(trace_id)) AS trace_id, \
@@ -88,6 +107,21 @@ struct ServiceRow {
 }
 
 #[derive(Debug, Row, Deserialize)]
+struct StepRow {
+    slot: i64,
+    requests: u64,
+    errors: u64,
+    p95: f64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct WholeRow {
+    requests: u64,
+    errors: u64,
+    p95: f64,
+}
+
+#[derive(Debug, Row, Deserialize)]
 struct SummaryRow {
     trace_id: String,
     root_service: String,
@@ -127,28 +161,105 @@ impl ClickhouseReader {
     pub(crate) fn client(&self) -> &Client {
         &self.client
     }
+
+    fn served(
+        &self,
+        sql: &str,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> clickhouse::query::Query {
+        let environment = filter.environment.as_deref().unwrap_or_default();
+        let service = service.unwrap_or_default();
+        self.client
+            .query(
+                &sql.replace("{measured}", MEASURED)
+                    .replace("{served}", SERVED),
+            )
+            .bind(tenant.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(environment)
+            .bind(environment)
+            .bind(environment)
+            .bind(service)
+            .bind(service)
+    }
+
+    async fn summaries(
+        &self,
+        sql: &str,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        let rows: Vec<ServiceRow> = self
+            .served(sql, tenant, service, filter)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows.into_iter().map(read_service).collect())
+    }
 }
 
 impl SpanReader for ClickhouseReader {
     async fn services(
         &self,
         tenant: TenantId,
-        window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
-        let rows: Vec<ServiceRow> = self
-            .client
-            .query(SERVICES)
-            .bind(tenant.as_uuid())
-            .bind(nanos(window.from_unix_nanos()))
-            .bind(nanos(window.to_unix_nanos()))
-            .bind(u8::from(project.is_some()))
-            .bind(uuid_of(project))
+        self.summaries(SERVICES, tenant, None, filter).await
+    }
+
+    async fn operations(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        self.summaries(OPERATIONS, tenant, Some(service), filter)
+            .await
+    }
+
+    async fn series(
+        &self,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        let from = filter.window.from_unix_nanos();
+        let step = filter.step_nanos();
+        let stepped = STEPS
+            .replace("{from}", &nanos(from).to_string())
+            .replace("{step}", &nanos(step).to_string());
+        let steps: Vec<StepRow> = self
+            .served(&stepped, tenant, service, filter)
             .fetch_all()
             .await
             .map_err(|error| refused(&error))?;
+        let whole: WholeRow = self
+            .served(WHOLE, tenant, service, filter)
+            .fetch_one()
+            .await
+            .map_err(|error| refused(&error))?;
 
-        Ok(rows.into_iter().map(read_service).collect())
+        Ok(ServiceSeries {
+            step_nanos: step,
+            requests: whole.requests,
+            errors: whole.errors,
+            p95_nanos: (whole.requests > 0).then(|| nanos_of(whole.p95)),
+            points: steps
+                .into_iter()
+                .map(|row| ServicePoint {
+                    start_unix_nanos: from + unsigned(row.slot) * step,
+                    requests: row.requests,
+                    errors: row.errors,
+                    p95_nanos: Some(nanos_of(row.p95)),
+                })
+                .collect(),
+        })
     }
 
     async fn traces(
@@ -238,11 +349,15 @@ fn read_service(row: ServiceRow) -> ServiceSummary {
     }
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn quantile(latency: &[f64], at: usize) -> u64 {
-    let Some(value) = latency.get(at).copied().filter(|value| value.is_finite()) else {
+    latency.get(at).copied().map_or(0, nanos_of)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn nanos_of(value: f64) -> u64 {
+    if !value.is_finite() {
         return 0;
-    };
+    }
     value.clamp(0.0, u64::MAX as f64) as u64
 }
 
@@ -350,7 +465,10 @@ pub(crate) fn refused(error: &clickhouse::error::Error) -> StoreError {
 mod tests {
     use ferristrace_domain::{SpanKind, SpanStatus, TraceOrder};
 
-    use super::{ONE_TRACE, SUMMARIES, ordering, read_kind, read_status};
+    use super::{
+        ONE_TRACE, OPERATIONS, SERVED, SERVICES, STEPS, SUMMARIES, WHOLE, ordering, read_kind,
+        read_status,
+    };
 
     #[test]
     fn every_kind_the_schema_holds_is_read_back() {
@@ -388,11 +506,18 @@ mod tests {
 
     #[test]
     fn neither_query_reads_across_tenants() {
-        for query in [SUMMARIES, ONE_TRACE] {
+        for query in [SUMMARIES, ONE_TRACE, SERVED] {
             assert!(
                 query.contains("WHERE tenant_id = ?"),
                 "a query without a tenant would read somebody else's spans"
             );
+        }
+    }
+
+    #[test]
+    fn every_service_view_reads_through_the_tenant_bound_filter() {
+        for query in [SERVICES, OPERATIONS, STEPS, WHOLE] {
+            assert!(query.contains("{served}"), "{query}");
         }
     }
 }

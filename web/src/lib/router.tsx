@@ -5,8 +5,8 @@ type AnchorProps = Omit<ComponentProps<'a'>, 'href'>
 
 export { Outlet }
 
-export function Link({ to, ...props }: AnchorProps & { to: string }) {
-  return <RouterLink to={to as never} {...props} />
+export function Link({ to, search, ...props }: AnchorProps & { to: string; search?: Record<string, string> }) {
+  return <RouterLink to={to as never} search={search as never} {...props} />
 }
 
 export const isActivePath = (pathname: string, to: string, end = false) =>

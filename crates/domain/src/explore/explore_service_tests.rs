@@ -5,7 +5,10 @@ use uuid::Uuid;
 use super::errors::{BadWindow, ExploreError};
 use super::explore_service::Explore;
 use super::ports::SpanReader;
-use super::value_objects::{ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window};
+use super::value_objects::{
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, TraceFilter, TraceOrder,
+    TraceSummary, Window,
+};
 use crate::access::key_ring_tests::Ring;
 use crate::access::{KeyScope, KeyScopes, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -92,12 +95,53 @@ impl SpanReader for &Asked {
     async fn services(
         &self,
         tenant: TenantId,
-        _window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
-        self.projects.lock().expect("the lock").push(project);
+        self.projects.lock().expect("the lock").push(filter.project);
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(filter.project);
+        Ok(vec![ServiceSummary {
+            name: format!("{service} op").into(),
+            requests: 4,
+            errors: 1,
+            p50_nanos: 1,
+            p95_nanos: 2,
+            p99_nanos: 3,
+            last_seen_unix_nanos: 9,
+        }])
+    }
+
+    async fn series(
+        &self,
+        tenant: TenantId,
+        _service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(filter.project);
+        let start = filter.window.from_unix_nanos() + 2 * filter.step_nanos();
+        Ok(ServiceSeries {
+            step_nanos: filter.step_nanos(),
+            requests: 5,
+            errors: 2,
+            p95_nanos: Some(70),
+            points: vec![ServicePoint {
+                start_unix_nanos: start,
+                requests: 5,
+                errors: 2,
+                p95_nanos: Some(70),
+            }],
+        })
     }
 
     async fn traces(
@@ -151,9 +195,26 @@ impl SpanReader for Unreachable {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        _service: &str,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        _filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
         Err(StoreError::Unreachable)
     }
 
@@ -173,6 +234,16 @@ impl SpanReader for Unreachable {
     ) -> Result<Vec<Span>, StoreError> {
         Err(StoreError::Unreachable)
     }
+}
+
+fn elsewhere(window: Window) -> ServiceFilter {
+    let mut filter = ServiceFilter::over(window);
+    filter.project = Some(a_project(OTHER));
+    filter
+}
+
+fn an_hour() -> ServiceFilter {
+    ServiceFilter::over(Window::new(0, 3_600_000_000_000).expect("an hour"))
 }
 
 fn a_filter() -> TraceFilter {
@@ -290,7 +361,11 @@ async fn the_services_of_another_organisation_are_refused_before_the_store_is_as
     let window = Window::new(0, 1000).expect("a window");
 
     let refused = explore
-        .services(&session(TOKEN), an_org(THEIRS), window, None)
+        .services(
+            &session(TOKEN),
+            an_org(THEIRS),
+            &ServiceFilter::over(window),
+        )
         .await;
 
     assert_eq!(refused, Err(ExploreError::NotYours));
@@ -304,7 +379,7 @@ async fn a_member_reads_the_services_of_its_own_organisation() {
     let window = Window::new(0, 1000).expect("a window");
 
     explore
-        .services(&session(TOKEN), an_org(MINE), window, None)
+        .services(&session(TOKEN), an_org(MINE), &ServiceFilter::over(window))
         .await
         .expect("a member may read");
 
@@ -349,7 +424,11 @@ async fn a_project_bound_read_key_reads_only_its_project_when_none_is_named() {
         .await
         .expect("a read key may read its project");
     explore
-        .services(&Reader::Key(secret), an_org(MINE), window, None)
+        .services(
+            &Reader::Key(secret),
+            an_org(MINE),
+            &ServiceFilter::over(window),
+        )
         .await
         .expect("and its services");
 
@@ -373,12 +452,7 @@ async fn a_project_bound_read_key_naming_another_project_is_refused_like_a_stran
         .traces(&Reader::Key(secret.clone()), an_org(MINE), &filter)
         .await;
     let services = explore
-        .services(
-            &Reader::Key(secret),
-            an_org(MINE),
-            window,
-            Some(a_project(OTHER)),
-        )
+        .services(&Reader::Key(secret), an_org(MINE), &elsewhere(window))
         .await;
 
     assert_eq!(traces, Err(ExploreError::NotYours));
@@ -476,4 +550,143 @@ async fn an_ingest_key_reads_nothing_and_is_refused_as_unauthenticated() {
 
     assert_eq!(refused, Err(ExploreError::NoSession));
     assert!(asked.tenants.lock().expect("the lock").is_empty());
+}
+
+#[tokio::test]
+async fn a_member_reads_the_operations_of_a_service_of_its_organisation() {
+    let asked = Asked::default();
+
+    let found = exploring(&asked)
+        .operations(&session(TOKEN), an_org(MINE), "checkout", &an_hour())
+        .await
+        .expect("a member may read");
+
+    assert_eq!(&*found[0].name, "checkout op");
+    assert_eq!(*asked.tenants.lock().expect("the lock"), vec![an_org(MINE)]);
+}
+
+#[tokio::test]
+async fn the_operations_and_series_of_another_organisation_are_refused_before_the_store_is_asked() {
+    let asked = Asked::default();
+    let explore = exploring(&asked);
+
+    let operations = explore
+        .operations(&session(TOKEN), an_org(THEIRS), "checkout", &an_hour())
+        .await;
+    let series = explore
+        .series(
+            &session(TOKEN),
+            an_org(THEIRS),
+            Some("checkout"),
+            &an_hour(),
+        )
+        .await;
+
+    assert_eq!(operations, Err(ExploreError::NotYours));
+    assert_eq!(series, Err(ExploreError::NotYours));
+    assert!(asked.tenants.lock().expect("the lock").is_empty());
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_reads_operations_and_series_of_its_project_only() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let window = Window::new(0, 3_600_000_000_000).expect("an hour");
+
+    explore
+        .operations(
+            &Reader::Key(secret.clone()),
+            an_org(MINE),
+            "checkout",
+            &an_hour(),
+        )
+        .await
+        .expect("its operations");
+    explore
+        .series(&Reader::Key(secret.clone()), an_org(MINE), None, &an_hour())
+        .await
+        .expect("its series");
+    let operations = explore
+        .operations(
+            &Reader::Key(secret.clone()),
+            an_org(MINE),
+            "checkout",
+            &elsewhere(window),
+        )
+        .await;
+    let series = explore
+        .series(
+            &Reader::Key(secret),
+            an_org(MINE),
+            Some("checkout"),
+            &elsewhere(window),
+        )
+        .await;
+
+    assert_eq!(operations, Err(ExploreError::NotYours));
+    assert_eq!(series, Err(ExploreError::NotYours));
+    assert_eq!(
+        asked.projects(),
+        vec![Some(a_project(OURS)), Some(a_project(OURS))]
+    );
+}
+
+#[tokio::test]
+async fn a_series_has_a_point_for_every_step_even_where_nothing_was_served() {
+    let asked = Asked::default();
+    let filter = an_hour();
+
+    let series = exploring(&asked)
+        .series(&session(TOKEN), an_org(MINE), Some("checkout"), &filter)
+        .await
+        .expect("a member may read");
+
+    assert_eq!(series.step_nanos, 60_000_000_000);
+    assert_eq!(series.points.len(), 60);
+    assert_eq!(series.points[0].start_unix_nanos, 0);
+    assert_eq!(series.points[59].start_unix_nanos, 59 * 60_000_000_000);
+    assert_eq!(
+        series.points[1],
+        ServicePoint {
+            start_unix_nanos: 60_000_000_000,
+            requests: 0,
+            errors: 0,
+            p95_nanos: None,
+        }
+    );
+    assert_eq!(series.points[2].requests, 5);
+    assert_eq!(series.points[2].p95_nanos, Some(70));
+    assert_eq!((series.requests, series.errors), (5, 2));
+}
+
+#[tokio::test]
+async fn an_unreachable_store_fails_operations_and_series_as_unreachable() {
+    let explore = exploring(Unreachable);
+
+    assert_eq!(
+        explore
+            .operations(&session(TOKEN), an_org(MINE), "checkout", &an_hour())
+            .await,
+        Err(ExploreError::StoreUnreachable)
+    );
+    assert_eq!(
+        explore
+            .series(&session(TOKEN), an_org(MINE), None, &an_hour())
+            .await,
+        Err(ExploreError::StoreUnreachable)
+    );
+}
+
+#[test]
+fn a_service_filter_steps_a_sixtieth_of_its_window_and_never_under_a_second() {
+    let minute = ServiceFilter::over(Window::new(0, 60_000_000_000).expect("a minute"));
+    let short = ServiceFilter::over(Window::new(0, 1_000_000).expect("a millisecond"));
+
+    assert_eq!(an_hour().step_nanos(), 60_000_000_000);
+    assert_eq!(minute.step_nanos(), 1_000_000_000);
+    assert_eq!(short.step_nanos(), 1_000_000_000);
+    assert_eq!(short.slot_starts().count(), 1);
+    assert_eq!(an_hour().environment, None);
 }

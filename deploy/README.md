@@ -92,6 +92,17 @@ their exemplars, and read back through `GET /api/orgs/<org>/metrics` and
 summaries are accepted and counted in usage but not stored yet; the server
 logs a warning the first time it skips one.
 
+The Services and Overview pages are computed from the server and consumer
+spans: `GET /api/orgs/<org>/services`,
+`GET /api/orgs/<org>/services/<service>/operations`,
+`GET /api/orgs/<org>/services/<service>/series` and
+`GET /api/orgs/<org>/series` give request and error counts and latency
+percentiles over a window, and accept `environment=` to keep only the
+spans whose `deployment.environment` (or `deployment.environment.name`)
+attribute matches. A span carries its resource attributes merged into its
+own at ingest, its own value winning, so an environment set on the
+resource is enough.
+
 ## Coming from a Comettrace deployment
 
 The product was called Comettrace before. A stack started under that name

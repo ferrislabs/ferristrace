@@ -10,10 +10,10 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
-    ProvisionPolicy, ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader,
-    SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
-    WhoamiError, Window,
+    ProvisionPolicy, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Span, SpanCursor, SpanEvent,
+    SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId,
+    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -137,22 +137,55 @@ impl SpanPages for TwoSpans {
     }
 }
 
+fn a_summary(name: &str) -> ServiceSummary {
+    ServiceSummary {
+        name: name.into(),
+        requests: 10,
+        errors: 1,
+        p50_nanos: 96_000_000,
+        p95_nanos: 1_280_000_000,
+        p99_nanos: 2_900_000_000,
+        last_seen_unix_nanos: 1_700_000_000_123_456_789,
+    }
+}
+
 impl SpanReader for TwoSpans {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
-        Ok(vec![ServiceSummary {
-            name: "checkout".into(),
-            requests: 10,
-            errors: 1,
-            p50_nanos: 96_000_000,
-            p95_nanos: 1_280_000_000,
-            p99_nanos: 2_900_000_000,
-            last_seen_unix_nanos: 1_700_000_000_123_456_789,
-        }])
+        Ok(vec![a_summary("checkout")])
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        service: &str,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(vec![a_summary(&format!("{service} POST /pay"))])
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        let start = filter.window.from_unix_nanos();
+        Ok(ServiceSeries {
+            step_nanos: filter.step_nanos(),
+            requests: 7,
+            errors: 2,
+            p95_nanos: Some(3_000_000),
+            points: vec![ServicePoint {
+                start_unix_nanos: start,
+                requests: 7,
+                errors: 2,
+                p95_nanos: Some(3_000_000),
+            }],
+        })
     }
 
     async fn traces(
@@ -214,10 +247,27 @@ impl SpanReader for NoSpans {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        _service: &str,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        _filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        Ok(ServiceSeries::default())
     }
 
     async fn traces(
@@ -487,6 +537,7 @@ async fn the_services_table_is_read_for_the_same_organisation() {
         service["per_second"], 0.166_666_666_666_666_66,
         "ten requests over a minute"
     );
+    assert_eq!(service["error_rate"], 0.1);
     assert_eq!(service["p50_us"], 96_000);
     assert_eq!(service["p99_us"], 2_900_000);
     assert_eq!(service["last_seen_ms"], 1_700_000_000_123u64);
@@ -530,8 +581,23 @@ async fn an_exception_on_a_span_reaches_the_waterfall_with_its_place_in_it() {
     );
 }
 
+type ServiceAsked = (Option<String>, ServiceFilter);
+
 #[derive(Debug, Default)]
-struct Remembering(Mutex<Option<TraceFilter>>);
+struct Remembering(Mutex<Option<TraceFilter>>, Mutex<Vec<ServiceAsked>>);
+
+impl Remembering {
+    fn services_asked(&self) -> Vec<ServiceAsked> {
+        self.1.lock().expect("the lock").clone()
+    }
+
+    fn note(&self, service: Option<&str>, filter: &ServiceFilter) {
+        self.1
+            .lock()
+            .expect("the lock")
+            .push((service.map(str::to_owned), filter.clone()));
+    }
+}
 
 impl SpanPages for Remembering {
     async fn page(
@@ -548,10 +614,30 @@ impl SpanReader for Remembering {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        self.note(None, filter);
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        self.note(Some(service), filter);
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        self.note(service, filter);
+        Ok(ServiceSeries::default())
     }
 
     async fn traces(
@@ -636,4 +722,143 @@ async fn a_window_on_its_own_filters_nothing_and_orders_by_when_it_started() {
     assert_eq!(filter.at_least_nanos, None);
     assert_eq!(filter.order, TraceOrder::Started);
     assert_eq!(filter.project, None);
+}
+
+#[tokio::test]
+async fn the_operations_of_a_service_are_listed_with_their_measures_in_nanoseconds() {
+    let uri = format!(
+        "/api/orgs/{}/services/checkout/operations?from=1700000000000&to=1700000060000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let operation = &found["operations"][0];
+    assert_eq!(operation["name"], "checkout POST /pay");
+    assert_eq!(operation["requests"], 10);
+    assert_eq!(operation["errors"], 1);
+    assert_eq!(operation["p50_ns"], 96_000_000);
+    assert_eq!(operation["p95_ns"], 1_280_000_000u64);
+    assert_eq!(operation["p99_ns"], 2_900_000_000u64);
+    assert_eq!(operation["last_seen_ns"], 1_700_000_000_123_456_789u64);
+}
+
+#[tokio::test]
+async fn a_service_series_has_sixty_steps_of_requests_errors_and_p95() {
+    let uri = format!(
+        "/api/orgs/{}/services/checkout/series?from=1700000000000&to=1700003600000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(found["step_ns"], 60_000_000_000u64);
+    let points = found["points"].as_array().expect("points");
+    assert_eq!(points.len(), 60);
+    assert_eq!(
+        points[0],
+        serde_json::json!([1_700_000_000_000_000_000u64, 7, 2, 3_000_000])
+    );
+    assert_eq!(
+        points[1],
+        serde_json::json!([1_700_000_060_000_000_000u64, 0, 0, null])
+    );
+    assert_eq!(found["requests"], 7);
+    assert_eq!(found["errors"], 2);
+    assert_eq!(found["p95_ns"], 3_000_000);
+}
+
+#[tokio::test]
+async fn the_organisation_series_is_the_same_shape_over_every_service() {
+    let uri = format!(
+        "/api/orgs/{}/series?from=1700000000000&to=1700003600000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(found["points"].as_array().map(Vec::len), Some(60));
+}
+
+#[tokio::test]
+async fn the_service_routes_refuse_strangers_bad_windows_and_missing_sessions() {
+    for route in [
+        "services/checkout/operations",
+        "services/checkout/series",
+        "series",
+    ] {
+        let theirs = format!("/api/orgs/{}/{route}?from=1&to=2", org(THEIRS));
+        let backwards = format!("/api/orgs/{}/{route}?from=20&to=10", org(MINE));
+        let mine = format!("/api/orgs/{}/{route}?from=1&to=2", org(MINE));
+
+        let (stranger, _) = served(TwoSpans, looking(&theirs, Some(&session()), true)).await;
+        let (window, _) = served(TwoSpans, looking(&backwards, Some(&session()), true)).await;
+        let (anonymous, _) = served(TwoSpans, looking(&mine, None, true)).await;
+
+        assert_eq!(stranger, StatusCode::NOT_FOUND, "{route}");
+        assert_eq!(window, StatusCode::BAD_REQUEST, "{route}");
+        assert_eq!(anonymous, StatusCode::UNAUTHORIZED, "{route}");
+    }
+}
+
+#[tokio::test]
+async fn the_service_routes_pass_the_project_environment_and_service_to_the_store() {
+    let asked = Arc::new(Remembering::default());
+    let project = org(7);
+    for route in [
+        "services",
+        "services/check%20out/operations",
+        "services/check%20out/series",
+        "series",
+    ] {
+        let uri = format!(
+            "/api/orgs/{}/{route}?from=1000&to=2000&project={project}&environment=production",
+            org(MINE)
+        );
+
+        let (status, body) =
+            served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+
+        assert_eq!(status, StatusCode::OK, "{route}: {body}");
+    }
+
+    let services: Vec<Option<String>> = asked
+        .services_asked()
+        .into_iter()
+        .map(|(service, _)| service)
+        .collect();
+    assert_eq!(
+        services,
+        vec![
+            None,
+            Some("check out".to_owned()),
+            Some("check out".to_owned()),
+            None
+        ]
+    );
+    for (_, filter) in asked.services_asked() {
+        assert_eq!(filter.window.from_unix_nanos(), 1_000_000_000);
+        assert_eq!(filter.project, Some(ProjectId::new(Uuid::from_u128(7))));
+        assert_eq!(filter.environment.as_deref(), Some("production"));
+    }
+}
+
+#[tokio::test]
+async fn an_empty_environment_is_no_filter() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!(
+        "/api/orgs/{}/services?from=1000&to=2000&environment=",
+        org(MINE)
+    );
+
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(asked.services_asked()[0].1.environment, None);
 }

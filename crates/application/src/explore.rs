@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    Explore, ExploreError, ProjectId, Reader, Readers, ServiceSummary, Span, TenantId, TraceFilter,
-    TraceId, TraceSummary, Whoami, Window,
+    Explore, ExploreError, Reader, Readers, ServiceFilter, ServiceSeries, ServiceSummary, Span,
+    TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
 };
 
 use crate::registry::ReadRepos;
@@ -15,8 +15,7 @@ where
         &self,
         who: &Reader,
         org: TenantId,
-        window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, ExploreError> {
         let Some(reader) = &self.span_store else {
             return Err(ExploreError::StoreUnreachable);
@@ -25,7 +24,45 @@ where
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
         )
-        .services(who, org, window, project)
+        .services(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn operations(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .operations(who, org, service, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn service_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .series(who, org, service, filter)
         .await
     }
 

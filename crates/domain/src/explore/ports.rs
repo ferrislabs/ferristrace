@@ -1,6 +1,8 @@
 use core::future::Future;
 
-use super::value_objects::{ServiceSummary, TraceFilter, TraceSummary, Window};
+use super::value_objects::{
+    ServiceFilter, ServiceSeries, ServiceSummary, TraceFilter, TraceSummary,
+};
 use crate::catalogue::ProjectId;
 use crate::store::StoreError;
 use crate::telemetry::{Span, TenantId, TraceId};
@@ -9,9 +11,22 @@ pub trait SpanReader {
     fn services(
         &self,
         tenant: TenantId,
-        window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send;
+
+    fn operations(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send;
+
+    fn series(
+        &self,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<ServiceSeries, StoreError>> + Send;
 
     fn traces(
         &self,
@@ -31,10 +46,27 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     fn services(
         &self,
         tenant: TenantId,
-        window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
-        (*self).services(tenant, window, project)
+        (*self).services(tenant, filter)
+    }
+
+    fn operations(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
+        (*self).operations(tenant, service, filter)
+    }
+
+    fn series(
+        &self,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<ServiceSeries, StoreError>> + Send {
+        (*self).series(tenant, service, filter)
     }
 
     fn traces(
@@ -59,10 +91,27 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
     fn services(
         &self,
         tenant: TenantId,
-        window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
-        self.as_ref().services(tenant, window, project)
+        self.as_ref().services(tenant, filter)
+    }
+
+    fn operations(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
+        self.as_ref().operations(tenant, service, filter)
+    }
+
+    fn series(
+        &self,
+        tenant: TenantId,
+        service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<ServiceSeries, StoreError>> + Send {
+        self.as_ref().series(tenant, service, filter)
     }
 
     fn traces(

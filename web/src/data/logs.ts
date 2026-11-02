@@ -126,3 +126,37 @@ export function useLogHistogram(query: LogQuery, live = false) {
   })
   return { buckets: found.data?.buckets ?? [], loading: found.isFetching, failed: found.error }
 }
+
+export const AROUND_TRACE_MS = 5 * 60 * 1000
+const TRACE_LOGS = 200
+
+export function traceWindow(startedAtMs: number, durationMs: number): { fromMs: number; toMs: number } {
+  return { fromMs: startedAtMs - AROUND_TRACE_MS, toMs: Math.ceil(startedAtMs + durationMs) + AROUND_TRACE_MS }
+}
+
+export function traceLogsFilter(trace: string, startedAtMs: number, durationMs: number): string {
+  const { fromMs, toMs } = traceWindow(startedAtMs, durationMs)
+  return new URLSearchParams({ from: String(fromMs), to: String(toMs), trace }).toString()
+}
+
+export function useTraceLogs(trace: string | undefined, startedAtMs: number, durationMs: number) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const found = useQuery({
+    queryKey: ['logs', active?.org, project, 'trace', trace, startedAtMs, durationMs],
+    enabled: Boolean(active && trace),
+    staleTime: FRESH_MS,
+    queryFn: async () => {
+      const { fromMs, toMs } = traceWindow(startedAtMs, durationMs)
+      const params = new URLSearchParams({ from: String(fromMs), to: String(toMs), trace: trace ?? '', limit: String(TRACE_LOGS) })
+      if (project) params.set('project', project)
+      return json<LogPage>(await get(`/api/orgs/${active?.org}/logs?${params.toString()}`))
+    },
+  })
+  return {
+    records: found.data?.records ?? [],
+    more: Boolean(found.data?.next),
+    pending: found.isPending,
+    failed: found.error,
+  }
+}

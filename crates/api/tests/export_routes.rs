@@ -13,10 +13,10 @@ use ferristrace_domain::{
     AccountId, Action, Actor, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, Created, ExportSource,
     ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships,
     NoPhotos, OrgRole, Organisation, Project, ProjectId, ProjectName, Projects, ProvisionPolicy,
-    ReadGrant, Renamed, ServiceSummary, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, Snapshot, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage,
-    SpanPages, SpanReader, SpanStatus, StoreError, TeamId, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, WhoamiError, Window,
+    ReadGrant, Renamed, ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError,
+    SessionId, SessionRoll, SessionStore, SessionToken, Snapshot, Span, SpanCursor, SpanEvent,
+    SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TeamId, TenantId,
+    TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -282,10 +282,27 @@ impl SpanReader for Shelf {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        _project: Option<ProjectId>,
+        _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        _service: &str,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        _filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        Ok(ServiceSeries::default())
     }
 
     async fn traces(

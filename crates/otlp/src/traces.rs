@@ -6,7 +6,7 @@ use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span as ProtoSpan};
 use prost::Message;
 
-use crate::attributes;
+use crate::attributes::{self, Attributes};
 
 pub const UNKNOWN_SERVICE: &str = "unknown_service";
 const SERVICE_NAME: &str = "service.name";
@@ -27,9 +27,13 @@ pub fn spans_of(request: ExportTraceServiceRequest) -> Result<Vec<Span>, DecodeE
     let mut spans = Vec::with_capacity(span_count(&request.resource_spans));
     for resource_spans in request.resource_spans {
         let service = service_name(&resource_spans);
+        let resource = resource_spans
+            .resource
+            .map(|resource| attributes::collect(resource.attributes))
+            .unwrap_or_default();
         for scope_spans in resource_spans.scope_spans {
             for span in scope_spans.spans {
-                spans.push(convert(span, &service)?);
+                spans.push(convert(span, &service, &resource)?);
             }
         }
     }
@@ -52,7 +56,7 @@ fn service_name(resource_spans: &ResourceSpans) -> Box<str> {
         .unwrap_or_else(|| UNKNOWN_SERVICE.into())
 }
 
-fn convert(span: ProtoSpan, service: &str) -> Result<Span, DecodeError> {
+fn convert(span: ProtoSpan, service: &str, resource: &Attributes) -> Result<Span, DecodeError> {
     let ProtoSpan {
         trace_id,
         span_id,
@@ -83,7 +87,7 @@ fn convert(span: ProtoSpan, service: &str) -> Result<Span, DecodeError> {
         status: status_of(status.map(|status| status.code)),
         start_unix_nanos: start_time_unix_nano,
         end_unix_nanos: end_time_unix_nano,
-        attributes: attributes::collect(pairs),
+        attributes: attributes::merged(resource, pairs),
         events: events_of(events),
     })
 }
@@ -251,6 +255,52 @@ mod tests {
         );
         assert_eq!(attributes.get("retried").map(|v| &**v), Some("true"));
         assert_eq!(attributes.get("payload"), None);
+    }
+
+    #[test]
+    fn resource_attributes_are_merged_into_each_span_and_the_span_wins_a_conflict() {
+        let mut span = a_proto_span();
+        span.attributes = vec![
+            text("deployment.environment", "staging"),
+            text("http.route", "/orders"),
+        ];
+        span.events = vec![ProtoEvent {
+            name: "retry".to_owned(),
+            attributes: vec![text("attempt", "2")],
+            ..ProtoEvent::default()
+        }];
+        let request = a_request(
+            span,
+            Some(a_resource(vec![
+                text("service.name", "orders"),
+                text("deployment.environment", "production"),
+                text("k8s.namespace.name", "shop"),
+            ])),
+        );
+
+        let spans = decode_traces(&request.encode_to_vec()).expect("a valid request");
+
+        let attributes = &spans[0].attributes;
+        assert_eq!(
+            attributes.get("k8s.namespace.name").map(|v| &**v),
+            Some("shop")
+        );
+        assert_eq!(
+            attributes.get("deployment.environment").map(|v| &**v),
+            Some("staging"),
+            "the span's own value wins"
+        );
+        assert_eq!(attributes.get("service.name").map(|v| &**v), Some("orders"));
+        assert_eq!(attributes.get("http.route").map(|v| &**v), Some("/orders"));
+        assert_eq!(
+            spans[0].events[0]
+                .attributes
+                .keys()
+                .map(|k| &**k)
+                .collect::<Vec<_>>(),
+            vec!["attempt"],
+            "event attributes stay their own"
+        );
     }
 
     #[test]

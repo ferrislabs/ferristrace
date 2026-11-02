@@ -33,8 +33,8 @@ pub use catalogue::{
 };
 pub use clock::{Clock, UnixSeconds};
 pub use explore::{
-    BadWindow, Explore, ExploreError, ServiceSummary, SpanReader, TraceFilter, TraceOrder,
-    TraceSummary, Window,
+    BadWindow, Explore, ExploreError, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary,
+    SpanReader, TraceFilter, TraceOrder, TraceSummary, Window,
 };
 pub use export::{
     EXPORT_PAGE, ExportError, ExportGrant, ExportSource, ExportedSpan, Exporter, Prepared,
