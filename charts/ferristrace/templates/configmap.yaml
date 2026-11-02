@@ -1,0 +1,41 @@
+{{- $c := .Values.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ferristrace.fullname" . }}
+  labels:
+    {{- include "ferristrace.labels" . | nindent 4 }}
+data:
+  RUST_LOG: {{ $c.logLevel | quote }}
+  FERRISTRACE_COOKIE_SECURE: {{ $c.cookieSecure | quote }}
+  FERRISTRACE_LOCAL_PASSWORD: {{ $c.localPassword | quote }}
+  FERRISTRACE_AFTER_SIGN_IN: {{ $c.afterSignIn | quote }}
+  {{- with $c.webRoot }}
+  FERRISTRACE_WEB_ROOT: {{ . | quote }}
+  {{- end }}
+  FERRISTRACE_SPANS__URL: {{ $c.spans.url | quote }}
+  FERRISTRACE_SPANS__RETENTION_DAYS: {{ $c.spans.retentionDays | quote }}
+  {{- with $c.spans.database }}
+  FERRISTRACE_SPANS__DATABASE: {{ . | quote }}
+  {{- end }}
+  {{- with $c.spans.user }}
+  FERRISTRACE_SPANS__USER: {{ . | quote }}
+  {{- end }}
+  {{- if $c.oidc.enabled }}
+  FERRISTRACE_OIDC__ISSUER: {{ required "config.oidc.issuer is required when config.oidc.enabled" $c.oidc.issuer | quote }}
+  FERRISTRACE_OIDC__CLIENT_ID: {{ required "config.oidc.clientId is required when config.oidc.enabled" $c.oidc.clientId | quote }}
+  FERRISTRACE_OIDC__REDIRECT_URI: {{ required "config.oidc.redirectUri is required when config.oidc.enabled" $c.oidc.redirectUri | quote }}
+  {{- end }}
+  {{- if $c.mail.enabled }}
+  FERRISTRACE_MAIL__RELAY: {{ required "config.mail.relay is required when config.mail.enabled" $c.mail.relay | quote }}
+  FERRISTRACE_MAIL__USERNAME: {{ required "config.mail.username is required when config.mail.enabled" $c.mail.username | quote }}
+  FERRISTRACE_MAIL__FROM: {{ required "config.mail.from is required when config.mail.enabled" $c.mail.from | quote }}
+  FERRISTRACE_MAIL__BASE_URL: {{ required "config.mail.baseUrl is required when config.mail.enabled" $c.mail.baseUrl | quote }}
+  {{- end }}
+  {{- if $c.objects.enabled }}
+  FERRISTRACE_OBJECTS__ENDPOINT: {{ required "config.objects.endpoint is required when config.objects.enabled" $c.objects.endpoint | quote }}
+  FERRISTRACE_OBJECTS__BUCKET: {{ required "config.objects.bucket is required when config.objects.enabled" $c.objects.bucket | quote }}
+  {{- with $c.objects.region }}
+  FERRISTRACE_OBJECTS__REGION: {{ . | quote }}
+  {{- end }}
+  {{- end }}

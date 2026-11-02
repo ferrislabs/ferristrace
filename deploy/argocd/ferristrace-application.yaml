@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ferristrace
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/ferrislabs/charts
+    chart: ferristrace
+    targetRevision: 0.1.0
+    helm:
+      valuesObject:
+        edition: community
+        replicaCount: 2
+        config:
+          spans:
+            url: http://clickhouse.example.svc:8123
+        secrets:
+          databaseUrl:
+            name: ferristrace-app
+            key: uri
+          redisUrl:
+            name: ferristrace-redis
+            key: url
+        httpRoute:
+          enabled: true
+          parentRefs:
+            - name: shared
+              namespace: gateway
+          hostnames:
+            - ferristrace.example.com
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ferristrace
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

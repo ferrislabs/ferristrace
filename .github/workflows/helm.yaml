@@ -1,0 +1,84 @@
+name: helm
+
+on:
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm.yaml"
+  push:
+    tags:
+      - "ferristrace-chart-v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KUBECONFORM_VERSION: v0.6.7
+  KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
+  REGISTRY: oci://ghcr.io/ferrislabs/charts
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - name: install kubeconform
+        run: |
+          set -eu
+          archive="$RUNNER_TEMP/kubeconform.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $archive" | sha256sum --check
+          tar -xzf "$archive" -C /usr/local/bin kubeconform
+      - name: lint and validate every ci values file
+        run: |
+          set -eu
+          helm lint charts/ferristrace
+          for f in charts/ferristrace/ci/*.yaml; do
+            helm lint charts/ferristrace -f "$f"
+            helm template t charts/ferristrace -f "$f" \
+              | kubeconform -strict -summary -ignore-missing-schemas
+          done
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/ferristrace-chart-v')
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - name: the tag matches the chart version
+        id: version
+        run: |
+          set -eu
+          tag_version="${GITHUB_REF_NAME#ferristrace-chart-v}"
+          chart_version="$(awk '/^version:/ {print $2}' charts/ferristrace/Chart.yaml)"
+          if [ "$tag_version" != "$chart_version" ]; then
+            echo "tag version '${tag_version}' does not match chart version '${chart_version}'"
+            exit 1
+          fi
+          echo "version=${tag_version}" >> "$GITHUB_OUTPUT"
+      - name: log in to ghcr
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+      - name: package and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          helm package charts/ferristrace
+          helm push "ferristrace-${VERSION}.tgz" "$REGISTRY"

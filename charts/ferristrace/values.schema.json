@@ -1,0 +1,422 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "edition": {
+      "enum": [
+        "community",
+        "ee"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "revisionHistoryLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 30
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        }
+      }
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "podLabels": {
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": {
+          "const": true
+        }
+      },
+      "required": [
+        "runAsNonRoot"
+      ]
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "const": false
+        },
+        "readOnlyRootFilesystem": {
+          "const": true
+        }
+      },
+      "required": [
+        "allowPrivilegeEscalation",
+        "readOnlyRootFilesystem"
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object"
+        },
+        "limits": {
+          "type": "object"
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "topologySpreadConstraints": {
+      "type": "array"
+    },
+    "extraEnv": {
+      "type": "array"
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        "httpPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "grpcPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "annotations": {
+          "type": "object"
+        }
+      }
+    },
+    "httpRoute": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "parentRefs": {
+          "type": "array"
+        },
+        "hostnames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "logLevel": {
+          "type": "string"
+        },
+        "cookieSecure": {
+          "type": "boolean"
+        },
+        "localPassword": {
+          "type": "boolean"
+        },
+        "afterSignIn": {
+          "type": "string"
+        },
+        "webRoot": {
+          "type": "string"
+        },
+        "spans": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "database": {
+              "type": "string"
+            },
+            "user": {
+              "type": "string"
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "clientId": {
+              "type": "string"
+            },
+            "redirectUri": {
+              "type": "string"
+            }
+          }
+        },
+        "mail": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "relay": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "objects": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "databaseUrl": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "redisUrl": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "clickhousePassword": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "atRestKey": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "oidcClientSecret": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "smtpPassword": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "objectsAccessKeyId": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "objectsSecretAccessKey": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

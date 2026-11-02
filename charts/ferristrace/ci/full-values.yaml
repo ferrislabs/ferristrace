@@ -1,0 +1,53 @@
+edition: ee
+replicaCount: 2
+config:
+  spans:
+    url: http://clickhouse.data.svc:8123
+  oidc:
+    enabled: true
+    issuer: https://id.example.com/realms/ferris
+    clientId: ferristrace
+    redirectUri: https://ferristrace.example.com/auth/oidc/callback
+  mail:
+    enabled: true
+    relay: mail.example.com
+    username: postmaster
+    from: FerrisTrace <no-reply@example.com>
+    baseUrl: https://ferristrace.example.com
+  objects:
+    enabled: true
+    endpoint: https://account.r2.cloudflarestorage.com
+    bucket: ferristrace-avatars
+    region: auto
+secrets:
+  clickhousePassword:
+    name: ferristrace-clickhouse
+    key: password
+  atRestKey:
+    name: ferristrace-at-rest
+    key: key
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: shared
+      namespace: gateway
+  hostnames:
+    - ferristrace.example.com
+podDisruptionBudget:
+  enabled: true
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway
+extraEnv:
+  - name: EXAMPLE
+    value: "1"
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: ferristrace

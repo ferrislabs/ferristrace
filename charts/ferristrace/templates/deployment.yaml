@@ -1,0 +1,122 @@
+{{- $s := .Values.secrets }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ferristrace.fullname" . }}
+  labels:
+    {{- include "ferristrace.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "ferristrace.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "ferristrace.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ferristrace.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ferristrace
+          image: {{ include "ferristrace.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 4318
+              protocol: TCP
+            - name: grpc
+              containerPort: 4317
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "ferristrace.fullname" . }}
+          env:
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_DATABASE_URL" "ref" $s.databaseUrl) | nindent 12 }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_REDIS_URL" "ref" $s.redisUrl) | nindent 12 }}
+            {{- if $s.clickhousePassword.name }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_SPANS__PASSWORD" "ref" $s.clickhousePassword) | nindent 12 }}
+            {{- end }}
+            {{- if $s.atRestKey.name }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_SECRETS__AT_REST_KEY" "ref" $s.atRestKey) | nindent 12 }}
+            {{- end }}
+            {{- if .Values.config.oidc.enabled }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OIDC__CLIENT_SECRET" "ref" $s.oidcClientSecret) | nindent 12 }}
+            {{- end }}
+            {{- if .Values.config.mail.enabled }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_MAIL__PASSWORD" "ref" $s.smtpPassword) | nindent 12 }}
+            {{- end }}
+            {{- if .Values.config.objects.enabled }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OBJECTS__ACCESS_KEY_ID" "ref" $s.objectsAccessKeyId) | nindent 12 }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OBJECTS__SECRET_ACCESS_KEY" "ref" $s.objectsSecretAccessKey) | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

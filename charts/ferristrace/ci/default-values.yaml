@@ -1,0 +1,7 @@
+secrets:
+  databaseUrl:
+    name: ferristrace-app
+    key: uri
+  redisUrl:
+    name: ferristrace-redis
+    key: url
