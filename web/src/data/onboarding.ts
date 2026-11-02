@@ -9,7 +9,7 @@ export function useFirstSignals(): FirstSignals {
 
 export const otlpEndpoint = () => `${window.location.origin}/v1/traces`
 
-export const ingestKeyCommand = 'docker compose exec server comettrace issue-key --org <org-uuid>'
+export const ingestKeyCommand = 'docker compose exec server ferristrace issue-key --org <org-uuid>'
 
 export const SNIPPETS: { language: string; code: string }[] = [
   {

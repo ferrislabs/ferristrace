@@ -2,7 +2,7 @@ import { Activity, CircleMinus, KeyRound, Gauge, TriangleAlert, UserPlus } from 
 import { useState } from 'react'
 import { Segmented } from '@/components/ui/segmented'
 import { Button } from '@/components/ui/button'
-import { MockData } from '@/components/cmt/MockData'
+import { MockData } from '@/components/ft/MockData'
 import { useNotifications } from '@/data/notifications'
 import { Link } from '@/lib/router'
 import { cn } from '@/lib/utils'

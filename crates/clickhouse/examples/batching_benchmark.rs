@@ -7,7 +7,7 @@ use ferristrace_domain::{Scope, Span, SpanId, SpanKind, SpanSink, SpanStatus, Te
 use ferristrace_infra::SystemClock;
 use uuid::Uuid;
 
-const DATABASE: &str = "comettrace_benchmark";
+const DATABASE: &str = "ferristrace_benchmark";
 const TOTAL_SPANS: usize = 60_000;
 const SPANS_PER_CALL: usize = 100;
 const TENANTS: u128 = 20;

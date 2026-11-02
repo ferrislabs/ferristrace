@@ -1,4 +1,4 @@
-# Comettrace
+# Ferristrace
 
 Distributed tracing you can host yourself. An OTLP endpoint takes spans over
 gRPC or HTTP, ClickHouse keeps them, Postgres keeps the accounts, the
@@ -11,7 +11,7 @@ One command brings the whole thing up, and one more gives it a way in:
 ```sh
 cd deploy
 docker compose up --build --detach
-docker compose exec server comettrace bootstrap --email you@example.com
+docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
 The server then answers OTLP over gRPC on 4317, and OTLP over HTTP, the API
@@ -58,7 +58,7 @@ The integration tests want a real backend and are skipped without one. Set
 turn a missing backend into a failure instead of a skip:
 
 ```sh
-DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
+DATABASE_URL=postgres://ferristrace:ferristrace@localhost:5432/ferristrace \
 REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
 ```
 

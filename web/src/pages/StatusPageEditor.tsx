@@ -10,8 +10,8 @@ import { Field, Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Switch } from '@/components/ui/switch'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
-import { StatusIndicator } from '@/components/cmt/bits'
-import { StatusPageView } from '@/components/cmt/StatusPageView'
+import { StatusIndicator } from '@/components/ft/bits'
+import { StatusPageView } from '@/components/ft/StatusPageView'
 import { useStatusConfig, useStatusGroups, type Accent, type StatusConfig } from '@/data/status-page'
 import { cn } from '@/lib/utils'
 
@@ -183,7 +183,7 @@ export function StatusPageEditor() {
               <Switch checked={draft.showDesc} onCheckedChange={(v) => set({ showDesc: v })} label="Component descriptions" />
               <Switch checked={draft.showPast} onCheckedChange={(v) => set({ showPast: v })} label="Past incidents" />
               <Switch checked={draft.showSubscribe} onCheckedChange={(v) => set({ showSubscribe: v })} label="Subscribe button" />
-              <Switch checked={draft.poweredBy} onCheckedChange={(v) => set({ poweredBy: v })} label="“Powered by Comettrace” in the footer" />
+              <Switch checked={draft.poweredBy} onCheckedChange={(v) => set({ poweredBy: v })} label="“Powered by Ferristrace” in the footer" />
             </fieldset>
           </form>
           <Preview c={draft} />
@@ -194,14 +194,14 @@ export function StatusPageEditor() {
         <div className="flex max-w-[820px] flex-col gap-7">
           <section className="flex flex-col gap-2.5"><h2 className="text-heading">Address</h2>
             <Card><dl className="m-0 grid grid-cols-[200px_minmax(0,1fr)] text-control">
-              <dt className="border-b border-border-subtle px-4 py-3 text-muted-foreground">Default address</dt><dd className="m-0 border-b border-border-subtle px-4 py-3 font-mono">acme-prod.status.comettrace.example.com</dd>
+              <dt className="border-b border-border-subtle px-4 py-3 text-muted-foreground">Default address</dt><dd className="m-0 border-b border-border-subtle px-4 py-3 font-mono">acme-prod.status.ferristrace.example.com</dd>
               <dt className="px-4 py-3 text-muted-foreground">Self-hosted</dt><dd className="m-0 px-4 py-3">Served by the same container at <span className="font-mono">https://&lt;your-host&gt;/status/acme-prod</span>.</dd>
             </dl></Card>
           </section>
           <section className="flex flex-col gap-2.5"><div className="flex items-center gap-2.5"><h2 className="text-heading">Custom domain</h2><Badge variant="success"><Check />Verified · TLS active</Badge></div>
             <Card className="flex flex-col gap-3.5 p-4">
-              <Field label="Domain" htmlFor="sp-dom"><div className="flex max-w-[460px] gap-2"><Input id="sp-dom" mono defaultValue="status.acme.dev" /><Button size="sm" className="h-8" onClick={() => toast.success('DNS record found', { description: 'CNAME status → acme-prod.status.comettrace.example.com' })}>Check DNS</Button></div></Field>
-              <span className="text-caption text-muted-foreground">CNAME <span className="font-mono">status</span> → <span className="font-mono">acme-prod.status.comettrace.example.com</span> · found Oct 2, 09:41</span>
+              <Field label="Domain" htmlFor="sp-dom"><div className="flex max-w-[460px] gap-2"><Input id="sp-dom" mono defaultValue="status.acme.dev" /><Button size="sm" className="h-8" onClick={() => toast.success('DNS record found', { description: 'CNAME status → acme-prod.status.ferristrace.example.com' })}>Check DNS</Button></div></Field>
+              <span className="text-caption text-muted-foreground">CNAME <span className="font-mono">status</span> → <span className="font-mono">acme-prod.status.ferristrace.example.com</span> · found Oct 2, 09:41</span>
             </Card>
           </section>
           <section className="flex flex-col gap-2.5"><h2 className="text-heading">Who can see it</h2>
@@ -233,7 +233,7 @@ function diff(a: StatusConfig, b: StatusConfig) {
   if (a.name !== b.name) out.push(`Page name “${a.name}” → “${b.name}”`)
   if (a.accent !== b.accent) out.push(`Accent colour ${a.accent} → ${b.accent}`)
   if (a.days !== b.days) out.push(`History ${a.days} → ${b.days} days`)
-  ;(['showUptime', 'showDesc', 'showPast', 'showSubscribe', 'poweredBy'] as const).forEach((k) => { if (a[k] !== b[k]) out.push(`${b[k] ? 'Show' : 'Hide'} ${{ showUptime: 'uptime bars', showDesc: 'descriptions', showPast: 'past incidents', showSubscribe: 'subscribe button', poweredBy: '“Powered by Comettrace”' }[k]}`) })
+  ;(['showUptime', 'showDesc', 'showPast', 'showSubscribe', 'poweredBy'] as const).forEach((k) => { if (a[k] !== b[k]) out.push(`${b[k] ? 'Show' : 'Hide'} ${{ showUptime: 'uptime bars', showDesc: 'descriptions', showPast: 'past incidents', showSubscribe: 'subscribe button', poweredBy: '“Powered by Ferristrace”' }[k]}`) })
   b.hidden.filter((h) => !a.hidden.includes(h)).forEach((h) => out.push(`Hide component “${h}”`))
   a.hidden.filter((h) => !b.hidden.includes(h)).forEach((h) => out.push(`Show component “${h}”`))
   return out

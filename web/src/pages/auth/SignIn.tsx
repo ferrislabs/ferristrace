@@ -72,7 +72,7 @@ export function SignIn() {
     <AuthFrame
       title="Sign in"
       intro={back?.startsWith('/') ? 'Your session ended. Sign in to pick up where you were.' : undefined}
-      footer={methods?.local_password ? <>No account yet? An administrator creates one with <span className="font-mono">comettrace create-account</span>.</> : null}
+      footer={methods?.local_password ? <>No account yet? An administrator creates one with <span className="font-mono">ferristrace create-account</span>.</> : null}
     >
       {refused ? (
         <Alert variant="destructive" icon={<TriangleAlert />}>

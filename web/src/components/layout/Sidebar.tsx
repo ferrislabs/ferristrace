@@ -14,7 +14,7 @@ import { useAccount, useOrganisations, useSignOut } from '@/auth/session'
 import { useTheme, type ThemePref } from '@/lib/theme'
 import { Link, NavLink, isActivePath, useLocation, useNavigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
-import { Logo } from '@/components/cmt/Logo'
+import { Logo } from '@/components/ft/Logo'
 
 export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const { pathname } = useLocation()
@@ -34,7 +34,7 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-[224px] shrink-0 flex-col border-r bg-sidebar md:flex" aria-label="Primary">
       <Link to="/" className="flex h-12 shrink-0 items-center gap-2 border-b px-4 text-[15px] font-bold text-foreground no-underline">
-        <Logo className="size-5" /> Comettrace
+        <Logo className="size-5" /> Ferristrace
       </Link>
       <nav aria-label="Main" className="scrollbar-none flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {NAV.map((g) => {

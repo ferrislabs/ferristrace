@@ -262,7 +262,7 @@ fn directory_of(pool: Option<&PgPool>) -> Directory {
     let Some(pool) = pool else {
         tracing::warn!(
             "no control plane is configured, so no ingest key can authenticate; \
-             issue one with `comettrace issue-key` once database_url is set"
+             issue one with `ferristrace issue-key` once database_url is set"
         );
         return Directory::Nothing(StaticDirectory::default());
     };
@@ -384,7 +384,7 @@ fn relay_of(config: &Config) -> anyhow::Result<Relay> {
     let Some(mail) = &config.mail else {
         tracing::warn!(
             "no mail relay is configured, so nobody can ask for a reset link; \
-             hand one over with `comettrace reset-password`"
+             hand one over with `ferristrace reset-password`"
         );
         return Ok(Relay::Unreachable);
     };

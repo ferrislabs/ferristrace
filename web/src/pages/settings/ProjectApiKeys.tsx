@@ -22,7 +22,7 @@ export function ProjectApiKeys() {
   return (
     <>
       <H title="Api keys" sub="Keys for storefront. Each key is shown once, then only its prefix." />
-      <div className="mt-1 flex flex-wrap items-center gap-3"><span className="flex flex-1 flex-col"><span className="font-semibold">Ingest keys <span className="font-mono font-normal text-muted-foreground">cmt_ik_</span></span><span className="text-control text-muted-foreground">Write only. Used by SDKs and collectors to send signals.</span></span><Button variant="primary" size="sm" onClick={() => setIssue(true)}><KeyRound />Issue ingest key</Button></div>
+      <div className="mt-1 flex flex-wrap items-center gap-3"><span className="flex flex-1 flex-col"><span className="font-semibold">Ingest keys <span className="font-mono font-normal text-muted-foreground">ft_ik_</span></span><span className="text-control text-muted-foreground">Write only. Used by SDKs and collectors to send signals.</span></span><Button variant="primary" size="sm" onClick={() => setIssue(true)}><KeyRound />Issue ingest key</Button></div>
       <Card className="overflow-x-auto">
         <Table><thead><tr><Th>Name</Th><Th className="w-[200px]">Key</Th><Th className="w-[120px]">Created</Th><Th className="w-[170px]">Last used</Th><Th className="w-[100px]"><span className="sr-only">Actions</span></Th></tr></thead>
           <tbody>{keys.map((k) => (
@@ -30,7 +30,7 @@ export function ProjectApiKeys() {
               <Td numeric>{k.revoked ? <Badge variant="outline">Revoked</Badge> : <Button variant="ghost" size="sm" className="text-destructive-text" onClick={() => setRevoke(k.name)}>Revoke</Button>}</Td></Tr>
           ))}</tbody></Table>
       </Card>
-      <div className="mt-2 flex flex-wrap items-center gap-3"><span className="flex flex-1 flex-col"><span className="font-semibold">Query keys <span className="font-mono font-normal text-muted-foreground">cmt_at_</span></span><span className="text-control text-muted-foreground">Read only. Used by scripts and dashboards to query this project.</span></span><Button size="sm"><Plus />Create query key</Button></div>
+      <div className="mt-2 flex flex-wrap items-center gap-3"><span className="flex flex-1 flex-col"><span className="font-semibold">Query keys <span className="font-mono font-normal text-muted-foreground">ft_at_</span></span><span className="text-control text-muted-foreground">Read only. Used by scripts and dashboards to query this project.</span></span><Button size="sm"><Plus />Create query key</Button></div>
       <Card className="overflow-x-auto">
         <Table><thead><tr><Th>Name</Th><Th className="w-[200px]">Key</Th><Th className="w-[160px]">Created by</Th><Th className="w-[120px]">Created</Th><Th className="w-[170px]">Last used</Th></tr></thead>
           <tbody>{readKeys.map((k) => <Tr key={k.name}><Td className="font-semibold">{k.name}</Td><Td className="font-mono">{k.prefix}<span className="text-faint-foreground">••••••</span></Td><Td className="text-control">{k.by}</Td><Td className="font-mono">{k.created}</Td><Td className="font-mono">{k.used}</Td></Tr>)}</tbody></Table>
@@ -45,7 +45,7 @@ export function ProjectApiKeys() {
               <DialogFooter><Button variant="primary" onClick={() => { setIssue(false); setSecret(null) }}>Done</Button></DialogFooter>
             </>
           ) : (
-            <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); const s = `cmt_ik_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2, 10)}`; setSecret(s); setKeys((k) => [{ name, prefix: s.slice(0, 11), created: '2026-10-24', used: 'never', revoked: false }, ...k]) }}>
+            <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); const s = `ft_ik_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2, 10)}`; setSecret(s); setKeys((k) => [{ name, prefix: s.slice(0, 11), created: '2026-10-24', used: 'never', revoked: false }, ...k]) }}>
               <Field label="Name" htmlFor="ik-n" hint="Where the key will live, so you know what breaks when you revoke it."><Input id="ik-n" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
               <DialogFooter><Button type="button" onClick={() => setIssue(false)}>Cancel</Button><Button variant="primary" type="submit">Issue key</Button></DialogFooter>
             </form>

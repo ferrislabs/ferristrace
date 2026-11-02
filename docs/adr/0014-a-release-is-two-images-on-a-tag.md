@@ -22,9 +22,9 @@ release candidate moves nothing.
 The runtime is `gcr.io/distroless/cc-debian12:nonroot`. No shell, no
 package manager, no curl, and uid 65532.
 
-`comettrace health` takes the place of curl: it asks `/health` on the
+`ferristrace health` takes the place of curl: it asks `/health` on the
 configured port and exits non-zero if the answer is not a success. The
-compose healthcheck is `["CMD", "comettrace", "health"]`, the exec form,
+compose healthcheck is `["CMD", "ferristrace", "health"]`, the exec form,
 because a distroless image has no `/bin/sh` for the shell form to use. It
 is intercepted before the control plane pool is opened, so a healthcheck
 every five seconds costs no database connection.

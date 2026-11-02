@@ -1,5 +1,5 @@
-import { StatusPageView } from '@/components/cmt/StatusPageView'
-import { MockData } from '@/components/cmt/MockData'
+import { StatusPageView } from '@/components/ft/StatusPageView'
+import { MockData } from '@/components/ft/MockData'
 import { useStatusConfig } from '@/data/status-page'
 
 export function PublicStatus() {

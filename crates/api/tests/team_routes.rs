@@ -15,7 +15,7 @@ use ferristrace_domain::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const BACKEND: u128 = 11;
@@ -230,7 +230,7 @@ fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Requ
     let mut request = Request::builder()
         .method(method)
         .uri(uri)
-        .header(COOKIE, format!("ct_session={TOKEN}"));
+        .header(COOKIE, format!("ft_session={TOKEN}"));
     if scripted {
         request = request.header("x-requested-with", "fetch");
     }

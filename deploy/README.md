@@ -1,4 +1,4 @@
-# Self-hosting Comettrace
+# Self-hosting Ferristrace
 
 One command brings up the server, its control plane, the span store and the
 usage counter:
@@ -20,7 +20,7 @@ sign in and no key can authenticate a payload. One command fixes all of
 that:
 
 ```sh
-docker compose exec server comettrace bootstrap --email you@example.com
+docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
 It creates the account, creates an organisation owned by it, and prints a
@@ -42,7 +42,7 @@ to run again.
 Draw an ingest key for the organisation `bootstrap` named:
 
 ```sh
-docker compose exec server comettrace issue-key --org <the printed org id>
+docker compose exec server ferristrace issue-key --org <the printed org id>
 ```
 
 Then point any OTLP exporter at `http://localhost:4318/v1/traces` or
@@ -55,6 +55,29 @@ curl -X POST http://localhost:4318/v1/traces \
   --data-binary @payload.pb
 ```
 
+## Coming from a Comettrace deployment
+
+The product was called Comettrace before. A stack started under that name
+does not carry over:
+
+- settings are read from `FERRISTRACE_*`; `COMETTRACE_*` is ignored, so
+  rename every line of your `.env`
+- the compose project, the Postgres and ClickHouse database, user and
+  password are `ferristrace`, so the volumes of a `comettrace` project are
+  not reused
+- ingest keys (`ft_live_`), sessions and reset links (`ft_pr_`) carry a new
+  prefix, so every key issued before has to be issued again and everybody
+  signs in again
+
+On a machine whose data can go, bring the old stack down with its volumes
+and start this one:
+
+```sh
+docker compose -p comettrace down --volumes
+docker compose up --build --detach
+docker compose exec server ferristrace bootstrap --email you@example.com
+```
+
 ## Using a published image instead of building
 
 Images land on `ghcr.io/ferrislabs/ferristrace` for every released tag:
@@ -62,11 +85,11 @@ Images land on `ghcr.io/ferrislabs/ferristrace` for every released tag:
 linux/amd64 and linux/arm64.
 
 ```sh
-export COMETTRACE_IMAGE=ghcr.io/ferrislabs/ferristrace:1.2.3
+export FERRISTRACE_IMAGE=ghcr.io/ferrislabs/ferristrace:1.2.3
 docker compose up --detach --no-build --pull always
 ```
 
-Without `COMETTRACE_IMAGE` the compose file builds from this checkout,
+Without `FERRISTRACE_IMAGE` the compose file builds from this checkout,
 which is what `--build` above does.
 
 Every published image is signed keyless with cosign, bound to the release
@@ -81,7 +104,7 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
 ## What to change before this faces anything real
 
 - **The passwords.** Postgres, ClickHouse and the server all default to
-  `comettrace` so that `docker compose up` works on a clean machine with
+  `ferristrace` so that `docker compose up` works on a clean machine with
   no preparation. ClickHouse and Redis are reachable only from inside the
   compose network; Postgres answers this machine too, on the loopback, so
   a database client can reach it. Set `POSTGRES_PASSWORD` and
@@ -96,9 +119,9 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
 
 ## Settings
 
-Every field of `comettrace.toml` can be given as an environment variable:
-uppercase, prefixed with `COMETTRACE_`, with `__` between a section and
-its field. `COMETTRACE_SPANS__RETENTION_DAYS` is `spans.retention_days`.
+Every field of `ferristrace.toml` can be given as an environment variable:
+uppercase, prefixed with `FERRISTRACE_`, with `__` between a section and
+its field. `FERRISTRACE_SPANS__RETENTION_DAYS` is `spans.retention_days`.
 
 Put them in a `.env` beside the compose file. `.env.example` lists every
 one of them, commented out, so copying it changes nothing:
@@ -117,8 +140,8 @@ stores inside its own network rather than something to choose.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `POSTGRES_PASSWORD` | `comettrace` | The control plane password |
-| `CLICKHOUSE_PASSWORD` | `comettrace` | The span store password |
+| `POSTGRES_PASSWORD` | `ferristrace` | The control plane password |
+| `CLICKHOUSE_PASSWORD` | `ferristrace` | The span store password |
 | `RETENTION_DAYS` | `30` | How long a span is kept |
 | `COOKIE_SECURE` | `false` | Whether a session cookie demands HTTPS |
 | `OTLP_GRPC_PORT` | `4317` | Host port for OTLP over gRPC |
@@ -126,20 +149,20 @@ stores inside its own network rather than something to choose.
 | `RUST_LOG` | `info` | Log filter |
 | `POSTGRES_BIND` | `127.0.0.1` | Which address the control plane answers on |
 | `POSTGRES_PORT` | `5432` | Host port for the control plane |
-| `COMETTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor is offered |
-| `COMETTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
-| `COMETTRACE_IMAGE` | built locally | A published image to run instead |
+| `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor is offered |
+| `FERRISTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
+| `FERRISTRACE_IMAGE` | built locally | A published image to run instead |
 
 ## Signing in with an identity provider instead
 
 Set the OIDC block in `.env` and local passwords become unnecessary:
 
 ```sh
-COMETTRACE_OIDC__ISSUER=https://id.example.com
-COMETTRACE_OIDC__CLIENT_ID=comettrace
-COMETTRACE_OIDC__CLIENT_SECRET=...
-COMETTRACE_OIDC__REDIRECT_URI=https://comettrace.example.com/auth/oidc/callback
-COMETTRACE_LOCAL_PASSWORD=false
+FERRISTRACE_OIDC__ISSUER=https://id.example.com
+FERRISTRACE_OIDC__CLIENT_ID=ferristrace
+FERRISTRACE_OIDC__CLIENT_SECRET=...
+FERRISTRACE_OIDC__REDIRECT_URI=https://ferristrace.example.com/auth/oidc/callback
+FERRISTRACE_LOCAL_PASSWORD=false
 ```
 
 An account is provisioned the first time somebody signs in, so run
@@ -156,7 +179,7 @@ secret with, because the alternative is a totp secret in clear in a column
 that lands in every backup:
 
 ```sh
-COMETTRACE_SECRETS__AT_REST_KEY=$(openssl rand -hex 32)
+FERRISTRACE_SECRETS__AT_REST_KEY=$(openssl rand -hex 32)
 ```
 
 Keep that key where the database password is kept. It is not derivable and
@@ -169,12 +192,12 @@ enrolment on and answers ten recovery codes, and a password for an account
 that keeps a confirmed factor answers `200` with a challenge cookie instead
 of a session. The sign-in screen drives that second step: the password form
 gives way to a field that takes six digits or a recovery code. Recovery codes
-are shown once, hashed at rest, and spent one at a time; `comettrace` has no
+are shown once, hashed at rest, and spent one at a time; `ferristrace` has no
 command to clear a factor, so an account that loses both its app and its
 codes is unlocked with SQL:
 
 ```sh
-docker compose exec postgres psql -U comettrace -d comettrace \
+docker compose exec postgres psql -U ferristrace -d ferristrace \
   -c "DELETE FROM auth_factors WHERE account_id = (SELECT id FROM accounts WHERE email = 'person@example.com')"
 ```
 
@@ -185,17 +208,17 @@ name they wrote or from their address. Give the server one and the profile
 screen gets an upload control:
 
 ```sh
-COMETTRACE_OBJECTS__ENDPOINT=https://<account id>.r2.cloudflarestorage.com
-COMETTRACE_OBJECTS__BUCKET=comettrace-avatars
-COMETTRACE_OBJECTS__ACCESS_KEY_ID=...
-COMETTRACE_OBJECTS__SECRET_ACCESS_KEY=...
+FERRISTRACE_OBJECTS__ENDPOINT=https://<account id>.r2.cloudflarestorage.com
+FERRISTRACE_OBJECTS__BUCKET=ferristrace-avatars
+FERRISTRACE_OBJECTS__ACCESS_KEY_ID=...
+FERRISTRACE_OBJECTS__SECRET_ACCESS_KEY=...
 ```
 
 Cloudflare R2 is what this was built against. The protocol is S3, so an S3
 bucket answers it, and so does a MinIO; R2 has one region and calls it
-`auto`, which is what the server assumes when `COMETTRACE_OBJECTS__REGION`
+`auto`, which is what the server assumes when `FERRISTRACE_OBJECTS__REGION`
 is left out. Nothing goes in the compose file: `env_file` hands anything
-prefixed `COMETTRACE_` to the server already.
+prefixed `FERRISTRACE_` to the server already.
 
 The bucket needs no public access and should not have any. A browser never
 talks to it: the server reads the bytes and serves them from its own origin,
@@ -232,7 +255,7 @@ Somebody who has lost their password asks for a link on the sign-in
 screen, which needs the mail relay. Without one, print a link yourself:
 
 ```sh
-docker compose exec server comettrace reset-password --email somebody@example.com
+docker compose exec server ferristrace reset-password --email somebody@example.com
 ```
 
 `create-account` and `grant-role` still do the same job from the command
@@ -269,18 +292,18 @@ refuses to create a second. Nothing stops you adding more with
 
 ## Looking at the databases
 
-Postgres answers `localhost:5432` as `comettrace` / `comettrace`, so any
+Postgres answers `localhost:5432` as `ferristrace` / `ferristrace`, so any
 client reaches it:
 
 ```sh
-psql postgres://comettrace:comettrace@localhost:5432/comettrace
+psql postgres://ferristrace:ferristrace@localhost:5432/ferristrace
 ```
 
 ClickHouse and Redis are not published. Reach them through the container:
 
 ```sh
 docker compose exec clickhouse clickhouse-client \
-  --user=comettrace --password=comettrace --database=comettrace
+  --user=ferristrace --password=ferristrace --database=ferristrace
 docker compose exec redis redis-cli
 ```
 
@@ -300,7 +323,7 @@ and `/auth`, `/api`, `/health` and `/v1` go to the real server on 4318. A
 session cookie is set for `localhost` and ignores the port, so signing in
 on either one signs you in on both.
 
-`COMETTRACE_SERVER` points the proxy somewhere other than
+`FERRISTRACE_SERVER` points the proxy somewhere other than
 `http://localhost:4318`.
 
 Rebuild the image when you change Rust, or to check what the single

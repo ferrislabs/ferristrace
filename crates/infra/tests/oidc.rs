@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
 const KEY_ID: &str = "the-test-key";
-const CLIENT_ID: &str = "comettrace";
+const CLIENT_ID: &str = "ferristrace";
 const SUBJECT: &str = "subject-123";
 const ADDRESS: &str = "person@example.com";
 const CODE: &str = "the-authorization-code";

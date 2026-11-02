@@ -129,7 +129,7 @@ async fn an_api_key_prefix_is_claimed_once() {
 
     sqlx::query(
         "INSERT INTO api_keys (id, org_id, prefix, hash) \
-         VALUES (gen_random_uuid(), $1, 'ct_live_abc123', '$argon2id$first')",
+         VALUES (gen_random_uuid(), $1, 'ft_live_abc123', '$argon2id$first')",
     )
     .bind(org)
     .execute(&pool)
@@ -138,7 +138,7 @@ async fn an_api_key_prefix_is_claimed_once() {
 
     let refused = sqlx::query(
         "INSERT INTO api_keys (id, org_id, prefix, hash) \
-         VALUES (gen_random_uuid(), $1, 'ct_live_abc123', '$argon2id$second')",
+         VALUES (gen_random_uuid(), $1, 'ft_live_abc123', '$argon2id$second')",
     )
     .bind(org)
     .execute(&pool)
@@ -186,7 +186,7 @@ async fn dropping_an_org_takes_its_projects_and_keys() {
         .expect("a project");
     sqlx::query(
         "INSERT INTO api_keys (id, org_id, prefix, hash) \
-         VALUES (gen_random_uuid(), $1, 'ct_live_xyz', '$argon2id$hash')",
+         VALUES (gen_random_uuid(), $1, 'ft_live_xyz', '$argon2id$hash')",
     )
     .bind(org)
     .execute(&pool)
@@ -591,11 +591,11 @@ async fn a_live_key_resolves_to_its_organisation() {
         return;
     };
     let org = seeded_org(&pool).await;
-    a_key(&pool, org, "ct_live_abc", Some("the-secret")).await;
+    a_key(&pool, org, "ft_live_abc", Some("the-secret")).await;
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
 
     let resolved = directory
-        .resolve(&IngestKey::from_plaintext("ct_live_abc.the-secret"))
+        .resolve(&IngestKey::from_plaintext("ft_live_abc.the-secret"))
         .await;
 
     assert_eq!(resolved, Ok(Scope::of(TenantId::new(org))));
@@ -607,13 +607,13 @@ async fn a_wrong_secret_an_unknown_prefix_and_a_malformed_key_all_refuse() {
         return;
     };
     let org = seeded_org(&pool).await;
-    a_key(&pool, org, "ct_live_abc", Some("the-secret")).await;
+    a_key(&pool, org, "ft_live_abc", Some("the-secret")).await;
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
 
     for candidate in [
-        "ct_live_abc.wrong-secret",
-        "ct_live_zzz.the-secret",
-        "ct_live_abc",
+        "ft_live_abc.wrong-secret",
+        "ft_live_zzz.the-secret",
+        "ft_live_abc",
     ] {
         assert_eq!(
             directory
@@ -631,7 +631,7 @@ async fn a_revoked_key_no_longer_resolves() {
         return;
     };
     let org = seeded_org(&pool).await;
-    let key = a_key(&pool, org, "ct_live_abc", Some("the-secret")).await;
+    let key = a_key(&pool, org, "ft_live_abc", Some("the-secret")).await;
     sqlx::query("UPDATE api_keys SET revoked_at = 1 WHERE id = $1")
         .bind(key)
         .execute(&pool)
@@ -641,7 +641,7 @@ async fn a_revoked_key_no_longer_resolves() {
 
     assert_eq!(
         directory
-            .resolve(&IngestKey::from_plaintext("ct_live_abc.the-secret"))
+            .resolve(&IngestKey::from_plaintext("ft_live_abc.the-secret"))
             .await,
         Err(UnknownKey)
     );
@@ -653,12 +653,12 @@ async fn a_key_left_without_a_digest_cannot_authenticate() {
         return;
     };
     let org = seeded_org(&pool).await;
-    a_key(&pool, org, "ct_live_abc", None).await;
+    a_key(&pool, org, "ft_live_abc", None).await;
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
 
     assert_eq!(
         directory
-            .resolve(&IngestKey::from_plaintext("ct_live_abc.the-secret"))
+            .resolve(&IngestKey::from_plaintext("ft_live_abc.the-secret"))
             .await,
         Err(UnknownKey)
     );
@@ -670,8 +670,8 @@ async fn a_sighting_is_recorded_once_then_left_alone_for_a_while() {
         return;
     };
     let org = seeded_org(&pool).await;
-    let key = a_key(&pool, org, "ct_live_abc", Some("the-secret")).await;
-    let ingest = IngestKey::from_plaintext("ct_live_abc.the-secret");
+    let key = a_key(&pool, org, "ft_live_abc", Some("the-secret")).await;
+    let ingest = IngestKey::from_plaintext("ft_live_abc.the-secret");
     let now = 1_700_000_000;
 
     assert_eq!(last_seen(&pool, key).await, None);
@@ -724,7 +724,7 @@ async fn an_issued_key_carries_a_prefix_and_a_long_secret() {
     let issued = directory.issue(org, None).await.expect("a key is issued");
     let (prefix, secret) = issued.split().expect("it splits");
 
-    assert!(prefix.starts_with("ct_live_"), "{prefix}");
+    assert!(prefix.starts_with("ft_live_"), "{prefix}");
     assert_eq!(secret.len(), 64, "a 32 byte secret in hex");
     assert_eq!(format!("{issued:?}"), "IngestKey(redacted)");
 }
@@ -772,7 +772,7 @@ async fn revoking_a_prefix_nobody_issued_changes_nothing() {
     };
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
 
-    assert!(!directory.revoke("ct_live_nothing").await.expect("a call"));
+    assert!(!directory.revoke("ft_live_nothing").await.expect("a call"));
 }
 
 #[tokio::test]
@@ -920,10 +920,10 @@ async fn a_postgres_directory_honours_the_directory_contract() {
         return;
     };
     let org = seeded_org(&pool).await;
-    a_key(&pool, org, "ct_live_abc", Some("the-secret")).await;
+    a_key(&pool, org, "ft_live_abc", Some("the-secret")).await;
     let directory = PostgresDirectory::new(pool.clone(), FixedClock::at(1_700_000_000));
-    let held = IngestKey::from_plaintext("ct_live_abc.the-secret");
-    let absent = IngestKey::from_plaintext("ct_live_zzz.the-secret");
+    let held = IngestKey::from_plaintext("ft_live_abc.the-secret");
+    let absent = IngestKey::from_plaintext("ft_live_zzz.the-secret");
 
     testing::a_directory_resolves_the_key_it_holds(&directory, &held, TenantId::new(org)).await;
     testing::a_directory_refuses_a_key_it_does_not_hold(&directory, &absent).await;

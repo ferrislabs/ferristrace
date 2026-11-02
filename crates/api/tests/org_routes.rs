@@ -16,7 +16,7 @@ use ferristrace_domain::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const FOUNDED: u64 = 1_700_000_000_123_456_789;
@@ -230,7 +230,7 @@ fn org(seed: u128) -> String {
 }
 
 fn session() -> String {
-    format!("ct_session={TOKEN}")
+    format!("ft_session={TOKEN}")
 }
 
 fn asking(method: Method, seed: u128, body: Option<&str>, scripted: bool) -> Request<Body> {

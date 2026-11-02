@@ -21,7 +21,7 @@ mod tests {
     use super::web_router;
 
     async fn asked(named: &str, uri: &str) -> (StatusCode, String) {
-        let root = std::env::temp_dir().join(format!("comettrace-web-{named}"));
+        let root = std::env::temp_dir().join(format!("ferristrace-web-{named}"));
         std::fs::create_dir_all(root.join("assets")).expect("a directory");
         std::fs::write(root.join("index.html"), "<!doctype html>the app").expect("the page");
         std::fs::write(root.join("assets").join("app.js"), "console.log(1)").expect("a bundle");
@@ -73,7 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reset_link_reaches_the_app_rather_than_the_api() {
-        let (status, body) = asked("reset", "/reset?token=ct_pr_abc").await;
+        let (status, body) = asked("reset", "/reset?token=ft_pr_abc").await;
 
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("the app"));

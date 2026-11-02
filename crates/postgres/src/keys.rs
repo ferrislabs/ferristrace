@@ -40,7 +40,7 @@ impl<C: Clock> PostgresDirectory<C> {
     }
 }
 
-const PREFIX_LABEL: &str = "ct_live_";
+const PREFIX_LABEL: &str = "ft_live_";
 const PREFIX_BYTES: usize = 6;
 const SECRET_BYTES: usize = 32;
 

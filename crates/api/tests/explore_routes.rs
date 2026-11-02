@@ -17,7 +17,7 @@ use ferristrace_domain::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const TRACE: &str = "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a";
@@ -291,7 +291,7 @@ fn org(seed: u128) -> String {
 }
 
 fn session() -> String {
-    format!("ct_session={TOKEN}")
+    format!("ft_session={TOKEN}")
 }
 
 #[tokio::test]
@@ -335,7 +335,7 @@ async fn a_request_without_a_session_is_refused() {
     let uri = format!("/api/orgs/{}/traces?from=1&to=2", org(MINE));
 
     let (no_cookie, _) = served(TwoSpans, looking(&uri, None, true)).await;
-    let (unknown, _) = served(TwoSpans, looking(&uri, Some("ct_session=ct_ss_nope"), true)).await;
+    let (unknown, _) = served(TwoSpans, looking(&uri, Some("ft_session=ft_ss_nope"), true)).await;
     let (unscripted, _) = served(TwoSpans, looking(&uri, Some(&session()), false)).await;
 
     assert_eq!(no_cookie, StatusCode::UNAUTHORIZED);

@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub const SESSION_PREFIX: &str = "ct_ss_";
+pub const SESSION_PREFIX: &str = "ft_ss_";
 
 #[derive(Clone, Copy, Eq)]
 pub struct SecretHash([u8; 32]);
@@ -62,7 +62,7 @@ impl fmt::Debug for SessionToken {
     }
 }
 
-pub const RESET_PREFIX: &str = "ct_pr_";
+pub const RESET_PREFIX: &str = "ft_pr_";
 
 const TOKEN_BYTES: usize = 32;
 
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn neither_a_hash_nor_a_token_renders_itself() {
-        let token = SessionToken::from_plaintext("ct_ss_abcdef");
+        let token = SessionToken::from_plaintext("ft_ss_abcdef");
 
         assert_eq!(format!("{token:?}"), "SessionToken(redacted)");
         assert_eq!(format!("{:?}", token.hash()), "SecretHash(..)");
@@ -118,16 +118,16 @@ mod tests {
 
     #[test]
     fn a_token_carries_its_prefix() {
-        assert!(SessionToken::from_plaintext("ct_ss_abcdef").looks_like_one());
+        assert!(SessionToken::from_plaintext("ft_ss_abcdef").looks_like_one());
         assert!(!SessionToken::from_plaintext("abcdef").looks_like_one());
         assert!(!SessionToken::from_plaintext(SESSION_PREFIX).looks_like_one());
     }
 
     #[test]
     fn a_token_hashes_to_the_digest_of_its_text() {
-        let token = SessionToken::from_plaintext("ct_ss_abcdef");
+        let token = SessionToken::from_plaintext("ft_ss_abcdef");
 
-        assert_eq!(token.hash(), SecretHash::of("ct_ss_abcdef"));
+        assert_eq!(token.hash(), SecretHash::of("ft_ss_abcdef"));
     }
 }
 

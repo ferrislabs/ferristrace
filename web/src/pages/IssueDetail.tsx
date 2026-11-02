@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { NativeSelect } from '@/components/ui/input'
 import { Alert, Skeleton, Table, Td, Th, Tr } from '@/components/ui/misc'
-import { Kpi, ServiceDot } from '@/components/cmt/bits'
+import { Kpi, ServiceDot } from '@/components/ft/bits'
 import { because } from '@/auth/client'
 import { useMembers } from '@/data/members'
 import { nameOf } from '@/data/profile'
@@ -246,7 +246,7 @@ function Known({
         </Table>
       </Card>
       <p className="m-0 text-caption text-muted-foreground">
-        The stack trace is the string the sdk recorded on the exception. Comettrace holds no source
+        The stack trace is the string the sdk recorded on the exception. Ferristrace holds no source
         and no source maps, so there is no code to show around a frame. Resolving an issue keeps its
         owner; an occurrence after that marks it Regressed without reopening it.
       </p>

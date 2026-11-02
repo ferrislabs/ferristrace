@@ -16,7 +16,7 @@ use ferristrace_domain::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const AN_HOUR_MS: u64 = 3_600_000;
@@ -124,7 +124,7 @@ impl UsageHistory for Rolled {
 fn asking(org: u128, query: &str, session: Option<&str>, scripted: bool) -> Request<Body> {
     let mut request = Request::builder().uri(format!("/api/orgs/{}/usage?{query}", id(org)));
     if let Some(token) = session {
-        request = request.header(COOKIE, format!("ct_session={token}"));
+        request = request.header(COOKIE, format!("ft_session={token}"));
     }
     if scripted {
         request = request.header("x-requested-with", "fetch");

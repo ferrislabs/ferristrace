@@ -2,8 +2,8 @@ use axum::http::HeaderMap;
 use axum::http::header::{COOKIE, HeaderValue, USER_AGENT};
 use ferristrace_domain::{Agent, ChallengeToken, SessionToken};
 
-const NAME: &str = "ct_session";
-const CHALLENGE: &str = "ct_second_step";
+const NAME: &str = "ft_session";
+const CHALLENGE: &str = "ft_second_step";
 const CHALLENGE_SECONDS: u32 = 300;
 const FLAGS: &str = "Path=/; HttpOnly; SameSite=Lax";
 
@@ -102,21 +102,21 @@ mod tests {
 
     #[test]
     fn a_session_is_read_from_any_cookie_header() {
-        let found = carried(&headers(&["other=1", "ct_session=ct_ss_abc; theme=dark"]));
+        let found = carried(&headers(&["other=1", "ft_session=ft_ss_abc; theme=dark"]));
 
-        assert_eq!(found.as_ref().map(SessionToken::exposed), Some("ct_ss_abc"));
+        assert_eq!(found.as_ref().map(SessionToken::exposed), Some("ft_ss_abc"));
     }
 
     #[test]
     fn a_cookie_without_the_prefix_is_not_a_session() {
-        assert!(carried(&headers(&["ct_session=garbage"])).is_none());
+        assert!(carried(&headers(&["ft_session=garbage"])).is_none());
         assert!(carried(&headers(&["theme=dark"])).is_none());
         assert!(carried(&HeaderMap::new()).is_none());
     }
 
     #[test]
     fn an_opened_cookie_hides_itself_from_scripts_and_from_other_sites() {
-        let token = SessionToken::from_plaintext("ct_ss_abc");
+        let token = SessionToken::from_plaintext("ft_ss_abc");
         let rendered = opened(
             &token,
             SessionCookie {
@@ -128,13 +128,13 @@ mod tests {
 
         assert_eq!(
             rendered.to_str().expect("text"),
-            "ct_session=ct_ss_abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=600; Secure"
+            "ft_session=ft_ss_abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=600; Secure"
         );
     }
 
     #[test]
     fn a_plain_http_deployment_drops_only_the_secure_flag() {
-        let token = SessionToken::from_plaintext("ct_ss_abc");
+        let token = SessionToken::from_plaintext("ft_ss_abc");
         let rendered = opened(
             &token,
             SessionCookie {
@@ -155,34 +155,34 @@ mod tests {
         let rendered = cleared(SessionCookie::default()).expect("a header");
         let text = rendered.to_str().expect("text");
 
-        assert!(text.starts_with("ct_session=;"));
+        assert!(text.starts_with("ft_session=;"));
         assert!(text.contains("Max-Age=0"));
     }
 
     #[test]
     fn a_challenge_hides_from_scripts_and_outlives_only_five_minutes() {
-        let token = ChallengeToken::from_plaintext("ct_2f_abc");
+        let token = ChallengeToken::from_plaintext("ft_2f_abc");
 
         let rendered = challenging(&token, SessionCookie::default()).expect("a header");
 
         assert_eq!(
             rendered.to_str().expect("text"),
-            "ct_second_step=ct_2f_abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=300; Secure"
+            "ft_second_step=ft_2f_abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=300; Secure"
         );
     }
 
     #[test]
     fn a_challenge_is_read_back_from_its_own_cookie() {
         let found = challenged(&headers(&[
-            "ct_session=ct_ss_abc; ct_second_step=ct_2f_abc",
+            "ft_session=ft_ss_abc; ft_second_step=ft_2f_abc",
         ]));
 
         assert_eq!(
             found.as_ref().map(ChallengeToken::exposed),
-            Some("ct_2f_abc")
+            Some("ft_2f_abc")
         );
-        assert!(challenged(&headers(&["ct_second_step=garbage"])).is_none());
-        assert!(challenged(&headers(&["ct_session=ct_ss_abc"])).is_none());
+        assert!(challenged(&headers(&["ft_second_step=garbage"])).is_none());
+        assert!(challenged(&headers(&["ft_session=ft_ss_abc"])).is_none());
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         let rendered = answered(SessionCookie::default()).expect("a header");
         let text = rendered.to_str().expect("text");
 
-        assert!(text.starts_with("ct_second_step=;"));
+        assert!(text.starts_with("ft_second_step=;"));
         assert!(text.contains("Max-Age=0"));
     }
 }

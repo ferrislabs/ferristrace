@@ -15,7 +15,7 @@ export function nothingYet(
 ) {
   if (found.asking) return 'Asking the server who you are…'
   if (!found.active) {
-    return 'This session belongs to no organisation. An operator grants one with `comettrace grant-role`.'
+    return 'This session belongs to no organisation. An operator grants one with `ferristrace grant-role`.'
   }
   if (isPending) return `Reading the ${what}…`
   return because(error, `The ${what} could not be read.`)

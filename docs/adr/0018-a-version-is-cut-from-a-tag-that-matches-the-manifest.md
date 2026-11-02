@@ -17,7 +17,7 @@ Release notes came from `releases/generate-notes`, which builds its list from pu
 
 Breaking means any of these:
 
-- a config key (`COMETTRACE_*`) or a compose variable removed, renamed, or given a different meaning
+- a config key (`FERRISTRACE_*`) or a compose variable removed, renamed, or given a different meaning
 - a CLI subcommand or flag removed or renamed
 - an API route or a response field removed or renamed, or a status code a screen depends on
 - an OTLP endpoint, port or authentication scheme changed

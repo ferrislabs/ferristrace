@@ -297,7 +297,7 @@ mod tests {
     fn settings() -> PhotoStoreSettings {
         PhotoStoreSettings {
             endpoint: "https://abc123.r2.cloudflarestorage.com".to_owned(),
-            bucket: "comettrace".to_owned(),
+            bucket: "ferristrace".to_owned(),
             region: None,
             access_key_id: "AKIAEXAMPLE".to_owned(),
             secret_access_key: "a secret nobody prints".to_owned(),
@@ -341,7 +341,7 @@ mod tests {
         let rendered = format!("{:?}", store());
 
         assert!(!rendered.contains("a secret nobody prints"), "{rendered}");
-        assert!(rendered.contains("comettrace"));
+        assert!(rendered.contains("ferristrace"));
     }
 
     #[test]
@@ -377,7 +377,7 @@ mod tests {
     fn the_bucket_comes_ahead_of_the_object_in_the_path() {
         assert_eq!(
             store().canonical_uri("avatars/x/y.png"),
-            "/comettrace/avatars/x/y.png"
+            "/ferristrace/avatars/x/y.png"
         );
     }
 
@@ -397,13 +397,13 @@ mod tests {
             ("x-amz-content-sha256", NOTHING.to_owned()),
         ];
 
-        let canonical = canonical_request("GET", "/comettrace/avatars/x/y.png", &headers, NOTHING);
+        let canonical = canonical_request("GET", "/ferristrace/avatars/x/y.png", &headers, NOTHING);
 
         assert_eq!(
             canonical,
             format!(
                 "GET\n\
-                 /comettrace/avatars/x/y.png\n\
+                 /ferristrace/avatars/x/y.png\n\
                  \n\
                  host:abc123.r2.cloudflarestorage.com\n\
                  x-amz-content-sha256:{NOTHING}\n\

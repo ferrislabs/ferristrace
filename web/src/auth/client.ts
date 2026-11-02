@@ -13,7 +13,7 @@ export const isUnauthorized = (error: unknown) => error instanceof ApiError && e
 export const because = (error: unknown, otherwise: string) =>
   error instanceof ApiError && error.body.length > 0 ? error.body : otherwise
 
-const REQUESTED_WITH = { 'x-requested-with': 'comettrace-web' }
+const REQUESTED_WITH = { 'x-requested-with': 'ferristrace-web' }
 
 async function send(path: string, init: RequestInit): Promise<Response> {
   const response = await fetch(path, { credentials: 'include', ...init, headers: { ...REQUESTED_WITH, ...init.headers } })

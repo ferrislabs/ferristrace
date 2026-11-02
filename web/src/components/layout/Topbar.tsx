@@ -7,8 +7,8 @@ import { OrganisationSwitcher } from './OrganisationSwitcher'
 import { useProjects } from '@/data/projects'
 import { Link } from '@/lib/router'
 import { useScope } from '@/lib/scope'
-import { Logo } from '@/components/cmt/Logo'
-import { MockData } from '@/components/cmt/MockData'
+import { Logo } from '@/components/ft/Logo'
+import { MockData } from '@/components/ft/MockData'
 
 const RANGES = ['Last 15 m', 'Last 1 h', 'Last 24 h', 'Last 7 d'] as const
 
@@ -19,7 +19,7 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
   const [range, setRange] = useState<string>('Last 1 h')
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
-      <Link to="/" className="text-foreground md:hidden" aria-label="Comettrace home"><Logo className="size-5" /></Link>
+      <Link to="/" className="text-foreground md:hidden" aria-label="Ferristrace home"><Logo className="size-5" /></Link>
       <span className="hidden text-caption text-muted-foreground sm:inline">Organisation</span>
       <OrganisationSwitcher />
       <span className="hidden text-faint-foreground sm:inline" aria-hidden>/</span>

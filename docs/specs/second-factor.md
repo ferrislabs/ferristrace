@@ -48,7 +48,7 @@ Out of scope
     `FederatedSignIn` keeps issuing sessions directly.
   - Organisation-wide enforcement. An admin cannot require a factor yet; the
     column it would need belongs to `orgs`, not here.
-  - A command-line way out of a lockout (`comettrace clear-second-factor`).
+  - A command-line way out of a lockout (`ferristrace clear-second-factor`).
     Recovery codes cover the owner; an operator still has SQL. PR3, behind
     `ControlPlane` as ADR 0017 requires.
   - Wiring `Security.tsx` and `SignIn.tsx` to these routes. The front end
@@ -68,7 +68,7 @@ Design
       `FactorKind`      `Authenticator` today, a second variant in PR2
       `RecoveryCode`    two groups of five from 31 unambiguous symbols,
                         zeroizing, sha256 at rest, read however it is typed
-      `ChallengeToken`  `ct_2f_` + 64 hex, zeroizing, sha256 at rest
+      `ChallengeToken`  `ft_2f_` + 64 hex, zeroizing, sha256 at rest
       `Standing`        what the settings screen reads: live kinds, codes left
       `Enrolment`       what the enrolment screen shows: secret, otpauth uri
       `Answer`          `Code(TotpCode)` or `Recovery(RecoveryCode)`
@@ -113,7 +113,7 @@ Design
     `POST   /auth/2fa/verify`      spend the challenge cookie, open a session
     `POST /auth/sign-in` keeps answering 204 with a session cookie when no
     factor is live, and answers 200 `{"second_step":["app"]}` with a
-    `ct_second_step` cookie when one is.
+    `ft_second_step` cookie when one is.
 
 Acceptance
   1. A password for an account with no factor still answers 204 and a session
@@ -187,11 +187,11 @@ Verify (exit)
   cargo fmt --all
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
-  DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p comettrace-storage
+  DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-storage
 
 Verify (loop)
-  cargo test -p comettrace-core totp::
-  cargo test -p comettrace-core second_factor::
+  cargo test -p ferristrace-core totp::
+  cargo test -p ferristrace-core second_factor::
 
 Amended: 2026-10-26 recovery codes are typed by a human, so they are two
 groups of five unambiguous symbols rather than a prefixed hex token; the gate

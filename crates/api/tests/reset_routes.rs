@@ -19,7 +19,7 @@ mod identity;
 
 use identity::{Fakes, Nowhere, state};
 
-const TOKEN: &str = "ct_pr_0123456789";
+const TOKEN: &str = "ft_pr_0123456789";
 
 #[derive(Clone)]
 struct OnePending {
@@ -181,7 +181,7 @@ async fn a_weak_password_and_a_bad_link_do_not_answer_alike() {
     let pending = OnePending::default();
 
     let (weak, _) = served(&pending, choosing(TOKEN, "short")).await;
-    let (spent, _) = served(&pending, choosing("ct_pr_never", "a long enough one")).await;
+    let (spent, _) = served(&pending, choosing("ft_pr_never", "a long enough one")).await;
     let (shaped, _) = served(&pending, choosing("garbage", "a long enough one")).await;
 
     assert_eq!(weak, StatusCode::UNPROCESSABLE_ENTITY);

@@ -14,7 +14,7 @@ use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const FOUNDED: u64 = 1_700_000_000_000_000_000;
@@ -253,7 +253,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let kept = Kept::holding("Acme");
 
     let refused = settings(OrgRole::Owner, &kept)
-        .read(&SessionToken::from_plaintext("ct_ss_nope"), an_org(MINE))
+        .read(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(SettingError::NoSession));

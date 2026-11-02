@@ -7,8 +7,8 @@ import { Card } from '@/components/ui/card'
 import { NativeSelect } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Table, Td, Th } from '@/components/ui/misc'
-import { EmptyState, Kpi, PageHeader } from '@/components/cmt/bits'
-import { LineChart } from '@/components/cmt/charts'
+import { EmptyState, Kpi, PageHeader } from '@/components/ft/bits'
+import { LineChart } from '@/components/ft/charts'
 import { useDocker, useKubernetes, type CStatus, type PodStatus } from '@/data/infra'
 import { cn } from '@/lib/utils'
 
@@ -54,13 +54,13 @@ export function Kubernetes() {
   if (!clusters.length) return (
     <>
       <PageHeader title="Kubernetes" />
-      <EmptyState icon={<Boxes />} title="No cluster connected" code={'helm repo add comettrace https://charts.comettrace.example.com\nhelm install comettrace-agent comettrace/agent \\\n  --set ingestKey=cmt_ik_… --set clusterName=prod-eu-1'}>Install the agent with Helm. It runs the OpenTelemetry Collector as a DaemonSet and sends nodes, pods, workloads, events and container logs.</EmptyState>
+      <EmptyState icon={<Boxes />} title="No cluster connected" code={'helm repo add ferristrace https://charts.ferristrace.example.com\nhelm install ferristrace-agent ferristrace/agent \\\n  --set ingestKey=ft_ik_… --set clusterName=prod-eu-1'}>Install the agent with Helm. It runs the OpenTelemetry Collector as a DaemonSet and sends nodes, pods, workloads, events and container logs.</EmptyState>
     </>
   )
   const inNs = <T extends { ns: string }>(l: T[]) => l.filter((x) => ns === 'all' || x.ns === ns)
   return (
     <>
-      <PageHeader title="Kubernetes" meta="From the Comettrace agent: kubelet stats, cluster state and events">
+      <PageHeader title="Kubernetes" meta="From the Ferristrace agent: kubelet stats, cluster state and events">
         <NativeSelect aria-label="Cluster" value={cluster} onChange={(e) => setCluster(e.target.value)} className="w-[170px] font-mono">{clusters.map((c) => <option key={c}>{c}</option>)}</NativeSelect>
         <NativeSelect aria-label="Namespace" value={ns} onChange={(e) => setNs(e.target.value)} className="w-[170px]"><option value="all">All namespaces</option>{namespaces.map((n) => <option key={n}>{n}</option>)}</NativeSelect>
       </PageHeader>
@@ -156,7 +156,7 @@ export function Docker() {
   if (!hosts.length) return (
     <>
       <PageHeader title="Docker" />
-      <EmptyState icon={<Box />} title="No Docker host connected" code={'docker run -d --name comettrace-agent \\\n  -v /var/run/docker.sock:/var/run/docker.sock:ro \\\n  -e CMT_INGEST_KEY=cmt_ik_… comettrace/agent'}>Run the agent next to your containers. It reads container stats and logs from the Docker socket, read-only.</EmptyState>
+      <EmptyState icon={<Box />} title="No Docker host connected" code={'docker run -d --name ferristrace-agent \\\n  -v /var/run/docker.sock:/var/run/docker.sock:ro \\\n  -e FT_INGEST_KEY=ft_ik_… ferristrace/agent'}>Run the agent next to your containers. It reads container stats and logs from the Docker socket, read-only.</EmptyState>
     </>
   )
   const rows = containers.filter((x) => filter === 'all' || x.status !== 'running')

@@ -20,7 +20,7 @@ mod identity;
 
 use identity::{Fakes, Nowhere, Profiled, state};
 
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const ACCOUNT: u128 = 7;
 const ACTIVE: u128 = 11;
 const OTHER: u128 = 12;
@@ -264,7 +264,7 @@ fn looking(at: u128, cookie: Option<&str>) -> Request<Body> {
 }
 
 fn mine() -> String {
-    format!("ct_session={TOKEN}")
+    format!("ft_session={TOKEN}")
 }
 
 async fn answered<G, P>(
@@ -407,7 +407,7 @@ async fn a_request_without_a_session_cookie_is_refused() {
 async fn a_cookie_the_store_does_not_know_is_refused() {
     let kept = Arc::new(Kept::default());
 
-    let (status, _) = served(&kept, TwoOrgs, asking(Some("ct_session=ct_ss_nope"), true)).await;
+    let (status, _) = served(&kept, TwoOrgs, asking(Some("ft_session=ft_ss_nope"), true)).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

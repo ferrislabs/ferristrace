@@ -21,7 +21,7 @@ use identity::{Directed, Fakes, Nowhere, state};
 
 const AUTHORIZE: &str = "https://id.example/authorize?state=the-state";
 const STATE: &str = "the-state";
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 const LANDING: &str = "/console";
 
 struct Provider {
