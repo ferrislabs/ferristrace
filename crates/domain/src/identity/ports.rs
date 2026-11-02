@@ -228,6 +228,14 @@ impl<T: SessionStore + Send + Sync> SessionStore for std::sync::Arc<T> {
     }
 }
 
+pub trait SessionSwitch {
+    fn switch(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+    ) -> impl Future<Output = Result<(), SessionError>> + Send;
+}
+
 pub trait SessionRoll {
     fn live(
         &self,

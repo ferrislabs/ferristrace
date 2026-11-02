@@ -5,7 +5,7 @@ use ferristrace_api::{
     key_router, llm_router, log_router, mark_routes, me_router, methods_router, metric_router,
     oidc_router, oncall_router, org_router, password_router, postmortem_router, release_router,
     reset_router, roster_router, second_factor_router, session_router, status_router, team_router,
-    usage_router,
+    usage_router, workspace_router,
 };
 
 use crate::adapters::Production;
@@ -62,6 +62,7 @@ fn identity_routes(config: &Config, state: Option<&State>) -> Router {
     offered
         .merge(me_router(state.clone()))
         .merge(session_router(state.clone()))
+        .merge(workspace_router(state.clone()))
         .merge(password_routes(config, state))
         .merge(federated_routes(config, state))
         .merge(reset_routes(config, state))

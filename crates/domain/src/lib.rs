@@ -80,8 +80,8 @@ pub use identity::{
     NotACode, OidcFlows, Opened, Password, PasswordCheck, PasswordHash, PasswordHasher,
     PasswordPolicy, Pending, PendingFlow, ProvisionPolicy, RecoveryCode, ResetError, ResetPassword,
     ResetStore, ResolvedIdentity, RollError, SECRET_BYTES, SecondFactors, SecondStep, Session,
-    SessionError, SessionId, SessionLifetime, SessionRoll, SessionStore, Sessions, SignIn,
-    SignInError, SignInProof, Standing, Step, Subject, TotpCode, TotpSecret, WeakPassword,
+    SessionError, SessionId, SessionLifetime, SessionRoll, SessionStore, SessionSwitch, Sessions,
+    SignIn, SignInError, SignInProof, Standing, Step, Subject, TotpCode, TotpSecret, WeakPassword,
 };
 pub use incidents::{
     AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,
@@ -123,7 +123,8 @@ pub use oncall::{
 pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
     OrgName, OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError,
-    SettingError, Squad, Squads, Team, TeamError, TeamId, TeamName, Who, Whoami, WhoamiError,
+    SettingError, Squad, Squads, SwitchError, Switching, Team, TeamError, TeamId, TeamName, Who,
+    Whoami, WhoamiError,
 };
 pub use placement::{
     BadPlacement, CLUSTER_KEY, MAX_PLACEMENT_BYTES, MAX_PLACEMENTS, NAMESPACE_KEY, NODE_KEY,
@@ -139,8 +140,8 @@ pub use profile::{
     PhotoKind, Photos, Pictured, Portrait, Profile, ProfileError,
 };
 pub use provisioning::{
-    Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, Minted, ProvisionError,
-    Provisioning, Revoked,
+    Bootstrapped, ControlPlane, DEFAULT_PROJECT, FoundError, Founded, Founding, Issued, Minted,
+    ProvisionError, Provisioning, Revoked,
 };
 pub use releases::{
     DEPLOY_FEED_LIMIT, DEPLOY_WATCH_TICK_SECS, Deploy, DeployFeed, DeployMarks, Deployed, Followed,

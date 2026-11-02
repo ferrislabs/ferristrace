@@ -2,12 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { TriangleAlert } from 'lucide-react'
 import { useMatches } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { MobileTabs } from './MobileTabs'
 import { useGlobalShortcuts } from './useGlobalShortcuts'
 import { CommandPalette, ShortcutsDialog } from './CommandPalette'
 import { healthQuery } from '@/auth/api'
+import { useOrganisations } from '@/auth/session'
+import { NewOrganisationForm } from './NewOrganisation'
 import { Outlet } from '@/lib/router'
 
 function UnavailableBanner() {
@@ -22,6 +25,20 @@ function UnavailableBanner() {
   )
 }
 
+function NoOrganisation() {
+  const { list, asking } = useOrganisations()
+  if (asking || list.length > 0) return null
+  return (
+    <Card className="flex max-w-[480px] flex-col gap-3 p-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-heading">You belong to no organisation yet</h2>
+        <span className="text-control text-muted-foreground">Create one to start sending data, or ask an operator to grant you a role in an existing one.</span>
+      </div>
+      <NewOrganisationForm />
+    </Card>
+  )
+}
+
 export function AppShell() {
   const mock = useMatches().some((m) => m.staticData.mock === true)
   const { palette, setPalette, shortcuts, setShortcuts } = useGlobalShortcuts()
@@ -32,6 +49,7 @@ export function AppShell() {
         <Topbar onPalette={() => setPalette(true)} mock={mock} />
         <UnavailableBanner />
         <main className="flex min-w-0 flex-1 flex-col gap-4 px-4 pb-10 pt-4 md:px-5">
+          <NoOrganisation />
           <Outlet />
         </main>
         <MobileTabs />

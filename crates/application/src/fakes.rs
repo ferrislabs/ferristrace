@@ -6,8 +6,8 @@ use ferristrace_domain::{
     KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName,
     OrgRole, Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
     ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked,
-    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
-    Snapshot, Status, StoreError, TeamId, TenantId, UnixSeconds,
+    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch,
+    SessionToken, Snapshot, Status, StoreError, TeamId, TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -85,6 +85,13 @@ impl SessionStore for FakeSessions {
     }
 
     async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
+        Ok(())
+    }
+}
+
+impl SessionSwitch for FakeSessions {
+    async fn switch(&self, _token: &SessionToken, _org: TenantId) -> Result<(), SessionError> {
+        self.handle.write();
         Ok(())
     }
 }

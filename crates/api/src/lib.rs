@@ -38,6 +38,7 @@ mod team_routes;
 mod usage_routes;
 mod web_routes;
 mod whoami_routes;
+mod workspace_routes;
 
 pub use agent_routes::{AgentRefused, agent_router};
 pub use alert_routes::{AlertRefused, alert_router};
@@ -78,3 +79,4 @@ pub use team_routes::{TeamRefused, team_router};
 pub use usage_routes::usage_router;
 pub use web_routes::web_router;
 pub use whoami_routes::{StandingRefused, me_router};
+pub use workspace_routes::{WorkspaceRefused, workspace_router};

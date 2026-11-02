@@ -38,6 +38,7 @@ pub use federated_sign_in::FederatedSignIn;
 pub use ports::{
     AccountDirectory, AuthProvider, Authorizer, FactorStore, Gate, Mailer, NoProvider,
     NoSecondFactor, OidcFlows, PasswordHasher, ResetStore, SessionRoll, SessionStore,
+    SessionSwitch,
 };
 pub use reset_password::ResetPassword;
 pub use second_factors::SecondFactors;

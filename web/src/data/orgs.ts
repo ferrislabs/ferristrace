@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountQuery } from '@/auth/api'
-import { because, del, get, json, offer, patch } from '@/auth/client'
+import { because, del, get, json, offer, patch, post, put } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
+import { useNavigate } from '@/lib/router'
+import { useScope } from '@/lib/scope'
 
 export type OrgCard = { id: string; name: string; plan: string; created_at_ms: number; version: string; logo?: string | null; retention_days: number | null; retention_cap_days: number | null; default_retention_days: number }
 
@@ -15,7 +17,7 @@ export function nothingYet(
 ) {
   if (found.asking) return 'Asking the server who you are…'
   if (!found.active) {
-    return 'This session belongs to no organisation. An operator grants one with `ferristrace grant-role`.'
+    return 'This session belongs to no organisation. Create one, or ask an operator to grant you one with `ferristrace grant-role`.'
   }
   if (isPending) return `Reading the ${what}…`
   return because(error, `The ${what} could not be read.`)
@@ -42,6 +44,38 @@ export function useRenameOrg() {
       client.setQueryData(key(card.id), card)
       void client.invalidateQueries({ queryKey: accountQuery.queryKey })
     },
+  })
+}
+
+export type FoundedOrg = { id: string; name: string; project: string }
+
+function useEnterOrg() {
+  const client = useQueryClient()
+  const navigate = useNavigate()
+  const { chooseOrg } = useScope()
+  return async (org: string, to: string) => {
+    chooseOrg(org)
+    await client.resetQueries()
+    navigate(to)
+  }
+}
+
+export function useSwitchOrg() {
+  const enter = useEnterOrg()
+  return useMutation({
+    mutationFn: async (org: string) => {
+      await put('/auth/session/org', { org })
+      return org
+    },
+    onSuccess: (org) => enter(org, '/'),
+  })
+}
+
+export function useCreateOrg() {
+  const enter = useEnterOrg()
+  return useMutation({
+    mutationFn: async (name: string) => json<FoundedOrg>(await post('/api/orgs', { name: name.trim() })),
+    onSuccess: (founded) => enter(founded.id, '/onboarding'),
   })
 }
 

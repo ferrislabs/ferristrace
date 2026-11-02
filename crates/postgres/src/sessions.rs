@@ -1,7 +1,7 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, Agent, Clock, Email, LiveSession, SESSION_PREFIX, Session, SessionError, SessionId,
-    SessionLifetime, SessionRoll, SessionStore, SessionToken, TenantId, UnixSeconds,
+    SessionLifetime, SessionRoll, SessionStore, SessionSwitch, SessionToken, TenantId, UnixSeconds,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -126,6 +126,26 @@ impl<C: Clock + Send + Sync> SessionStore for PostgresSessions<C> {
             .await
             .map(|_| ())
             .map_err(|_| SessionError::StoreUnreachable)
+    }
+}
+
+impl<C: Clock + Send + Sync> SessionSwitch for PostgresSessions<C> {
+    async fn switch(&self, token: &SessionToken, org: TenantId) -> Result<(), SessionError> {
+        let mut tx = self.tx.lock().await;
+        let switched = sqlx::query(
+            "UPDATE sessions SET org_id = $2 \
+             WHERE hash = $1 AND revoked_at IS NULL AND expires_at > $3",
+        )
+        .bind(token.hash().as_bytes().as_slice())
+        .bind(org.as_uuid())
+        .bind(seconds_to_nanos(self.clock.now()))
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| SessionError::StoreUnreachable)?;
+        if switched.rows_affected() == 0 {
+            return Err(SessionError::Unknown);
+        }
+        Ok(())
     }
 }
 

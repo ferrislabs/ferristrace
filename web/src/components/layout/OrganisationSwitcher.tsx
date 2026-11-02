@@ -1,32 +1,52 @@
-import { Building2, ChevronDown } from 'lucide-react'
+import { Building2, Check, ChevronDown, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { because } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
+import { useSwitchOrg } from '@/data/orgs'
+import { NewOrganisationForm } from './NewOrganisation'
 
 const orgLabel = (name: string | undefined) => name ?? 'no organisation'
 
 export function OrganisationSwitcher() {
   const { list, active } = useOrganisations()
-  const [chosen, setChosen] = useState<string | null>(null)
-  const current = list.find((m) => m.org === chosen) ?? active
-  if (list.length < 2) return <span className="hidden whitespace-nowrap font-semibold sm:inline">{orgLabel(active?.name)}</span>
+  const change = useSwitchOrg()
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const choose = (org: string) => {
+    setOpen(false)
+    if (org === active?.org) return
+    change.mutate(org, { onError: (error) => toast.error(because(error, 'The organisation was not switched')) })
+  }
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" aria-haspopup="listbox"><Building2 /><span>{orgLabel(current?.name)}</span><ChevronDown className="text-muted-foreground" /></Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[300px] p-1">
-        {list.map((m) => (
-          <button key={m.org} type="button" onClick={() => setChosen(m.org)} className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-control hover:bg-muted">
-            <span className="flex-1 truncate">{orgLabel(m.name)}</span>
-            <Badge variant="outline">{m.role}</Badge>
-            {m.org === current?.org ? <span className="text-accent-text">✓</span> : null}
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" aria-haspopup="listbox" loading={change.isPending}><Building2 /><span>{orgLabel(active?.name)}</span><ChevronDown className="text-muted-foreground" /></Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[300px] p-1">
+          {list.map((m) => (
+            <button key={m.org} type="button" onClick={() => choose(m.org)} className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-control hover:bg-muted">
+              <span className="flex-1 truncate">{orgLabel(m.name)}</span>
+              <Badge variant="outline">{m.role}</Badge>
+              {m.org === active?.org ? <Check className="size-3.5 text-accent-text" aria-label="Active" /> : null}
+            </button>
+          ))}
+          {list.length > 0 ? <div className="my-1 border-t" role="separator" /> : null}
+          <button type="button" onClick={() => { setOpen(false); setCreating(true) }} className="flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-control hover:bg-muted">
+            <Plus className="size-3.5" aria-hidden /><span>New organisation</span>
           </button>
-        ))}
-        <p className="m-0 px-2 py-2 text-caption text-muted-foreground">The server keeps the active organisation and has no route to change it, so this choice lasts as long as the tab.</p>
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent title="New organisation" description="Create an organisation and switch to it.">
+          <NewOrganisationForm onCancel={() => setCreating(false)} onCreated={() => setCreating(false)} />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
