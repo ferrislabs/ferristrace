@@ -65,9 +65,10 @@ pub use provisioning::{
 pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use store::StoreError;
 pub use telemetry::{
-    Admission, Allowance, BillingHour, BillingMonth, Consumed, Consumption, CounterUnreachable,
-    DecompressedBytes, HourTotal, HourlyCounters, Ingest, IngestError, IngestKey, InvalidId,
-    Metering, MonthTotal, Payload, QuotaPolicy, Scope, SinkError, Span, SpanEvent, SpanId,
-    SpanKind, SpanSink, SpanStatus, StaticQuota, TenantDirectory, TenantId, TraceId, UnknownKey,
-    Unmetered, UsageHistory, UsageLedger, UsageMeter, UsageReader, UsageSyncError,
+    Admission, Allowance, BadRetention, BillingHour, BillingMonth, Consumed, Consumption,
+    CounterUnreachable, DecompressedBytes, HourTotal, HourlyCounters, Ingest, IngestError,
+    IngestKey, InvalidId, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, Metering, MonthTotal, Payload,
+    QuotaPolicy, RetentionDays, Scope, SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink,
+    SpanStatus, StaticQuota, TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered,
+    UsageHistory, UsageLedger, UsageMeter, UsageReader, UsageSyncError,
 };

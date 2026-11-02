@@ -8,8 +8,8 @@ use super::errors::{IngestError, SinkError, UnknownKey};
 use super::ingest::Ingest;
 use super::ports::{QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageMeter};
 use super::value_objects::{
-    Admission, DecompressedBytes, IngestKey, Payload, Scope, SpanId, SpanKind, SpanStatus,
-    TenantId, TraceId,
+    Admission, DecompressedBytes, IngestKey, Payload, RetentionDays, Scope, SpanId, SpanKind,
+    SpanStatus, TenantId, TraceId,
 };
 use crate::testing;
 
@@ -328,4 +328,34 @@ async fn a_fake_directory_honours_the_directory_contract() {
     testing::a_directory_resolves_the_key_it_holds(&directory, &held, tenant).await;
     testing::a_directory_refuses_a_key_it_does_not_hold(&directory, &absent).await;
     testing::a_directory_answers_the_same_key_the_same_way_twice(&directory, &held).await;
+}
+
+struct RetainingDirectory(Scope);
+
+impl TenantDirectory for RetainingDirectory {
+    fn resolve(&self, _key: &IngestKey) -> impl Future<Output = Result<Scope, UnknownKey>> + Send {
+        let scope = self.0;
+        async move { Ok(scope) }
+    }
+}
+
+#[tokio::test]
+async fn the_retention_the_directory_resolved_reaches_the_sink() {
+    let tenant = TenantId::new(Uuid::from_u128(42));
+    let week = RetentionDays::try_from(7).expect("a week");
+    let sink = RecordingSink::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        RetainingDirectory(Scope::of(tenant).retained_for(Some(week))),
+        Unmetered,
+        &sink,
+        &meter,
+    );
+
+    ingest
+        .accept(&IngestKey::from_plaintext("live"), a_payload(512))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(sink.batches()[0].0.retention, Some(week));
 }

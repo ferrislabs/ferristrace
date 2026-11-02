@@ -10,6 +10,13 @@ pub enum InvalidId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a retention is between {min} and {max} days")]
+pub struct BadRetention {
+    pub min: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SinkError {
     #[error("the span sink is unavailable")]
     Unavailable,

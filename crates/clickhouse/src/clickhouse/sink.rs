@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clickhouse::inserter::Inserter;
 use clickhouse::{Client, error::Error as ClickhouseError};
-use ferristrace_domain::{Clock, Scope, SinkError, Span, SpanSink};
+use ferristrace_domain::{Clock, RetentionDays, Scope, SinkError, Span, SpanSink, UnixSeconds};
 use tokio::sync::Mutex;
 
 use crate::clickhouse::rows::{EventRow, SpanRow};
@@ -81,10 +81,7 @@ impl<C: Clock> ClickhouseSink<C> {
 
 impl<C: Clock + Send + Sync> SpanSink for ClickhouseSink<C> {
     async fn accept(&self, scope: Scope, spans: Vec<Span>) -> Result<(), SinkError> {
-        let expire_at = self
-            .clock
-            .now()
-            .saturating_add_secs(self.retention.as_secs());
+        let expire_at = expiry(self.clock.now(), self.retention, scope.retention);
 
         let mut span_rows = Vec::with_capacity(spans.len());
         for span in &spans {
@@ -120,6 +117,10 @@ impl<C: Clock + Send + Sync> SpanSink for ClickhouseSink<C> {
     }
 }
 
+fn expiry(now: UnixSeconds, default: Duration, chosen: Option<RetentionDays>) -> UnixSeconds {
+    now.saturating_add_secs(chosen.map_or_else(|| default.as_secs(), RetentionDays::seconds))
+}
+
 fn inserter<R: clickhouse::Row>(client: &Client, table: &str, limits: BatchLimits) -> Inserter<R> {
     client
         .inserter::<R>(table)
@@ -130,4 +131,53 @@ fn inserter<R: clickhouse::Row>(client: &Client, table: &str, limits: BatchLimit
 fn refused(error: &ClickhouseError) -> SinkError {
     tracing::error!(%error, "the span store refused a batch");
     SinkError::Unavailable
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use ferristrace_domain::{RetentionDays, UnixSeconds};
+
+    use super::expiry;
+
+    const DAY: u64 = 24 * 60 * 60;
+    const INGESTED: u64 = 1_700_000_000;
+
+    fn days(count: u32) -> RetentionDays {
+        RetentionDays::try_from(count).expect("an admitted retention")
+    }
+
+    #[test]
+    fn a_scope_retaining_seven_days_expires_seven_days_after_ingest() {
+        let at = expiry(
+            UnixSeconds::new(INGESTED),
+            Duration::from_secs(30 * DAY),
+            Some(days(7)),
+        );
+
+        assert_eq!(at, UnixSeconds::new(INGESTED + 7 * DAY));
+    }
+
+    #[test]
+    fn a_scope_retaining_nothing_in_particular_takes_the_deployment_default() {
+        let at = expiry(
+            UnixSeconds::new(INGESTED),
+            Duration::from_secs(30 * DAY),
+            None,
+        );
+
+        assert_eq!(at, UnixSeconds::new(INGESTED + 30 * DAY));
+    }
+
+    #[test]
+    fn the_scope_wins_even_when_it_is_longer_than_the_default() {
+        let at = expiry(
+            UnixSeconds::new(INGESTED),
+            Duration::from_secs(DAY),
+            Some(days(90)),
+        );
+
+        assert_eq!(at, UnixSeconds::new(INGESTED + 90 * DAY));
+    }
 }

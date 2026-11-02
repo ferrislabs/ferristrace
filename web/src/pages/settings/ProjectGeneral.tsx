@@ -69,10 +69,10 @@ export function ProjectGeneral() {
         <span className="text-control"><span className="text-muted-foreground">Project id</span> <span className="font-mono">{project.id}</span></span>
         <span className="text-control"><span className="text-muted-foreground">Api keys that still authenticate</span> <span className="font-mono">{project.keys}</span></span>
       </Card>
-      <p className="m-0 text-caption text-muted-foreground">How long a signal is kept is a property of the deployment rather than of one project: it is <span className="font-mono">spans.retention_days</span>, and the span store applies it on its own schedule.</p>
+      <p className="m-0 text-caption text-muted-foreground">How long a signal is kept is set for the whole organisation, in Settings, Organisation, General. Without a choice there, the deployment default applies.</p>
       {mayChange ? (
         <>
-          <Danger title={`Delete ${project.name}`} text="Its api keys stop authenticating at once. Spans already written wait out the retention the deployment set." action="Delete project" onClick={() => setDel(true)} />
+          <Danger title={`Delete ${project.name}`} text="Its api keys stop authenticating at once. Spans already written wait out the retention of the organisation." action="Delete project" onClick={() => setDel(true)} />
           <ConfirmDelete
             open={del}
             onOpenChange={setDel}

@@ -80,12 +80,16 @@ Design
     owners and admins, filtered by actor and action, newest first, paged.
     Web: Settings > Organisation > Audit log.
   3 Retention
-    ClickHouse: `spans` and `span_events` gain `retention_days UInt16`, set
-    at ingest from the organisation; TTL becomes
-    `start + toIntervalDay(retention_days)`. Postgres `orgs.retention_days`
-    (NULL = deployment default), capped by the plan's `retention_days`.
-    Owners set it in Settings > Organisation; the deployment default stays
-    `spans.retention_days`.
+    Spans and span events already carry `expire_at` and ClickHouse deletes
+    by `TTL expire_at`, so no ClickHouse migration: the sink computes
+    `expire_at` from the payload's scope instead of one deployment value.
+    Postgres `orgs.retention_days` (NULL = deployment default). The ingest
+    directory resolves it with the key (one query, still on its own pool),
+    capped by the plan's `retention_days` when the plan has one; the scope
+    carries it to the sink. Owners set it in Settings > Organisation,
+    between 1 day and the plan cap; the change is audited
+    (`org.retention_set`) and applies to spans ingested afterwards. The
+    deployment default stays `spans.retention_days`.
   4 Export
     `GET /api/orgs/{org}/export` for owners: a streamed `tar.gz` holding
     `control-plane.json` (org, projects, teams, members, keys without
@@ -110,8 +114,9 @@ Acceptance
               one; a revoked key is refused at once.
   @spec-l0-5  Renaming an organisation writes one audit entry naming the
               account; a refused rename writes none.
-  @spec-l0-6  An organisation with retention 7 days gets spans whose TTL is
-              7 days, while another keeps the deployment default.
+  @spec-l0-6  An organisation with retention 7 days gets spans whose
+              expire_at is 7 days after ingest, while another keeps the
+              deployment default; a value above the plan cap is refused.
   @spec-l0-7  The export of org A contains A's spans and none of org B's.
   @spec-l0-8  `helm template` with the example values renders and passes
               kubeconform; the Deployment runs as non-root with a read-only

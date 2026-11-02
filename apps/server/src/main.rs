@@ -35,7 +35,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink};
 use crate::cli::{Cli, Command, health, run_command};
-use crate::config::Config;
+use crate::config::{Config, default_retention_days};
 use crate::routes::{Held, State, control_routes, cookie_of};
 
 const SECONDS_PER_HOUR: u64 = 3600;
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let identity = control_routes(&config, state.as_ref(), held);
     let gateway = Arc::new(gateway_of(
-        directory_of(pool.as_ref()),
+        directory_of(pool.as_ref(), default_retention_days(config.spans.as_ref())),
         allowances,
         meter,
         Arc::clone(&sink),
@@ -172,7 +172,8 @@ fn control_plane(
         .with_invite_window(INVITE_WINDOW);
     let adapters = adapters_of(hasher, mailer, gallery, meter, optional);
     let app = Arc::new(Ferristrace::<Production>::new(repos, adapters));
-    Ok(AppState::new(app, cookie_of(config)))
+    Ok(AppState::new(app, cookie_of(config))
+        .with_default_retention_days(default_retention_days(config.spans.as_ref())))
 }
 
 fn adapters_of(
@@ -258,7 +259,7 @@ fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> anyhow::Result<Ferristrace<Prod
     Ok(Ferristrace::new(repos, adapters))
 }
 
-fn directory_of(pool: Option<&PgPool>) -> Directory {
+fn directory_of(pool: Option<&PgPool>, default_retention_days: u64) -> Directory {
     let Some(pool) = pool else {
         tracing::warn!(
             "no control plane is configured, so no ingest key can authenticate; \
@@ -269,7 +270,10 @@ fn directory_of(pool: Option<&PgPool>) -> Directory {
     let own = PgPoolOptions::new()
         .max_connections(DIRECTORY_CONNECTIONS)
         .connect_lazy_with(pool.connect_options().as_ref().clone());
-    Directory::ControlPlane(PostgresDirectory::new(own, SystemClock))
+    Directory::ControlPlane(
+        PostgresDirectory::new(own, SystemClock)
+            .with_default_retention_days(default_retention_days),
+    )
 }
 
 fn gateway_of(

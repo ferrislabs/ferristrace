@@ -8,7 +8,7 @@ use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
 use crate::secret::SecretHash;
 use crate::store::StoreError;
-use crate::telemetry::TenantId;
+use crate::telemetry::{RetentionDays, TenantId};
 
 pub trait Orgs {
     fn only(
@@ -26,6 +26,12 @@ pub trait Orgs {
         &self,
         org: TenantId,
         logo: Option<&Portrait>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn set_retention(
+        &self,
+        org: TenantId,
+        retention: Option<RetentionDays>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -52,6 +58,14 @@ impl<T: Orgs + Sync> Orgs for &T {
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).set_logo(org, logo)
     }
+
+    fn set_retention(
+        &self,
+        org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        (*self).set_retention(org, retention)
+    }
 }
 
 impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
@@ -76,6 +90,14 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
         logo: Option<&Portrait>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().set_logo(org, logo)
+    }
+
+    fn set_retention(
+        &self,
+        org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.as_ref().set_retention(org, retention)
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::identity::SessionError;
 use crate::profile::PhotoError;
 use crate::store::StoreError;
+use crate::telemetry::RetentionDays;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BadName {
@@ -18,6 +19,10 @@ pub enum SettingError {
     NotYours,
     #[error("changing an organisation is an administrator's to do")]
     NotYoursToChange,
+    #[error("retention is an owner's to set")]
+    OwnersOnly,
+    #[error("the plan keeps spans at most {} days", cap.get())]
+    AboveCap { cap: RetentionDays },
     #[error("no organisation carries that id any more")]
     Gone,
     #[error("that organisation keeps no logo")]

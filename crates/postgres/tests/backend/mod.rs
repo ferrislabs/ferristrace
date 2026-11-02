@@ -175,6 +175,7 @@ forward!(Orgs: Orgs {
     fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError>;
     fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), StoreError>;
     fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError>;
+    fn set_retention(&self, org: TenantId, retention: Option<RetentionDays>) -> Result<(), StoreError>;
 });
 
 forward!(Projects: Projects {

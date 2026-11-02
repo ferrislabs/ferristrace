@@ -10,8 +10,8 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole,
     Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProvisionPolicy,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError,
-    TenantId, UnixSeconds, WhoamiError,
+    RetentionDays, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
+    StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -88,7 +88,12 @@ impl Memberships for MemberOfMine {
 }
 
 #[derive(Debug)]
-struct Kept(Mutex<String>, Mutex<Option<Portrait>>);
+struct Kept(
+    Mutex<String>,
+    Mutex<Option<Portrait>>,
+    Mutex<Option<RetentionDays>>,
+    Option<RetentionDays>,
+);
 
 impl Orgs for Kept {
     async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
@@ -98,6 +103,8 @@ impl Orgs for Kept {
             plan: "Self-hosted".into(),
             created_at_unix_nanos: FOUNDED,
             logo: self.1.lock().expect("the lock").clone(),
+            retention: *self.2.lock().expect("the lock"),
+            retention_cap: self.3,
         }))
     }
 
@@ -110,6 +117,15 @@ impl Orgs for Kept {
 
     async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         *self.1.lock().expect("the lock") = logo.cloned();
+        Ok(())
+    }
+
+    async fn set_retention(
+        &self,
+        _org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> Result<(), StoreError> {
+        *self.2.lock().expect("the lock") = retention;
         Ok(())
     }
 }
@@ -270,7 +286,36 @@ async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (Sta
 }
 
 fn holding(name: &str) -> Arc<Kept> {
-    Arc::new(Kept(Mutex::new(name.to_owned()), Mutex::default()))
+    Arc::new(Kept(
+        Mutex::new(name.to_owned()),
+        Mutex::default(),
+        Mutex::default(),
+        None,
+    ))
+}
+
+fn holding_under_cap(name: &str, cap: u32) -> Arc<Kept> {
+    Arc::new(Kept(
+        Mutex::new(name.to_owned()),
+        Mutex::default(),
+        Mutex::default(),
+        RetentionDays::try_from(cap).ok(),
+    ))
+}
+
+fn retaining(days: &serde_json::Value) -> String {
+    serde_json::json!({ "days": days }).to_string()
+}
+
+fn asking_retention(seed: u128, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/api/orgs/{}/retention", org(seed)))
+        .header(COOKIE, session())
+        .header("x-requested-with", "fetch")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("a request")
 }
 
 fn a_png() -> Vec<u8> {
@@ -617,4 +662,123 @@ async fn a_deployment_with_no_object_store_says_which_part_is_missing() {
 
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(body.contains("object store"), "{body}");
+}
+
+#[tokio::test]
+async fn the_card_carries_the_retention_the_cap_and_the_deployment_default() {
+    let kept = holding_under_cap("Acme", 90);
+
+    let (status, body) = served(
+        OrgRole::Member,
+        &kept,
+        asking(Method::GET, MINE, None, true),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let card: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert!(card["retention_days"].is_null());
+    assert_eq!(card["retention_cap_days"], 90);
+    assert_eq!(card["default_retention_days"], 30);
+}
+
+#[tokio::test]
+async fn an_owner_sets_the_retention_and_is_answered_with_the_card() {
+    let kept = holding("Acme");
+
+    let (status, body) = served(
+        OrgRole::Owner,
+        &kept,
+        asking_retention(MINE, &retaining(&serde_json::json!(7))),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let card: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(card["retention_days"], 7);
+    assert!(card["retention_cap_days"].is_null());
+}
+
+#[tokio::test]
+async fn null_days_returns_the_organisation_to_the_deployment_default() {
+    let kept = holding("Acme");
+    served(
+        OrgRole::Owner,
+        &kept,
+        asking_retention(MINE, &retaining(&serde_json::json!(7))),
+    )
+    .await;
+
+    let (status, body) = served(
+        OrgRole::Owner,
+        &kept,
+        asking_retention(MINE, &retaining(&serde_json::Value::Null)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let card: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert!(card["retention_days"].is_null());
+}
+
+#[tokio::test]
+async fn an_administrator_and_a_member_are_forbidden_to_set_the_retention() {
+    for role in [OrgRole::Admin, OrgRole::Member] {
+        let kept = holding("Acme");
+
+        let (status, _) = served(
+            role,
+            &kept,
+            asking_retention(MINE, &retaining(&serde_json::json!(7))),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(*kept.2.lock().expect("the lock"), None);
+    }
+}
+
+#[tokio::test]
+async fn a_stranger_setting_the_retention_of_another_organisation_finds_nothing() {
+    let kept = holding("Acme");
+
+    let (status, _) = served(
+        OrgRole::Owner,
+        &kept,
+        asking_retention(THEIRS, &retaining(&serde_json::json!(7))),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_retention_out_of_range_or_above_the_plan_cap_is_unprocessable() {
+    let kept = holding_under_cap("Acme", 30);
+
+    for days in [
+        serde_json::json!(0),
+        serde_json::json!(3651),
+        serde_json::json!(-1),
+        serde_json::json!(31),
+    ] {
+        let (status, _) = served(
+            OrgRole::Owner,
+            &kept,
+            asking_retention(MINE, &retaining(&days)),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{days}");
+    }
+    assert_eq!(*kept.2.lock().expect("the lock"), None);
+}
+
+#[tokio::test]
+async fn a_body_with_no_days_does_not_quietly_reset_the_retention() {
+    let kept = holding("Acme");
+
+    let (status, _) = served(OrgRole::Owner, &kept, asking_retention(MINE, "{}")).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }

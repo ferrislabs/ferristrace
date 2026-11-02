@@ -1,7 +1,7 @@
 use super::value_objects::{OrgRole, Owned, TeamId};
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
-use crate::telemetry::TenantId;
+use crate::telemetry::{RetentionDays, TenantId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Organisation {
@@ -10,6 +10,8 @@ pub struct Organisation {
     pub plan: Box<str>,
     pub created_at_unix_nanos: u64,
     pub logo: Option<Portrait>,
+    pub retention: Option<RetentionDays>,
+    pub retention_cap: Option<RetentionDays>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
