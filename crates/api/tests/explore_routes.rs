@@ -4,12 +4,15 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::explore_router;
-use comettrace_core::{
-    AccountId, Agent, Explore, Membership, Memberships, OrgRole, ProjectId, ReadError,
-    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanEvent, SpanId,
-    SpanKind, SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
-    UnixSeconds, Whoami, WhoamiError, Window,
+use ferristrace_api::{AppState, SessionCookie, explore_router};
+use ferristrace_application::registry::{RepoFor, domain};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::{
+    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
+    ProvisionPolicy, ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus, StoreError, TenantId,
+    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -48,6 +51,28 @@ impl SessionStore for OneSession {
 
     async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
         Ok(())
+    }
+}
+
+impl SessionRoll for OneSession {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
     }
 }
 
@@ -106,7 +131,7 @@ impl SpanReader for TwoSpans {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(vec![ServiceSummary {
             name: "checkout".into(),
             requests: 10,
@@ -122,7 +147,7 @@ impl SpanReader for TwoSpans {
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         Ok(vec![TraceSummary {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
@@ -134,7 +159,7 @@ impl SpanReader for TwoSpans {
         }])
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(vec![
             a_span(
                 1,
@@ -163,7 +188,7 @@ impl SpanReader for NoSpans {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -171,11 +196,11 @@ impl SpanReader for NoSpans {
         &self,
         _tenant: TenantId,
         _filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -191,12 +216,66 @@ fn looking(uri: &str, cookie: Option<&str>, scripted: bool) -> Request<Body> {
     request.body(Body::empty()).expect("a request")
 }
 
+struct Fakes;
+
+impl Untransacted for Fakes {}
+
+impl RepoFor<domain::Sessions> for Fakes {
+    type Repo = OneSession;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        OneSession
+    }
+}
+
+impl RepoFor<domain::Memberships> for Fakes {
+    type Repo = MemberOfMine;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        MemberOfMine
+    }
+}
+
+struct TestStack<R>(std::marker::PhantomData<R>);
+
+impl<R: SpanReader + Send + Sync + 'static> Stack for TestStack<R> {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = R;
+    type IssueStore = Inert;
+    type Meter = Inert;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+fn state<R: SpanReader + Send + Sync + 'static>(reader: R) -> AppState<TestStack<R>> {
+    let adapters = Adapters {
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
+        photos: NoPhotos,
+        meter: Inert::default(),
+        span_store: Some(reader),
+        issue_store: None,
+        oidc: None,
+        provision: ProvisionPolicy::default(),
+    };
+    AppState::new(
+        Arc::new(Ferristrace::new(Fakes, adapters)),
+        SessionCookie::default(),
+    )
+}
+
 async fn served<R>(reader: R, request: Request<Body>) -> (StatusCode, String)
 where
     R: SpanReader + Send + Sync + 'static,
 {
-    let explore = Arc::new(Explore::new(Whoami::new(OneSession, MemberOfMine), reader));
-    let response = explore_router(explore)
+    let response = explore_router(state(reader))
         .oneshot(request)
         .await
         .expect("a response");
@@ -340,8 +419,8 @@ async fn an_empty_list_is_an_answer_rather_than_an_error() {
     assert_eq!(body, r#"{"traces":[]}"#);
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }
 
 #[tokio::test]
@@ -415,7 +494,7 @@ impl SpanReader for Remembering {
         _tenant: TenantId,
         _window: Window,
         _project: Option<ProjectId>,
-    ) -> Result<Vec<ServiceSummary>, ReadError> {
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -423,12 +502,12 @@ impl SpanReader for Remembering {
         &self,
         _tenant: TenantId,
         filter: &TraceFilter,
-    ) -> Result<Vec<TraceSummary>, ReadError> {
+    ) -> Result<Vec<TraceSummary>, StoreError> {
         *self.0.lock().expect("the lock") = Some(filter.clone());
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, ReadError> {
+    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }

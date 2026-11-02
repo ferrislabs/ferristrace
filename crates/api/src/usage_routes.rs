@@ -1,17 +1,17 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::get;
-use comettrace_core::{
-    Consumption, Memberships, Metering, SessionStore, TenantId, UsageHistory, UsageReader, Window,
-};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::UsageRepos;
+use ferristrace_domain::{Consumption, TenantId, Window};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{LookRefused, carried};
+use crate::carried::carried;
+use crate::explore_routes::LookRefused;
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 
@@ -51,29 +51,23 @@ impl From<Consumption> for Metered {
     }
 }
 
-pub fn usage_router<S, G, R, H>(metering: Arc<Metering<S, G, R, H>>) -> Router
+pub fn usage_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: UsageReader + Send + Sync + 'static,
-    H: UsageHistory + Send + Sync + 'static,
+    S::Repos: UsageRepos,
 {
     Router::new()
-        .route("/api/orgs/{org}/usage", get(usage::<S, G, R, H>))
-        .with_state(metering)
+        .route("/api/orgs/{org}/usage", get(usage::<S>))
+        .with_state(state)
 }
 
-async fn usage<S, G, R, H>(
-    State(metering): State<Arc<Metering<S, G, R, H>>>,
+async fn usage<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     Query(asked): Query<Asked>,
     headers: HeaderMap,
 ) -> Result<Json<Metered>, LookRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: UsageReader + Send + Sync + 'static,
-    H: UsageHistory + Send + Sync + 'static,
+    S::Repos: UsageRepos,
 {
     let token = carried(&headers)?;
     let window = Window::new(
@@ -81,7 +75,8 @@ where
         asked.to.saturating_mul(NANOS_PER_MILLI),
     )
     .map_err(|_| LookRefused::Window)?;
-    let consumption = metering
+    let consumption = state
+        .app
         .consumption(&token, TenantId::new(org), window)
         .await?;
     Ok(Json(consumption.into()))

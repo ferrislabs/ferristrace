@@ -1,5 +1,7 @@
+mod adapters;
 mod cli;
 mod config;
+mod routes;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -10,135 +12,41 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
-use comettrace_api::{
-    SessionCookie, SignInMethods, auth_router, catalogue_router, explore_router, health_router,
-    issue_router, me_router, methods_router, oidc_router, org_router, password_router,
-    reset_router, roster_router, router, second_factor_router, session_router, team_router,
-    trace_server, usage_router, web_router,
+use ferristrace_api::{AppState, health_router, router, trace_server, web_router};
+use ferristrace_application::{Adapters, Ferristrace, Ingestion};
+use ferristrace_clickhouse::{
+    ClickhouseIssues, ClickhouseReader, SpanStoreSettings, open_span_store,
 };
-use comettrace_core::{
-    AuthSources, Catalogue, ChangePassword, Clock, DecompressedBytes, Email, Explore,
-    FederatedSignIn, Ingest, IngestKey, Issues, Mailer, Metering, NoPhotos, NoProvider,
-    OrgSettings, Photo, PhotoError, Photos, Pictured, Portrait, Profile, ProvisionPolicy,
-    ResetError, ResetPassword, ResetToken, Roster, Scope, SecondFactors, SecondStep,
-    SessionLifetime, Sessions, SignIn, SinkError, Span, SpanSink, Squad, TenantDirectory, TenantId,
-    UnknownKey, UsageMeter, UsageReader, Whoami,
+use ferristrace_domain::telemetry::{Allowance, StaticQuota};
+use ferristrace_domain::{Clock, ProvisionPolicy, TenantId};
+use ferristrace_infra::{
+    Argon2Hasher, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
+    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
 };
-use comettrace_storage::{
-    Allowance, Argon2Hasher, CONTROL_PLANE, ClickhouseIssues, ClickhouseReader, ClickhouseSink,
-    LocalPasswordProvider, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
-    PhotoStoreSettings, PostgresAccounts, PostgresDecisions, PostgresDirectory, PostgresFactors,
-    PostgresFlows, PostgresMemberships, PostgresOrgs, PostgresProjects, PostgresResets,
-    PostgresRoster, PostgresSessions, PostgresTeams, PostgresUsage, RedisMeter, S3Photos,
-    SecretSeal, SmtpMailer, SpanStoreSettings, StaticDirectory, StaticQuota, SystemClock,
-    load_allowances, open_span_store,
+use ferristrace_postgres::{
+    CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
 };
+use ferristrace_redis::RedisMeter;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
+use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink};
 use crate::cli::{Cli, Command, health, run_command};
 use crate::config::Config;
+use crate::routes::{Held, State, control_routes, cookie_of};
 
 const SECONDS_PER_HOUR: u64 = 3600;
 const FLUSH_FALLBACK: Duration = Duration::from_secs(5);
 const MIN_FLUSH_WAIT: Duration = Duration::from_millis(100);
 
-type Gateway = Ingest<Directory, StaticQuota<Arc<Meter>>, Arc<Sink>, Arc<Meter>>;
-
-#[derive(Debug)]
-enum Sink {
-    Memory(MemorySink),
-    Spans(Box<ClickhouseSink<SystemClock>>),
-}
-
-impl SpanSink for Sink {
-    async fn accept(&self, scope: Scope, spans: Vec<Span>) -> Result<(), SinkError> {
-        match self {
-            Self::Memory(sink) => sink.accept(scope, spans).await,
-            Self::Spans(sink) => sink.accept(scope, spans).await,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Relay {
-    Smtp(Box<SmtpMailer>),
-    Unreachable,
-}
-
-impl Mailer for Relay {
-    async fn send_password_reset(&self, to: &Email, token: &ResetToken) -> Result<(), ResetError> {
-        match self {
-            Self::Smtp(mailer) => mailer.send_password_reset(to, token).await,
-            Self::Unreachable => {
-                tracing::warn!("a reset link was asked for but no mail relay is configured");
-                Err(ResetError::Undeliverable)
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Gallery {
-    Objects(Box<S3Photos<SystemClock>>),
-    Nowhere,
-}
-
-impl Photos for Gallery {
-    async fn put(&self, of: Pictured, photo: &Photo) -> Result<Portrait, PhotoError> {
-        match self {
-            Self::Objects(store) => store.put(of, photo).await,
-            Self::Nowhere => {
-                tracing::warn!("a photo was offered but no object store is configured");
-                NoPhotos.put(of, photo).await
-            }
-        }
-    }
-
-    async fn fetch(
-        &self,
-        of: Pictured,
-        portrait: &Portrait,
-    ) -> Result<Option<Vec<u8>>, PhotoError> {
-        match self {
-            Self::Objects(store) => store.fetch(of, portrait).await,
-            Self::Nowhere => NoPhotos.fetch(of, portrait).await,
-        }
-    }
-
-    async fn remove(&self, of: Pictured, portrait: &Portrait) -> Result<(), PhotoError> {
-        match self {
-            Self::Objects(store) => store.remove(of, portrait).await,
-            Self::Nowhere => NoPhotos.remove(of, portrait).await,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Meter {
-    Memory(MemoryMeter),
-    Redis(RedisMeter<SystemClock>),
-}
-
-impl UsageMeter for Meter {
-    async fn record_ingest(&self, tenant: TenantId, decompressed: DecompressedBytes) {
-        match self {
-            Self::Memory(meter) => meter.record_ingest(tenant, decompressed).await,
-            Self::Redis(meter) => meter.record_ingest(tenant, decompressed).await,
-        }
-    }
-}
-
-impl UsageReader for Meter {
-    async fn used(&self, tenant: TenantId) -> DecompressedBytes {
-        match self {
-            Self::Memory(meter) => meter.used(tenant).await,
-            Self::Redis(meter) => meter.used(tenant).await,
-        }
-    }
+#[derive(Default)]
+struct Optional {
+    span_store: Option<ClickhouseReader>,
+    issue_store: Option<ClickhouseIssues>,
+    oidc: Option<OidcProvider>,
 }
 
 #[tokio::main]
@@ -151,28 +59,47 @@ async fn main() -> anyhow::Result<()> {
     let config = config::load().context("reading the configuration")?;
     match Cli::parse().command {
         Some(Command::Health) => return health(&config).await,
-        Some(command) => return run_command(command, &config).await,
+        Some(command) => return provision(command, &config).await,
         None => {}
     }
     let pool = control_plane_pool(&config).await?;
     let allowances = allowances_of(&config, pool.as_ref()).await?;
-    let meter = Arc::new(meter_of(&config, pool.as_ref()).await?);
+    let meter = Arc::new(meter_of(&config).await?);
     if let (Some(pool), Meter::Redis(_)) = (pool.as_ref(), meter.as_ref()) {
-        tokio::spawn(roll_up_hourly(Arc::clone(&meter), pool.clone()));
+        let usage = Arc::new(usage_of(pool, Arc::clone(&meter))?);
+        let seeded = usage
+            .rehydrate_usage()
+            .await
+            .context("rehydrating the usage counters")?;
+        tracing::info!(tenants = seeded, "usage counters rehydrated");
+        tokio::spawn(roll_up_hourly(usage));
     }
     let (sink, reader, grouping) = spans_of(&config).await?;
+    let held = Held {
+        explore: reader.is_some(),
+        issues: grouping.is_some(),
+    };
     let sink = Arc::new(sink);
     tokio::spawn(flush_spans(Arc::clone(&sink)));
-    let gallery = Arc::new(gallery_of(&config)?);
-    let identity = identity_routes(&config, pool.as_ref(), Arc::clone(&gallery))
-        .await?
-        .merge(explore_routes(pool.as_ref(), reader))
-        .merge(issue_routes(pool.as_ref(), grouping))
-        .merge(catalogue_routes(pool.as_ref()))
-        .merge(org_routes(pool.as_ref(), gallery))
-        .merge(roster_routes(pool.as_ref())?)
-        .merge(team_routes(pool.as_ref()))
-        .merge(usage_routes(pool.as_ref(), Arc::clone(&meter)));
+    let gallery = gallery_of(&config)?;
+    let state = match pool.as_ref() {
+        Some(pool) => {
+            let optional = Optional {
+                span_store: reader,
+                issue_store: grouping,
+                oidc: oidc_of(&config).await?,
+            };
+            Some(control_plane(
+                &config,
+                pool,
+                gallery,
+                Arc::clone(&meter),
+                optional,
+            )?)
+        }
+        None => None,
+    };
+    let identity = control_routes(&config, state.as_ref(), held);
     let gateway = Arc::new(gateway_of(
         directory_of(pool.as_ref()),
         allowances,
@@ -201,6 +128,74 @@ async fn main() -> anyhow::Result<()> {
     grpc?;
     Ok(())
 }
+
+async fn provision(command: Command, config: &Config) -> anyhow::Result<()> {
+    let pool = control_plane_pool(config)
+        .await?
+        .context("this command needs a control plane, so set database_url")?;
+    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
+    let repos = Postgres::new(pool, SystemClock)
+        .with_hasher(hasher.clone())
+        .with_invite_window(INVITE_WINDOW);
+    let adapters = adapters_of(
+        hasher,
+        Relay::Unreachable,
+        Gallery::Nowhere,
+        Arc::new(Meter::Memory(MemoryMeter::default())),
+        Optional::default(),
+    );
+    let app = Ferristrace::<Production>::new(repos, adapters);
+    run_command(command, config, &app, INVITE_WINDOW).await
+}
+
+fn control_plane(
+    config: &Config,
+    pool: &PgPool,
+    gallery: Gallery,
+    meter: Arc<Meter>,
+    optional: Optional,
+) -> anyhow::Result<State> {
+    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
+    let seal = if config.local_password {
+        seal_of(config)?
+    } else {
+        None
+    };
+    let mailer = if config.local_password {
+        relay_of(config)?
+    } else {
+        Relay::Unreachable
+    };
+    let repos = Postgres::new(pool.clone(), SystemClock)
+        .with_hasher(hasher.clone())
+        .with_seal(seal)
+        .with_invite_window(INVITE_WINDOW);
+    let adapters = adapters_of(hasher, mailer, gallery, meter, optional);
+    let app = Arc::new(Ferristrace::<Production>::new(repos, adapters));
+    Ok(AppState::new(app, cookie_of(config)))
+}
+
+fn adapters_of(
+    hasher: Argon2Hasher,
+    mailer: Relay,
+    photos: Gallery,
+    meter: Arc<Meter>,
+    optional: Optional,
+) -> Adapters<Production> {
+    Adapters {
+        clock: SystemClock,
+        hasher,
+        mailer,
+        photos,
+        meter,
+        span_store: optional.span_store,
+        issue_store: optional.issue_store,
+        oidc: optional.oidc,
+        provision: ProvisionPolicy::default(),
+    }
+}
+
+const DIRECTORY_CONNECTIONS: u32 = 2;
 
 async fn control_plane_pool(config: &Config) -> anyhow::Result<Option<PgPool>> {
     let Some(url) = config.database_url.as_deref() else {
@@ -239,7 +234,7 @@ async fn allowances_of(
     Ok(loaded)
 }
 
-async fn meter_of(config: &Config, pool: Option<&PgPool>) -> anyhow::Result<Meter> {
+async fn meter_of(config: &Config) -> anyhow::Result<Meter> {
     let Some(url) = config.redis_url.as_deref() else {
         return Ok(Meter::Memory(MemoryMeter::default()));
     };
@@ -247,29 +242,20 @@ async fn meter_of(config: &Config, pool: Option<&PgPool>) -> anyhow::Result<Mete
     let meter = RedisMeter::connect(url, SystemClock)
         .await
         .context("connecting to the usage counter store")?;
-    if let Some(pool) = pool {
-        let seeded = meter
-            .rehydrate(pool)
-            .await
-            .context("rehydrating the usage counters")?;
-        tracing::info!(tenants = seeded, "usage counters rehydrated");
-    }
     Ok(Meter::Redis(meter))
 }
 
-#[derive(Debug)]
-enum Directory {
-    Nothing(StaticDirectory),
-    ControlPlane(PostgresDirectory<SystemClock>),
-}
-
-impl TenantDirectory for Directory {
-    async fn resolve(&self, key: &IngestKey) -> Result<Scope, UnknownKey> {
-        match self {
-            Self::Nothing(directory) => directory.resolve(key).await,
-            Self::ControlPlane(directory) => directory.resolve(key).await,
-        }
-    }
+fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> anyhow::Result<Ferristrace<Production>> {
+    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
+    let repos = Postgres::new(pool.clone(), SystemClock);
+    let adapters = adapters_of(
+        hasher,
+        Relay::Unreachable,
+        Gallery::Nowhere,
+        meter,
+        Optional::default(),
+    );
+    Ok(Ferristrace::new(repos, adapters))
 }
 
 fn directory_of(pool: Option<&PgPool>) -> Directory {
@@ -280,7 +266,10 @@ fn directory_of(pool: Option<&PgPool>) -> Directory {
         );
         return Directory::Nothing(StaticDirectory::default());
     };
-    Directory::ControlPlane(PostgresDirectory::new(pool.clone(), SystemClock))
+    let own = PgPoolOptions::new()
+        .max_connections(DIRECTORY_CONNECTIONS)
+        .connect_lazy_with(pool.connect_options().as_ref().clone());
+    Directory::ControlPlane(PostgresDirectory::new(own, SystemClock))
 }
 
 fn gateway_of(
@@ -288,143 +277,9 @@ fn gateway_of(
     allowances: BTreeMap<TenantId, Allowance>,
     meter: Arc<Meter>,
     sink: Arc<Sink>,
-) -> Gateway {
+) -> Ingestion<Production> {
     let quota = StaticQuota::new(Arc::clone(&meter), allowances);
-    Ingest::new(directory, quota, sink, meter)
-}
-
-type Looking = Explore<Arc<Store>, PostgresMemberships, ClickhouseReader>;
-type Holding = Catalogue<Arc<Store>, PostgresMemberships, PostgresProjects>;
-type Settling = OrgSettings<Arc<Store>, PostgresMemberships, PostgresOrgs, Arc<Gallery>>;
-type Enrolling = Roster<Arc<Store>, PostgresMemberships, PostgresRoster<SystemClock>>;
-type Arranging = Squad<Arc<Store>, PostgresMemberships, PostgresTeams>;
-type Measuring = Metering<Arc<Store>, PostgresMemberships, Arc<Meter>, PostgresUsage>;
-type Grouping =
-    Issues<Arc<Store>, PostgresMemberships, ClickhouseIssues, PostgresDecisions, SystemClock>;
-
-fn roster_routes(pool: Option<&PgPool>) -> anyhow::Result<Router> {
-    let Some(pool) = pool else {
-        return Ok(Router::new());
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
-    let roster: Arc<Enrolling> = Arc::new(Roster::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        PostgresRoster::new(pool.clone(), hasher, SystemClock),
-    ));
-    Ok(roster_router(roster))
-}
-
-fn usage_routes(pool: Option<&PgPool>, meter: Arc<Meter>) -> Router {
-    let Some(pool) = pool else {
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let metering: Arc<Measuring> = Arc::new(Metering::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        meter,
-        PostgresUsage::new(pool.clone()),
-    ));
-    usage_router(metering)
-}
-
-fn team_routes(pool: Option<&PgPool>) -> Router {
-    let Some(pool) = pool else {
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let squad: Arc<Arranging> = Arc::new(Squad::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        PostgresTeams::new(pool.clone()),
-    ));
-    team_router(squad)
-}
-
-fn org_routes(pool: Option<&PgPool>, gallery: Arc<Gallery>) -> Router {
-    let Some(pool) = pool else {
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let settings: Arc<Settling> = Arc::new(OrgSettings::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        PostgresOrgs::new(pool.clone()),
-        gallery,
-    ));
-    org_router(settings)
-}
-
-fn catalogue_routes(pool: Option<&PgPool>) -> Router {
-    let Some(pool) = pool else {
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let catalogue: Arc<Holding> = Arc::new(Catalogue::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        PostgresProjects::new(pool.clone()),
-    ));
-    catalogue_router(catalogue)
-}
-
-fn issue_routes(pool: Option<&PgPool>, reader: Option<ClickhouseIssues>) -> Router {
-    let (Some(pool), Some(reader)) = (pool, reader) else {
-        tracing::warn!(
-            "issues cannot be grouped: that needs both a control plane to authorise \
-             the reader and a span store holding the exceptions to group"
-        );
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let issues: Arc<Grouping> = Arc::new(Issues::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        reader,
-        PostgresDecisions::new(pool.clone()),
-        SystemClock,
-    ));
-    issue_router(issues)
-}
-
-fn explore_routes(pool: Option<&PgPool>, reader: Option<ClickhouseReader>) -> Router {
-    let (Some(pool), Some(reader)) = (pool, reader) else {
-        tracing::warn!(
-            "traces cannot be read back: that needs both a control plane to \
-             authorise the reader and a span store to read from"
-        );
-        return Router::new();
-    };
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let explore: Arc<Looking> = Arc::new(Explore::new(
-        Whoami::new(sessions, PostgresMemberships::new(pool.clone())),
-        reader,
-    ));
-    explore_router(explore)
+    Ingestion::new(directory, quota, sink, meter)
 }
 
 async fn spans_of(
@@ -484,125 +339,19 @@ async fn flush_once(sink: &Sink) {
     }
 }
 
-type LocalSource = LocalPasswordProvider<Argon2Hasher>;
-type Store = PostgresSessions<SystemClock>;
-type Factors = PostgresFactors<SystemClock>;
-type PasswordSignIn = SignIn<LocalSource, NoProvider, PostgresAccounts, Arc<Store>, Factors>;
-type Settings = SecondFactors<Factors, Arc<Store>, SystemClock>;
-type Steps = SecondStep<Factors, Arc<Store>, SystemClock>;
-type Resets = ResetPassword<PostgresResets<SystemClock>, Argon2Hasher, Relay>;
-type Changes = ChangePassword<Arc<Store>, LocalSource, PostgresResets<SystemClock>, Argon2Hasher>;
-type Me = Profile<Arc<Store>, PostgresMemberships, PostgresAccounts, Arc<Gallery>>;
-type Rolling = Sessions<Arc<Store>, Store>;
-type Federated =
-    FederatedSignIn<OidcProvider, PostgresFlows<SystemClock>, PostgresAccounts, Arc<Store>>;
-
-async fn identity_routes(
-    config: &Config,
-    pool: Option<&PgPool>,
-    gallery: Arc<Gallery>,
-) -> anyhow::Result<Router> {
-    let offered = methods_router(SignInMethods {
-        local_password: config.local_password && pool.is_some(),
-        oidc: config.oidc.is_some() && pool.is_some(),
-    });
-    let Some(pool) = pool else {
-        if config.local_password || config.oidc.is_some() {
-            tracing::warn!("no control plane is configured, so nobody can sign in");
-        }
-        return Ok(offered);
+async fn oidc_of(config: &Config) -> anyhow::Result<Option<OidcProvider>> {
+    let Some(settings) = &config.oidc else {
+        return Ok(None);
     };
-
-    let cookie = SessionCookie {
-        secure: config.cookie_secure,
-        ..SessionCookie::default()
-    };
-    let accounts = PostgresAccounts::new(pool.clone());
-    let sessions = Arc::new(PostgresSessions::new(
-        pool.clone(),
-        SystemClock,
-        SessionLifetime::default(),
-    ));
-    let me: Arc<Me> = Arc::new(Profile::new(
-        Whoami::new(
-            Arc::clone(&sessions),
-            PostgresMemberships::new(pool.clone()),
-        ),
-        accounts.clone(),
-        gallery,
-    ));
-    let rolling: Arc<Rolling> = Arc::new(Sessions::new(
-        Arc::clone(&sessions),
-        sessions.as_ref().clone(),
-    ));
-    let mut routes = offered.merge(me_router(me)).merge(session_router(rolling));
-
-    if config.local_password {
-        let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
-        let factors = PostgresFactors::new(pool.clone(), SystemClock, seal_of(config)?);
-        let sign_in: Arc<PasswordSignIn> = Arc::new(SignIn::new(
-            AuthSources::new(Some(LocalPasswordProvider::new(pool.clone(), hasher)), None),
-            accounts.clone(),
-            Arc::clone(&sessions),
-            factors.clone(),
-            ProvisionPolicy::default(),
-        ));
-        let settings: Arc<Settings> = Arc::new(SecondFactors::new(
-            factors.clone(),
-            Arc::clone(&sessions),
-            SystemClock,
-        ));
-        let steps: Arc<Steps> =
-            Arc::new(SecondStep::new(factors, Arc::clone(&sessions), SystemClock));
-        routes = routes
-            .merge(auth_router(sign_in, cookie))
-            .merge(second_factor_router(settings, steps, cookie));
-        tracing::info!("local passwords accepted");
-    }
-
-    if let Some(settings) = &config.oidc {
-        let provider = OidcProvider::discover(OidcSettings {
-            issuer: settings.issuer.clone(),
-            client_id: settings.client_id.clone(),
-            client_secret: settings.client_secret.clone(),
-            redirect_uri: settings.redirect_uri.clone(),
-        })
-        .await
-        .context("reaching the identity provider")?;
-        let federated: Arc<Federated> = Arc::new(FederatedSignIn::new(
-            provider,
-            PostgresFlows::new(pool.clone(), SystemClock),
-            accounts,
-            Arc::clone(&sessions),
-            ProvisionPolicy::default(),
-        ));
-        routes = routes.merge(oidc_router(federated, cookie, config.after_sign_in.clone()));
-        tracing::info!(issuer = %settings.issuer, "federated sign in accepted");
-    }
-
-    if config.mail.is_some() && !config.local_password {
-        tracing::warn!("a mail relay is configured but local passwords are off");
-    }
-
-    if config.local_password {
-        let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
-        let reset: Arc<Resets> = Arc::new(ResetPassword::new(
-            PostgresResets::new(pool.clone(), SystemClock),
-            hasher.clone(),
-            relay_of(config)?,
-        ));
-        let change: Arc<Changes> = Arc::new(ChangePassword::new(
-            Arc::clone(&sessions),
-            LocalPasswordProvider::new(pool.clone(), hasher.clone()),
-            PostgresResets::new(pool.clone(), SystemClock),
-            hasher,
-        ));
-        routes = routes
-            .merge(reset_router(reset))
-            .merge(password_router(change));
-    }
-
-    Ok(routes)
+    let provider = OidcProvider::discover(OidcSettings {
+        issuer: settings.issuer.clone(),
+        client_id: settings.client_id.clone(),
+        client_secret: settings.client_secret.clone(),
+        redirect_uri: settings.redirect_uri.clone(),
+    })
+    .await
+    .context("reaching the identity provider")?;
+    Ok(Some(provider))
 }
 
 fn gallery_of(config: &Config) -> anyhow::Result<Gallery> {
@@ -653,7 +402,7 @@ fn relay_of(config: &Config) -> anyhow::Result<Relay> {
 
 async fn serve_http(
     address: SocketAddr,
-    gateway: Arc<Gateway>,
+    gateway: Arc<Ingestion<Production>>,
     identity: Router,
     web: Router,
 ) -> anyhow::Result<()> {
@@ -685,7 +434,10 @@ fn web_routes(config: &Config) -> Router {
     web_router(root)
 }
 
-async fn serve_grpc(address: SocketAddr, gateway: Arc<Gateway>) -> anyhow::Result<()> {
+async fn serve_grpc(
+    address: SocketAddr,
+    gateway: Arc<Ingestion<Production>>,
+) -> anyhow::Result<()> {
     Server::builder()
         .add_service(trace_server(gateway))
         .serve_with_shutdown(address, shutdown())
@@ -699,13 +451,10 @@ async fn shutdown() {
     }
 }
 
-async fn roll_up_hourly(meter: Arc<Meter>, pool: PgPool) {
-    let Meter::Redis(redis) = meter.as_ref() else {
-        return;
-    };
+async fn roll_up_hourly(usage: Arc<Ferristrace<Production>>) {
     loop {
         tokio::time::sleep(until_the_next_hour(SystemClock)).await;
-        match redis.roll_up(&pool).await {
+        match usage.roll_up_usage().await {
             Ok(tenants) => tracing::info!(tenants, "the finished hour was rolled up"),
             Err(error) => tracing::error!(%error, "the usage rollup failed"),
         }

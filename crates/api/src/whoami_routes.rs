@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -8,15 +6,17 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use comettrace_core::{
-    AccountId, AccountName, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, Memberships,
-    Photo, PhotoError, Photos, Portrait, Profile, ProfileError, SessionStore, SessionToken,
-    TenantId, Who,
+use ferristrace_application::Stack;
+use ferristrace_application::registry::ProfileRepos;
+use ferristrace_domain::{
+    AccountId, AccountName, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, Photo, PhotoError, Portrait,
+    ProfileError, SessionToken, TenantId, Who,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::session_cookie;
+use crate::state::AppState;
 
 const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 
@@ -72,53 +72,41 @@ pub struct Naming {
     name: String,
 }
 
-pub fn me_router<S, G, A, P>(profile: Arc<Profile<S, G, A, P>>) -> Router
+pub fn me_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     Router::new()
-        .route(
-            "/auth/me",
-            get(standing::<S, G, A, P>).patch(rename::<S, G, A, P>),
-        )
+        .route("/auth/me", get(standing::<S>).patch(rename::<S>))
         .route(
             "/auth/me/photo",
-            post(keep::<S, G, A, P>)
-                .delete(forget::<S, G, A, P>)
+            post(keep::<S>)
+                .delete(forget::<S>)
                 .layer(DefaultBodyLimit::max(MAX_PHOTO_BYTES)),
         )
-        .route("/auth/accounts/{account}/photo", get(served::<S, G, A, P>))
-        .with_state(profile)
+        .route("/auth/accounts/{account}/photo", get(served::<S>))
+        .with_state(state)
 }
 
-async fn standing<S, G, A, P>(
-    State(profile): State<Arc<Profile<S, G, A, P>>>,
+async fn standing<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Json<Standing>, StandingRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     let token = carried(&headers)?;
 
-    Ok(Json(profile.read(&token).await?.into()))
+    Ok(Json(state.app.profile(&token).await?.into()))
 }
 
-async fn rename<S, G, A, P>(
-    State(profile): State<Arc<Profile<S, G, A, P>>>,
+async fn rename<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(asked): Json<Naming>,
 ) -> Result<Json<Standing>, StandingRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     let token = carried(&headers)?;
     let chosen = asked.name.trim();
@@ -128,61 +116,55 @@ where
         Some(AccountName::try_from(chosen)?)
     };
 
-    let who = profile.rename(&token, name.as_ref()).await?;
+    let who = state.app.rename_profile(&token, name.as_ref()).await?;
     tracing::info!(account = %who.account, named = who.name.is_some(), "an account was renamed");
     Ok(Json(who.into()))
 }
 
-async fn keep<S, G, A, P>(
-    State(profile): State<Arc<Profile<S, G, A, P>>>,
+async fn keep<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Standing>, StandingRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     let token = carried(&headers)?;
     let photo = Photo::examined(body.to_vec())?;
     let kind = photo.kind();
 
-    let who = profile.put_photo(&token, &photo).await?;
+    let who = state.app.put_profile_photo(&token, &photo).await?;
     tracing::info!(account = %who.account, %kind, "an account kept a photo");
     Ok(Json(who.into()))
 }
 
-async fn forget<S, G, A, P>(
-    State(profile): State<Arc<Profile<S, G, A, P>>>,
+async fn forget<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Json<Standing>, StandingRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     let token = carried(&headers)?;
 
-    let who = profile.remove_photo(&token).await?;
+    let who = state.app.remove_profile_photo(&token).await?;
     tracing::info!(account = %who.account, "an account dropped its photo");
     Ok(Json(who.into()))
 }
 
-async fn served<S, G, A, P>(
-    State(profile): State<Arc<Profile<S, G, A, P>>>,
+async fn served<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(account): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, StandingRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    A: Accounts + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: ProfileRepos,
 {
     let token = session_cookie::carried(&headers).ok_or(StandingRefused::NoSession)?;
-    let (kind, bytes) = profile.photo(&token, AccountId::new(account)).await?;
+    let (kind, bytes) = state
+        .app
+        .profile_photo(&token, AccountId::new(account))
+        .await?;
 
     Ok((
         [(CONTENT_TYPE, kind.as_str()), (CACHE_CONTROL, FOR_EVER)],

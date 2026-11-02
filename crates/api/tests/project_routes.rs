@@ -3,11 +3,15 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::catalogue_router;
-use comettrace_core::{
-    AccountId, Agent, Assigned, Catalogue, Created, Membership, Memberships, OrgRole, OwnerTeam,
-    Project, ProjectId, ProjectName, Projects, ReadError, Renamed, Session, SessionError,
-    SessionStore, SessionToken, TeamId, TenantId, UnixSeconds, Whoami, WhoamiError,
+use ferristrace_api::{AppState, SessionCookie, catalogue_router};
+use ferristrace_application::registry::{RepoFor, domain};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::{
+    AccountId, Agent, Assigned, Created, LiveSession, Membership, Memberships, NoPhotos, OrgRole,
+    OwnerTeam, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, Renamed, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId,
+    UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -52,6 +56,28 @@ impl SessionStore for OneSession {
 
     async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
         Ok(())
+    }
+}
+
+impl SessionRoll for OneSession {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
     }
 }
 
@@ -141,7 +167,7 @@ impl Kept {
 }
 
 impl Projects for Kept {
-    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, ReadError> {
+    async fn of(&self, tenant: TenantId) -> Result<Vec<Project>, StoreError> {
         Ok(vec![Project {
             id: ProjectId::new(Uuid::from_u128(STOREFRONT)),
             org: tenant,
@@ -152,7 +178,7 @@ impl Projects for Kept {
         }])
     }
 
-    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, ReadError> {
+    async fn create(&self, _org: TenantId, name: &ProjectName) -> Result<Created, StoreError> {
         self.written().created.push(name.as_str().to_owned());
         Ok(self.created)
     }
@@ -162,14 +188,14 @@ impl Projects for Kept {
         _org: TenantId,
         project: ProjectId,
         name: &ProjectName,
-    ) -> Result<Renamed, ReadError> {
+    ) -> Result<Renamed, StoreError> {
         self.written()
             .renamed
             .push((project, name.as_str().to_owned()));
         Ok(self.renamed)
     }
 
-    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, ReadError> {
+    async fn forget(&self, _org: TenantId, project: ProjectId) -> Result<bool, StoreError> {
         self.written().forgotten.push(project);
         Ok(self.forgotten)
     }
@@ -179,7 +205,7 @@ impl Projects for Kept {
         _org: TenantId,
         project: ProjectId,
         team: Option<TeamId>,
-    ) -> Result<Assigned, ReadError> {
+    ) -> Result<Assigned, StoreError> {
         self.written().assigned.push((project, team));
         Ok(self.assigned)
     }
@@ -201,12 +227,78 @@ fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Requ
         .expect("a request")
 }
 
+struct Fakes {
+    role: OrgRole,
+    kept: Arc<Kept>,
+}
+
+impl Untransacted for Fakes {}
+
+impl RepoFor<domain::Sessions> for Fakes {
+    type Repo = OneSession;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        OneSession
+    }
+}
+
+impl RepoFor<domain::Memberships> for Fakes {
+    type Repo = MemberOfMine;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        MemberOfMine(self.role)
+    }
+}
+
+impl RepoFor<domain::Projects> for Fakes {
+    type Repo = Arc<Kept>;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Arc::clone(&self.kept)
+    }
+}
+
+struct TestStack;
+
+impl Stack for TestStack {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = Inert;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
+    let fakes = Fakes {
+        role,
+        kept: Arc::clone(kept),
+    };
+    let adapters = Adapters {
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
+        photos: NoPhotos,
+        meter: Inert::default(),
+        span_store: None,
+        issue_store: None,
+        oidc: None,
+        provision: ProvisionPolicy::default(),
+    };
+    AppState::new(
+        Arc::new(Ferristrace::new(fakes, adapters)),
+        SessionCookie::default(),
+    )
+}
+
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
-    let catalogue = Arc::new(Catalogue::new(
-        Whoami::new(OneSession, MemberOfMine(role)),
-        Arc::clone(kept),
-    ));
-    let response = catalogue_router(catalogue)
+    let response = catalogue_router(state(role, kept))
         .oneshot(request)
         .await
         .expect("a response");

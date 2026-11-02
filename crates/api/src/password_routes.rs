@@ -1,17 +1,16 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
-    AuthProvider, ChangeError, ChangePassword, Password, PasswordHasher, ResetStore, SessionStore,
-};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
+use ferristrace_domain::{ChangeError, Password};
 use serde::Deserialize;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct Chosen {
@@ -19,32 +18,27 @@ pub struct Chosen {
     password: String,
 }
 
-pub fn password_router<S, L, R, H>(change: Arc<ChangePassword<S, L, R, H>>) -> Router
+pub fn password_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    L: AuthProvider + Send + Sync + 'static,
-    R: ResetStore + Send + Sync + 'static,
-    H: PasswordHasher + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     Router::new()
-        .route("/auth/password", post(change_it::<S, L, R, H>))
-        .with_state(change)
+        .route("/auth/password", post(change_it::<S>))
+        .with_state(state)
 }
 
-async fn change_it<S, L, R, H>(
-    State(change): State<Arc<ChangePassword<S, L, R, H>>>,
+async fn change_it<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(chosen): Json<Chosen>,
 ) -> Result<Response, ChangeRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    L: AuthProvider + Send + Sync + 'static,
-    R: ResetStore + Send + Sync + 'static,
-    H: PasswordHasher + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     let token = carried(&headers).map_err(ChangeRefused::Reaching)?;
-    let ended = change
-        .change(
+    let ended = state
+        .app
+        .change_password(
             &token,
             &Password::new(&chosen.current),
             &Password::new(&chosen.password),

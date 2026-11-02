@@ -20,14 +20,14 @@ ARG FEATURES=""
 
 COPY --from=planner /usr/local/src/comettrace/recipe.json recipe.json
 
-RUN cargo chef cook --release --locked --recipe-path recipe.json --package comettrace \
+RUN cargo chef cook --release --locked --recipe-path recipe.json --package ferristrace-server \
     ${FEATURES:+--features "$FEATURES"}
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY apps apps
 
-RUN cargo build --release --locked --package comettrace \
+RUN cargo build --release --locked --package ferristrace-server \
     ${FEATURES:+--features "$FEATURES"}
 
 FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS web-build

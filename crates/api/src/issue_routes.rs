@@ -1,19 +1,20 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use comettrace_core::{
-    AccountId, Clock, Fingerprint, Issue, IssueDecisions, IssueError, IssueFilter, IssueReader,
-    Issues, Memberships, Occurrence, ProjectId, SessionStore, Status, TenantId, Window,
+use ferristrace_application::registry::IssueRepos;
+use ferristrace_application::{IssueRuling, Stack};
+use ferristrace_domain::{
+    AccountId, Fingerprint, Issue, IssueError, IssueFilter, Occurrence, ProjectId, Status,
+    TenantId, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 const DEFAULT_OCCURRENCES: u32 = 50;
@@ -55,6 +56,7 @@ pub struct Decided {
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
+    #[allow(clippy::option_option)]
     owner: Option<Option<Uuid>>,
 }
 
@@ -128,41 +130,31 @@ impl From<Occurrence> for Rendered {
     }
 }
 
-type Grouping<S, G, R, P, C> = Arc<Issues<S, G, R, P, C>>;
-
-pub fn issue_router<S, G, R, P, C>(issues: Grouping<S, G, R, P, C>) -> Router
+pub fn issue_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: IssueReader + Send + Sync + 'static,
-    P: IssueDecisions + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IssueRepos,
 {
     Router::new()
-        .route("/api/orgs/{org}/issues", get(list::<S, G, R, P, C>))
+        .route("/api/orgs/{org}/issues", get(list::<S>))
         .route(
             "/api/orgs/{org}/issues/{print}",
-            get(one::<S, G, R, P, C>).patch(decide::<S, G, R, P, C>),
+            get(one::<S>).patch(decide::<S>),
         )
         .route(
             "/api/orgs/{org}/issues/{print}/occurrences",
-            get(occurrences::<S, G, R, P, C>),
+            get(occurrences::<S>),
         )
-        .with_state(issues)
+        .with_state(state)
 }
 
-async fn list<S, G, R, P, C>(
-    State(issues): State<Grouping<S, G, R, P, C>>,
+async fn list<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     Query(asked): Query<Asked>,
     headers: HeaderMap,
 ) -> Result<Json<Found>, IssueRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: IssueReader + Send + Sync + 'static,
-    P: IssueDecisions + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IssueRepos,
 {
     let token = carried(&headers)?;
     let mut filter = IssueFilter::over(a_window(asked.from, asked.to)?);
@@ -179,8 +171,9 @@ where
         filter = filter.at_most(limit);
     }
 
-    let found = issues
-        .list(&token, TenantId::new(org), &filter)
+    let found = state
+        .app
+        .list_issues(&token, TenantId::new(org), &filter)
         .await?
         .into_iter()
         .map(Listed::from)
@@ -188,22 +181,19 @@ where
     Ok(Json(Found { issues: found }))
 }
 
-async fn one<S, G, R, P, C>(
-    State(issues): State<Grouping<S, G, R, P, C>>,
+async fn one<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, print)): Path<(Uuid, String)>,
     Query(asked): Query<AskedOne>,
     headers: HeaderMap,
 ) -> Result<Json<Listed>, IssueRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: IssueReader + Send + Sync + 'static,
-    P: IssueDecisions + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IssueRepos,
 {
     let token = carried(&headers)?;
-    let issue = issues
-        .one(
+    let issue = state
+        .app
+        .issue(
             &token,
             TenantId::new(org),
             asked.project.map(ProjectId::new),
@@ -214,22 +204,19 @@ where
     Ok(Json(Listed::from(issue)))
 }
 
-async fn occurrences<S, G, R, P, C>(
-    State(issues): State<Grouping<S, G, R, P, C>>,
+async fn occurrences<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, print)): Path<(Uuid, String)>,
     Query(asked): Query<AskedSeen>,
     headers: HeaderMap,
 ) -> Result<Json<Seen>, IssueRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: IssueReader + Send + Sync + 'static,
-    P: IssueDecisions + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IssueRepos,
 {
     let token = carried(&headers)?;
-    let seen = issues
-        .occurrences(
+    let seen = state
+        .app
+        .issue_occurrences(
             &token,
             TenantId::new(org),
             ProjectId::new(asked.project),
@@ -244,33 +231,31 @@ where
     Ok(Json(Seen { occurrences: seen }))
 }
 
-async fn decide<S, G, R, P, C>(
-    State(issues): State<Grouping<S, G, R, P, C>>,
+async fn decide<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, print)): Path<(Uuid, String)>,
     headers: HeaderMap,
     Json(decided): Json<Decided>,
 ) -> Result<Response, IssueRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    R: IssueReader + Send + Sync + 'static,
-    P: IssueDecisions + Send + Sync + 'static,
-    C: Clock + Send + Sync + 'static,
+    S::Repos: IssueRepos,
 {
     let token = carried(&headers)?;
     let org = TenantId::new(org);
     let project = ProjectId::new(decided.project);
     let print = a_print(&print)?;
-
-    if let Some(spelling) = decided.status.as_deref() {
-        let status = Status::parse(spelling).ok_or(IssueRefused::Status)?;
-        issues.decide(&token, org, project, print, status).await?;
-    }
-    if let Some(owner) = decided.owner {
-        issues
-            .assign(&token, org, project, print, owner.map(AccountId::new))
-            .await?;
-    }
+    let status = decided
+        .status
+        .as_deref()
+        .map(|spelling| Status::parse(spelling).ok_or(IssueRefused::Status))
+        .transpose()?;
+    let ruling = IssueRuling {
+        project,
+        print,
+        status,
+        owner: decided.owner.map(|owner| owner.map(AccountId::new)),
+    };
+    state.app.rule_on_issue(&token, org, ruling).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

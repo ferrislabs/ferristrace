@@ -1,19 +1,19 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
-use comettrace_core::{
-    AccountId, Email, InvalidCredential, Member, Memberships, OrgRole, Roll, Roster, RosterError,
-    SessionStore, TenantId,
+use ferristrace_application::Stack;
+use ferristrace_application::registry::RosterRepos;
+use ferristrace_domain::{
+    AccountId, Email, InvalidCredential, Member, OrgRole, RosterError, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
+use crate::state::AppState;
 use crate::whoami_routes::photo_url;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -84,57 +84,52 @@ pub struct Granting {
     role: Standing,
 }
 
-pub fn roster_router<S, G, M>(roster: Arc<Roster<S, G, M>>) -> Router
+pub fn roster_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    M: Roll + Send + Sync + 'static,
+    S::Repos: RosterRepos,
 {
     Router::new()
         .route(
             "/api/orgs/{org}/members",
-            get(members::<S, G, M>).post(invite::<S, G, M>),
+            get(members::<S>).post(invite::<S>),
         )
         .route(
             "/api/orgs/{org}/members/{account}",
-            patch(grant::<S, G, M>).delete(remove::<S, G, M>),
+            patch(grant::<S>).delete(remove::<S>),
         )
-        .with_state(roster)
+        .with_state(state)
 }
 
-async fn members<S, G, M>(
-    State(roster): State<Arc<Roster<S, G, M>>>,
+async fn members<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<Members>, MemberRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    M: Roll + Send + Sync + 'static,
+    S::Repos: RosterRepos,
 {
     let token = carried(&headers)?;
-    let roll = roster.members(&token, TenantId::new(org)).await?;
+    let roll = state.app.list_members(&token, TenantId::new(org)).await?;
     Ok(Json(Members {
         members: roll.into_iter().map(Listed::from).collect(),
     }))
 }
 
-async fn invite<S, G, M>(
-    State(roster): State<Arc<Roster<S, G, M>>>,
+async fn invite<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
     Json(asked): Json<Inviting>,
 ) -> Result<(StatusCode, Json<Welcomed>), MemberRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    M: Roll + Send + Sync + 'static,
+    S::Repos: RosterRepos,
 {
     let token = carried(&headers)?;
     let email = Email::try_from(asked.email.as_str())?;
     let role = OrgRole::from(asked.role);
-    let invitation = roster
-        .invite(&token, TenantId::new(org), &email, role)
+    let invitation = state
+        .app
+        .invite_member(&token, TenantId::new(org), &email, role)
         .await?;
     tracing::info!(
         org = %org,
@@ -151,20 +146,19 @@ where
     ))
 }
 
-async fn grant<S, G, M>(
-    State(roster): State<Arc<Roster<S, G, M>>>,
+async fn grant<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, account)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(asked): Json<Granting>,
 ) -> Result<Json<Listed>, MemberRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    M: Roll + Send + Sync + 'static,
+    S::Repos: RosterRepos,
 {
     let token = carried(&headers)?;
-    let changed = roster
-        .grant(
+    let changed = state
+        .app
+        .grant_member_role(
             &token,
             TenantId::new(org),
             AccountId::new(account),
@@ -175,19 +169,18 @@ where
     Ok(Json(changed.into()))
 }
 
-async fn remove<S, G, M>(
-    State(roster): State<Arc<Roster<S, G, M>>>,
+async fn remove<S: Stack>(
+    State(state): State<AppState<S>>,
     Path((org, account)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, MemberRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    M: Roll + Send + Sync + 'static,
+    S::Repos: RosterRepos,
 {
     let token = carried(&headers)?;
-    roster
-        .remove(&token, TenantId::new(org), AccountId::new(account))
+    state
+        .app
+        .remove_member(&token, TenantId::new(org), AccountId::new(account))
         .await?;
     tracing::info!(org = %org, account = %account, "a member was removed");
     Ok(StatusCode::NO_CONTENT)

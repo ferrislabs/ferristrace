@@ -3,11 +3,15 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::org_router;
-use comettrace_core::{
-    AccountId, Agent, Membership, Memberships, NoPhotos, OrgName, OrgRole, OrgSettings,
-    Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ReadError,
-    Session, SessionError, SessionStore, SessionToken, TenantId, UnixSeconds, Whoami, WhoamiError,
+use ferristrace_api::{AppState, SessionCookie, org_router};
+use ferristrace_application::registry::{RepoFor, domain};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::{
+    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole,
+    Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProvisionPolicy,
+    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError,
+    TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -49,6 +53,28 @@ impl SessionStore for OneSession {
     }
 }
 
+impl SessionRoll for OneSession {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
+    }
+}
+
 struct MemberOfMine(OrgRole);
 
 impl Memberships for MemberOfMine {
@@ -65,7 +91,7 @@ impl Memberships for MemberOfMine {
 struct Kept(Mutex<String>, Mutex<Option<Portrait>>);
 
 impl Orgs for Kept {
-    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, ReadError> {
+    async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
         Ok(Some(Organisation {
             id: org,
             name: self.0.lock().expect("the lock").clone().into(),
@@ -75,14 +101,14 @@ impl Orgs for Kept {
         }))
     }
 
-    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), ReadError> {
+    async fn rename(&self, _org: TenantId, name: &OrgName) -> Result<(), StoreError> {
         let mut held = self.0.lock().expect("the lock");
         held.clear();
         held.push_str(name.as_str());
         Ok(())
     }
 
-    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), ReadError> {
+    async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         *self.1.lock().expect("the lock") = logo.cloned();
         Ok(())
     }
@@ -125,6 +151,80 @@ impl Photos for Shelf {
     }
 }
 
+struct Fakes {
+    role: OrgRole,
+    kept: Arc<Kept>,
+}
+
+impl Untransacted for Fakes {}
+
+impl RepoFor<domain::Sessions> for Fakes {
+    type Repo = OneSession;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        OneSession
+    }
+}
+
+impl RepoFor<domain::Memberships> for Fakes {
+    type Repo = MemberOfMine;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        MemberOfMine(self.role)
+    }
+}
+
+impl RepoFor<domain::Orgs> for Fakes {
+    type Repo = Arc<Kept>;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Arc::clone(&self.kept)
+    }
+}
+
+struct TestStack<P>(std::marker::PhantomData<P>);
+
+impl<P: Photos + Send + Sync + 'static> Stack for TestStack<P> {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = P;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = Inert;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+fn state<P: Photos + Send + Sync + 'static>(
+    role: OrgRole,
+    kept: &Arc<Kept>,
+    photos: P,
+) -> AppState<TestStack<P>> {
+    let fakes = Fakes {
+        role,
+        kept: Arc::clone(kept),
+    };
+    let adapters = Adapters {
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
+        photos,
+        meter: Inert::default(),
+        span_store: None,
+        issue_store: None,
+        oidc: None,
+        provision: ProvisionPolicy::default(),
+    };
+    AppState::new(
+        Arc::new(Ferristrace::new(fakes, adapters)),
+        SessionCookie::default(),
+    )
+}
+
 fn org(seed: u128) -> String {
     Uuid::from_u128(seed).to_string()
 }
@@ -150,12 +250,7 @@ fn asking(method: Method, seed: u128, body: Option<&str>, scripted: bool) -> Req
 }
 
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
-    let settings = Arc::new(OrgSettings::new(
-        Whoami::new(OneSession, MemberOfMine(role)),
-        Arc::clone(kept),
-        NoPhotos,
-    ));
-    let response = org_router(settings)
+    let response = org_router(state(role, kept, NoPhotos))
         .oneshot(request)
         .await
         .expect("a response");
@@ -195,12 +290,7 @@ async fn marked(
     shelf: &Arc<Shelf>,
     request: Request<Body>,
 ) -> (StatusCode, Vec<u8>, Option<String>, Option<String>) {
-    let settings = Arc::new(OrgSettings::new(
-        Whoami::new(OneSession, MemberOfMine(role)),
-        Arc::clone(kept),
-        Arc::clone(shelf),
-    ));
-    let response = org_router(settings)
+    let response = org_router(state(role, kept, Arc::clone(shelf)))
         .oneshot(request)
         .await
         .expect("a response");

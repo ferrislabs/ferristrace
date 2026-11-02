@@ -1,6 +1,6 @@
 # Small versus large batches into ClickHouse
 
-Produced by `cargo run -p comettrace-storage --example batching_benchmark --release`
+Produced by `cargo run -p ferristrace-clickhouse --example batching_benchmark --release`
 in the `clickhouse` CI job, against `clickhouse/clickhouse-server:24.8` running as a
 service container on the same runner.
 

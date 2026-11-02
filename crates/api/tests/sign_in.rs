@@ -3,19 +3,26 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
 use axum::http::{Request, StatusCode};
-use comettrace_api::{SessionCookie, auth_router};
-use comettrace_core::{
-    AccountDirectory, AccountId, Agent, AuthError, AuthProvider, AuthSources, FactorError,
-    FactorKind, Gate, Issuer, NoProvider, NoSecondFactor, ProvisionPolicy, ResolvedIdentity,
-    SecretHash, Session, SessionError, SessionStore, SessionToken, SignIn, SignInProof, Subject,
-    TenantId, UnixSeconds,
+use ferristrace_api::{SessionCookie, auth_router};
+use ferristrace_application::testing::Inert;
+use ferristrace_domain::{
+    AccountDirectory, AccountId, Agent, AuthError, AuthProvider, FactorError, FactorKind, Gate,
+    Issuer, NoPhotos, NoSecondFactor, ProvisionPolicy, ResolvedIdentity, SecretHash, Session,
+    SessionError, SessionStore, SessionToken, SignInProof, Subject, TenantId, UnixSeconds,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
+#[allow(dead_code)]
+#[path = "support/identity.rs"]
+mod identity;
+
+use identity::{Directed, Fakes, Nowhere, state};
+
 const GOOD: &str = "correct horse";
 const TOKEN: &str = "ct_ss_0123456789";
 
+#[derive(Clone)]
 struct OnePassword;
 
 impl AuthProvider for OnePassword {
@@ -35,6 +42,7 @@ impl AuthProvider for OnePassword {
     }
 }
 
+#[derive(Clone)]
 struct OneAccount(AccountId);
 
 impl AccountDirectory for OneAccount {
@@ -123,9 +131,6 @@ impl Gate for OneFactor {
     }
 }
 
-type Service = SignIn<OnePassword, NoProvider, OneAccount, Arc<MemorySessions>, NoSecondFactor>;
-type Guarded = SignIn<OnePassword, NoProvider, OneAccount, Arc<MemorySessions>, OneFactor>;
-
 fn cookie() -> SessionCookie {
     SessionCookie {
         secure: true,
@@ -133,28 +138,37 @@ fn cookie() -> SessionCookie {
     }
 }
 
+fn routed<F>(sessions: &Arc<MemorySessions>, gate: F) -> axum::Router
+where
+    F: Gate + Clone + Send + Sync + 'static,
+{
+    let fakes = Fakes {
+        sessions: Arc::clone(sessions),
+        memberships: Nowhere,
+        accounts: Directed(OneAccount(AccountId::new(Uuid::from_u128(7)))),
+        gate,
+        resets: Nowhere,
+        flows: Nowhere,
+        local: OnePassword,
+    };
+    auth_router(state(
+        fakes,
+        Inert::default(),
+        Inert::default(),
+        NoPhotos,
+        None::<Inert>,
+        cookie(),
+    ))
+}
+
 fn harness() -> (axum::Router, Arc<MemorySessions>) {
     let sessions = Arc::new(MemorySessions::default());
-    let sign_in: Arc<Service> = Arc::new(SignIn::new(
-        AuthSources::new(Some(OnePassword), None),
-        OneAccount(AccountId::new(Uuid::from_u128(7))),
-        Arc::clone(&sessions),
-        NoSecondFactor,
-        ProvisionPolicy::default(),
-    ));
-    (auth_router(sign_in, cookie()), sessions)
+    (routed(&sessions, NoSecondFactor), sessions)
 }
 
 fn guarded(gate: OneFactor) -> (axum::Router, Arc<MemorySessions>) {
     let sessions = Arc::new(MemorySessions::default());
-    let sign_in: Arc<Guarded> = Arc::new(SignIn::new(
-        AuthSources::new(Some(OnePassword), None),
-        OneAccount(AccountId::new(Uuid::from_u128(7))),
-        Arc::clone(&sessions),
-        gate,
-        ProvisionPolicy::default(),
-    ));
-    (auth_router(sign_in, cookie()), sessions)
+    (routed(&sessions, gate), sessions)
 }
 
 fn sign_in_request(password: &str, with_header: bool) -> Request<Body> {
@@ -319,6 +333,6 @@ async fn a_wrong_password_opens_no_challenge_either() {
     assert!(!sessions.holds(TOKEN));
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }

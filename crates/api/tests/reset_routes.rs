@@ -3,13 +3,21 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::reset_router;
-use comettrace_core::{
-    AccountId, Email, HashError, Mailer, Password, PasswordCheck, PasswordHash, PasswordHasher,
-    ResetError, ResetPassword, ResetStore, ResetToken, SecretHash,
+use ferristrace_api::SessionCookie;
+use ferristrace_api::reset_router;
+use ferristrace_application::testing::Inert;
+use ferristrace_domain::{
+    AccountId, Email, HashError, Mailer, NoPhotos, Password, PasswordCheck, PasswordHash,
+    PasswordHasher, ResetError, ResetStore, ResetToken, SecretHash,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
+
+#[allow(dead_code)]
+#[path = "support/identity.rs"]
+mod identity;
+
+use identity::{Fakes, Nowhere, state};
 
 const TOKEN: &str = "ct_pr_0123456789";
 
@@ -115,11 +123,23 @@ fn choosing(token: &str, password: &str) -> Request<Body> {
 }
 
 async fn served(pending: &OnePending, request: Request<Body>) -> (StatusCode, String) {
-    let reset = Arc::new(ResetPassword::new(
-        pending.clone(),
+    let fakes = Fakes {
+        sessions: Nowhere,
+        memberships: Nowhere,
+        accounts: Nowhere,
+        gate: Nowhere,
+        resets: pending.clone(),
+        flows: Nowhere,
+        local: Nowhere,
+    };
+    let reset = state(
+        fakes,
         Plain::default(),
         Dropped,
-    ));
+        NoPhotos,
+        None::<Inert>,
+        SessionCookie::default(),
+    );
     let response = reset_router(reset)
         .oneshot(request)
         .await

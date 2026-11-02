@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -7,13 +5,15 @@ use axum::http::header::{HeaderName, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
-    AccountDirectory, AuthError, AuthProvider, Email, FactorError, Gate, Opened, Password,
-    SessionError, SessionStore, SignIn, SignInError, SignInProof,
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
+use ferristrace_domain::{
+    AuthError, Email, FactorError, Opened, Password, SessionError, SignInError, SignInProof,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::session_cookie::{self, SessionCookie};
+use crate::session_cookie;
+use crate::state::AppState;
 
 const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 
@@ -28,43 +28,23 @@ struct SecondStepAsked {
     second_step: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Shape {
-    cookie: SessionCookie,
-}
-
-type Admitting<L, F, A, S, G> = Arc<SignIn<L, F, A, S, G>>;
-
-pub fn auth_router<L, F, A, S, G>(
-    sign_in: Admitting<L, F, A, S, G>,
-    cookie: SessionCookie,
-) -> Router
+pub fn auth_router<S: Stack>(state: AppState<S>) -> Router
 where
-    L: AuthProvider + Send + Sync + 'static,
-    F: AuthProvider + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    G: Gate + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     Router::new()
-        .route("/auth/sign-in", post(begin::<L, F, A, S, G>))
-        .route("/auth/sign-out", post(end::<L, F, A, S, G>))
-        .layer(axum::Extension(Shape { cookie }))
-        .with_state(sign_in)
+        .route("/auth/sign-in", post(begin::<S>))
+        .route("/auth/sign-out", post(end::<S>))
+        .with_state(state)
 }
 
-async fn begin<L, F, A, S, G>(
-    State(sign_in): State<Admitting<L, F, A, S, G>>,
-    axum::Extension(shape): axum::Extension<Shape>,
+async fn begin<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(credentials): Json<Credentials>,
 ) -> Result<Response, SignInRefused>
 where
-    L: AuthProvider + Send + Sync + 'static,
-    F: AuthProvider + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    G: Gate + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     requested_by_a_script(&headers)?;
     let email =
@@ -74,18 +54,19 @@ where
         password: Password::new(&credentials.password),
     };
 
-    match sign_in
-        .begin(proof, session_cookie::agent(&headers).as_ref())
+    match state
+        .app
+        .sign_in(proof, session_cookie::agent(&headers).as_ref())
         .await?
     {
         Opened::Session(token) => {
-            let Some(cookie) = session_cookie::opened(&token, shape.cookie) else {
+            let Some(cookie) = session_cookie::opened(&token, state.cookie) else {
                 return Err(SignInRefused::Unavailable);
             };
             Ok(([(SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response())
         }
         Opened::SecondStep { challenge, offered } => {
-            let Some(cookie) = session_cookie::challenging(&challenge, shape.cookie) else {
+            let Some(cookie) = session_cookie::challenging(&challenge, state.cookie) else {
                 return Err(SignInRefused::Unavailable);
             };
             let asked = SecondStepAsked {
@@ -96,23 +77,18 @@ where
     }
 }
 
-async fn end<L, F, A, S, G>(
-    State(sign_in): State<Admitting<L, F, A, S, G>>,
-    axum::Extension(shape): axum::Extension<Shape>,
+async fn end<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> Result<Response, SignInRefused>
 where
-    L: AuthProvider + Send + Sync + 'static,
-    F: AuthProvider + Send + Sync + 'static,
-    A: AccountDirectory + Send + Sync + 'static,
-    S: SessionStore + Send + Sync + 'static,
-    G: Gate + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     requested_by_a_script(&headers)?;
     if let Some(token) = session_cookie::carried(&headers) {
-        sign_in.end(&token).await?;
+        state.app.sign_out(&token).await?;
     }
-    let Some(cookie) = session_cookie::cleared(shape.cookie) else {
+    let Some(cookie) = session_cookie::cleared(state.cookie) else {
         return Err(SignInRefused::Unavailable);
     };
     Ok(([(SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response())
@@ -170,7 +146,7 @@ impl IntoResponse for SignInRefused {
 
 #[cfg(test)]
 mod tests {
-    use comettrace_core::FactorKind;
+    use ferristrace_domain::FactorKind;
 
     use super::SecondStepAsked;
 

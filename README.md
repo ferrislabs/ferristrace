@@ -21,19 +21,25 @@ and the web application on <http://localhost:4318>.
 
 | Path | What it holds |
 | --- | --- |
-| `crates/core` | The domain: entities, value objects, use cases, and the port traits the rest implements. Depends on no infrastructure. |
+| `crates/domain` | The domain, one directory per bounded context: value objects, entities, port traits, domain services. Depends on nothing that does I/O. |
+| `crates/application` | The use cases: each control plane use case runs in one transaction through the unit of work port. |
+| `crates/macros` | `#[repository]` and `#[transactional]`. |
 | `crates/otlp` | OTLP protobuf in, domain spans out. |
-| `crates/storage` | The driven adapters: Postgres, ClickHouse, Redis, S3, SMTP, OIDC. |
-| `crates/api` | The driving adapters: the HTTP router, the OTLP gRPC service, the DTOs. |
+| `crates/postgres` | The control plane adapters and their migrations. |
+| `crates/clickhouse` | The span store adapters and their migrations. |
+| `crates/redis` | The usage counter. |
+| `crates/infra` | S3 photos, SMTP, OIDC, argon2, the secret seal, clocks, in-memory adapters. |
+| `crates/api` | The driving adapters: the HTTP routers, the OTLP gRPC service, the DTOs. |
 | `crates/ee` | The cloud build, behind the `ee` feature. Empty in this repository. |
 | `apps/server` | The binary: configuration, wiring, the CLI, the server. |
 | `web` | The front end: React, Vite, TypeScript. |
 | `deploy` | The self-hosted stack and its guide. |
 | `docs/adr` | Every architecture decision, in the order it was taken. |
 
-Dependencies point inward: `crates/api` and `crates/storage` know
-`crates/core`, `crates/core` knows neither. `apps/server` is the only place
-that names a concrete adapter.
+Dependencies point inward: the adapter crates know `crates/application`
+and `crates/domain`, `crates/api` knows `crates/application`, and neither
+the application nor the domain knows any of them. `apps/server` is the only
+place that names a concrete adapter. See ADR 0023 and ADR 0024.
 
 ## Working on it
 
@@ -53,7 +59,7 @@ turn a missing backend into a failure instead of a skip:
 
 ```sh
 DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
-REQUIRE_DATABASE_URL=1 cargo test -p comettrace-storage
+REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
 ```
 
 Running the front end against the stack, without rebuilding the image, is in

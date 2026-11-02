@@ -1,7 +1,7 @@
 use axum::extract::FromRequestParts;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use comettrace_core::IngestKey;
+use ferristrace_domain::IngestKey;
 use tonic::metadata::MetadataMap;
 
 use crate::error::ApiError;

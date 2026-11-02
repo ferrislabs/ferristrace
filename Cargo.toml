@@ -1,17 +1,27 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/core",
+    "crates/domain",
+    "crates/application",
+    "crates/macros",
+    "crates/postgres",
     "crates/otlp",
-    "crates/storage",
+    "crates/clickhouse",
+    "crates/redis",
+    "crates/infra",
     "crates/api",
     "crates/ee",
     "apps/server",
 ]
 default-members = [
-    "crates/core",
+    "crates/domain",
+    "crates/application",
+    "crates/macros",
+    "crates/postgres",
     "crates/otlp",
-    "crates/storage",
+    "crates/clickhouse",
+    "crates/redis",
+    "crates/infra",
     "crates/api",
     "apps/server",
 ]
@@ -22,11 +32,16 @@ edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-comettrace-core = { path = "crates/core" }
-comettrace-otlp = { path = "crates/otlp" }
-comettrace-storage = { path = "crates/storage" }
-comettrace-api = { path = "crates/api" }
-comettrace-ee = { path = "crates/ee" }
+ferristrace-domain = { path = "crates/domain" }
+ferristrace-application = { path = "crates/application" }
+ferristrace-macros = { path = "crates/macros" }
+ferristrace-postgres = { path = "crates/postgres" }
+ferristrace-otlp = { path = "crates/otlp" }
+ferristrace-clickhouse = { path = "crates/clickhouse" }
+ferristrace-redis = { path = "crates/redis" }
+ferristrace-infra = { path = "crates/infra" }
+ferristrace-api = { path = "crates/api" }
+ferristrace-ee = { path = "crates/ee" }
 
 anyhow = "1.0.104"
 argon2 = "0.6.0"
@@ -44,7 +59,9 @@ lettre = { version = "0.11.23", default-features = false, features = ["smtp-tran
 jsonwebtoken = { version = "11.1.0", default-features = false, features = ["use_pem", "rust_crypto"] }
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls", "timing-resistant-secret-traits"] }
 opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic", "trace"] }
+proc-macro2 = "1.0.107"
 prost = "0.14.4"
+quote = "1.0.47"
 proptest = "1"
 rand = "0.10.3"
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "charset", "json"] }
@@ -56,6 +73,7 @@ sha1 = "0.11.0"
 sha2 = "0.11.1"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "uuid"] }
 subtle = "2.6.1"
+syn = { version = "2.0.119", features = ["full"] }
 time = { version = "0.3.47", default-features = false, features = ["std"] }
 thiserror = "2.0.21"
 tokio-stream = "0.1.17"

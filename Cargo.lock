@@ -625,119 +625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "comettrace"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "comettrace-api",
- "comettrace-core",
- "comettrace-ee",
- "comettrace-storage",
- "figment",
- "reqwest",
- "serde",
- "sqlx",
- "tokio",
- "tonic",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "comettrace-api"
-version = "0.1.0"
-dependencies = [
- "axum",
- "bytes",
- "comettrace-core",
- "comettrace-otlp",
- "comettrace-storage",
- "flate2",
- "hex",
- "opentelemetry-proto",
- "prost",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
- "tonic",
- "tower",
- "tower-http 0.7.1",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "comettrace-core"
-version = "0.1.0"
-dependencies = [
- "hex",
- "hmac 0.13.0",
- "proptest",
- "rand 0.10.3",
- "sha1",
- "sha2 0.11.1",
- "subtle",
- "thiserror 2.0.21",
- "tokio",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "comettrace-ee"
-version = "0.1.0"
-
-[[package]]
-name = "comettrace-otlp"
-version = "0.1.0"
-dependencies = [
- "comettrace-core",
- "opentelemetry-proto",
- "proptest",
- "prost",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "comettrace-storage"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "axum",
- "base64 0.23.1",
- "chacha20poly1305",
- "clickhouse",
- "comettrace-core",
- "hex",
- "hmac 0.13.0",
- "jsonwebtoken",
- "lettre",
- "openidconnect",
- "rand 0.10.3",
- "redis",
- "reqwest",
- "rsa",
- "serde",
- "serde_json",
- "serde_repr",
- "sha2 0.11.1",
- "sqlx",
- "subtle",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-stream",
- "tracing",
- "uuid",
- "zeroize",
-]
-
-[[package]]
 name = "compression-codecs"
 version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1190,6 +1077,189 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
+name = "ferristrace-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "ferristrace-application",
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "ferristrace-otlp",
+ "flate2",
+ "hex",
+ "opentelemetry-proto",
+ "prost",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tower",
+ "tower-http 0.7.1",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-application"
+version = "0.1.0"
+dependencies = [
+ "ferristrace-domain",
+ "ferristrace-macros",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "clickhouse",
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "hex",
+ "serde",
+ "serde_repr",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-domain"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "hmac 0.13.0",
+ "proptest",
+ "rand 0.10.3",
+ "sha1",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "ferristrace-ee"
+version = "0.1.0"
+
+[[package]]
+name = "ferristrace-infra"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "base64 0.23.1",
+ "chacha20poly1305",
+ "ferristrace-domain",
+ "hex",
+ "hmac 0.13.0",
+ "jsonwebtoken",
+ "lettre",
+ "openidconnect",
+ "rand 0.10.3",
+ "reqwest",
+ "rsa",
+ "serde_json",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "ferristrace-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "ferristrace-otlp"
+version = "0.1.0"
+dependencies = [
+ "ferristrace-domain",
+ "opentelemetry-proto",
+ "proptest",
+ "prost",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "ferristrace-postgres"
+version = "0.1.0"
+dependencies = [
+ "ferristrace-application",
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "ferristrace-macros",
+ "hex",
+ "rand 0.10.3",
+ "sqlx",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-redis"
+version = "0.1.0"
+dependencies = [
+ "ferristrace-application",
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "ferristrace-postgres",
+ "redis",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "ferristrace-api",
+ "ferristrace-application",
+ "ferristrace-clickhouse",
+ "ferristrace-domain",
+ "ferristrace-ee",
+ "ferristrace-infra",
+ "ferristrace-postgres",
+ "ferristrace-redis",
+ "figment",
+ "reqwest",
+ "serde",
+ "sqlx",
+ "tokio",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "ff"
@@ -4705,3 +4775,7 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "creusot-std"
+version = "0.15.0-dev"

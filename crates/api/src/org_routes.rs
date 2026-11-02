@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -8,15 +6,18 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use comettrace_core::{
-    BadName, BadPhoto, MAX_PHOTO_BYTES, Memberships, OrgName, OrgSettings, Organisation, Orgs,
-    Photo, PhotoError, Photos, Portrait, SessionStore, SettingError, TenantId,
+use ferristrace_application::Stack;
+use ferristrace_application::registry::OrgRepos;
+use ferristrace_domain::{
+    BadName, BadPhoto, MAX_PHOTO_BYTES, OrgName, Organisation, Photo, PhotoError, Portrait,
+    SettingError, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 use crate::session_cookie;
+use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 
@@ -57,116 +58,104 @@ pub struct Renaming {
     name: String,
 }
 
-pub fn org_router<S, G, O, P>(settings: Arc<OrgSettings<S, G, O, P>>) -> Router
+pub fn org_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     Router::new()
-        .route(
-            "/api/orgs/{org}",
-            get(card::<S, G, O, P>).patch(rename::<S, G, O, P>),
-        )
+        .route("/api/orgs/{org}", get(card::<S>).patch(rename::<S>))
         .route(
             "/api/orgs/{org}/logo",
-            get(served::<S, G, O, P>)
-                .post(keep::<S, G, O, P>)
-                .delete(forget::<S, G, O, P>)
+            get(served::<S>)
+                .post(keep::<S>)
+                .delete(forget::<S>)
                 .layer(DefaultBodyLimit::max(MAX_PHOTO_BYTES)),
         )
-        .with_state(settings)
+        .with_state(state)
 }
 
-async fn card<S, G, O, P>(
-    State(settings): State<Arc<OrgSettings<S, G, O, P>>>,
+async fn card<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<Card>, OrgRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     let token = carried(&headers)?;
-    let card = settings.read(&token, TenantId::new(org)).await?;
+    let card = state.app.org_card(&token, TenantId::new(org)).await?;
     Ok(Json(card.into()))
 }
 
-async fn rename<S, G, O, P>(
-    State(settings): State<Arc<OrgSettings<S, G, O, P>>>,
+async fn rename<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
     Json(asked): Json<Renaming>,
 ) -> Result<Json<Card>, OrgRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     let token = carried(&headers)?;
     let name = OrgName::try_from(asked.name.as_str())?;
-    let card = settings.rename(&token, TenantId::new(org), &name).await?;
+    let card = state
+        .app
+        .rename_org(&token, TenantId::new(org), &name)
+        .await?;
     tracing::info!(org = %org, "an organisation was renamed");
     Ok(Json(card.into()))
 }
 
-async fn keep<S, G, O, P>(
-    State(settings): State<Arc<OrgSettings<S, G, O, P>>>,
+async fn keep<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Card>, OrgRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     let token = carried(&headers)?;
     let logo = Photo::examined(body.to_vec())?;
     let kind = logo.kind();
 
-    let card = settings.put_logo(&token, TenantId::new(org), &logo).await?;
+    let card = state
+        .app
+        .put_org_logo(&token, TenantId::new(org), &logo)
+        .await?;
     tracing::info!(org = %org, %kind, "an organisation kept a logo");
     Ok(Json(card.into()))
 }
 
-async fn forget<S, G, O, P>(
-    State(settings): State<Arc<OrgSettings<S, G, O, P>>>,
+async fn forget<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<Card>, OrgRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     let token = carried(&headers)?;
 
-    let card = settings.remove_logo(&token, TenantId::new(org)).await?;
+    let card = state
+        .app
+        .remove_org_logo(&token, TenantId::new(org))
+        .await?;
     tracing::info!(org = %org, "an organisation dropped its logo");
     Ok(Json(card.into()))
 }
 
-async fn served<S, G, O, P>(
-    State(settings): State<Arc<OrgSettings<S, G, O, P>>>,
+async fn served<S: Stack>(
+    State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, OrgRefused>
 where
-    S: SessionStore + Send + Sync + 'static,
-    G: Memberships + Send + Sync + 'static,
-    O: Orgs + Send + Sync + 'static,
-    P: Photos + Send + Sync + 'static,
+    S::Repos: OrgRepos,
 {
     let token =
         session_cookie::carried(&headers).ok_or(OrgRefused::Reaching(NotCarried::NoSession))?;
-    let (kind, bytes) = settings.logo(&token, TenantId::new(org)).await?;
+    let (kind, bytes) = state.app.org_logo(&token, TenantId::new(org)).await?;
 
     Ok((
         [(CONTENT_TYPE, kind.as_str()), (CACHE_CONTROL, FOR_EVER)],

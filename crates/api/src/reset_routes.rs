@@ -7,11 +7,12 @@ use axum::http::header::HeaderName;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use comettrace_core::{
-    Email, Mailer, Password, PasswordHasher, ResetError, ResetPassword, ResetStore, ResetToken,
-    WeakPassword,
-};
+use ferristrace_application::Stack;
+use ferristrace_application::registry::IdentityRepos;
+use ferristrace_domain::{Email, Password, ResetError, ResetToken, WeakPassword};
 use serde::Deserialize;
+
+use crate::state::AppState;
 
 const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 
@@ -26,32 +27,29 @@ pub struct Chosen {
     password: String,
 }
 
-pub fn reset_router<R, H, M>(reset: Arc<ResetPassword<R, H, M>>) -> Router
+pub fn reset_router<S: Stack>(state: AppState<S>) -> Router
 where
-    R: ResetStore + Send + Sync + 'static,
-    H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     Router::new()
-        .route("/auth/reset/request", post(request::<R, H, M>))
-        .route("/auth/reset/confirm", post(confirm::<R, H, M>))
-        .with_state(reset)
+        .route("/auth/reset/request", post(request::<S>))
+        .route("/auth/reset/confirm", post(confirm::<S>))
+        .with_state(state)
 }
 
-async fn request<R, H, M>(
-    State(reset): State<Arc<ResetPassword<R, H, M>>>,
+async fn request<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(asked): Json<Requested>,
 ) -> Result<Response, ResetRefused>
 where
-    R: ResetStore + Send + Sync + 'static,
-    H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     requested_by_a_script(&headers)?;
     if let Ok(email) = Email::try_from(asked.email.as_str()) {
+        let app = Arc::clone(&state.app);
         tokio::spawn(async move {
-            match reset.request(&email, ResetToken::random()).await {
+            match app.request_reset(&email, ResetToken::random()).await {
                 Ok(true) => tracing::info!("a password reset was sent"),
                 Ok(false) => tracing::info!("a password reset was asked for an unknown address"),
                 Err(error) => tracing::error!(%error, "a password reset was not sent"),
@@ -61,23 +59,22 @@ where
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn confirm<R, H, M>(
-    State(reset): State<Arc<ResetPassword<R, H, M>>>,
+async fn confirm<S: Stack>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Json(chosen): Json<Chosen>,
 ) -> Result<Response, ResetRefused>
 where
-    R: ResetStore + Send + Sync + 'static,
-    H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + Send + Sync + 'static,
+    S::Repos: IdentityRepos,
 {
     requested_by_a_script(&headers)?;
     let token = ResetToken::from_plaintext(&chosen.token);
     if !token.looks_like_one() {
         return Err(ResetRefused::Link);
     }
-    let ended = reset
-        .confirm(&token, &Password::new(&chosen.password))
+    let ended = state
+        .app
+        .confirm_reset(&token, &Password::new(&chosen.password))
         .await?;
     tracing::info!(sessions = ended, "a password was reset");
     Ok(StatusCode::NO_CONTENT.into_response())

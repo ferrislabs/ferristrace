@@ -3,14 +3,22 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use comettrace_api::me_router;
-use comettrace_core::{
+use ferristrace_api::SessionCookie;
+use ferristrace_api::me_router;
+use ferristrace_application::testing::Inert;
+use ferristrace_domain::{
     AccountId, AccountName, Accounts, Agent, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos,
-    OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Profile, ReadError, Session,
-    SessionError, SessionStore, SessionToken, TenantId, UnixSeconds, Whoami, WhoamiError,
+    OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Session, SessionError,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
+
+#[allow(dead_code)]
+#[path = "support/identity.rs"]
+mod identity;
+
+use identity::{Fakes, Nowhere, Profiled, state};
 
 const TOKEN: &str = "ct_ss_0123456789";
 const ACCOUNT: u128 = 7;
@@ -48,7 +56,7 @@ impl Accounts for Kept {
         &self,
         account: AccountId,
         name: Option<&AccountName>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         assert_eq!(
             account,
             AccountId::new(Uuid::from_u128(ACCOUNT)),
@@ -60,7 +68,7 @@ impl Accounts for Kept {
         Ok(())
     }
 
-    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, ReadError> {
+    async fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError> {
         if account != AccountId::new(Uuid::from_u128(ACCOUNT)) {
             return Ok(None);
         }
@@ -71,7 +79,7 @@ impl Accounts for Kept {
         &self,
         _account: AccountId,
         portrait: Option<&Portrait>,
-    ) -> Result<(), ReadError> {
+    ) -> Result<(), StoreError> {
         *self.portrait.lock().expect("the lock") = portrait.cloned();
         Ok(())
     }
@@ -118,6 +126,7 @@ impl Photos for Shelf {
     }
 }
 
+#[derive(Clone)]
 struct OneSession {
     org: Option<TenantId>,
     kept: Arc<Kept>,
@@ -160,6 +169,7 @@ impl SessionStore for OneSession {
     }
 }
 
+#[derive(Clone)]
 struct TwoOrgs;
 
 impl Memberships for TwoOrgs {
@@ -182,6 +192,7 @@ impl Memberships for TwoOrgs {
     }
 }
 
+#[derive(Clone)]
 struct NoControlPlane;
 
 impl Memberships for NoControlPlane {
@@ -263,20 +274,29 @@ async fn answered<G, P>(
     request: Request<Body>,
 ) -> (StatusCode, Vec<u8>, Option<String>, Option<String>)
 where
-    G: Memberships + Send + Sync + 'static,
+    G: Memberships + Clone + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
 {
-    let me = Arc::new(Profile::new(
-        Whoami::new(
-            OneSession {
-                org: Some(TenantId::new(Uuid::from_u128(ACTIVE))),
-                kept: Arc::clone(kept),
-            },
-            memberships,
-        ),
-        Arc::clone(kept),
+    let fakes = Fakes {
+        sessions: OneSession {
+            org: Some(TenantId::new(Uuid::from_u128(ACTIVE))),
+            kept: Arc::clone(kept),
+        },
+        memberships,
+        accounts: Profiled(Arc::clone(kept)),
+        gate: Nowhere,
+        resets: Nowhere,
+        flows: Nowhere,
+        local: Nowhere,
+    };
+    let me = state(
+        fakes,
+        Inert::default(),
+        Inert::default(),
         photos,
-    ));
+        None::<Inert>,
+        SessionCookie::default(),
+    );
     let response = me_router(me).oneshot(request).await.expect("a response");
     let status = response.status();
     let headers = response.headers().clone();
@@ -299,7 +319,7 @@ where
 
 async fn served<G>(kept: &Arc<Kept>, memberships: G, request: Request<Body>) -> (StatusCode, String)
 where
-    G: Memberships + Send + Sync + 'static,
+    G: Memberships + Clone + Send + Sync + 'static,
 {
     let (status, body, _, _) = answered(kept, Shelf::default(), memberships, request).await;
     (status, String::from_utf8(body).expect("text"))
@@ -621,6 +641,6 @@ async fn a_deployment_with_no_object_store_says_so() {
     assert_eq!(kept.portrait(), None);
 }
 
-fn an_email() -> comettrace_core::Email {
-    comettrace_core::Email::try_from("person@example.com").expect("an address")
+fn an_email() -> ferristrace_domain::Email {
+    ferristrace_domain::Email::try_from("person@example.com").expect("an address")
 }

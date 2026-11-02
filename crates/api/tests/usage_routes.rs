@@ -3,11 +3,15 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::header::COOKIE;
 use axum::http::{Request, StatusCode};
-use comettrace_api::usage_router;
-use comettrace_core::{
-    AccountId, Agent, Consumed, DecompressedBytes, Membership, Memberships, Metering, OrgRole,
-    ReadError, Session, SessionError, SessionStore, SessionToken, TenantId, UnixSeconds,
-    UsageHistory, UsageReader, Whoami, WhoamiError, Window,
+use ferristrace_api::{AppState, SessionCookie, usage_router};
+use ferristrace_application::registry::{RepoFor, domain};
+use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::{
+    AccountId, Agent, Consumed, DecompressedBytes, LiveSession, Membership, Memberships, NoPhotos,
+    OrgRole, ProvisionPolicy, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, StoreError, TenantId, UnixSeconds, UsageHistory, UsageMeter, UsageReader,
+    WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -53,6 +57,28 @@ impl SessionStore for OneSession {
     }
 }
 
+impl SessionRoll for OneSession {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
+    }
+}
+
 struct MemberOfMine;
 
 impl Memberships for MemberOfMine {
@@ -67,6 +93,10 @@ impl Memberships for MemberOfMine {
 
 struct Live(u64);
 
+impl UsageMeter for Live {
+    async fn record_ingest(&self, _tenant: TenantId, _decompressed: DecompressedBytes) {}
+}
+
 impl UsageReader for Live {
     async fn used(&self, _tenant: TenantId) -> DecompressedBytes {
         DecompressedBytes::new(self.0)
@@ -79,14 +109,14 @@ struct Rolled {
 }
 
 impl UsageHistory for Rolled {
-    async fn hours(&self, _org: TenantId, window: Window) -> Result<Vec<Consumed>, ReadError> {
+    async fn hours(&self, _org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError> {
         Ok(vec![Consumed {
             started_at_unix_nanos: window.from_unix_nanos(),
             ingested_bytes: 4_096,
         }])
     }
 
-    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, ReadError> {
+    async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, StoreError> {
         Ok(self.included.map(DecompressedBytes::new))
     }
 }
@@ -102,13 +132,76 @@ fn asking(org: u128, query: &str, session: Option<&str>, scripted: bool) -> Requ
     request.body(Body::empty()).expect("a request")
 }
 
+struct Fakes {
+    included: Option<u64>,
+}
+
+impl Untransacted for Fakes {}
+
+impl RepoFor<domain::Sessions> for Fakes {
+    type Repo = OneSession;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        OneSession
+    }
+}
+
+impl RepoFor<domain::Memberships> for Fakes {
+    type Repo = MemberOfMine;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        MemberOfMine
+    }
+}
+
+impl RepoFor<domain::UsageHistory> for Fakes {
+    type Repo = Rolled;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Rolled {
+            included: self.included,
+        }
+    }
+}
+
+struct TestStack;
+
+impl Stack for TestStack {
+    type Repos = Fakes;
+    type Clock = Inert;
+    type Hasher = Inert;
+    type Mailer = Inert;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = Inert;
+    type Meter = Live;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+}
+
+fn state(live: u64, included: Option<u64>) -> AppState<TestStack> {
+    let fakes = Fakes { included };
+    let adapters = Adapters {
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
+        photos: NoPhotos,
+        meter: Live(live),
+        span_store: None,
+        issue_store: None,
+        oidc: None,
+        provision: ProvisionPolicy::default(),
+    };
+    AppState::new(
+        Arc::new(Ferristrace::new(fakes, adapters)),
+        SessionCookie::default(),
+    )
+}
+
 async fn served(live: u64, included: Option<u64>, request: Request<Body>) -> (StatusCode, String) {
-    let metering = Arc::new(Metering::new(
-        Whoami::new(OneSession, MemberOfMine),
-        Live(live),
-        Rolled { included },
-    ));
-    let response = usage_router(metering)
+    let response = usage_router(state(live, included))
         .oneshot(request)
         .await
         .expect("a response");
