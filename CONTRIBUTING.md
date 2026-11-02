@@ -67,25 +67,28 @@ to turn a missing backend into a failure instead of a pass:
 
 ```sh
 DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
-  REQUIRE_DATABASE_URL=1 cargo test -p comettrace-storage
+  REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
 
 CLICKHOUSE_URL=http://localhost:8123 CLICKHOUSE_USER=comettrace \
   CLICKHOUSE_PASSWORD=comettrace REQUIRE_CLICKHOUSE_URL=1 \
-  cargo test -p comettrace-storage
+  cargo test -p ferristrace-clickhouse
 
-REDIS_URL=redis://localhost:6379 REQUIRE_REDIS_URL=1 \
-  cargo test -p comettrace-storage
+DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
+  REDIS_URL=redis://localhost:6379 REQUIRE_REDIS_URL=1 \
+  cargo test -p ferristrace-redis
 ```
 
-The guards live in one place, `crates/storage/tests/backend/mod.rs`. CI sets
-all three.
+Each adapter crate keeps its guards in `tests/backend/mod.rs`. CI sets all
+three.
 
 ## What the code is held to
 
-**The layers.** `crates/api`, `crates/storage` and `apps/server` know
-`crates/core`; `crates/core` knows neither. The domain declares no
-infrastructure dependency and must keep declaring none. Port traits are
-defined by the domain and implemented by adapters. A DTO never leaves
+**The layers.** The adapter crates (`postgres`, `clickhouse`, `redis`,
+`infra`) and `crates/api` know `crates/application` and `crates/domain`;
+neither of those knows them, and the `layers` CI job checks it. The domain
+declares no infrastructure dependency and must keep declaring none. Port
+traits are defined by the domain or the application and implemented by
+adapters. A control plane use case runs in one transaction (ADR 0024). A DTO never leaves
 `crates/api`: it becomes a domain type through `TryFrom` at the edge.
 `apps/server` is the only place that names a concrete adapter.
 

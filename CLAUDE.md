@@ -10,22 +10,36 @@ Start with [README.md](README.md) for the layout and
 ## Layers
 
 ```
-crates/api, crates/storage, apps/server  ->  crates/core
+domain       <- application <- api <- apps/server
+domain       <- otlp        <- api
+application  <- postgres, clickhouse, redis, infra <- apps/server
 ```
 
-- `crates/core` is the domain and owns every port trait. It declares no
-  infrastructure dependency and must keep declaring none.
-- `crates/storage` implements the driven ports: Postgres, ClickHouse, Redis,
-  S3, SMTP, OIDC.
-- `crates/api` is the driving side: axum router, tonic service, DTOs. A DTO
-  never leaves this crate; it becomes a domain type through `TryFrom` at the
-  edge.
-- `apps/server` is the only place that names a concrete adapter. Ports are
-  wired by enum dispatch, not `dyn`. `main.rs` is configuration, wiring and
-  the server; `cli.rs` is the clap definitions and the printing, over the
-  `Provisioning` service. Neither holds a rule.
+ADR 0023 is the layout, ADR 0024 the transactions.
+
+- `crates/domain` holds one directory per bounded context: `value_objects`,
+  `entities`, `ports`, `errors`, one file per service, `*_tests.rs` beside
+  each. It depends on nothing that does I/O. New public names are re-exported
+  from `src/lib.rs`.
+- `crates/application` owns the unit of work, the repository registry
+  (`src/registry.rs`: one marker per Postgres repository, one bundle trait per
+  context), `Stack`, and `Ferristrace<S>`. A control plane use case is one
+  `#[transactional(..)]` method in the module of its context.
+- `crates/postgres`, `crates/clickhouse`, `crates/redis`, `crates/infra`
+  implement the driven ports, one backend each. A Postgres repository holds a
+  `SharedTx` and is registered with `#[repository(..)]`.
+- `crates/api` is the driving side: axum routers over `AppState<S>`, the
+  tonic service over `Ingestion<S>`, DTOs. A DTO never leaves this crate; it
+  becomes a domain type through `TryFrom` at the edge. A handler's only type
+  parameter is `S: Stack`.
+- `apps/server` is the only place that names a concrete adapter: the
+  `Production` stack and the adapter enums in `adapters.rs`, routers in
+  `routes.rs`. `main.rs` is configuration, wiring and the server; `cli.rs` is
+  the clap definitions and the printing, over the application. Neither holds
+  a rule.
 - `crates/ee` is the cloud build behind the `ee` feature, and the `ee-gate`
-  CI job proves the default build excludes it.
+  CI job proves the default build excludes it. The `layers` job proves the
+  dependency arrows above.
 
 ## Conventions
 
@@ -54,12 +68,12 @@ Integration tests skip silently without a backend unless the matching
 `REQUIRE_*` variable is set, which is what CI sets:
 
 ```sh
-DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p comettrace-storage
-CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p comettrace-storage
-REDIS_URL=... REQUIRE_REDIS_URL=1 cargo test -p comettrace-storage
+DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
+CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-clickhouse
+DATABASE_URL=... REDIS_URL=... REQUIRE_REDIS_URL=1 cargo test -p ferristrace-redis
 ```
 
-The guards live in one place: `crates/storage/tests/backend/mod.rs`.
+Each adapter crate keeps its guards in `tests/backend/mod.rs`.
 
 ## Working agreement
 

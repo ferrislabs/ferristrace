@@ -277,3 +277,11 @@ Verify (exit)
 
 Verify (loop)
   CARGO_TARGET_DIR=/tmp/ferristrace-check cargo check --workspace --all-targets
+
+Amended: 2026-11-02 `Stack::Repos` is bounded by `UnitOfWork` only; each use-case impl block and router bounds `S::Repos` by its context's bundle trait in `registry.rs`, and the server asserts `Repositories` on its backend. This lets a test stack implement one context.
+Amended: 2026-11-02 no `persistence` crate: `SharedTx` and the `Postgres<C>` unit of work live in `ferristrace-postgres` (ADR 0023).
+Amended: 2026-11-02 `UnitOfWork::transaction` takes a `Settle` policy; `#[transactional(.., settle = always)]` commits on refusal, used by the second-step answer and the OIDC callback (ADR 0024).
+Amended: 2026-11-02 the Postgres write ports return the shared-kernel `StoreError::Unreachable` (renamed from `ReadError`) rather than one error per context: the only variant was "unreachable", and one type in the kernel says it once.
+Amended: 2026-11-02 the domain depends on `time` (no I/O) for the billing calendar, moved from infra with `StaticQuota`.
+Amended: 2026-11-02 the ingest key directory has its own two-connection pool; a refused request no longer extends its session (ADR 0024, Costs).
+Amended: 2026-11-02 known debt: `ferristrace-postgres` depends on `ferristrace-infra` for the argon2 hasher, the seal and the test clock.
