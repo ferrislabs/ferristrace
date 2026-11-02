@@ -6,13 +6,14 @@ license.workspace = true
 publish = false
 
 [features]
-testing = []
+testing = ["ferristrace-domain/testing"]
 
 [dependencies]
 ferristrace-domain.workspace = true
 ferristrace-macros.workspace = true
 
 [dev-dependencies]
+ferristrace-domain = { workspace = true, features = ["testing"] }
 tokio.workspace = true
 uuid.workspace = true
 

@@ -10,30 +10,30 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: CatalogueRepos,
 {
-    #[transactional(sessions, memberships, projects, unavailable = CatalogueError::StoreUnreachable)]
+    #[transactional(sessions, memberships, projects, audit, unavailable = CatalogueError::StoreUnreachable)]
     pub async fn list_projects(
         &self,
         token: &SessionToken,
         org: TenantId,
     ) -> Result<Vec<Project>, CatalogueError> {
-        Catalogue::new(Whoami::new(sessions, memberships), projects)
+        Catalogue::new(Whoami::new(sessions, memberships), projects, audit)
             .projects(token, org)
             .await
     }
 
-    #[transactional(sessions, memberships, projects, unavailable = CatalogueError::StoreUnreachable)]
+    #[transactional(sessions, memberships, projects, audit, unavailable = CatalogueError::StoreUnreachable)]
     pub async fn create_project(
         &self,
         token: &SessionToken,
         org: TenantId,
         name: &ProjectName,
     ) -> Result<Vec<Project>, CatalogueError> {
-        Catalogue::new(Whoami::new(sessions, memberships), projects)
+        Catalogue::new(Whoami::new(sessions, memberships), projects, audit)
             .create(token, org, name)
             .await
     }
 
-    #[transactional(sessions, memberships, projects, unavailable = CatalogueError::StoreUnreachable)]
+    #[transactional(sessions, memberships, projects, audit, unavailable = CatalogueError::StoreUnreachable)]
     pub async fn rename_project(
         &self,
         token: &SessionToken,
@@ -41,24 +41,24 @@ where
         project: ProjectId,
         name: &ProjectName,
     ) -> Result<Vec<Project>, CatalogueError> {
-        Catalogue::new(Whoami::new(sessions, memberships), projects)
+        Catalogue::new(Whoami::new(sessions, memberships), projects, audit)
             .rename(token, org, project, name)
             .await
     }
 
-    #[transactional(sessions, memberships, projects, unavailable = CatalogueError::StoreUnreachable)]
+    #[transactional(sessions, memberships, projects, audit, unavailable = CatalogueError::StoreUnreachable)]
     pub async fn forget_project(
         &self,
         token: &SessionToken,
         org: TenantId,
         project: ProjectId,
     ) -> Result<Vec<Project>, CatalogueError> {
-        Catalogue::new(Whoami::new(sessions, memberships), projects)
+        Catalogue::new(Whoami::new(sessions, memberships), projects, audit)
             .forget(token, org, project)
             .await
     }
 
-    #[transactional(sessions, memberships, projects, unavailable = CatalogueError::StoreUnreachable)]
+    #[transactional(sessions, memberships, projects, audit, unavailable = CatalogueError::StoreUnreachable)]
     pub async fn assign_project(
         &self,
         token: &SessionToken,
@@ -66,7 +66,7 @@ where
         project: ProjectId,
         team: Option<TeamId>,
     ) -> Result<Vec<Project>, CatalogueError> {
-        Catalogue::new(Whoami::new(sessions, memberships), projects)
+        Catalogue::new(Whoami::new(sessions, memberships), projects, audit)
             .assign(token, org, project, team)
             .await
     }

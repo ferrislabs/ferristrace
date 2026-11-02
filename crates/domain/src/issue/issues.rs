@@ -3,6 +3,7 @@ use super::errors::IssueError;
 use super::ports::{IssueDecisions, IssueReader};
 use super::value_objects::{Fingerprint, IssueFilter, MAX_LIMIT, Occurrence, Status};
 use crate::access::{ApiKeys, Reader, Readers};
+use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::catalogue::ProjectId;
 use crate::clock::Clock;
 use crate::explore::Window;
@@ -14,27 +15,30 @@ use crate::telemetry::TenantId;
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 #[derive(Debug)]
-pub struct Issues<S, G, K, R, P, C> {
+pub struct Issues<S, G, K, R, P, A, C> {
     readers: Readers<S, G, K>,
     reader: R,
     decisions: P,
+    trail: A,
     clock: C,
 }
 
-impl<S, G, K, R, P, C> Issues<S, G, K, R, P, C>
+impl<S, G, K, R, P, A, C> Issues<S, G, K, R, P, A, C>
 where
     S: SessionStore,
     G: Memberships,
     K: ApiKeys,
     R: IssueReader,
     P: IssueDecisions,
+    A: AuditTrail,
     C: Clock,
 {
-    pub fn new(readers: Readers<S, G, K>, reader: R, decisions: P, clock: C) -> Self {
+    pub fn new(readers: Readers<S, G, K>, reader: R, decisions: P, trail: A, clock: C) -> Self {
         Self {
             readers,
             reader,
             decisions,
+            trail,
             clock,
         }
     }
@@ -125,10 +129,19 @@ where
         status: Status,
     ) -> Result<(), IssueError> {
         let by = self.acting(token, org).await?;
-        Ok(self
-            .decisions
+        self.decisions
             .decide(project, print, status, by, self.now_unix_nanos())
-            .await?)
+            .await?;
+        self.note(
+            org,
+            by,
+            Action::IssueDecided,
+            print,
+            Detail::default()
+                .with("project", project)
+                .with("status", status),
+        )
+        .await
     }
 
     pub async fn assign(
@@ -140,9 +153,38 @@ where
         owner: Option<AccountId>,
     ) -> Result<(), IssueError> {
         let by = self.acting(token, org).await?;
-        Ok(self
-            .decisions
+        self.decisions
             .assign(project, print, owner, by, self.now_unix_nanos())
+            .await?;
+        self.note(
+            org,
+            by,
+            Action::IssueAssigned,
+            print,
+            Detail::default()
+                .with("project", project)
+                .with_maybe("owner", owner),
+        )
+        .await
+    }
+
+    async fn note(
+        &self,
+        org: TenantId,
+        by: AccountId,
+        action: Action,
+        print: Fingerprint,
+        detail: Detail,
+    ) -> Result<(), IssueError> {
+        Ok(self
+            .trail
+            .record(&AuditEntry {
+                org,
+                actor: Actor::Account(by),
+                action,
+                target: Target::issue(print),
+                detail,
+            })
             .await?)
     }
 }

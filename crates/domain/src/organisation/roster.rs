@@ -3,24 +3,31 @@ use super::errors::RosterError;
 use super::ports::{Memberships, Roll};
 use super::value_objects::{Invitation, OrgRole, Who};
 use super::whoami::Whoami;
+use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::identity::{AccountId, Email, SessionStore};
 use crate::secret::{ResetToken, SessionToken};
 use crate::telemetry::TenantId;
 
 #[derive(Debug)]
-pub struct Roster<S, G, M> {
+pub struct Roster<S, G, M, A> {
     whoami: Whoami<S, G>,
     roll: M,
+    trail: A,
 }
 
-impl<S, G, M> Roster<S, G, M>
+impl<S, G, M, A> Roster<S, G, M, A>
 where
     S: SessionStore,
     G: Memberships,
     M: Roll,
+    A: AuditTrail,
 {
-    pub fn new(whoami: Whoami<S, G>, roll: M) -> Self {
-        Self { whoami, roll }
+    pub fn new(whoami: Whoami<S, G>, roll: M, trail: A) -> Self {
+        Self {
+            whoami,
+            roll,
+            trail,
+        }
     }
 
     pub async fn members(
@@ -43,10 +50,20 @@ where
         let (held, owners) = self.standing_in(org, account).await?;
         owners_only(&who, org, [held, role])?;
         keeps_an_owner(held, Some(role), owners)?;
-        self.roll
+        let granted = self
+            .roll
             .grant(org, account, role)
             .await?
-            .ok_or(RosterError::NoSuchMember)
+            .ok_or(RosterError::NoSuchMember)?;
+        self.note(
+            org,
+            &who,
+            Action::MemberRoleGranted,
+            account,
+            Detail::default().with("from", held).with("to", role),
+        )
+        .await?;
+        Ok(granted)
     }
 
     pub async fn remove(
@@ -59,11 +76,17 @@ where
         let (held, owners) = self.standing_in(org, account).await?;
         owners_only(&who, org, [held])?;
         keeps_an_owner(held, None, owners)?;
-        if self.roll.remove(org, account).await? {
-            Ok(())
-        } else {
-            Err(RosterError::NoSuchMember)
+        if !self.roll.remove(org, account).await? {
+            return Err(RosterError::NoSuchMember);
         }
+        self.note(
+            org,
+            &who,
+            Action::MemberRemoved,
+            account,
+            Detail::default().with("role", held),
+        )
+        .await
     }
 
     pub async fn invite(
@@ -94,6 +117,16 @@ where
         if let Some(way_in) = &way_in {
             self.roll.open_way_in(holder.account, way_in.hash()).await?;
         }
+        self.note(
+            org,
+            &who,
+            Action::MemberInvited,
+            holder.account,
+            Detail::default()
+                .with("email", email.as_str())
+                .with("role", joined.role),
+        )
+        .await?;
         Ok(Invitation {
             member: Member {
                 account: holder.account,
@@ -119,6 +152,26 @@ where
             Some(role) if !role.at_least(floor) => Err(RosterError::NotYoursToChange),
             Some(_) => Ok(who),
         }
+    }
+
+    async fn note(
+        &self,
+        org: TenantId,
+        who: &Who,
+        action: Action,
+        member: AccountId,
+        detail: Detail,
+    ) -> Result<(), RosterError> {
+        Ok(self
+            .trail
+            .record(&AuditEntry {
+                org,
+                actor: Actor::Account(who.account),
+                action,
+                target: Target::member(member),
+                detail,
+            })
+            .await?)
     }
 
     async fn standing_in(

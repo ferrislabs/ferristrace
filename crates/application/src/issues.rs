@@ -10,7 +10,7 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: IssueRepos,
 {
-    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, audit, unavailable = IssueError::Unavailable)]
     pub async fn list_issues(
         &self,
         who: &Reader,
@@ -24,13 +24,14 @@ where
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
+            audit,
             &self.clock,
         )
         .list(who, org, filter)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, audit, unavailable = IssueError::Unavailable)]
     pub async fn issue(
         &self,
         who: &Reader,
@@ -46,13 +47,14 @@ where
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
+            audit,
             &self.clock,
         )
         .one(who, org, project, print, window)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, audit, unavailable = IssueError::Unavailable)]
     pub async fn issue_occurrences(
         &self,
         who: &Reader,
@@ -69,13 +71,14 @@ where
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
+            audit,
             &self.clock,
         )
         .occurrences(who, org, project, print, window, limit)
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, audit, unavailable = IssueError::Unavailable)]
     pub async fn rule_on_issue(
         &self,
         token: &SessionToken,
@@ -89,6 +92,7 @@ where
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
+            audit,
             &self.clock,
         );
         if let Some(status) = ruling.status {

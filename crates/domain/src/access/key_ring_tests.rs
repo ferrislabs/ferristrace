@@ -6,6 +6,7 @@ use super::errors::KeyError;
 use super::key_ring::KeyRing;
 use super::ports::ApiKeys;
 use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, ReadGrant};
+use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{Assigned, Created, Project, ProjectId, ProjectName, Projects, Renamed};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
@@ -13,6 +14,7 @@ use crate::organisation::{Membership, Memberships, OrgRole, TeamId, Whoami, Whoa
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 pub(crate) const TOKEN: &str = "ft_ss_live";
 pub(crate) const MINE: u128 = 1;
@@ -230,11 +232,23 @@ impl Projects for OneProject {
     }
 }
 
-fn ring(role: OrgRole, keys: &Ring) -> KeyRing<OneSession, MemberOfMine, &Ring, OneProject> {
+fn ring(
+    role: OrgRole,
+    keys: &Ring,
+) -> KeyRing<OneSession, MemberOfMine, &Ring, OneProject, Notebook> {
+    noting(role, keys, &Notebook::default())
+}
+
+fn noting<'a>(
+    role: OrgRole,
+    keys: &'a Ring,
+    notebook: &Notebook,
+) -> KeyRing<OneSession, MemberOfMine, &'a Ring, OneProject, Notebook> {
     KeyRing::new(
         Whoami::new(OneSession, MemberOfMine(role)),
         keys,
         OneProject,
+        notebook.clone(),
     )
 }
 
@@ -408,4 +422,71 @@ async fn a_key_is_only_bound_to_a_project_of_its_own_organisation() {
         Err(KeyError::NoSuchProject)
     );
     assert_eq!(keys.writes(), 0);
+}
+
+#[tokio::test]
+async fn issuing_and_revoking_a_key_records_each_once_and_never_its_secret() {
+    let keys = Ring::default();
+    let notebook = Notebook::default();
+    let ring = noting(OrgRole::Admin, &keys, &notebook);
+
+    let issued = ring
+        .issue(
+            &token(),
+            an_org(MINE),
+            None,
+            &KeyName::try_from("ci").expect("a name"),
+            &KeyScopes::new(&[KeyScope::Ingest, KeyScope::Read]).expect("scopes"),
+        )
+        .await
+        .expect("an administrator issues a key");
+    ring.revoke(&token(), an_org(MINE), issued.key.id)
+        .await
+        .expect("an administrator revokes a key");
+
+    let entries = notebook.entries();
+    let actions: Vec<Action> = entries.iter().map(|entry| entry.action).collect();
+    assert_eq!(actions, vec![Action::KeyIssued, Action::KeyRevoked]);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.target == Target::key(issued.key.id))
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.actor == Actor::Account(AccountId::new(Uuid::from_u128(ACCOUNT))))
+    );
+    assert_eq!(entries[0].detail.get("name"), Some(Some("ci")));
+    assert_eq!(entries[0].detail.get("scopes"), Some(Some("ingest,read")));
+    assert_eq!(entries[0].detail.get("project"), Some(None));
+    let (_, secret) = issued.secret.split().expect("a well formed secret");
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.detail.pairs().iter().all(|(_, value)| {
+                value.as_deref().is_none_or(|value| {
+                    !value.contains(secret) && !value.contains(issued.secret.exposed())
+                })
+            }))
+    );
+}
+
+#[tokio::test]
+async fn a_refused_key_change_records_nothing() {
+    let keys = Ring::default();
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Member, &keys, &notebook)
+        .issue(
+            &token(),
+            an_org(MINE),
+            None,
+            &KeyName::try_from("ci").expect("a name"),
+            &KeyScopes::ingest(),
+        )
+        .await;
+
+    assert_eq!(refused.err(), Some(KeyError::NotYoursToChange));
+    assert!(notebook.entries().is_empty());
 }

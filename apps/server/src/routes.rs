@@ -1,8 +1,9 @@
 use axum::Router;
 use ferristrace_api::{
-    AppState, SessionCookie, SignInMethods, auth_router, catalogue_router, explore_router,
-    issue_router, key_router, me_router, methods_router, oidc_router, org_router, password_router,
-    reset_router, roster_router, second_factor_router, session_router, team_router, usage_router,
+    AppState, SessionCookie, SignInMethods, audit_router, auth_router, catalogue_router,
+    explore_router, issue_router, key_router, me_router, methods_router, oidc_router, org_router,
+    password_router, reset_router, roster_router, second_factor_router, session_router,
+    team_router, usage_router,
 };
 
 use crate::adapters::Production;
@@ -30,6 +31,7 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
         .merge(catalogue_routes(state))
         .merge(key_routes(state))
         .merge(org_routes(state))
+        .merge(audit_routes(state))
         .merge(roster_routes(state))
         .merge(team_routes(state))
         .merge(usage_routes(state))
@@ -112,6 +114,10 @@ fn key_routes(state: Option<&State>) -> Router {
 
 fn org_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| org_router(state.clone()))
+}
+
+fn audit_routes(state: Option<&State>) -> Router {
+    state.map_or_else(Router::new, |state| audit_router(state.clone()))
 }
 
 fn roster_routes(state: Option<&State>) -> Router {

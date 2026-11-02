@@ -1,3 +1,4 @@
+use crate::access::KeyId;
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::secret::ResetToken;
 use crate::telemetry::{IngestKey, TenantId};
@@ -22,4 +23,16 @@ pub enum Bootstrapped {
 pub struct Issued {
     pub key: IngestKey,
     pub project: Option<ProjectId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Minted {
+    pub id: KeyId,
+    pub key: IngestKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Revoked {
+    pub org: TenantId,
+    pub id: KeyId,
 }

@@ -8,6 +8,7 @@ use crate::access::key_ring_tests::{
     MINE, MemberOfMine, OURS, OneSession, Ring, THEIRS, a_project, an_org, scopes, token,
 };
 use crate::access::{KeyScope, Reader, Readers};
+use crate::audit::{Action, Actor, Target};
 use crate::catalogue::ProjectId;
 use crate::clock::{Clock, UnixSeconds};
 use crate::explore::Window;
@@ -15,6 +16,7 @@ use crate::identity::AccountId;
 use crate::organisation::{OrgRole, Whoami};
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 const OTHER: u128 = 40;
 
@@ -96,11 +98,20 @@ impl Clock for Still {
 fn issues<'a>(
     keys: &'a Ring,
     asked: &'a Asked,
-) -> Issues<OneSession, MemberOfMine, &'a Ring, &'a Asked, NoDecisions, Still> {
+) -> Issues<OneSession, MemberOfMine, &'a Ring, &'a Asked, NoDecisions, Notebook, Still> {
+    noting(keys, asked, &Notebook::default())
+}
+
+fn noting<'a>(
+    keys: &'a Ring,
+    asked: &'a Asked,
+    notebook: &Notebook,
+) -> Issues<OneSession, MemberOfMine, &'a Ring, &'a Asked, NoDecisions, Notebook, Still> {
     Issues::new(
         Readers::new(Whoami::new(OneSession, MemberOfMine(OrgRole::Member)), keys),
         asked,
         NoDecisions,
+        notebook.clone(),
         Still,
     )
 }
@@ -235,4 +246,76 @@ async fn a_member_session_still_reads_and_decides_as_before() {
         .expect("a member decides");
 
     assert_eq!(asked.projects(), vec![Some(a_project(OTHER))]);
+}
+
+#[tokio::test]
+async fn deciding_and_assigning_an_issue_record_one_entry_each() {
+    let keys = Ring::default();
+    let asked = Asked::default();
+    let notebook = Notebook::default();
+    let issues = noting(&keys, &asked, &notebook);
+    let owner = AccountId::new(uuid::Uuid::from_u128(12));
+
+    issues
+        .decide(
+            &token(),
+            an_org(MINE),
+            a_project(OTHER),
+            a_print(),
+            Status::Resolved,
+        )
+        .await
+        .expect("a member decides");
+    issues
+        .assign(
+            &token(),
+            an_org(MINE),
+            a_project(OTHER),
+            a_print(),
+            Some(owner),
+        )
+        .await
+        .expect("a member assigns");
+
+    let entries = notebook.entries();
+    let actions: Vec<Action> = entries.iter().map(|entry| entry.action).collect();
+    assert_eq!(actions, vec![Action::IssueDecided, Action::IssueAssigned]);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.target == Target::issue(a_print()))
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.actor == Actor::Account(AccountId::new(uuid::Uuid::from_u128(9))))
+    );
+    let project = a_project(OTHER).to_string();
+    assert_eq!(
+        entries[0].detail.get("project"),
+        Some(Some(project.as_str()))
+    );
+    assert_eq!(entries[0].detail.get("status"), Some(Some("resolved")));
+    let owner = owner.to_string();
+    assert_eq!(entries[1].detail.get("owner"), Some(Some(owner.as_str())));
+}
+
+#[tokio::test]
+async fn a_refused_decision_records_nothing() {
+    let keys = Ring::default();
+    let asked = Asked::default();
+    let notebook = Notebook::default();
+
+    let refused = noting(&keys, &asked, &notebook)
+        .decide(
+            &token(),
+            an_org(THEIRS),
+            a_project(OTHER),
+            a_print(),
+            Status::Resolved,
+        )
+        .await;
+
+    assert_eq!(refused, Err(IssueError::NotYours));
+    assert!(notebook.entries().is_empty());
 }

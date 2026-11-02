@@ -121,6 +121,10 @@ pub fn api_keys<C>(backend: &Postgres<C>) -> Each<'_, domain::ApiKeys, C> {
     Each::over(backend)
 }
 
+pub fn audit<C>(backend: &Postgres<C>) -> Each<'_, domain::Audit, C> {
+    Each::over(backend)
+}
+
 pub fn control_plane_of<C>(backend: &Postgres<C>) -> Each<'_, domain::ControlPlane, C> {
     Each::over(backend)
 }
@@ -186,6 +190,11 @@ forward!(ApiKeys: ApiKeys {
     fn issue(&self, org: TenantId, project: Option<ProjectId>, name: &KeyName, scopes: &KeyScopes, by: AccountId) -> Result<IssuedKey, StoreError>;
     fn revoke(&self, org: TenantId, id: KeyId) -> Result<bool, StoreError>;
     fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError>;
+});
+
+forward!(Audit: AuditTrail {
+    fn record(&self, entry: &AuditEntry) -> Result<(), StoreError>;
+    fn list(&self, org: TenantId, filter: &AuditFilter, page: PageSize) -> Result<AuditPage, StoreError>;
 });
 
 forward!(Roster: Roll {
@@ -263,8 +272,9 @@ forward!(ControlPlane: ControlPlane {
     fn invite(&self, account: AccountId, digest: SecretHash) -> Result<(), ProvisionError>;
     fn claim_project(&self, org: TenantId, name: &ProjectName) -> Result<ProjectId, ProvisionError>;
     fn only_project(&self, org: TenantId) -> Result<Option<ProjectId>, ProvisionError>;
-    fn issue_key(&self, org: TenantId, project: Option<ProjectId>) -> Result<IngestKey, ProvisionError>;
-    fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError>;
+    fn issue_key(&self, org: TenantId, project: Option<ProjectId>) -> Result<Minted, ProvisionError>;
+    fn revoke_key(&self, prefix: &str) -> Result<Option<Revoked>, ProvisionError>;
+    fn memberships_of(&self, account: AccountId) -> Result<Vec<TenantId>, ProvisionError>;
 });
 
 impl<C: Send + Sync + 'static> Each<'_, domain::Memberships, C> {
