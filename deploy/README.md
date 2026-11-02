@@ -253,6 +253,28 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
   ingested afterwards, and `RETENTION_DAYS` stays the value for every
   organisation that sets none.
 
+## FerrisKey and the security of the way in
+
+- **The at-rest key.** Until this release `deploy/.env.example` carried an
+  active `FERRISTRACE_SECRETS__AT_REST_KEY`, and it is still in git
+  history. A deployment that copied that file must treat the key as public
+  and rotate it: mint a new one with `openssl rand -hex 32`, put it in
+  `.env`, restart the server, and enter every webhook channel secret again,
+  because the secrets sealed under the old key no longer open and there is
+  no rotation command.
+- **`email_verified` is trusted.** When `bootstrap` or an invitation created
+  an account first, the first sign-in with that address adopts the account
+  only if the token says the address is verified. FerrisTrace cannot check
+  that claim. The realm must therefore not let users register themselves, or
+  change their address, without verifying the new one; otherwise anybody who
+  can claim an address inherits the account that holds it.
+- **The issuer is part of each person's identity.** An identity is the pair
+  of the issuer URL and the subject. A trailing slash is ignored, but any
+  other change to `FERRISTRACE_OIDC__ISSUER` (another host, another realm
+  name) makes everybody a stranger: their next sign-in is adopted by
+  address, or refused, rather than resolved by subject. Keep the issuer
+  stable.
+
 ## Settings
 
 Every field of `ferristrace.toml` can be given as an environment variable:

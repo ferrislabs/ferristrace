@@ -43,6 +43,16 @@ fn an_issuer_is_the_url_it_was_given_trimmed() {
     assert_eq!(Issuer::new("  "), Err(InvalidCredential::Issuer));
 }
 
+#[test]
+fn a_trailing_slash_does_not_make_another_issuer() {
+    let bare = Issuer::new("https://x.example/realms/a").expect("a url");
+    let slashed = Issuer::new(" https://x.example/realms/a/ ").expect("a url");
+
+    assert_eq!(bare, slashed);
+    assert_eq!(slashed.as_str(), "https://x.example/realms/a");
+    assert_eq!(Issuer::new("/"), Err(InvalidCredential::Issuer));
+}
+
 mod proptests {
     use proptest::prelude::*;
 

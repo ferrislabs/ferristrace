@@ -61,11 +61,11 @@ pub struct Issuer(Box<str>);
 
 impl Issuer {
     pub fn new(url: &str) -> Result<Self, InvalidCredential> {
-        let trimmed = url.trim();
-        if trimmed.is_empty() {
+        let normal = url.trim().trim_end_matches('/');
+        if normal.is_empty() {
             return Err(InvalidCredential::Issuer);
         }
-        Ok(Self(trimmed.into()))
+        Ok(Self(normal.into()))
     }
 
     pub fn as_str(&self) -> &str {

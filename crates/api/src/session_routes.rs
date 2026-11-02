@@ -54,12 +54,22 @@ where
     if !headers.contains_key(&REQUESTED_WITH) {
         return Err(SessionsRefused::NotFromOurOrigin);
     }
-    if let Some(token) = session_cookie::carried(&headers) {
-        state.app.sign_out(&token).await?;
-    }
+    let revoked = match session_cookie::carried(&headers) {
+        Some(token) => state.app.sign_out(&token).await,
+        None => Ok(()),
+    };
     let Some(cookie) = session_cookie::cleared(state.cookie) else {
         return Err(SessionsRefused::Refused(RollError::Unavailable));
     };
+    if let Err(error) = revoked {
+        tracing::error!(%error, "a session could not be revoked at sign out");
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(SET_COOKIE, cookie)],
+            "the session could not be revoked",
+        )
+            .into_response());
+    }
     Ok(([(SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response())
 }
 

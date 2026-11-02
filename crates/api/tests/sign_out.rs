@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -23,6 +24,7 @@ const TOKEN: &str = "ft_ss_0123456789";
 #[derive(Default)]
 struct MemorySessions {
     live: Mutex<Vec<String>>,
+    failing: AtomicBool,
 }
 
 impl MemorySessions {
@@ -66,6 +68,9 @@ impl SessionStore for MemorySessions {
     }
 
     async fn revoke(&self, token: &SessionToken) -> Result<(), SessionError> {
+        if self.failing.load(Ordering::SeqCst) {
+            return Err(SessionError::StoreUnreachable);
+        }
         self.live
             .lock()
             .expect("the session lock")
@@ -150,6 +155,25 @@ async fn signing_out_without_a_cookie_still_clears_it() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert!(response.headers().get(SET_COOKIE).is_some());
     assert!(sessions.holds(TOKEN));
+}
+
+#[tokio::test]
+async fn a_failed_revocation_still_clears_the_cookie_and_answers_unavailable() {
+    let (router, sessions) = harness();
+    sessions.failing.store(true, Ordering::SeqCst);
+
+    let response = router
+        .oneshot(sign_out_request(true, true))
+        .await
+        .expect("the router answers");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let cookie = response
+        .headers()
+        .get(SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("a clearing cookie");
+    assert!(cookie.contains("Max-Age=0"), "{cookie}");
 }
 
 #[tokio::test]
