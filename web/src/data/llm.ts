@@ -262,3 +262,132 @@ export const useDeletePrice = () =>
   useRefreshing<string, void>(async (org, id) => {
     await del(`/api/orgs/${org}/llm/prices/${id}`)
   })
+
+export type GroupBy = 'feature' | 'model' | 'customer' | 'environment' | 'provider'
+
+export const GROUP_BYS: { value: GroupBy; label: string }[] = [
+  { value: 'feature', label: 'Feature' },
+  { value: 'model', label: 'Model' },
+  { value: 'customer', label: 'Customer' },
+  { value: 'environment', label: 'Environment' },
+  { value: 'provider', label: 'Provider' },
+]
+
+export const SPEND_WINDOWS: { value: string; label: string; ms: number }[] = [
+  { value: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
+  { value: '1d', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
+  { value: '7d', label: '7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '30d', label: '30 days', ms: 30 * 24 * 60 * 60 * 1000 },
+]
+
+export type SpendFilters = { feature: string; model: string; customer: string; user: string; prompt: string }
+
+export const NO_FILTERS: SpendFilters = { feature: '', model: '', customer: '', user: '', prompt: '' }
+
+export type SpendGroup = {
+  key: string
+  cost: number
+  unpriced: number
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  p50Ms: number
+  p95Ms: number
+  errors: number
+  points: [number, number][]
+}
+
+export type PromptMarker = { timeMs: number; feature: string; promptVersion: string }
+
+export type Spend = { fromMs: number; toMs: number; stepMs: number; groups: SpendGroup[]; markers: PromptMarker[] }
+
+type WireSpendGroup = {
+  key: string
+  cost: number
+  unpriced: number
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  p50_ms: number
+  p95_ms: number
+  errors: number
+  points: [number, number][]
+}
+
+type WireSpend = {
+  step_ms: number
+  groups: WireSpendGroup[]
+  markers: { time_ms: number; feature: string; prompt_version: string }[]
+}
+
+const MINUTE_MS = 60_000
+const GROUP_CALLS = 50
+
+export const LLM_PRICES_PATH = '/settings/llm-prices'
+
+export function useSpend(windowMs: number, groupBy: GroupBy, filters: SpendFilters) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const minute = Math.floor(Date.now() / MINUTE_MS)
+  const found = useQuery({
+    queryKey: ['llm', active?.org, project, 'spend', windowMs, groupBy, filters, minute],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    retry: false,
+    queryFn: async (): Promise<Spend> => {
+      const to = Date.now()
+      const from = to - windowMs
+      const params = new URLSearchParams({ from: String(from), to: String(to), group_by: groupBy })
+      for (const [name, value] of Object.entries(filters)) if (value.trim()) params.set(name, value.trim())
+      if (project) params.set('project', project)
+      const body = await json<WireSpend>(await get(`/api/orgs/${active?.org}/llm/spend?${params.toString()}`))
+      return {
+        fromMs: from,
+        toMs: to,
+        stepMs: body.step_ms,
+        groups: body.groups.map((group) => ({
+          key: group.key,
+          cost: group.cost,
+          unpriced: group.unpriced,
+          calls: group.calls,
+          inputTokens: group.input_tokens,
+          outputTokens: group.output_tokens,
+          p50Ms: group.p50_ms,
+          p95Ms: group.p95_ms,
+          errors: group.errors,
+          points: group.points,
+        })),
+        markers: body.markers.map((marker) => ({ timeMs: marker.time_ms, feature: marker.feature, promptVersion: marker.prompt_version })),
+      }
+    },
+  })
+  return { spend: found.data ?? null, pending: found.isPending, failed: found.error }
+}
+
+export function useGroupCalls(windowMs: number, groupBy: GroupBy, key: string | null, filters: SpendFilters) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const minute = Math.floor(Date.now() / MINUTE_MS)
+  const found = useQuery({
+    queryKey: ['llm', active?.org, project, 'group-calls', windowMs, groupBy, key, filters, minute],
+    enabled: Boolean(active) && key !== null && key !== '',
+    staleTime: FRESH_MS,
+    retry: false,
+    queryFn: async () => {
+      const to = Date.now()
+      const params = new URLSearchParams({ from: String(to - windowMs), to: String(to), limit: String(GROUP_CALLS) })
+      for (const [name, value] of Object.entries(filters)) if (value.trim()) params.set(name, value.trim())
+      params.set(groupBy, key ?? '')
+      if (project) params.set('project', project)
+      const body = await json<{ calls: WireCall[] }>(await get(`/api/orgs/${active?.org}/llm/calls?${params.toString()}`))
+      return body.calls.map(called)
+    },
+  })
+  return { calls: found.data ?? [], pending: found.isPending, failed: found.error }
+}
+
+export function formatMs(ms: number): string {
+  if (ms === 0) return '—'
+  if (ms < 1000) return `${ms.toFixed(0)} ms`
+  return `${(ms / 1000).toFixed(2)} s`
+}

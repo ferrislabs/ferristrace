@@ -70,7 +70,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 }
 
 const SHORTCUTS: [string[], string][] = [
-  [['/'], 'Search, or paste a trace id'], [['⌘', 'K'], 'The same search'], [['G', 'O'], 'Overview'], [['G', 'V'], 'Services'], [['G', 'I'], 'Issues'], [['G', 'R'], 'Releases'], [['G', 'A'], 'Alerts'], [['G', 'T'], 'Traces'],
+  [['/'], 'Search, or paste a trace id'], [['⌘', 'K'], 'The same search'], [['G', 'O'], 'Overview'], [['G', 'V'], 'Services'], [['G', 'I'], 'Issues'], [['G', 'R'], 'Releases'], [['G', 'C'], 'AI spend'], [['G', 'A'], 'Alerts'], [['G', 'T'], 'Traces'],
   [['G', 'L'], 'Logs'], [['G', 'M'], 'Metrics'], [['G', 'P'], 'Status page'], [['G', 'S'], 'Settings'], [['J', 'K'], 'Move in lists'], [['↵'], 'Open the selected row'], [['?'], 'This list'],
 ]
 export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
