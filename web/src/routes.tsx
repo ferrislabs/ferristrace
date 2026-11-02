@@ -31,6 +31,7 @@ import { Profile } from '@/pages/settings/Profile'
 import { Security } from '@/pages/settings/Security'
 import { Preferences } from '@/pages/settings/Preferences'
 import { OrgGeneral } from '@/pages/settings/OrgGeneral'
+import { Agents } from '@/pages/settings/Agents'
 import { AuditLog } from '@/pages/settings/AuditLog'
 import { LlmPrices } from '@/pages/settings/LlmPrices'
 import { Members } from '@/pages/settings/Members'
@@ -112,6 +113,7 @@ const settingsChildren = [
   createRoute({ getParentRoute: () => settingsRoute, path: 'teams', component: Teams, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'projects', component: Projects, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'usage', component: Usage, staticData: real }),
+  createRoute({ getParentRoute: () => settingsRoute, path: 'agents', component: Agents, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'audit', component: AuditLog, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'llm-prices', component: LlmPrices, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'billing', component: Billing, staticData: mock }),

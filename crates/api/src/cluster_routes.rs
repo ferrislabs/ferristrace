@@ -189,7 +189,7 @@ async fn cluster<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = looked.filter()?;
     let snapshot = state.app.cluster(&who, TenantId::new(org), &filter).await?;
     Ok(Json(snapshot.into()))
@@ -207,6 +207,8 @@ pub enum ClusterRefused {
     Reaching(NotCarried),
     #[error("no such organisation")]
     NoSuchOrg,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error(transparent)]
     Placement(#[from] Misplaced),
     #[error("the cluster could not be read")]
@@ -218,6 +220,7 @@ impl From<ExploreError> for ClusterRefused {
         match error {
             ExploreError::NoSession => Self::Reaching(NotCarried::NoSession),
             ExploreError::NotYours => Self::NoSuchOrg,
+            ExploreError::OutOfScope => Self::OutOfScope,
             ExploreError::StoreUnreachable => Self::Unavailable,
         }
     }
@@ -227,6 +230,7 @@ impl IntoResponse for ClusterRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
+            Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg => StatusCode::NOT_FOUND,
             Self::Placement(_) => StatusCode::BAD_REQUEST,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,

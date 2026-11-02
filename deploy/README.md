@@ -244,6 +244,8 @@ stores inside its own network rather than something to choose.
 | `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor and no webhook channel is offered |
 | `FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS` | `false` | Whether a webhook may reach a private, loopback or link-local address |
 | `FERRISTRACE_ALERTS__BASE_URL` | the mail `base_url` | Public address of the app, for the link in an alert |
+| `FERRISTRACE_AGENTS__ISSUER` | the OIDC issuer | Issuer of the access tokens AI agents present; without it (and without OIDC) or without the audience every agent token is refused with 401 |
+| `FERRISTRACE_AGENTS__AUDIENCE` | unset | Required for agents to be on: an agent token must carry this audience. An issuer without it leaves agents off (a warning is logged at startup, sign-in is unaffected) |
 | `FERRISTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
 | `FERRISTRACE_IMAGE` | built locally | A published image to run instead |
 
@@ -264,6 +266,82 @@ An account is provisioned the first time somebody signs in, so run
 organisation to own. It prints no reset token in that case: there is no
 password to set, and `/auth/reset/*` is not mounted when local passwords
 are off.
+
+## AI agents
+
+An AI agent signs in as itself through FerrisKey, reads telemetry and
+incidents within the scopes an administrator ticked, and every request it
+makes is written to the audit log with the token id (`jti`) that allowed
+it. FerrisTrace never holds the agent's secret: the agent asks FerrisKey
+for an access token with the client credentials grant and sends it as
+`Authorization: Bearer <jwt>`. A bearer made of three dot separated parts is
+read as an agent token, anything else as an API key.
+
+Configure the issuer whose tokens are accepted:
+
+```sh
+FERRISTRACE_AGENTS__ISSUER=https://id.example.com/realms/ferris
+FERRISTRACE_AGENTS__AUDIENCE=ferristrace
+```
+
+The issuer defaults to `FERRISTRACE_OIDC__ISSUER`; the audience is
+mandatory. Without it, a token the realm issued to a person signing in to
+the web app would pass for an agent token, so agents stay off instead: the
+server logs a warning at startup, keeps running (sign-in is unaffected),
+every agent token is answered `401` and Settings > Agents shows why. The
+same happens with no issuer at all. The server finds the signing keys at the
+`jwks_uri` of the issuer's discovery document (which must be on the
+issuer's own host), caches them for ten minutes, and fetches them again at
+most once a minute when a token names a key it does not know. The fetch
+never blocks other requests, a failed fetch keeps the keys already cached,
+and a document larger than 1 MiB is refused. Only RS256 and ES256 tokens are accepted, and one is refused
+when its signature, `iss`, expiry (30 seconds of leeway), `aud`, `nbf` or `typ` (it must be `Bearer`) does not check out, or when it
+carries no `jti`.
+
+Create the client in FerrisKey, then register it in FerrisTrace:
+
+1. In the realm, create a client for the agent with client authentication on
+   and the *service accounts roles* (client credentials) flow enabled. Its
+   client id is what you paste into FerrisTrace.
+2. Create three client scopes named exactly `telemetry:read`,
+   `incidents:comment` and `incidents:resolve`, and attach to the client the
+   ones the agent may ever need. The token's `scope` claim lists the scopes
+   that were requested and attached, so a scope absent there can never be
+   used.
+3. Add an audience mapper to the client (or to one of its scopes) that puts
+   the value of `FERRISTRACE_AGENTS__AUDIENCE` in `aud`, and do not add that
+   mapper to the client people sign in with.
+4. In Settings > Agents, register the agent: a name, the client id, the
+   scopes it may use, and optionally one project. The client id of the web
+   app's sign-in client (`FERRISTRACE_OIDC__CLIENT_ID`) is refused. An agent bound to a
+   project reads only that project.
+
+An agent's effective scopes are the scopes in the token's `scope` claim that
+FerrisTrace also granted it, so a token can never do more than either side
+allows. A token refused for its signature, expiry or issuer answers `401`;
+a live registered agent without the scope answers `403`; an unregistered
+client, a client registered in another organisation and a revoked agent all
+answer the same `401`, so a caller cannot tell them apart. A revoked agent is
+refused on its very next request, whatever its token's expiry.
+
+```sh
+TOKEN=$(curl -s https://id.example.com/realms/ferris/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=triage-bot -d client_secret=... \
+  -d scope=telemetry:read | jq -r .access_token)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://ferristrace.example.com/api/orgs/$ORG/traces?from=...&to=..."
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://ferristrace.example.com/api/orgs/$ORG/agents/me"
+```
+
+An agent reads what a session or a read key reads: traces, services,
+operations, logs, metrics, the cluster, releases, deploys, LLM calls and
+spend, issues, incidents and their timelines. It never reaches a
+session-only or administration route (keys, agents, members, settings,
+audit). Each read leaves an `agent.read` entry naming the route template and
+the `jti`; registering and revoking an agent are audited as `agent.registered`
+and `agent.revoked`. Incident comments and resolution by an agent come with
+the next part of this milestone.
 
 ## A second factor
 

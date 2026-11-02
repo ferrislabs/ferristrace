@@ -14,6 +14,8 @@ pub enum ExploreError {
     NoSession,
     #[error("this session holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a store could not be reached")]
     StoreUnreachable,
 }
@@ -40,6 +42,7 @@ impl From<ReadRefusal> for ExploreError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

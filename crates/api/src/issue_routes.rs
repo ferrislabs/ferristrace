@@ -156,7 +156,7 @@ async fn list<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let mut filter = IssueFilter::over(a_window(asked.from, asked.to)?);
     filter.project = asked.project.map(ProjectId::new);
     filter.service = asked
@@ -190,7 +190,7 @@ async fn one<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let issue = state
         .app
         .issue(
@@ -213,7 +213,7 @@ async fn occurrences<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let seen = state
         .app
         .issue_occurrences(
@@ -307,7 +307,7 @@ impl IntoResponse for IssueRefused {
             Self::Refused(error @ IssueError::NoSession) => {
                 (StatusCode::UNAUTHORIZED, error.to_string())
             }
-            Self::Refused(error @ IssueError::NotYours) => {
+            Self::Refused(error @ (IssueError::NotYours | IssueError::OutOfScope)) => {
                 (StatusCode::FORBIDDEN, error.to_string())
             }
             Self::Refused(error @ IssueError::NoSuchIssue) => {

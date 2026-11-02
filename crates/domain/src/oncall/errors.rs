@@ -36,6 +36,8 @@ pub enum OncallError {
     NoSession,
     #[error("this reader holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("on-call schedules are an administrator's to change")]
     NotYoursToChange,
     #[error("a read key reads schedules and pages; acknowledging takes a session")]
@@ -88,6 +90,7 @@ impl From<ReadRefusal> for OncallError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

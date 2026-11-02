@@ -12,6 +12,8 @@ pub enum IssueError {
     NoSession,
     #[error("this organisation is not yours to read")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("no issue carries that fingerprint")]
     NoSuchIssue,
     #[error("the issues could not be read")]
@@ -40,6 +42,7 @@ impl From<ReadRefusal> for IssueError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::Unavailable,
         }
     }

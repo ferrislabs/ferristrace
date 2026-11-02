@@ -319,7 +319,7 @@ async fn list<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let held = state
         .app
         .team_schedules(&who, TenantId::new(org), TeamId::new(team))
@@ -356,7 +356,7 @@ async fn one<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let held = state
         .app
         .schedule(&who, TenantId::new(org), ScheduleId::new(id))
@@ -406,7 +406,7 @@ async fn now<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let now = state
         .app
         .on_call_now(&who, TenantId::new(org), ScheduleId::new(id))
@@ -468,7 +468,7 @@ async fn pages<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let scope = match listing.state.as_deref() {
         None => PageScope::Open,
         Some(asked) => PageScope::parse(asked.trim()).ok_or(OncallRefused::Malformed("state"))?,
@@ -490,7 +490,7 @@ async fn acknowledge<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let acknowledged = state
         .app
         .acknowledge_page(&who, TenantId::new(org), PageId::new(id))
@@ -549,6 +549,7 @@ fn status_of(error: OncallError) -> StatusCode {
         | OncallError::NoSuchPage
         | OncallError::NoAckKey => StatusCode::NOT_FOUND,
         OncallError::NotYoursToChange
+        | OncallError::OutOfScope
         | OncallError::ReadOnly
         | OncallError::NotYourPage
         | OncallError::Ack(AckRefused::Tampered) => StatusCode::FORBIDDEN,

@@ -3,6 +3,7 @@ mod secret;
 mod store;
 
 pub mod access;
+pub mod agents;
 pub mod alerts;
 pub mod audit;
 pub mod catalogue;
@@ -31,6 +32,11 @@ pub mod testing;
 pub use access::{
     ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
     KeyRing, KeyScope, KeyScopes, ReadGrant, ReadRefusal, Reader, Readers,
+};
+pub use agents::{
+    Agent as RegisteredAgent, AgentCall, AgentEnrolment, AgentError, AgentGrant, AgentId,
+    AgentName, AgentRegistry, AgentScope, AgentScopes, AgentToken, AgentTokens, Agents,
+    BadAgentName, BadAgentScopes, BadClientId, ClientId, TokenRefusal, VerifiedToken,
 };
 pub use alerts::{
     AlertBook, AlertChannels, AlertDuty, AlertError, AlertEvent, AlertEvents, AlertMailer,

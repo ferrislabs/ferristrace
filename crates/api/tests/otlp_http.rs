@@ -43,6 +43,7 @@ impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
     type MetricStore = Inert;
     type Meter = Arc<MemoryMeter>;
     type Oidc = Inert;
+    type Agents = Inert;
     type Sink = Arc<MemorySink>;
     type Quota = Q;
     type Directory = StaticDirectory;

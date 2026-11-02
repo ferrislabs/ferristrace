@@ -383,7 +383,7 @@ async fn calls<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let query = asked.query()?;
     let page = state
         .app
@@ -401,7 +401,7 @@ async fn spend<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let query = asked.query()?;
     let spent = state
         .app
@@ -419,7 +419,7 @@ async fn unpriced<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let window = window_of(asked.from, asked.to)?;
     let found = state
         .app
@@ -438,7 +438,7 @@ async fn prices<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let held = state.app.llm_prices(&who, TenantId::new(org)).await?;
     Ok(Json(Prices {
         prices: held.into_iter().map(Into::into).collect(),
@@ -534,7 +534,7 @@ fn status_of(error: LlmError) -> StatusCode {
     match error {
         LlmError::NoSession => StatusCode::UNAUTHORIZED,
         LlmError::NotYours | LlmError::NoSuchPrice => StatusCode::NOT_FOUND,
-        LlmError::NotYoursToChange => StatusCode::FORBIDDEN,
+        LlmError::NotYoursToChange | LlmError::OutOfScope => StatusCode::FORBIDDEN,
         LlmError::PriceTaken => StatusCode::CONFLICT,
         LlmError::StoreUnreachable => StatusCode::SERVICE_UNAVAILABLE,
     }

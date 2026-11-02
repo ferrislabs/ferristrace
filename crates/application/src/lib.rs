@@ -1,6 +1,7 @@
 extern crate self as ferristrace_application;
 
 mod access;
+mod agents;
 mod alerts;
 #[cfg(test)]
 mod alerts_llm_tests;

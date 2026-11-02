@@ -228,7 +228,7 @@ async fn traces<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let window = Window::new(
         asked.from.saturating_mul(NANOS_PER_MILLI),
         asked.to.saturating_mul(NANOS_PER_MILLI),
@@ -276,7 +276,7 @@ async fn one<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let id = hex::decode(&trace)
         .ok()
         .and_then(|bytes| TraceId::try_from(bytes.as_slice()).ok())
@@ -306,7 +306,7 @@ async fn placements<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let window = Window::new(
         seen.from.saturating_mul(NANOS_PER_MILLI),
         seen.to.saturating_mul(NANOS_PER_MILLI),
@@ -336,6 +336,8 @@ pub enum LookRefused {
     Reaching(NotCarried),
     #[error("no such organisation")]
     NoSuchOrg,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a window must end after it starts")]
     Window,
     #[error(transparent)]
@@ -353,6 +355,7 @@ impl From<ExploreError> for LookRefused {
         match error {
             ExploreError::NoSession => Self::Reaching(NotCarried::NoSession),
             ExploreError::NotYours => Self::NoSuchOrg,
+            ExploreError::OutOfScope => Self::OutOfScope,
             ExploreError::StoreUnreachable => Self::Unavailable,
         }
     }
@@ -362,6 +365,7 @@ impl IntoResponse for LookRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
+            Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg | Self::NoSuchTrace => StatusCode::NOT_FOUND,
             Self::Window | Self::TraceId | Self::Placement(_) => StatusCode::BAD_REQUEST,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -542,7 +546,7 @@ async fn services<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let seconds = over.seconds();
     let filter = over.filter()?;
 
@@ -565,7 +569,7 @@ async fn operations<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = over.filter()?;
 
     let found = state
@@ -587,7 +591,7 @@ async fn service_series<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = over.filter()?;
 
     let series = state
@@ -606,7 +610,7 @@ async fn org_series<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = over.filter()?;
 
     let series = state

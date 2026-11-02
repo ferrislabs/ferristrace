@@ -121,6 +121,10 @@ pub fn api_keys<C>(backend: &Postgres<C>) -> Each<'_, domain::ApiKeys, C> {
     Each::over(backend)
 }
 
+pub fn agents<C>(backend: &Postgres<C>) -> Each<'_, domain::Agents, C> {
+    Each::over(backend)
+}
+
 pub fn audit<C>(backend: &Postgres<C>) -> Each<'_, domain::Audit, C> {
     Each::over(backend)
 }
@@ -195,6 +199,14 @@ forward!(ApiKeys: ApiKeys {
     fn issue(&self, org: TenantId, project: Option<ProjectId>, name: &KeyName, scopes: &KeyScopes, by: AccountId) -> Result<IssuedKey, StoreError>;
     fn revoke(&self, org: TenantId, id: KeyId) -> Result<bool, StoreError>;
     fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError>;
+    fn agent_standing(&self, org: TenantId, client_id: &str) -> Result<Option<RegisteredAgent>, StoreError>;
+    fn agent_used(&self, org: TenantId, agent: AgentId, entry: &AuditEntry) -> Result<(), StoreError>;
+});
+
+forward!(Agents: Agents {
+    fn list(&self, org: TenantId) -> Result<Vec<RegisteredAgent>, StoreError>;
+    fn register(&self, org: TenantId, enrolment: &AgentEnrolment, by: AccountId) -> Result<Option<RegisteredAgent>, StoreError>;
+    fn revoke(&self, org: TenantId, id: AgentId) -> Result<Option<RegisteredAgent>, StoreError>;
 });
 
 forward!(Audit: AuditTrail {

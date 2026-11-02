@@ -2,6 +2,7 @@ use core::fmt;
 use uuid::Uuid;
 
 use crate::access::KeyId;
+use crate::agents::AgentId;
 use crate::catalogue::ProjectId;
 use crate::identity::AccountId;
 use crate::issue::Fingerprint;
@@ -37,6 +38,7 @@ impl fmt::Display for EntryId {
 pub enum Actor {
     Account(AccountId),
     ApiKey(KeyId),
+    Agent(AgentId),
     Operator,
     System,
 }
@@ -46,6 +48,7 @@ impl Actor {
         match self {
             Self::Account(_) => "account",
             Self::ApiKey(_) => "api_key",
+            Self::Agent(_) => "agent",
             Self::Operator => "operator",
             Self::System => "system",
         }
@@ -55,6 +58,7 @@ impl Actor {
         match self {
             Self::Account(account) => Some(account.as_uuid()),
             Self::ApiKey(key) => Some(key.as_uuid()),
+            Self::Agent(agent) => Some(agent.as_uuid()),
             Self::Operator | Self::System => None,
         }
     }
@@ -63,6 +67,7 @@ impl Actor {
         match (kind, id) {
             ("account", Some(id)) => Some(Self::Account(AccountId::new(id))),
             ("api_key", Some(id)) => Some(Self::ApiKey(KeyId::new(id))),
+            ("agent", Some(id)) => Some(Self::Agent(AgentId::new(id))),
             ("operator", None) => Some(Self::Operator),
             ("system", None) => Some(Self::System),
             _ => None,
@@ -129,10 +134,13 @@ pub enum Action {
     StatusComponentDeleted,
     PriceCreated,
     PriceDeleted,
+    AgentRegistered,
+    AgentRevoked,
+    AgentRead,
 }
 
 impl Action {
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 60] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -190,6 +198,9 @@ impl Action {
         Self::StatusComponentDeleted,
         Self::PriceCreated,
         Self::PriceDeleted,
+        Self::AgentRegistered,
+        Self::AgentRevoked,
+        Self::AgentRead,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -251,6 +262,9 @@ impl Action {
             Self::StatusComponentDeleted => "status_component.deleted",
             Self::PriceCreated => "price.created",
             Self::PriceDeleted => "price.deleted",
+            Self::AgentRegistered => "agent.registered",
+            Self::AgentRevoked => "agent.revoked",
+            Self::AgentRead => "agent.read",
         }
     }
 
@@ -283,10 +297,11 @@ pub enum TargetKind {
     StatusPage,
     StatusComponent,
     Price,
+    Agent,
 }
 
 impl TargetKind {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -303,6 +318,7 @@ impl TargetKind {
         Self::StatusPage,
         Self::StatusComponent,
         Self::Price,
+        Self::Agent,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -323,6 +339,7 @@ impl TargetKind {
             Self::StatusPage => "status_page",
             Self::StatusComponent => "status_component",
             Self::Price => "price",
+            Self::Agent => "agent",
         }
     }
 
@@ -371,6 +388,10 @@ impl Target {
 
     pub fn key(key: KeyId) -> Self {
         Self::named(TargetKind::Key, key)
+    }
+
+    pub fn agent(agent: AgentId) -> Self {
+        Self::named(TargetKind::Agent, agent)
     }
 
     pub fn issue(print: Fingerprint) -> Self {

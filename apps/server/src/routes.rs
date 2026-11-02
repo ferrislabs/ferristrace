@@ -1,10 +1,11 @@
 use axum::Router;
 use ferristrace_api::{
-    AppState, SessionCookie, SignInMethods, alert_router, audit_router, auth_router,
+    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router, auth_router,
     catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
-    key_router, llm_router, log_router, me_router, methods_router, metric_router, oidc_router,
-    oncall_router, org_router, password_router, postmortem_router, release_router, reset_router,
-    roster_router, second_factor_router, session_router, status_router, team_router, usage_router,
+    key_router, llm_router, log_router, mark_routes, me_router, methods_router, metric_router,
+    oidc_router, oncall_router, org_router, password_router, postmortem_router, release_router,
+    reset_router, roster_router, second_factor_router, session_router, status_router, team_router,
+    usage_router,
 };
 
 use crate::adapters::Production;
@@ -26,22 +27,25 @@ pub(crate) fn cookie_of(config: &Config) -> SessionCookie {
 }
 
 pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held) -> Router {
-    identity_routes(config, state)
-        .merge(explore_routes(state, held.explore))
-        .merge(issue_routes(state, held.issues))
-        .merge(catalogue_routes(state))
-        .merge(key_routes(state))
-        .merge(org_routes(state))
-        .merge(audit_routes(state))
-        .merge(alert_routes(state))
-        .merge(incident_routes(state))
-        .merge(oncall_routes(state))
-        .merge(postmortem_routes(state))
-        .merge(status_routes(state))
-        .merge(export_routes(state))
-        .merge(roster_routes(state))
-        .merge(team_routes(state))
-        .merge(usage_routes(state))
+    mark_routes(
+        identity_routes(config, state)
+            .merge(explore_routes(state, held.explore))
+            .merge(issue_routes(state, held.issues))
+            .merge(catalogue_routes(state))
+            .merge(key_routes(state))
+            .merge(org_routes(state))
+            .merge(audit_routes(state))
+            .merge(alert_routes(state))
+            .merge(incident_routes(state))
+            .merge(oncall_routes(state))
+            .merge(postmortem_routes(state))
+            .merge(status_routes(state))
+            .merge(export_routes(state))
+            .merge(roster_routes(state))
+            .merge(team_routes(state))
+            .merge(usage_routes(state))
+            .merge(agent_routes(state)),
+    )
 }
 
 fn identity_routes(config: &Config, state: Option<&State>) -> Router {
@@ -122,6 +126,10 @@ fn catalogue_routes(state: Option<&State>) -> Router {
 
 fn key_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| key_router(state.clone()))
+}
+
+fn agent_routes(state: Option<&State>) -> Router {
+    state.map_or_else(Router::new, |state| agent_router(state.clone()))
 }
 
 fn org_routes(state: Option<&State>) -> Router {

@@ -246,6 +246,17 @@
             }
           }
         },
+        "agents": {
+          "type": "object",
+          "properties": {
+            "issuer": {
+              "type": "string"
+            },
+            "audience": {
+              "type": "string"
+            }
+          }
+        },
         "mail": {
           "type": "object",
           "properties": {

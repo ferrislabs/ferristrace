@@ -32,6 +32,8 @@ pub enum LlmError {
     NoSession,
     #[error("this reader holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("model prices are an administrator's to change")]
     NotYoursToChange,
     #[error("no price of this organisation carries that id")]
@@ -64,6 +66,7 @@ impl From<ReadRefusal> for LlmError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

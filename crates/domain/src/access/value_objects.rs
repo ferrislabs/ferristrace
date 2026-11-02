@@ -3,6 +3,7 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::errors::{BadKeyName, BadScopes, ReadRefusal};
+use crate::agents::AgentCall;
 use crate::catalogue::ProjectId;
 use crate::secret::{KEY_PREFIX, SessionToken, split_key};
 use crate::telemetry::TenantId;
@@ -174,4 +175,5 @@ impl ReadGrant {
 pub enum Reader {
     Session(SessionToken),
     Key(ApiSecret),
+    Agent(AgentCall),
 }

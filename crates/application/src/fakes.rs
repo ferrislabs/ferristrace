@@ -42,6 +42,7 @@ impl Stack for Probing {
     type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
+    type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;

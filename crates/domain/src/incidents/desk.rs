@@ -443,7 +443,7 @@ where
 
     async fn writer(&self, who: &Reader, org: TenantId) -> Result<AccountId, IncidentError> {
         match who {
-            Reader::Key(_) => {
+            Reader::Key(_) | Reader::Agent(_) => {
                 self.readers.grant(who, org).await?;
                 Err(IncidentError::ReadOnly)
             }

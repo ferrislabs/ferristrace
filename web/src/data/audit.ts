@@ -3,7 +3,7 @@ import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { nothingYet } from './orgs'
 
-export type ActorKind = 'account' | 'api_key' | 'operator'
+export type ActorKind = 'account' | 'api_key' | 'agent' | 'operator'
 
 export type AuditEntry = {
   id: string
@@ -57,6 +57,9 @@ export const AUDIT_ACTIONS = [
   'incident.attached',
   'incident.resolved',
   'incident.reopened',
+  'agent.registered',
+  'agent.revoked',
+  'agent.read',
 ] as const
 
 export const OPERATOR = 'operator'

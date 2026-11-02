@@ -264,7 +264,7 @@ where
         org: TenantId,
     ) -> Result<(AccountId, OrgRole), PostmortemError> {
         match who {
-            Reader::Key(_) => {
+            Reader::Key(_) | Reader::Agent(_) => {
                 self.readers.grant(who, org).await?;
                 Err(PostmortemError::ReadOnly)
             }

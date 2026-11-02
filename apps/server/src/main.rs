@@ -26,9 +26,9 @@ use ferristrace_domain::{
     LinkKey, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
 };
 use ferristrace_infra::{
-    Argon2Hasher, HttpWebhooks, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
-    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
-    WebhookSettings, ack_key_from_hex, status_key_from_hex,
+    Argon2Hasher, HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink,
+    OidcProvider, OidcSettings, PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer,
+    StaticDirectory, SystemClock, WebhookSettings, ack_key_from_hex, status_key_from_hex,
 };
 use ferristrace_postgres::{
     CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
@@ -45,7 +45,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink, Stored};
 use crate::cli::{Cli, Command, health, run_command};
-use crate::config::{Config, default_retention_days};
+use crate::config::{AgentSetup, Config, default_retention_days};
 use crate::routes::{Held, State, control_routes, cookie_of};
 
 const SECONDS_PER_HOUR: u64 = 3600;
@@ -64,6 +64,7 @@ struct Optional {
     log_store: Option<ClickhouseLogReader>,
     metric_store: Option<ClickhouseMetricReader>,
     oidc: Option<OidcProvider>,
+    agents: Option<JwksVerifier>,
 }
 
 #[tokio::main]
@@ -113,6 +114,7 @@ async fn main() -> anyhow::Result<()> {
                 log_store: logs,
                 metric_store: metrics,
                 oidc: oidc_of(&config).await?,
+                agents: agents_of(&config)?,
             };
             Some(control_plane(
                 &config,
@@ -190,7 +192,7 @@ fn control_plane(
     pool: &PgPool,
     gallery: Gallery,
     meter: Arc<Meter>,
-    optional: Optional,
+    mut optional: Optional,
 ) -> anyhow::Result<State> {
     let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
     let seal = seal_of(config)?;
@@ -201,6 +203,7 @@ fn control_plane(
         .with_hasher(hasher.clone())
         .with_seal(seal)
         .with_invite_window(INVITE_WINDOW);
+    let agents = optional.agents.take();
     let adapters = adapters_of(
         hasher,
         mailer,
@@ -212,9 +215,14 @@ fn control_plane(
     let app = Arc::new(
         Ferristrace::<Production>::new(repos, adapters)
             .with_ack_key(ack)
-            .with_status_key(links),
+            .with_status_key(links)
+            .with_agent_tokens(agents),
     );
     Ok(AppState::new(app, cookie_of(config))
+        .with_agent_policy(
+            config.agent_setup().off_reason(),
+            config.reserved_client_id().map(str::to_owned),
+        )
         .with_default_retention_days(default_retention_days(config.spans.as_ref())))
 }
 
@@ -446,6 +454,33 @@ async fn oidc_of(config: &Config) -> anyhow::Result<Option<OidcProvider>> {
     .await
     .context("reaching the identity provider")?;
     Ok(Some(provider))
+}
+
+fn agents_of(config: &Config) -> anyhow::Result<Option<JwksVerifier>> {
+    match config.agent_setup() {
+        AgentSetup::NoIssuer => {
+            tracing::info!(
+                "no agent issuer is configured, so no AI agent can read: set agents.issuer or oidc.issuer"
+            );
+            Ok(None)
+        }
+        AgentSetup::NoAudience { issuer } => {
+            tracing::warn!(
+                %issuer,
+                "agents stay off: set agents.audience (FERRISTRACE_AGENTS__AUDIENCE) and add an audience mapper to the agents' FerrisKey clients, or any token of the realm would pass"
+            );
+            Ok(None)
+        }
+        AgentSetup::On { issuer, audience } => {
+            let verifier = JwksVerifier::new(JwksSettings {
+                issuer: issuer.clone(),
+                audience: Some(audience),
+            })
+            .context("preparing the agent token verifier")?;
+            tracing::info!(%issuer, "agent tokens are verified against the issuer's keys");
+            Ok(Some(verifier))
+        }
+    }
 }
 
 fn gallery_of(config: &Config) -> anyhow::Result<Gallery> {

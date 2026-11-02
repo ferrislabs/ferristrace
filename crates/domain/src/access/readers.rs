@@ -1,6 +1,8 @@
 use super::errors::ReadRefusal;
 use super::ports::ApiKeys;
 use super::value_objects::{ReadGrant, Reader};
+use crate::agents::{AgentCall, AgentGrant, AgentScope};
+use crate::audit::{Action, Actor, AuditEntry, Detail, Target};
 use crate::identity::SessionStore;
 use crate::organisation::{Memberships, OrgRole, Whoami};
 use crate::telemetry::TenantId;
@@ -47,6 +49,58 @@ where
                     Err(ReadRefusal::NotYours)
                 }
             }
+            Reader::Agent(call) => {
+                let grant = self
+                    .agent(call, org, Some(AgentScope::TelemetryRead))
+                    .await?;
+                Ok(ReadGrant {
+                    org,
+                    project: grant.project,
+                })
+            }
         }
+    }
+
+    pub async fn agent(
+        &self,
+        call: &AgentCall,
+        org: TenantId,
+        needs: Option<AgentScope>,
+    ) -> Result<AgentGrant, ReadRefusal> {
+        let agent = self
+            .keys
+            .agent_standing(org, &call.token.client_id)
+            .await?
+            .ok_or(ReadRefusal::Unknown)?;
+        if agent.is_revoked() {
+            return Err(ReadRefusal::Unknown);
+        }
+        let scopes = agent.scopes.within(&call.token.scopes);
+        let allowed = match needs {
+            Some(scope) => scopes.contains(&scope),
+            None => !scopes.is_empty(),
+        };
+        if !allowed {
+            return Err(ReadRefusal::OutOfScope);
+        }
+        let entry = AuditEntry {
+            org,
+            actor: Actor::Agent(agent.id),
+            action: Action::AgentRead,
+            target: Target::org(org),
+            detail: Detail::default()
+                .with("route", &call.route)
+                .with("jti", &call.token.jti),
+        };
+        self.keys.agent_used(org, agent.id, &entry).await?;
+        Ok(AgentGrant {
+            agent: agent.id,
+            name: agent.name,
+            client_id: agent.client_id,
+            org,
+            scopes,
+            project: agent.project,
+            jti: call.token.jti.clone(),
+        })
     }
 }

@@ -58,6 +58,7 @@ appends `-ee`. `image.tag` overrides the version (default: chart appVersion).
 | `config.logLevel`, `config.cookieSecure`, `config.localPassword`, `config.afterSignIn`, `config.webRoot` | `info`, `true`, `true`, `/`, `""` | Server settings |
 | `config.spans.*` | `http://clickhouse:8123`, `ferristrace`, `ferristrace`, 30 days | ClickHouse |
 | `config.oidc.*`, `config.mail.*`, `config.objects.*` | disabled | Optional integrations |
+| `config.agents.issuer`, `config.agents.audience` | empty | Issuer and required audience of the access tokens AI agents present; agents stay off without the audience (`FERRISTRACE_AGENTS__*`) |
 | `secrets.*` | see above | Existing Secrets, by name and key |
 
 gRPC (4317) is exposed by the Service only; route it with your own

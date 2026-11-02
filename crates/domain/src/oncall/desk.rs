@@ -86,7 +86,7 @@ where
         now: UnixSeconds,
     ) -> Result<PageView, OncallError> {
         let token = match who {
-            Reader::Key(_) => {
+            Reader::Key(_) | Reader::Agent(_) => {
                 self.readers.grant(who, org).await?;
                 return Err(OncallError::ReadOnly);
             }

@@ -1,9 +1,9 @@
 use ferristrace_domain::{
-    AckKey, AlertMailer, AuthProvider, Authorizer, Clock, ClusterReader, CulpritReader, DeployFeed,
-    ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader, LogSink, Mailer, MetricReader,
-    MetricSink, PasswordHasher, Photos, PlacementReader, ProvisionPolicy, QuotaPolicy,
-    ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory, UsageMeter,
-    UsageReader, WebhookSender,
+    AckKey, AgentTokens, AlertMailer, AuthProvider, Authorizer, Clock, ClusterReader,
+    CulpritReader, DeployFeed, ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader,
+    LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos, PlacementReader,
+    ProvisionPolicy, QuotaPolicy, ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer,
+    TenantDirectory, UsageMeter, UsageReader, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -20,6 +20,7 @@ pub trait Stack: Send + Sync + 'static {
     type MetricStore: MetricReader + ClusterReader + Send + Sync + 'static;
     type Meter: UsageMeter + UsageReader + Send + Sync + 'static;
     type Oidc: Authorizer + AuthProvider + Send + Sync + 'static;
+    type Agents: AgentTokens + Send + Sync + 'static;
     type Sink: SpanSink + LogSink + MetricSink + Send + Sync + 'static;
     type Quota: QuotaPolicy + Send + Sync + 'static;
     type Directory: TenantDirectory + Send + Sync + 'static;
@@ -56,6 +57,7 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) log_store: Option<S::LogStore>,
     pub(crate) metric_store: Option<S::MetricStore>,
     pub(crate) oidc: Option<S::Oidc>,
+    pub(crate) agents: Option<S::Agents>,
     pub(crate) provision: ProvisionPolicy,
     pub(crate) ack_key: Option<AckKey>,
     pub(crate) status_key: Option<LinkKey>,
@@ -66,6 +68,12 @@ impl<S: Stack> Ferristrace<S> {
     #[must_use]
     pub fn with_ack_key(mut self, key: Option<AckKey>) -> Self {
         self.ack_key = key;
+        self
+    }
+
+    #[must_use]
+    pub fn with_agent_tokens(mut self, tokens: Option<S::Agents>) -> Self {
+        self.agents = tokens;
         self
     }
 
@@ -95,6 +103,7 @@ impl<S: Stack> Ferristrace<S> {
             log_store: adapters.log_store,
             metric_store: adapters.metric_store,
             oidc: adapters.oidc,
+            agents: None,
             provision: adapters.provision,
             ack_key: None,
             status_key: None,

@@ -22,6 +22,8 @@ pub enum IncidentError {
     NoSession,
     #[error("this reader holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a read key reads incidents; changing them takes a session")]
     ReadOnly,
     #[error("no incident of this organisation carries that id")]
@@ -64,6 +66,7 @@ impl From<ReadRefusal> for IncidentError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

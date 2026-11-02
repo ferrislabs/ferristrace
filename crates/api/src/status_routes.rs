@@ -492,7 +492,7 @@ async fn list<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let listed = state.app.status_pages(&who, TenantId::new(org)).await?;
     Ok(Json(PageList {
         status_pages: listed.iter().map(PageBody::from).collect(),
@@ -507,7 +507,7 @@ async fn one<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let sheet = state
         .app
         .status_page(&who, TenantId::new(org), StatusPageId::new(id))
@@ -524,7 +524,7 @@ async fn create<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let draft = asked.draft()?;
     let sheet = state
         .app
@@ -543,7 +543,7 @@ async fn update<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let patch = asked.patch()?;
     let sheet = state
         .app
@@ -560,7 +560,7 @@ async fn remove<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     state
         .app
         .delete_status_page(&who, TenantId::new(org), StatusPageId::new(id))
@@ -576,7 +576,7 @@ async fn preview<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let view = state
         .app
         .preview_status_page(&who, TenantId::new(org), StatusPageId::new(id))
@@ -593,7 +593,7 @@ async fn add_component<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let draft = asked.draft()?;
     let component = state
         .app
@@ -611,7 +611,7 @@ async fn change_component<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let patch = asked.patch()?;
     let changed = state
         .app
@@ -634,7 +634,7 @@ async fn remove_component<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     state
         .app
         .remove_status_component(
@@ -656,7 +656,7 @@ async fn order<S: Stack>(
 where
     S::Repos: StatusRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let ordered = state
         .app
         .order_status_components(
@@ -785,6 +785,7 @@ fn status_of(error: StatusError) -> StatusCode {
         | StatusError::NoSuchPostmortem
         | StatusError::NoSuchSubscriber => StatusCode::NOT_FOUND,
         StatusError::ReadOnly
+        | StatusError::OutOfScope
         | StatusError::NotAdmin
         | StatusError::Link(LinkRefused::Tampered) => StatusCode::FORBIDDEN,
         StatusError::Link(LinkRefused::Expired) => StatusCode::GONE,

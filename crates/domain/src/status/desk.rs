@@ -331,7 +331,7 @@ where
 
     async fn admin(&self, who: &Reader, org: TenantId) -> Result<AccountId, StatusError> {
         match who {
-            Reader::Key(_) => {
+            Reader::Key(_) | Reader::Agent(_) => {
                 self.readers.grant(who, org).await?;
                 Err(StatusError::ReadOnly)
             }

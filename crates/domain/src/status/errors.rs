@@ -38,6 +38,8 @@ pub enum StatusError {
     NoSession,
     #[error("this reader holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a read key reads status pages; changing them takes a session")]
     ReadOnly,
     #[error("only an administrator changes a status page")]
@@ -90,6 +92,7 @@ impl From<ReadRefusal> for StatusError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

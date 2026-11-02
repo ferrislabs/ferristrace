@@ -123,7 +123,7 @@ async fn listed<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let found = state
         .app
         .postmortem_summaries(&who, TenantId::new(org))
@@ -141,7 +141,7 @@ async fn one<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let written = state
         .app
         .postmortem(&who, TenantId::new(org), IncidentId::new(id))
@@ -158,7 +158,7 @@ async fn draft<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let written = state
         .app
         .draft_postmortem(
@@ -181,7 +181,7 @@ async fn edit<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let body = PostmortemBody::try_from(asked.body.as_str())?;
     let written = state
         .app
@@ -198,7 +198,7 @@ async fn publish<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let written = state
         .app
         .publish_postmortem(&who, TenantId::new(org), IncidentId::new(id))
@@ -214,7 +214,7 @@ async fn unpublish<S: Stack>(
 where
     S::Repos: PostmortemRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let written = state
         .app
         .unpublish_postmortem(&who, TenantId::new(org), IncidentId::new(id))
@@ -248,7 +248,9 @@ fn status_of(error: PostmortemError) -> StatusCode {
         PostmortemError::NotYours
         | PostmortemError::NoSuchIncident
         | PostmortemError::NoSuchPostmortem => StatusCode::NOT_FOUND,
-        PostmortemError::ReadOnly | PostmortemError::NotAdmin => StatusCode::FORBIDDEN,
+        PostmortemError::ReadOnly | PostmortemError::OutOfScope | PostmortemError::NotAdmin => {
+            StatusCode::FORBIDDEN
+        }
         PostmortemError::Edited | PostmortemError::Published | PostmortemError::Exists => {
             StatusCode::CONFLICT
         }
