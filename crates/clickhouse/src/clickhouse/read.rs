@@ -42,7 +42,9 @@ const STEPS: &str = "SELECT \
 const WHOLE: &str = "SELECT \
      count() AS requests, \
      countIf(status = 'error') AS errors, \
-     quantile(0.95)(toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time)) AS p95 \
+     quantiles(0.5, 0.95, 0.99)( \
+       toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
+     ) AS latency \
    {served}";
 
 const SUMMARIES: &str = "SELECT \
@@ -118,7 +120,7 @@ struct StepRow {
 struct WholeRow {
     requests: u64,
     errors: u64,
-    p95: f64,
+    latency: Vec<f64>,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -249,7 +251,9 @@ impl SpanReader for ClickhouseReader {
             step_nanos: step,
             requests: whole.requests,
             errors: whole.errors,
-            p95_nanos: (whole.requests > 0).then(|| nanos_of(whole.p95)),
+            p50_nanos: (whole.requests > 0).then(|| quantile(&whole.latency, 0)),
+            p95_nanos: (whole.requests > 0).then(|| quantile(&whole.latency, 1)),
+            p99_nanos: (whole.requests > 0).then(|| quantile(&whole.latency, 2)),
             points: steps
                 .into_iter()
                 .map(|row| ServicePoint {

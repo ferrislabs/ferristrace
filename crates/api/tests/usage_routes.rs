@@ -181,6 +181,7 @@ impl Stack for TestStack {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 fn state(live: u64, included: Option<u64>) -> AppState<TestStack> {
@@ -189,6 +190,7 @@ fn state(live: u64, included: Option<u64>) -> AppState<TestStack> {
         clock: Inert::default(),
         hasher: Inert::default(),
         mailer: Inert::default(),
+        webhooks: Inert::default(),
         photos: NoPhotos,
         meter: Live(live),
         span_store: None,

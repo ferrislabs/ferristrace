@@ -134,7 +134,9 @@ impl SpanReader for &Asked {
             step_nanos: filter.step_nanos(),
             requests: 5,
             errors: 2,
+            p50_nanos: None,
             p95_nanos: Some(70),
+            p99_nanos: None,
             points: vec![ServicePoint {
                 start_unix_nanos: start,
                 requests: 5,

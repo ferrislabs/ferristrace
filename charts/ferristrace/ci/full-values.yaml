@@ -19,6 +19,9 @@ config:
     endpoint: https://account.r2.cloudflarestorage.com
     bucket: ferristrace-avatars
     region: auto
+  alerts:
+    allowPrivateWebhooks: false
+    baseUrl: https://ferristrace.example.com
 secrets:
   clickhousePassword:
     name: ferristrace-clickhouse

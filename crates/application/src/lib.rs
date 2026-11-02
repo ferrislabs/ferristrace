@@ -1,6 +1,7 @@
 extern crate self as ferristrace_application;
 
 mod access;
+mod alerts;
 mod audit;
 mod borrowed;
 mod catalogue;
@@ -23,6 +24,7 @@ mod usage;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use alerts::SignalReaders;
 pub use ferristrace_macros::{repository, transactional};
 pub use ingestion::Ingestion;
 pub use issues::IssueRuling;

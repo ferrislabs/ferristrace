@@ -21,10 +21,11 @@ use ferristrace_clickhouse::{
     SpanStoreSettings, open_span_store,
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
-use ferristrace_domain::{Clock, ProvisionPolicy, TenantId};
+use ferristrace_domain::{Clock, Drained, ProvisionPolicy, TenantId, Tick};
 use ferristrace_infra::{
-    Argon2Hasher, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
+    Argon2Hasher, HttpWebhooks, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
     PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
+    WebhookSettings,
 };
 use ferristrace_postgres::{
     CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
@@ -33,6 +34,9 @@ use ferristrace_redis::RedisMeter;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio::time::MissedTickBehavior;
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +48,8 @@ use crate::routes::{Held, State, control_routes, cookie_of};
 const SECONDS_PER_HOUR: u64 = 3600;
 const FLUSH_FALLBACK: Duration = Duration::from_secs(5);
 const MIN_FLUSH_WAIT: Duration = Duration::from_millis(100);
+const EVALUATE_EVERY: Duration = Duration::from_secs(60);
+const DELIVER_EVERY: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 struct Optional {
@@ -113,6 +119,8 @@ async fn main() -> anyhow::Result<()> {
         None => None,
     };
     let identity = control_routes(&config, state.as_ref(), held);
+    let (stop, stopped) = watch::channel(false);
+    let watching = watch_alerts(state.as_ref(), held.explore, &stopped);
     let gateway = Arc::new(gateway_of(
         directory_of(pool.as_ref(), default_retention_days(config.spans.as_ref())),
         allowances,
@@ -136,6 +144,12 @@ async fn main() -> anyhow::Result<()> {
     let grpc = tokio::spawn(serve_grpc(config.grpc_address, gateway));
 
     let (http, grpc) = tokio::try_join!(http, grpc).context("joining the listeners")?;
+    stop.send_replace(true);
+    for loop_ in watching {
+        if let Err(error) = loop_.await {
+            tracing::error!(%error, "an alert loop did not stop cleanly");
+        }
+    }
     flush_once(&sink).await;
     http?;
     grpc?;
@@ -153,6 +167,7 @@ async fn provision(command: Command, config: &Config) -> anyhow::Result<()> {
     let adapters = adapters_of(
         hasher,
         Relay::Unreachable,
+        guarded_webhooks(),
         Gallery::Nowhere,
         Arc::new(Meter::Memory(MemoryMeter::default())),
         Optional::default(),
@@ -169,21 +184,20 @@ fn control_plane(
     optional: Optional,
 ) -> anyhow::Result<State> {
     let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
-    let seal = if config.local_password {
-        seal_of(config)?
-    } else {
-        None
-    };
-    let mailer = if config.local_password {
-        relay_of(config)?
-    } else {
-        Relay::Unreachable
-    };
+    let seal = seal_of(config)?;
+    let mailer = relay_of(config)?;
     let repos = Postgres::new(pool.clone(), SystemClock)
         .with_hasher(hasher.clone())
         .with_seal(seal)
         .with_invite_window(INVITE_WINDOW);
-    let adapters = adapters_of(hasher, mailer, gallery, meter, optional);
+    let adapters = adapters_of(
+        hasher,
+        mailer,
+        webhooks_of(config),
+        gallery,
+        meter,
+        optional,
+    );
     let app = Arc::new(Ferristrace::<Production>::new(repos, adapters));
     Ok(AppState::new(app, cookie_of(config))
         .with_default_retention_days(default_retention_days(config.spans.as_ref())))
@@ -192,6 +206,7 @@ fn control_plane(
 fn adapters_of(
     hasher: Argon2Hasher,
     mailer: Relay,
+    webhooks: HttpWebhooks,
     photos: Gallery,
     meter: Arc<Meter>,
     optional: Optional,
@@ -200,6 +215,7 @@ fn adapters_of(
         clock: SystemClock,
         hasher,
         mailer,
+        webhooks,
         photos,
         meter,
         span_store: optional.span_store,
@@ -267,6 +283,7 @@ fn usage_of(pool: &PgPool, meter: Arc<Meter>) -> anyhow::Result<Ferristrace<Prod
     let adapters = adapters_of(
         hasher,
         Relay::Unreachable,
+        guarded_webhooks(),
         Gallery::Nowhere,
         meter,
         Optional::default(),
@@ -433,20 +450,21 @@ fn gallery_of(config: &Config) -> anyhow::Result<Gallery> {
 fn seal_of(config: &Config) -> anyhow::Result<Option<SecretSeal>> {
     let Some(secrets) = &config.secrets else {
         tracing::warn!(
-            "no secrets.at_rest_key is configured, so nobody can keep a second factor; mint one with `openssl rand -hex 32`"
+            "no secrets.at_rest_key is configured, so nobody can keep a second factor or a webhook \
+             channel; mint one with `openssl rand -hex 32`"
         );
         return Ok(None);
     };
     let seal = SecretSeal::from_hex(&secrets.at_rest_key).context("reading secrets.at_rest_key")?;
-    tracing::info!("second factors are sealed at rest");
+    tracing::info!("second factors and webhook secrets are sealed at rest");
     Ok(Some(seal))
 }
 
 fn relay_of(config: &Config) -> anyhow::Result<Relay> {
     let Some(mail) = &config.mail else {
         tracing::warn!(
-            "no mail relay is configured, so nobody can ask for a reset link; \
-             hand one over with `ferristrace reset-password`"
+            "no mail relay is configured, so nobody can ask for a reset link and no alert is mailed; \
+             hand a reset link over with `ferristrace reset-password`"
         );
         return Ok(Relay::Unreachable);
     };
@@ -458,8 +476,111 @@ fn relay_of(config: &Config) -> anyhow::Result<Relay> {
         base_url: mail.base_url.clone(),
     })
     .context("preparing the mail relay")?;
-    tracing::info!(relay = %mail.relay, "password resets can be sent");
+    tracing::info!(relay = %mail.relay, "password resets and alerts can be mailed");
     Ok(Relay::Smtp(Box::new(mailer)))
+}
+
+fn guarded_webhooks() -> HttpWebhooks {
+    HttpWebhooks::new(WebhookSettings::default())
+}
+
+fn webhooks_of(config: &Config) -> HttpWebhooks {
+    let base_url = config
+        .alerts
+        .base_url
+        .clone()
+        .or_else(|| config.mail.as_ref().map(|mail| mail.base_url.clone()))
+        .unwrap_or_default();
+    if config.alerts.allow_private_webhooks {
+        tracing::warn!(
+            "alerts.allow_private_webhooks is set, so a webhook may reach private, loopback \
+             and link-local addresses, cloud metadata included"
+        );
+    }
+    HttpWebhooks::new(WebhookSettings {
+        allow_private: config.alerts.allow_private_webhooks,
+        base_url,
+        ..WebhookSettings::default()
+    })
+}
+
+fn watch_alerts(
+    state: Option<&State>,
+    held: bool,
+    stopped: &watch::Receiver<bool>,
+) -> Vec<JoinHandle<()>> {
+    let (Some(state), true) = (state, held) else {
+        tracing::warn!(
+            "alert rules are not evaluated: that needs both a control plane to hold the rules \
+             and a span store to read the signals from"
+        );
+        return Vec::new();
+    };
+    tracing::info!("alert rules are evaluated every minute and delivered every ten seconds");
+    vec![
+        tokio::spawn(evaluate_alerts(Arc::clone(&state.app), stopped.clone())),
+        tokio::spawn(deliver_alerts(Arc::clone(&state.app), stopped.clone())),
+    ]
+}
+
+fn ticking(period: Duration) -> tokio::time::Interval {
+    let mut ticks = tokio::time::interval(period);
+    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    ticks
+}
+
+async fn evaluate_alerts(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(EVALUATE_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.evaluate_alerts().await {
+            Ok(Tick::Skipped) => tracing::debug!("another replica evaluated this minute"),
+            Ok(Tick::Evaluated {
+                rules,
+                transitions,
+                failed,
+                pruned,
+            }) => {
+                tracing::debug!(rules, transitions, pruned, "the alert rules were evaluated");
+                if failed > 0 {
+                    tracing::warn!(failed, "some alert rules could not read their signal");
+                }
+            }
+            Err(error) => tracing::error!(%error, "the alert rules could not be evaluated"),
+        }
+    }
+}
+
+async fn deliver_alerts(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(DELIVER_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.deliver_alerts().await {
+            Ok(Drained::Skipped) => tracing::debug!("another replica is delivering"),
+            Ok(Drained::Delivered {
+                sent: 0,
+                retried: 0,
+                abandoned: 0,
+            }) => {}
+            Ok(Drained::Delivered {
+                sent,
+                retried,
+                abandoned,
+            }) => tracing::info!(
+                sent,
+                retried,
+                abandoned,
+                "alert notifications were delivered"
+            ),
+            Err(error) => tracing::error!(%error, "the alert notifications could not be delivered"),
+        }
+    }
 }
 
 async fn serve_http(

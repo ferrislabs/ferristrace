@@ -3,6 +3,7 @@ mod secret;
 mod store;
 
 pub mod access;
+pub mod alerts;
 pub mod audit;
 pub mod catalogue;
 pub mod explore;
@@ -22,6 +23,18 @@ pub mod testing;
 pub use access::{
     ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
     KeyRing, KeyScope, KeyScopes, ReadGrant, ReadRefusal, Reader, Readers,
+};
+pub use alerts::{
+    AlertBook, AlertChannels, AlertDuty, AlertError, AlertEvent, AlertEvents, AlertMailer,
+    AlertOutbox, AlertRules, AlertSeverity, AlertStates, AlertStatus, BadChannel, BadRule, Channel,
+    ChannelBook, ChannelId, ChannelKind, ChannelName, ChannelView, Claimed, Comparison, Condition,
+    Courier, Definition, DefinitionParts, Delivery, DeliveryError, DeliveryStatus, Destination,
+    Dispatch, Drained, Duty, EmailList, Evaluator, EventId, HISTORY_DAYS, IssuedChannel, Labels,
+    LogSignal, MetricSignal, NoDataPolicy, Notification, NotificationId, Observation, Overall,
+    PREVIEW_POINTS, Preview, ProbeError, RETRY_AFTER_SECS, Rule, RuleDraft, RuleId, RuleName,
+    RulePatch, RuleState, SeriesState, Settlement, Signal, SignalProbe, TICK_SECS, Tick,
+    TraceMeasure, TraceSignal, Transition, Watched, WebhookSecret, WebhookSender, WebhookUrl,
+    next_state,
 };
 pub use audit::{
     Action, Actor, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPage, AuditTrail, Cursor,

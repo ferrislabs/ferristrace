@@ -451,7 +451,7 @@ impl<R, H, M, P, Z> Stack for Wired<R, H, M, P, Z>
 where
     R: ferristrace_application::registry::UnitOfWork,
     H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + Send + Sync + 'static,
+    M: Mailer + ferristrace_domain::AlertMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {
@@ -469,6 +469,7 @@ where
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 pub fn state<R, H, M, P, Z>(
@@ -482,7 +483,7 @@ pub fn state<R, H, M, P, Z>(
 where
     R: ferristrace_application::registry::UnitOfWork,
     H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + Send + Sync + 'static,
+    M: Mailer + ferristrace_domain::AlertMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {
@@ -490,6 +491,7 @@ where
         clock: Inert::default(),
         hasher,
         mailer,
+        webhooks: Inert::default(),
         photos,
         meter: Inert::default(),
         span_store: None,

@@ -1,17 +1,18 @@
 use core::future::Future;
 
-pub use ferristrace_domain::testing::Notebook;
+pub use ferristrace_domain::testing::{AlertLedger, Couriered, Notebook};
 use ferristrace_domain::{
-    AccountId, Admission, Aggregation, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditFilter,
-    AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock, Counted,
-    DecompressedBytes, Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader,
-    IssuedKey, KeyId, KeyName, KeyScopes, LogBucket, LogPage, LogQuery, LogReader, LogRecord,
-    LogSink, Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink,
-    Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow,
-    ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet,
-    ServiceFilter, ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor,
-    SpanPage, SpanPages, SpanReader, SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter,
-    TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
+    AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
+    AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,
+    Counted, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, Fingerprint, HashError,
+    IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LogBucket, LogPage,
+    LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
+    MetricQuery, MetricReader, MetricSink, Occurrence, PageSize, Password, PasswordCheck,
+    PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError,
+    ResetToken, ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries, ServiceSummary,
+    SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink,
+    StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -77,6 +78,27 @@ impl Mailer for Inert {
         _token: &ResetToken,
     ) -> Result<(), ResetError> {
         Ok(())
+    }
+}
+
+impl AlertMailer for Inert {
+    async fn send_alert(&self, _to: &EmailList, _dispatch: &Dispatch) -> Result<(), DeliveryError> {
+        Err(DeliveryError::new("no mail relay is configured"))
+    }
+}
+
+impl WebhookSender for Inert {
+    fn admits(&self, _url: &WebhookUrl) -> bool {
+        false
+    }
+
+    async fn send(
+        &self,
+        _url: &WebhookUrl,
+        _secret: &WebhookSecret,
+        _dispatch: &Dispatch,
+    ) -> Result<(), DeliveryError> {
+        Err(DeliveryError::new("no webhook sender is configured"))
     }
 }
 

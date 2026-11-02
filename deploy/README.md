@@ -201,7 +201,9 @@ stores inside its own network rather than something to choose.
 | `RUST_LOG` | `info` | Log filter |
 | `POSTGRES_BIND` | `127.0.0.1` | Which address the control plane answers on |
 | `POSTGRES_PORT` | `5432` | Host port for the control plane |
-| `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor is offered |
+| `FERRISTRACE_SECRETS__AT_REST_KEY` | unset | 32 bytes as hex, without which no second factor and no webhook channel is offered |
+| `FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS` | `false` | Whether a webhook may reach a private, loopback or link-local address |
+| `FERRISTRACE_ALERTS__BASE_URL` | the mail `base_url` | Public address of the app, for the link in an alert |
 | `FERRISTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
 | `FERRISTRACE_IMAGE` | built locally | A published image to run instead |
 
@@ -252,6 +254,60 @@ codes is unlocked with SQL:
 docker compose exec postgres psql -U ferristrace -d ferristrace \
   -c "DELETE FROM auth_factors WHERE account_id = (SELECT id FROM accounts WHERE email = 'person@example.com')"
 ```
+
+## Alerts
+
+A rule watches one signal — a trace measure, a count of matching logs, or a
+metric — over a window, and goes `ok`, `pending`, `firing` or `no_data`. It
+needs both stores: the control plane keeps the rules and the span store
+holds what they read, so without either the server logs that rules are not
+evaluated and the alert routes answer `503` for a preview.
+
+Every replica runs two loops: evaluation every minute, delivery every ten
+seconds. Each runs inside one Postgres transaction that first takes
+`pg_try_advisory_xact_lock`; a replica that does not get it skips, and the
+minute it evaluated is recorded in `alert_duties` so a replica arriving late
+in the same minute skips too. Running several replicas never evaluates a
+minute twice nor sends a notification twice.
+
+Units: a trace latency is in milliseconds, an error rate in percent, a trace
+or log count is the count over the window, and a metric is in its own unit,
+aggregated over the window (sum, min or max of the steps; the mean of the
+steps for avg, rate and the percentiles).
+
+A change into or out of `firing` sends one notification per channel of the
+rule. Email goes through the same relay as reset links. A webhook is a JSON
+`POST`:
+
+```json
+{"alert": {"id": "…", "name": "Checkout errors", "severity": "critical"},
+ "from": "pending", "to": "firing", "value": 12.5, "labels": {},
+ "at_ms": 1700000000000, "org": "…", "url_to_alert": "https://app.example.com/alerts/…"}
+```
+
+signed with `X-FerrisTrace-Signature: sha256=<hex>`, the HMAC-SHA256 of the
+exact body under the channel secret (the 64 hex characters answered once when
+the channel is created). Verify it before trusting the body:
+
+```sh
+printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET"
+```
+
+A failed delivery is retried 1, 5, 15 and 60 minutes after each failure,
+then marked `abandoned` with the last error in `alert_outbox`; nothing is
+dropped silently. History is kept 30 days.
+
+A webhook secret is sealed with `secrets.at_rest_key`, like a second factor.
+Without the key the server refuses to create a webhook channel (`422`)
+rather than keep the secret in clear; email channels work without it.
+
+A webhook never reaches a private, loopback, link-local or cloud metadata
+address, checked on the literal address when the channel is saved and on
+every resolved address before each delivery, with no redirect followed. A
+deployment whose receivers live on its own network can lift that with
+`FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS=true` (the chart's
+`config.alerts.allowPrivateWebhooks`), at the price of letting any admin
+point the server at internal services.
 
 ## Profile photos
 

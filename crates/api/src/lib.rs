@@ -1,3 +1,4 @@
+mod alert_routes;
 mod audit_routes;
 mod auth;
 mod carried;
@@ -28,6 +29,7 @@ mod usage_routes;
 mod web_routes;
 mod whoami_routes;
 
+pub use alert_routes::{AlertRefused, alert_router};
 pub use audit_routes::{AuditRefused, audit_router};
 pub use carried::NotCarried;
 pub use catalogue_routes::{ProjectRefused, catalogue_router};

@@ -3,7 +3,7 @@ use core::fmt;
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 use ferristrace_domain::{SECRET_BYTES, TotpSecret};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const NONCE_BYTES: usize = 12;
 
@@ -25,27 +25,34 @@ impl SecretSeal {
     }
 
     pub fn seal(&self, secret: &TotpSecret) -> Option<Vec<u8>> {
+        self.seal_bytes(secret.as_bytes().as_slice())
+    }
+
+    pub fn unseal(&self, row: &[u8]) -> Option<TotpSecret> {
+        let opened = self.unseal_bytes(row)?;
+        let bytes: [u8; SECRET_BYTES] = opened.as_slice().try_into().ok()?;
+        Some(TotpSecret::from_bytes(bytes))
+    }
+
+    pub fn seal_bytes(&self, clear: &[u8]) -> Option<Vec<u8>> {
         let nonce: [u8; NONCE_BYTES] = rand::random();
-        let sealed = self
-            .cipher
-            .encrypt(&Nonce::from(nonce), secret.as_bytes().as_slice())
-            .ok()?;
+        let sealed = self.cipher.encrypt(&Nonce::from(nonce), clear).ok()?;
         let mut row = Vec::with_capacity(NONCE_BYTES + sealed.len());
         row.extend_from_slice(&nonce);
         row.extend_from_slice(&sealed);
         Some(row)
     }
 
-    pub fn unseal(&self, row: &[u8]) -> Option<TotpSecret> {
+    pub fn unseal_bytes(&self, row: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
         if row.len() <= NONCE_BYTES {
             return None;
         }
         let (head, body) = row.split_at(NONCE_BYTES);
         let nonce: [u8; NONCE_BYTES] = head.try_into().ok()?;
-        let mut opened = self.cipher.decrypt(&Nonce::from(nonce), body).ok()?;
-        let bytes: Option<[u8; SECRET_BYTES]> = opened.as_slice().try_into().ok();
-        opened.zeroize();
-        Some(TotpSecret::from_bytes(bytes?))
+        self.cipher
+            .decrypt(&Nonce::from(nonce), body)
+            .ok()
+            .map(Zeroizing::new)
     }
 }
 
@@ -145,6 +152,25 @@ mod tests {
             Err(BadKey)
         );
         assert!(SecretSeal::from_hex(&format!("  {}  ", a_key())).is_ok());
+    }
+
+    #[test]
+    fn any_bytes_seal_and_come_back_whole() {
+        let seal = SecretSeal::from_hex(&a_key()).expect("a key");
+        let clear = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        let row = seal.seal_bytes(clear).expect("it seals");
+
+        assert!(!row.windows(clear.len()).any(|window| window == clear));
+        assert_eq!(
+            seal.unseal_bytes(&row).as_deref().map(Vec::as_slice),
+            Some(&clear[..])
+        );
+        assert_eq!(
+            seal.unseal(&row),
+            None,
+            "a webhook secret is not a totp secret"
+        );
     }
 
     #[test]

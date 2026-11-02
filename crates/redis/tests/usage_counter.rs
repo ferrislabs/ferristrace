@@ -47,6 +47,7 @@ impl Stack for Wired {
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
+    type Webhooks = Inert;
 }
 
 async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristrace<Wired>> {
@@ -57,6 +58,7 @@ async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristr
             clock: FixedClock::at(seconds),
             hasher: Inert::default(),
             mailer: Inert::default(),
+            webhooks: Inert::default(),
             photos: NoPhotos,
             meter,
             span_store: None,

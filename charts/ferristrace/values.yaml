@@ -116,6 +116,11 @@ config:
     endpoint: ""
     bucket: ""
     region: ""
+  alerts:
+    # -- Let webhooks reach private, loopback and link-local addresses. Keep false unless every receiver lives inside the cluster.
+    allowPrivateWebhooks: false
+    # -- Public address of the web app, used for links in alert mail and webhooks. Empty falls back to config.mail.baseUrl.
+    baseUrl: ""
 
 # Existing Secrets, by name and key. This chart never creates or holds a value.
 # An empty name leaves the optional ones out.

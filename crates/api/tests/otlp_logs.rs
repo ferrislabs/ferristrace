@@ -55,6 +55,7 @@ impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
     type Sink = Arc<MemorySink>;
     type Quota = Q;
     type Directory = StaticDirectory;
+    type Webhooks = Inert;
 }
 
 struct Harness<Q: QuotaPolicy + Send + Sync + 'static> {

@@ -10,13 +10,14 @@ use ferristrace_domain::telemetry::{
     BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
 };
 use ferristrace_domain::{
-    DecompressedBytes, Email, IngestKey, LogRecord, LogSink, Mailer, Metric, MetricSink, NoPhotos,
-    Photo, PhotoError, Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span,
-    SpanSink, TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
+    AlertMailer, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey,
+    LogRecord, LogSink, Mailer, Metric, MetricSink, NoPhotos, Photo, PhotoError, Photos, Pictured,
+    Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink, TenantDirectory, TenantId,
+    UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
-    Argon2Hasher, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer, StaticDirectory,
-    SystemClock,
+    Argon2Hasher, HttpWebhooks, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer,
+    StaticDirectory, SystemClock,
 };
 use ferristrace_postgres::{Postgres, PostgresDirectory};
 use ferristrace_redis::RedisMeter;
@@ -39,6 +40,7 @@ impl Stack for Production {
     type Sink = Arc<Sink>;
     type Quota = StaticQuota<Arc<Meter>>;
     type Directory = Directory;
+    type Webhooks = HttpWebhooks;
 }
 
 const _: fn() = || {
@@ -99,6 +101,18 @@ impl Mailer for Relay {
             Self::Unreachable => {
                 tracing::warn!("a reset link was asked for but no mail relay is configured");
                 Err(ResetError::Undeliverable)
+            }
+        }
+    }
+}
+
+impl AlertMailer for Relay {
+    async fn send_alert(&self, to: &EmailList, dispatch: &Dispatch) -> Result<(), DeliveryError> {
+        match self {
+            Self::Smtp(mailer) => mailer.send_alert(to, dispatch).await,
+            Self::Unreachable => {
+                tracing::warn!("an alert was to be mailed but no mail relay is configured");
+                Err(DeliveryError::new("no mail relay is configured"))
             }
         }
     }

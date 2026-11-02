@@ -15,11 +15,12 @@ lettre.workspace = true
 openidconnect.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 time.workspace = true
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "net"] }
 tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
@@ -29,7 +30,6 @@ axum.workspace = true
 base64.workspace = true
 ferristrace-domain = { workspace = true, features = ["testing"] }
 jsonwebtoken.workspace = true
-serde_json.workspace = true
 rsa = { version = "0.9.10", features = ["getrandom"] }
 tokio = { workspace = true, features = ["test-util"] }
 

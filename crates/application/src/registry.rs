@@ -1,9 +1,10 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountDirectory, Accounts, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource,
-    FactorStore, Gate, IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll,
-    SessionRoll, SessionStore, Squads, UsageHistory,
+    AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
+    AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
+    IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll,
+    SessionStore, Squads, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +38,18 @@ pub trait RepoFor<D>: UnitOfWork {
 pub mod domain {
     #[derive(Debug)]
     pub struct Accounts;
+    #[derive(Debug)]
+    pub struct AlertChannels;
+    #[derive(Debug)]
+    pub struct AlertDuty;
+    #[derive(Debug)]
+    pub struct AlertEvents;
+    #[derive(Debug)]
+    pub struct AlertOutbox;
+    #[derive(Debug)]
+    pub struct AlertRules;
+    #[derive(Debug)]
+    pub struct AlertStates;
     #[derive(Debug)]
     pub struct ApiKeys;
     #[derive(Debug)]
@@ -209,8 +222,39 @@ impl<R> ProvisioningRepos for R where
 {
 }
 
+pub trait WatchRepos:
+    RepoFor<domain::AlertRules, Repo: AlertRules>
+    + RepoFor<domain::AlertStates, Repo: AlertStates>
+    + RepoFor<domain::AlertEvents, Repo: AlertEvents>
+    + RepoFor<domain::AlertOutbox, Repo: AlertOutbox>
+    + RepoFor<domain::AlertChannels, Repo: AlertChannels>
+    + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+{
+}
+
+impl<R> WatchRepos for R where
+    R: RepoFor<domain::AlertRules, Repo: AlertRules>
+        + RepoFor<domain::AlertStates, Repo: AlertStates>
+        + RepoFor<domain::AlertEvents, Repo: AlertEvents>
+        + RepoFor<domain::AlertOutbox, Repo: AlertOutbox>
+        + RepoFor<domain::AlertChannels, Repo: AlertChannels>
+        + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+{
+}
+
+pub trait AlertRepos:
+    ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
+impl<R> AlertRepos for R where
+    R: ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
 pub trait Repositories:
     ReadRepos
+    + AlertRepos
     + AuditRepos
     + ExportRepos
     + AccessRepos
@@ -227,6 +271,7 @@ pub trait Repositories:
 
 impl<R> Repositories for R where
     R: ReadRepos
+        + AlertRepos
         + AuditRepos
         + ExportRepos
         + AccessRepos
