@@ -62,8 +62,8 @@ Design
     domain telemetry: `LogRecord`, a `LogSink` port (accept scope + records),
     `Ingest` generalised to accept a `Payload` of spans or logs (one admit,
     one meter record).
-    api: `POST /v1/logs` (protobuf and JSON, gzip, same auth and limits as
-    traces), gRPC `LogsService`.
+    api: `POST /v1/logs` (protobuf, gzip, same auth and limits as traces;
+    OTLP/JSON is #198 for both signals), gRPC `LogsService`.
     clickhouse: migration `logs` table (tenant_id, project_id,
     service_name, time, observed_time, severity, severity_number, body,
     attributes Map(String,String), resource Map(String,String), trace_id
