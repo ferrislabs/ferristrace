@@ -49,12 +49,21 @@ export type RuleDefinition = {
 
 export type Rule = RuleDefinition & { id: string; state: RuleState }
 
+export type AlertContext = {
+  pods: { name: string; node: string | null; count: number }[]
+  others: number
+  nodes: string[]
+  versions: string[]
+  labels: Record<string, string>
+}
+
 export type AlertEvent = {
   at_ms: number
   from: AlertStatus
   to: AlertStatus
   value: number | null
   labels: Record<string, string>
+  context?: AlertContext
 }
 
 export type ChannelKind = 'email' | 'webhook'

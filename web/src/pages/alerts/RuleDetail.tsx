@@ -12,7 +12,7 @@ import { useState } from 'react'
 import { stamp } from '@/lib/format'
 import { Link, useNavigate } from '@/lib/router'
 import { labelOf } from '@/components/ft/MetricChart'
-import { StateBadge } from './bits'
+import { AlertContext, StateBadge } from './bits'
 
 const SHOWN = 100
 
@@ -80,7 +80,7 @@ export function RuleDetail({ rule, project, mayChange, onEdit, onClose }: { rule
                     <tbody>{history.events.slice(0, SHOWN).map((one) => (
                       <Tr key={`${one.at_ms}-${labelOf(one.labels)}-${one.to}`}>
                         <Td className="font-mono">{stamp(one.at_ms)}</Td>
-                        <Td><span className="flex flex-wrap items-center gap-1.5">{word(one.from)} <span aria-hidden>→</span> <StateBadge status={one.to} />{Object.keys(one.labels).length ? <span className="font-mono text-caption text-muted-foreground">{labelOf(one.labels)}</span> : null}</span></Td>
+                        <Td><span className="flex flex-wrap items-center gap-1.5">{word(one.from)} <span aria-hidden>→</span> <StateBadge status={one.to} />{Object.keys(one.labels).length ? <span className="font-mono text-caption text-muted-foreground">{labelOf(one.labels)}</span> : null}{one.context ? <span className="basis-full"><AlertContext context={one.context} /></span> : null}</span></Td>
                         <Td numeric>{withUnit(one.value, unit)}</Td>
                       </Tr>
                     ))}</tbody>
