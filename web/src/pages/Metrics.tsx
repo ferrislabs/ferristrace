@@ -5,6 +5,7 @@ import { useSearchParam } from '@/lib/router'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { EmptyState } from '@/components/ft/bits'
+import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import { MetricChart, labelOf } from '@/components/ft/MetricChart'
 import {
   AGGREGATIONS,
@@ -165,7 +166,10 @@ export function Metrics() {
         ) : metric && agg ? (
           <>
             <div className="flex min-w-0 flex-col gap-2">
-              <span className="break-all font-mono text-[13px] font-semibold">{metric.name}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 break-all font-mono text-[13px] font-semibold">{metric.name}</span>
+                <AttachToIncident attachment={{ kind: 'metric', reference: encode(isPinned(picked) ? { ...picked, agg } : { ...picked, agg, fromMs: Date.now() - picked.rangeMs, toMs: Date.now() }) ?? '', label: `${agg}(${metric.name})${picked.groupBy.length ? ` by ${picked.groupBy.join(', ')}` : ''}`.slice(0, 200) }} />
+              </div>
               <Meta metric={metric} />
             </div>
             <div className="flex flex-wrap items-center gap-2" role="search">

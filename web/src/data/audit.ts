@@ -43,6 +43,20 @@ export const AUDIT_ACTIONS = [
   'issue.assigned',
   'account.created_by_operator',
   'reset_link.issued_by_operator',
+  'alert.created',
+  'alert.updated',
+  'alert.deleted',
+  'alert.enabled',
+  'alert.disabled',
+  'channel.created',
+  'channel.updated',
+  'channel.deleted',
+  'incident.opened',
+  'incident.updated',
+  'incident.commented',
+  'incident.attached',
+  'incident.resolved',
+  'incident.reopened',
 ] as const
 
 export const OPERATOR = 'operator'

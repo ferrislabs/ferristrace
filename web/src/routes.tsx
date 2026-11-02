@@ -4,6 +4,8 @@ import { accountQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
 import { AppShell } from '@/components/layout/AppShell'
 import { Alerts } from '@/pages/Alerts'
+import { IncidentDetail } from '@/pages/IncidentDetail'
+import { Incidents } from '@/pages/Incidents'
 import { Docker, Kubernetes } from '@/pages/Infra'
 import { IssueDetail } from '@/pages/IssueDetail'
 import { Issues } from '@/pages/Issues'
@@ -122,6 +124,8 @@ const routeTree = rootRoute.addChildren([
     inShell('/releases', Releases),
     inShell('/releases/$version', ReleaseDetail),
     inShell('/alerts', Alerts, real),
+    inShell('/incidents', Incidents, real),
+    inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra/kubernetes', Kubernetes),
     inShell('/infra/docker', Docker),
     inShell('/traces', Traces, {}),

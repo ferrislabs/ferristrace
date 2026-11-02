@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowLeftRight, BellRing, Box, Boxes, Bug, CircleAlert, Rocket, Cpu, Database, Globe, House, Layers, LayoutGrid, LineChart, Mail, MonitorSmartphone, Package, PanelTop, ScrollText, Users, Waypoints, Zap, type LucideIcon,
+  Activity, ArrowLeftRight, BellRing, Box, Boxes, Bug, CircleAlert, Rocket, Cpu, Database, Globe, House, Layers, LayoutGrid, LineChart, Mail, MonitorSmartphone, Package, PanelTop, ScrollText, Siren, Users, Waypoints, Zap, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = { label: string; to: string; icon: LucideIcon; keys?: string; badge?: boolean }
@@ -23,6 +23,6 @@ export const NAV: NavGroup[] = [
     ],
   },
   { label: 'Infrastructure', collapsible: true, items: [{ label: 'Kubernetes', to: '/infra/kubernetes', icon: Boxes }, { label: 'Docker', to: '/infra/docker', icon: Box }] },
-  { label: 'Reliability', items: [{ label: 'Alerts', to: '/alerts', icon: BellRing, keys: 'A', badge: true }, { label: 'Status page', to: '/status-page', icon: Activity, keys: 'P' }] },
+  { label: 'Reliability', items: [{ label: 'Alerts', to: '/alerts', icon: BellRing, keys: 'A', badge: true }, { label: 'Incidents', to: '/incidents', icon: Siren, keys: 'N', badge: true }, { label: 'Status page', to: '/status-page', icon: Activity, keys: 'P' }] },
 ]
 export const ALL_NAV = NAV.flatMap((g) => g.items)
