@@ -409,7 +409,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Shelf;
@@ -480,7 +479,6 @@ impl Harness {
     fn app(&self, role: OrgRole, span_store: Option<Shelf>) -> Router {
         let adapters = Adapters {
             clock: Inert::default(),
-            hasher: Inert::default(),
             mailer: Inert::default(),
             webhooks: Inert::default(),
             photos: NoPhotos,

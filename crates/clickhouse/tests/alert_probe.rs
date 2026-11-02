@@ -617,7 +617,6 @@ struct Watching;
 impl Stack for Watching {
     type Repos = Ledgered;
     type Clock = Moving;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = ClickhouseReader;
@@ -683,7 +682,6 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
@@ -800,7 +798,6 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
         ledgered.clone(),
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
@@ -1303,7 +1300,6 @@ async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,
@@ -1334,7 +1330,6 @@ struct Spending;
 impl Stack for Spending {
     type Repos = Ledgered;
     type Clock = Moving;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -1537,7 +1532,6 @@ async fn spec_l4_4_a_cost_rule_fires_when_the_priced_calls_cross_ten_dollars_and
         },
         Adapters {
             clock: clock.clone(),
-            hasher: Inert::default(),
             mailer: Couriered::default(),
             webhooks: Couriered::default(),
             photos: NoPhotos,

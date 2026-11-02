@@ -44,7 +44,7 @@ where
         let flow = self.flows.take(state).await?;
         let identity = self
             .provider
-            .sign_in(SignInProof::Federated {
+            .sign_in(SignInProof {
                 code,
                 code_verifier: flow.verifier.exposed().to_owned(),
                 nonce: flow.nonce.clone(),

@@ -46,7 +46,7 @@ impl OidcProvider {
         let metadata = CoreProviderMetadata::discover_async(url, &http)
             .await
             .map_err(|_| OidcError::Discovery)?;
-        let issuer = Issuer::federated(&settings.issuer).map_err(|_| OidcError::Settings)?;
+        let issuer = Issuer::new(&settings.issuer).map_err(|_| OidcError::Settings)?;
 
         Ok(Self {
             metadata,
@@ -92,15 +92,12 @@ impl OidcProvider {
 
 impl AuthProvider for OidcProvider {
     async fn sign_in(&self, proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
-        let SignInProof::Federated {
+        let SignInProof {
             code,
             code_verifier,
             nonce,
             redirect_uri,
-        } = proof
-        else {
-            return Err(AuthError::SourceDisabled);
-        };
+        } = proof;
 
         let redirect = RedirectUrl::new(redirect_uri).map_err(|_| AuthError::Rejected)?;
         let client = CoreClient::from_provider_metadata(
@@ -195,7 +192,7 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();
-        let issuer = Issuer::federated(&settings.issuer).unwrap();
+        let issuer = Issuer::new(&settings.issuer).unwrap();
 
         OidcProvider {
             metadata,

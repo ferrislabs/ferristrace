@@ -1,6 +1,6 @@
 use ferristrace_domain::{
     Bootstrapped, Email, Issued, OrgName, OrgRole, ProjectId, ProjectName, ProvisionError,
-    Provisioning, ResetToken, TenantId,
+    Provisioning, TenantId,
 };
 
 use crate::registry::ProvisioningRepos;
@@ -15,24 +15,9 @@ where
         &self,
         name: &OrgName,
         owner: &Email,
-        local_password: bool,
     ) -> Result<Bootstrapped, ProvisionError> {
         Provisioning::new(control_plane, audit)
-            .bootstrap(name, owner, local_password)
-            .await
-    }
-
-    #[transactional(control_plane, audit, unavailable = ProvisionError::Unreachable)]
-    pub async fn create_account(&self, email: &Email) -> Result<ResetToken, ProvisionError> {
-        Provisioning::new(control_plane, audit)
-            .create_account(email)
-            .await
-    }
-
-    #[transactional(control_plane, audit, unavailable = ProvisionError::Unreachable)]
-    pub async fn issue_reset_link(&self, email: &Email) -> Result<ResetToken, ProvisionError> {
-        Provisioning::new(control_plane, audit)
-            .reset_password(email)
+            .bootstrap(name, owner)
             .await
     }
 

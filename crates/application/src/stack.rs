@@ -1,9 +1,9 @@
 use ferristrace_domain::{
     AckKey, AgentTokens, AlertMailer, AuthProvider, Authorizer, Clock, ClusterReader,
     CulpritReader, DeployFeed, ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader,
-    LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos, PlacementReader,
-    ProvisionPolicy, QuotaPolicy, ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer,
-    TenantDirectory, UsageMeter, UsageReader, WebhookSender,
+    LogSink, MetricReader, MetricSink, Photos, PlacementReader, ProvisionPolicy, QuotaPolicy,
+    ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory, UsageMeter,
+    UsageReader, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -11,8 +11,7 @@ use crate::registry::UnitOfWork;
 pub trait Stack: Send + Sync + 'static {
     type Repos: UnitOfWork;
     type Clock: Clock + Send + Sync + 'static;
-    type Hasher: PasswordHasher + Send + Sync + 'static;
-    type Mailer: Mailer + AlertMailer + StatusMailer + Send + Sync + 'static;
+    type Mailer: AlertMailer + StatusMailer + Send + Sync + 'static;
     type Photos: Photos + Send + Sync + 'static;
     type SpanStore: SpanReader + SpanPages + PlacementReader + CulpritReader + Send + Sync + 'static;
     type IssueStore: IssueReader + ReleaseReader + LlmReader + DeployFeed + Send + Sync + 'static;
@@ -30,7 +29,6 @@ pub trait Stack: Send + Sync + 'static {
 #[derive(Debug)]
 pub struct Adapters<S: Stack> {
     pub clock: S::Clock,
-    pub hasher: S::Hasher,
     pub mailer: S::Mailer,
     pub webhooks: S::Webhooks,
     pub photos: S::Photos,
@@ -47,7 +45,6 @@ pub struct Adapters<S: Stack> {
 pub struct Ferristrace<S: Stack> {
     pub(crate) repos: S::Repos,
     pub(crate) clock: S::Clock,
-    pub(crate) hasher: S::Hasher,
     pub(crate) mailer: S::Mailer,
     pub(crate) webhooks: S::Webhooks,
     pub(crate) photos: S::Photos,
@@ -93,7 +90,6 @@ impl<S: Stack> Ferristrace<S> {
         Self {
             repos,
             clock: adapters.clock,
-            hasher: adapters.hasher,
             mailer: adapters.mailer,
             webhooks: adapters.webhooks,
             photos: adapters.photos,

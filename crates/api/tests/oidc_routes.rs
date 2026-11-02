@@ -48,7 +48,7 @@ impl AuthProvider for Provider {
             return Err(AuthError::Rejected);
         }
         Ok(ResolvedIdentity {
-            issuer: Issuer::federated("https://id.example").expect("a url"),
+            issuer: Issuer::new("https://id.example").expect("a url"),
             subject: Subject::try_from("subject").expect("a subject"),
             email: ferristrace_domain::Email::try_from("person@example.com").expect("an address"),
             email_verified: true,
@@ -141,14 +141,10 @@ fn harness(vouches: bool) -> (axum::Router, Arc<MemoryFlows>, Arc<MemorySessions
         sessions: Arc::clone(&sessions),
         memberships: Nowhere,
         accounts: Directed(OneAccount),
-        gate: Nowhere,
-        resets: Nowhere,
         flows: Arc::clone(&flows),
-        local: Nowhere,
     };
     let app = state(
         fakes,
-        Inert::default(),
         Inert::default(),
         NoPhotos,
         Some(Provider { vouches }),

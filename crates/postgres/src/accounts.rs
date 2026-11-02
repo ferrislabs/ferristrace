@@ -1,7 +1,7 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PasswordHash, PhotoKind,
-    Portrait, ProvisionPolicy, ResolvedIdentity, StoreError,
+    AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PhotoKind, Portrait,
+    ProvisionPolicy, ResolvedIdentity, StoreError,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -30,17 +30,12 @@ impl PostgresAccounts {
         Self { tx: tx.clone() }
     }
 
-    pub async fn create(
-        &self,
-        email: &Email,
-        locked: &PasswordHash,
-    ) -> Result<AccountId, AccountError> {
+    pub async fn create(&self, email: &Email) -> Result<AccountId, AccountError> {
         let mut tx = self.tx.lock().await;
         let id = Uuid::new_v4();
-        sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
+        sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
             .bind(id)
             .bind(email.as_str())
-            .bind(locked.encoded())
             .execute(&mut **tx)
             .await
             .map_err(|error| match &error {
@@ -68,20 +63,13 @@ impl PostgresAccounts {
         Ok(found.map(|row| AccountId::new(row.get("account_id"))))
     }
 
-    pub async fn established(
-        &self,
-        identity: &ResolvedIdentity,
-    ) -> Result<AccountId, AccountError> {
+    pub async fn by_email(&self, email: &Email) -> Result<Option<AccountId>, AccountError> {
         let mut tx = self.tx.lock().await;
-        let id =
-            Uuid::parse_str(identity.subject.as_str()).map_err(|_| AccountError::NotProvisioned)?;
-        let found = sqlx::query("SELECT id AS id FROM accounts WHERE id = $1")
-            .bind(id)
+        let found = sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
+            .bind(email.as_str())
             .fetch_optional(&mut **tx)
             .await?;
-        found
-            .map(|row| AccountId::new(row.get("id")))
-            .ok_or(AccountError::NotProvisioned)
+        Ok(found.map(|row| AccountId::new(row.get("id"))))
     }
 
     pub async fn provision(
@@ -89,9 +77,6 @@ impl PostgresAccounts {
         identity: &ResolvedIdentity,
         policy: ProvisionPolicy,
     ) -> Result<AccountId, AccountError> {
-        if identity.issuer.is_local() {
-            return self.established(identity).await;
-        }
         if let Some(account) = self.linked(identity).await? {
             return Ok(account);
         }

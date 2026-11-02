@@ -84,29 +84,14 @@ async fn the_self_hosted_plan_leaves_every_limit_open() {
 }
 
 #[tokio::test]
-async fn an_account_may_hold_only_a_password() {
-    let Some(pool) = migrated("control_password_only").await else {
-        return;
-    };
-
-    sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'local@example.com', '$argon2id$hash')",
-    )
-    .execute(&pool)
-    .await
-    .expect("a password is a way in on its own");
-}
-
-#[tokio::test]
 async fn an_account_may_now_exist_before_any_way_in_is_linked() {
     let Some(pool) = migrated("control_no_way_in").await else {
         return;
     };
 
     sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'nobody@example.com', NULL)",
+        "INSERT INTO accounts (id, email) \
+         VALUES (gen_random_uuid(), 'nobody@example.com')",
     )
     .execute(&pool)
     .await
@@ -244,6 +229,113 @@ async fn the_migrations_reverse_and_reapply() {
     );
 }
 
+const BEFORE_THE_DROP: i64 = 20_261_113_000_001;
+const DROPPED_BY: &str =
+    include_str!("../migrations/postgres/20261114000001_drop_local_credentials.up.sql");
+
+async fn migrations_applied(pool: &PgPool) -> i64 {
+    sqlx::query("SELECT count(*) AS n FROM _sqlx_migrations WHERE success")
+        .fetch_one(pool)
+        .await
+        .expect("counting the migrations")
+        .get("n")
+}
+
+#[tokio::test]
+async fn no_table_or_column_holds_a_credential_after_the_migrations() {
+    let Some(pool) = migrated("control_no_credentials").await else {
+        return;
+    };
+
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text FROM information_schema.tables \
+         WHERE table_schema = 'control_no_credentials' \
+         AND table_name IN ('password_resets', 'auth_factors', 'recovery_codes', \
+                            'second_step_challenges')",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("listing the tables");
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text || '.' || column_name::text FROM information_schema.columns \
+         WHERE table_schema = 'control_no_credentials' \
+         AND (column_name ILIKE '%password%' OR column_name ILIKE '%totp%' \
+              OR column_name ILIKE '%recovery%')",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("listing the columns");
+
+    assert!(tables.is_empty(), "tables left behind: {tables:?}");
+    assert!(columns.is_empty(), "columns left behind: {columns:?}");
+}
+
+#[tokio::test]
+async fn applying_the_migrations_twice_changes_nothing() {
+    let Some(pool) = migrated("control_applied_twice").await else {
+        return;
+    };
+    let once = migrations_applied(&pool).await;
+
+    CONTROL_PLANE
+        .run(&pool)
+        .await
+        .expect("the migrator finds nothing left to apply");
+    sqlx::raw_sql(DROPPED_BY)
+        .execute(&pool)
+        .await
+        .expect("the drop is harmless when there is nothing to drop");
+
+    assert_eq!(migrations_applied(&pool).await, once);
+}
+
+#[tokio::test]
+async fn the_drop_takes_the_credential_rows_and_keeps_the_accounts() {
+    let Some(pool) = migrated("control_drop_rows").await else {
+        return;
+    };
+    CONTROL_PLANE
+        .undo(&pool, BEFORE_THE_DROP)
+        .await
+        .expect("the drop is reverted");
+    let account = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO accounts (id, email, password_hash) VALUES ($1, 'kept@example.com', 'x')",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("an account that still carried a hash");
+    sqlx::query(
+        "INSERT INTO auth_factors (account_id, kind, secret, created_at) VALUES ($1, 'app', '\\x00', 0)",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("a factor");
+    sqlx::query(
+        "INSERT INTO password_resets (digest, account_id, created_at, expires_at) \
+         VALUES ('\\x01', $1, 0, 1)",
+    )
+    .bind(account)
+    .execute(&pool)
+    .await
+    .expect("a reset");
+
+    CONTROL_PLANE
+        .run(&pool)
+        .await
+        .expect("the drop applies over populated tables");
+
+    let kept: i64 = sqlx::query("SELECT count(*) AS n FROM accounts WHERE id = $1")
+        .bind(account)
+        .fetch_one(&pool)
+        .await
+        .expect("counting the accounts")
+        .get("n");
+    assert_eq!(kept, 1, "the account outlives its credentials");
+}
+
 async fn seeded_org(pool: &PgPool) -> uuid::Uuid {
     let plan: uuid::Uuid = sqlx::query("SELECT id AS id FROM plans WHERE slug = $1")
         .bind(SELF_HOSTED_PLAN)
@@ -370,7 +462,7 @@ fn an_identity(issuer: Issuer, subject: &str, email: &str) -> ResolvedIdentity {
 }
 
 fn a_federated_identity(issuer: &str, subject: &str, email: &str) -> ResolvedIdentity {
-    an_identity(Issuer::federated(issuer).expect("a url"), subject, email)
+    an_identity(Issuer::new(issuer).expect("a url"), subject, email)
 }
 
 async fn account_count(pool: &PgPool) -> i64 {
@@ -533,7 +625,7 @@ async fn an_unverified_email_that_somebody_else_holds_is_refused() {
         .expect("the first provider");
 
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://other.example").expect("a url"),
+        issuer: Issuer::new("https://other.example").expect("a url"),
         subject: Subject::try_from("sub-2").expect("a subject"),
         email: Email::try_from("person@example.com").expect("an address"),
         email_verified: false,
@@ -576,7 +668,7 @@ async fn an_unverified_email_nobody_holds_still_provisions_its_own_account() {
     let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
     let accounts = backend::accounts(&pg);
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://id.example").expect("a url"),
+        issuer: Issuer::new("https://id.example").expect("a url"),
         subject: Subject::try_from("sub-1").expect("a subject"),
         email: Email::try_from("nobody@example.com").expect("an address"),
         email_verified: false,
@@ -603,6 +695,50 @@ async fn an_unverified_email_nobody_holds_still_provisions_its_own_account() {
         .expect("the account exists")
         .get("email");
     assert_eq!(kept_email, "nobody@example.com");
+}
+
+#[tokio::test]
+async fn a_bootstrapped_address_is_adopted_by_its_first_federated_sign_in() {
+    let Some(pool) = migrated("identity_bootstrap_first").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let plane = backend::control_plane_of(&pg);
+    let owner = Email::try_from("operator@example.com").expect("an address");
+    let created = plane.create_account(&owner).await.expect("the account");
+    let org = plane
+        .found(&OrgName::try_from("Acme").expect("a name"), &owner)
+        .await
+        .expect("the organisation");
+    let identity = a_federated_identity("https://id.example", "sub-1", "operator@example.com");
+
+    let signed_in = backend::accounts(&pg)
+        .provision(
+            &identity,
+            ProvisionPolicy {
+                auto_provision: true,
+                link_by_email: true,
+            },
+        )
+        .await
+        .expect("the first sign in");
+
+    assert_eq!(
+        signed_in, created,
+        "the sign in lands on the bootstrapped account"
+    );
+    assert_eq!(account_count(&pool).await, 1);
+    let owners: i64 = sqlx::query(
+        "SELECT count(*) AS n FROM org_members WHERE org_id = $1 AND account_id = $2 \
+         AND role = 'owner'",
+    )
+    .bind(org.as_uuid())
+    .bind(signed_in.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .expect("counting owners")
+    .get("n");
+    assert_eq!(owners, 1);
 }
 
 #[tokio::test]
@@ -656,7 +792,7 @@ async fn a_takeover_attempt_reaches_the_account_directory_as_rejected_not_unavai
         .expect("the first provider");
 
     let unverified = ResolvedIdentity {
-        issuer: Issuer::federated("https://other.example").expect("a url"),
+        issuer: Issuer::new("https://other.example").expect("a url"),
         subject: Subject::try_from("sub-2").expect("a subject"),
         email: Email::try_from("person@example.com").expect("an address"),
         email_verified: false,
@@ -674,54 +810,6 @@ async fn a_takeover_attempt_reaches_the_account_directory_as_rejected_not_unavai
 
     assert_eq!(outcome, Err(AuthError::Rejected));
     assert_eq!(account_count(&pool).await, 1, "no second account appears");
-}
-
-#[tokio::test]
-async fn a_local_identity_is_the_account_it_names_and_needs_no_link() {
-    let Some(pool) = migrated("identity_local").await else {
-        return;
-    };
-    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
-    let accounts = backend::accounts(&pg);
-    let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'x')")
-        .bind(id)
-        .bind("person@example.com")
-        .execute(&pool)
-        .await
-        .expect("an account");
-    let local = an_identity(Issuer::Local, &id.to_string(), "person@example.com");
-
-    let resolved = accounts
-        .provision(&local, ProvisionPolicy::default())
-        .await
-        .expect("the local identity");
-
-    assert_eq!(resolved.as_uuid(), id);
-    assert_eq!(account_count(&pool).await, 1);
-    assert_eq!(
-        link_count(&pool).await,
-        0,
-        "a local account is its own identity, so it needs no link row"
-    );
-}
-
-#[tokio::test]
-async fn a_local_subject_that_is_not_an_account_id_is_refused() {
-    let Some(pool) = migrated("identity_local_nonsense").await else {
-        return;
-    };
-    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
-
-    let refused = backend::accounts(&pg)
-        .provision(
-            &an_identity(Issuer::Local, "not-a-uuid", "person@example.com"),
-            ProvisionPolicy::default(),
-        )
-        .await;
-
-    assert!(matches!(refused, Err(AccountError::NotProvisioned)));
-    assert_eq!(account_count(&pool).await, 0);
 }
 
 #[tokio::test]
@@ -1124,8 +1212,8 @@ async fn an_organisation_founded_in_a_transaction_that_fails_does_not_exist() {
         return;
     };
     sqlx::query(
-        "INSERT INTO accounts (id, email, password_hash) \
-         VALUES (gen_random_uuid(), 'founder@example.com', 'x')",
+        "INSERT INTO accounts (id, email) \
+         VALUES (gen_random_uuid(), 'founder@example.com')",
     )
     .execute(&pool)
     .await

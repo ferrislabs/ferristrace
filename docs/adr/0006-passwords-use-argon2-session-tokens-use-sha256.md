@@ -1,7 +1,9 @@
 # 0006. A password is hashed with argon2id, a session token with SHA-256
 
-Status: accepted
+Status: accepted, narrowed by 0028
 Date: 2026-10-24
+
+Narrowed by [0028](0028-local-passwords-and-the-second-factor-leave-the-product.md): the argon2id half is superseded because no password is stored any more. The session half stands: a session token is stored as its SHA-256 and compared in constant time.
 
 ## Context
 Two secrets reach the control plane and both are stored as digests, but they are not the same kind of secret. A password is chosen by a person, so its entropy is low and guessable: an attacker holding the digests will try a dictionary. A session token is thirty-two bytes this service drew at random, so there is no dictionary to try and no smaller space to search than the whole of it. Using one hashing scheme for both would either leave passwords cheap to attack or make every authenticated request pay a key derivation.

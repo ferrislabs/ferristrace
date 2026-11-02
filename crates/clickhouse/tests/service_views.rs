@@ -559,7 +559,6 @@ struct Views;
 impl Stack for Views {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = ClickhouseReader;
@@ -578,7 +577,6 @@ impl Stack for Views {
 async fn asked(reader: ClickhouseReader, uri: &str) -> serde_json::Value {
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos: NoPhotos,

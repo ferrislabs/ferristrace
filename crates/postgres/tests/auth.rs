@@ -1,13 +1,10 @@
 use ferristrace_domain::{
-    AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, AuthSources, CodeVerifier,
-    Email, FlowError, Issuer, Mailer, NoProvider, NoSecondFactor, OidcFlows, Opened, Password,
-    PasswordCheck, PasswordHasher, PendingFlow, PhotoKind, Portrait, ProvisionPolicy, ResetError,
-    ResetPassword, ResetStore, ResetToken, ResolvedIdentity, SessionError, SessionId,
-    SessionLifetime, SessionRoll, SessionStore, SignIn, SignInProof, Subject,
+    AccountId, AccountName, Accounts, Agent, CodeVerifier, Email, FlowError, OidcFlows,
+    PendingFlow, PhotoKind, Portrait, SessionError, SessionId, SessionLifetime, SessionRoll,
+    SessionStore,
 };
-use ferristrace_infra::{Argon2Hasher, FixedClock};
+use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{AccountError, CONTROL_PLANE, Postgres};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
@@ -19,14 +16,6 @@ mod backend;
 
 const NOW: u64 = 1_700_000_000;
 
-fn cheap() -> Argon2Hasher {
-    Argon2Hasher::with_cost(8, 1, 1).expect("a cheap hasher")
-}
-
-fn dearer() -> Argon2Hasher {
-    Argon2Hasher::with_cost(32, 2, 1).expect("a dearer hasher")
-}
-
 fn lifetime() -> SessionLifetime {
     SessionLifetime {
         idle_seconds: 100,
@@ -35,9 +24,7 @@ fn lifetime() -> SessionLifetime {
 }
 
 fn at(pool: &PgPool, instant: u64) -> Postgres<FixedClock> {
-    Postgres::new(pool.clone(), FixedClock::at(instant))
-        .with_session_lifetime(lifetime())
-        .with_hasher(cheap())
+    Postgres::new(pool.clone(), FixedClock::at(instant)).with_session_lifetime(lifetime())
 }
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
@@ -81,93 +68,15 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
     Some(scoped)
 }
 
-async fn an_account(pool: &PgPool, email: &str, password: Option<&str>) -> AccountId {
+async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     let id = Uuid::new_v4();
-    let hash = match password {
-        Some(plaintext) => Some(
-            cheap()
-                .hash(&Password::new(plaintext))
-                .await
-                .expect("a hash")
-                .encoded()
-                .to_owned(),
-        ),
-        None => None,
-    };
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(id)
         .bind(email)
-        .bind(hash)
         .execute(pool)
         .await
         .expect("an account");
     AccountId::new(id)
-}
-
-fn a_proof(email: &str, password: &str) -> SignInProof {
-    SignInProof::Password {
-        email: Email::try_from(email).expect("an address"),
-        password: Password::new(password),
-    }
-}
-
-#[tokio::test]
-async fn a_hash_accepts_its_own_password() {
-    let hasher = cheap();
-    let password = Password::new("correct horse battery");
-
-    let hash = hasher.hash(&password).await.expect("a hash");
-    let check = hasher.check(&password, &hash).await.expect("a check");
-
-    assert_eq!(check, PasswordCheck::Accepted);
-    assert!(
-        hash.encoded().starts_with("$argon2id$"),
-        "{}",
-        hash.encoded()
-    );
-}
-
-#[tokio::test]
-async fn a_wrong_password_is_rejected() {
-    let hasher = cheap();
-    let hash = hasher
-        .hash(&Password::new("correct horse battery"))
-        .await
-        .expect("a hash");
-
-    let check = hasher
-        .check(&Password::new("wrong horse battery"), &hash)
-        .await
-        .expect("a check");
-
-    assert_eq!(check, PasswordCheck::Rejected);
-}
-
-#[tokio::test]
-async fn the_decoy_matches_nothing() {
-    let hasher = cheap();
-
-    let check = hasher
-        .check(&Password::new("anything at all"), hasher.decoy())
-        .await
-        .expect("a check");
-
-    assert_eq!(check, PasswordCheck::Rejected);
-}
-
-#[tokio::test]
-async fn a_hash_below_the_current_cost_is_rewritten() {
-    let password = Password::new("correct horse battery");
-    let old = cheap().hash(&password).await.expect("a cheap hash");
-
-    let check = dearer().check(&password, &old).await.expect("a check");
-
-    match check {
-        PasswordCheck::AcceptedBehindCost(upgraded) => {
-            assert_ne!(upgraded.encoded(), old.encoded());
-        }
-        other => panic!("the stale cost went unnoticed: {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -176,7 +85,7 @@ async fn a_session_resolves_to_its_account() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let sessions = backend::sessions(&pg);
 
     let token = sessions
@@ -196,7 +105,7 @@ async fn a_revoked_session_resolves_no_longer() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let sessions = backend::sessions(&pg);
     let token = sessions
         .issue(account, None, None)
@@ -213,7 +122,7 @@ async fn an_expired_session_resolves_no_longer() {
     let Some(pool) = control_plane("auth_expired").await else {
         return;
     };
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let early_pg = at(&pool, NOW);
     let early = backend::sessions(&early_pg);
     let late_pg = at(&pool, NOW + 101);
@@ -228,7 +137,7 @@ async fn resolving_slides_the_expiry_but_not_past_the_hard_life() {
     let Some(pool) = control_plane("auth_sliding").await else {
         return;
     };
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let early_pg = at(&pool, NOW);
     let early = backend::sessions(&early_pg);
     let token = early.issue(account, None, None).await.expect("a session");
@@ -259,7 +168,7 @@ async fn pruning_removes_only_what_has_expired() {
     let Some(pool) = control_plane("auth_prune").await else {
         return;
     };
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let early_pg = at(&pool, NOW);
     let early = backend::sessions(&early_pg);
     early.issue(account, None, None).await.expect("a session");
@@ -281,44 +190,6 @@ async fn pruning_removes_only_what_has_expired() {
         .expect("counting sessions")
         .get("n");
     assert_eq!((removed, left), (1, 1));
-}
-
-#[tokio::test]
-async fn a_correct_password_resolves_a_local_identity() {
-    let Some(pool) = control_plane("auth_local_ok").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("correct horse")).await;
-    let provider = backend::local(&pg);
-
-    let identity = provider
-        .sign_in(a_proof("person@example.com", "correct horse"))
-        .await
-        .expect("the password matches");
-
-    assert!(identity.issuer.is_local());
-    assert_eq!(identity.subject.as_str(), account.as_uuid().to_string());
-    assert_eq!(identity.email.as_str(), "person@example.com");
-}
-
-#[tokio::test]
-async fn a_wrong_password_an_unknown_address_and_no_password_all_refuse() {
-    let Some(pool) = control_plane("auth_local_refused").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    an_account(&pool, "person@example.com", Some("correct horse")).await;
-    an_account(&pool, "federated@example.com", None).await;
-    let provider = backend::local(&pg);
-
-    for proof in [
-        a_proof("person@example.com", "wrong horse"),
-        a_proof("stranger@example.com", "correct horse"),
-        a_proof("federated@example.com", "correct horse"),
-    ] {
-        assert_eq!(provider.sign_in(proof).await, Err(AuthError::Rejected));
-    }
 }
 
 fn a_flow(state: &str) -> PendingFlow {
@@ -419,222 +290,6 @@ async fn pruning_removes_only_attempts_past_their_window() {
     assert!(later.take("state-2").await.is_ok(), "the live one stayed");
 }
 
-#[derive(Default)]
-struct Outbox {
-    sent: Mutex<Vec<String>>,
-}
-
-impl Outbox {
-    fn last(&self) -> Option<String> {
-        self.sent.lock().expect("the outbox lock").last().cloned()
-    }
-
-    fn count(&self) -> usize {
-        self.sent.lock().expect("the outbox lock").len()
-    }
-}
-
-impl Mailer for &Outbox {
-    async fn send_password_reset(&self, _to: &Email, token: &ResetToken) -> Result<(), ResetError> {
-        self.sent
-            .lock()
-            .expect("the outbox lock")
-            .push(token.exposed().to_owned());
-        Ok(())
-    }
-}
-
-fn a_reset_token(seed: &str) -> ResetToken {
-    ResetToken::from_plaintext(&format!("ft_pr_{seed}"))
-}
-
-#[tokio::test]
-async fn a_reset_is_offered_only_to_an_address_we_know() {
-    let Some(pool) = control_plane("reset_known").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    an_account(&pool, "person@example.com", Some("old secret")).await;
-    let outbox = Outbox::default();
-    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
-
-    let known = reset
-        .request(
-            &Email::try_from("person@example.com").expect("an address"),
-            a_reset_token("one"),
-        )
-        .await
-        .expect("the request runs");
-    let unknown = reset
-        .request(
-            &Email::try_from("stranger@example.com").expect("an address"),
-            a_reset_token("two"),
-        )
-        .await
-        .expect("the request runs");
-
-    assert!(known);
-    assert!(!unknown);
-    assert_eq!(
-        outbox.count(),
-        1,
-        "no message leaves for an unknown address"
-    );
-}
-
-#[tokio::test]
-async fn a_confirmed_reset_changes_the_password_and_ends_every_session() {
-    let Some(pool) = control_plane("reset_confirm").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("old secret")).await;
-    let sessions = backend::sessions(&pg);
-    let token = sessions
-        .issue(account, None, None)
-        .await
-        .expect("a session");
-    let outbox = Outbox::default();
-    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
-    let address = Email::try_from("person@example.com").expect("an address");
-    reset
-        .request(&address, a_reset_token("one"))
-        .await
-        .expect("the request");
-    let sent = ResetToken::from_plaintext(&outbox.last().expect("a message"));
-
-    let ended = reset
-        .confirm(&sent, &Password::new("a new secret"))
-        .await
-        .expect("the confirmation");
-
-    assert_eq!(ended, 1, "the session it was signed in with is gone");
-    assert_eq!(sessions.resolve(&token).await, Err(SessionError::Unknown));
-
-    let provider = backend::local(&pg);
-    assert!(
-        provider
-            .sign_in(a_proof("person@example.com", "a new secret"))
-            .await
-            .is_ok(),
-        "the new password works"
-    );
-    assert_eq!(
-        provider
-            .sign_in(a_proof("person@example.com", "old secret"))
-            .await,
-        Err(AuthError::Rejected),
-        "the old one does not"
-    );
-}
-
-#[tokio::test]
-async fn a_reset_token_is_spent_by_its_first_use() {
-    let Some(pool) = control_plane("reset_once").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    an_account(&pool, "person@example.com", Some("old secret")).await;
-    let outbox = Outbox::default();
-    let reset = ResetPassword::new(backend::resets(&pg), cheap(), &outbox);
-    let token = a_reset_token("one");
-    reset
-        .request(
-            &Email::try_from("person@example.com").expect("an address"),
-            token.clone(),
-        )
-        .await
-        .expect("the request");
-
-    reset
-        .confirm(&token, &Password::new("a new secret"))
-        .await
-        .expect("the first use");
-    let replay = reset
-        .confirm(&token, &Password::new("another good one"))
-        .await;
-
-    assert_eq!(replay, Err(ResetError::Unknown));
-}
-
-#[tokio::test]
-async fn a_reset_past_its_window_is_gone() {
-    let Some(pool) = control_plane("reset_expired").await else {
-        return;
-    };
-    an_account(&pool, "person@example.com", Some("old secret")).await;
-    let outbox = Outbox::default();
-    let token = a_reset_token("one");
-    ResetPassword::new(
-        backend::resets(&at(&pool, NOW).with_reset_window(Duration::from_secs(60))),
-        cheap(),
-        &outbox,
-    )
-    .request(
-        &Email::try_from("person@example.com").expect("an address"),
-        token.clone(),
-    )
-    .await
-    .expect("the request");
-
-    let late = ResetPassword::new(
-        backend::resets(&at(&pool, NOW + 61).with_reset_window(Duration::from_secs(60))),
-        cheap(),
-        &outbox,
-    )
-    .confirm(&token, &Password::new("a new secret"))
-    .await;
-
-    assert_eq!(late, Err(ResetError::Unknown));
-}
-
-#[tokio::test]
-async fn a_created_account_is_locked_until_a_password_is_chosen() {
-    let Some(pool) = control_plane("accounts_locked").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    let address = Email::try_from("fresh@example.com").expect("an address");
-    let locked = cheap().locked().expect("a locked hash");
-    let account = backend::accounts(&pg)
-        .create(&address, &locked)
-        .await
-        .expect("the account is created");
-    let provider = backend::local(&pg);
-
-    assert_eq!(
-        provider.sign_in(a_proof("fresh@example.com", "")).await,
-        Err(AuthError::Rejected),
-        "an empty password must not open a locked account"
-    );
-    assert_eq!(
-        provider
-            .sign_in(a_proof("fresh@example.com", "correct horse"))
-            .await,
-        Err(AuthError::Rejected)
-    );
-
-    let outbox = Outbox::default();
-    let resets = backend::resets(&pg);
-    let invite = a_reset_token("invite");
-    resets
-        .begin(account, invite.hash())
-        .await
-        .expect("the invite is opened");
-    ResetPassword::new(resets, cheap(), &outbox)
-        .confirm(&invite, &Password::new("chosen at last"))
-        .await
-        .expect("the password is chosen");
-
-    assert!(
-        provider
-            .sign_in(a_proof("fresh@example.com", "chosen at last"))
-            .await
-            .is_ok(),
-        "the account opens once its password is chosen"
-    );
-}
-
 #[tokio::test]
 async fn an_address_carries_at_most_one_account() {
     let Some(pool) = control_plane("accounts_taken").await else {
@@ -643,113 +298,11 @@ async fn an_address_carries_at_most_one_account() {
     let pg = at(&pool, NOW);
     let address = Email::try_from("twice@example.com").expect("an address");
     let accounts = backend::accounts(&pg);
-    let locked = cheap().locked().expect("a locked hash");
-    accounts
-        .create(&address, &locked)
-        .await
-        .expect("the first account");
+    accounts.create(&address).await.expect("the first account");
 
-    let refused = accounts.create(&address, &locked).await;
+    let refused = accounts.create(&address).await;
 
     assert!(matches!(refused, Err(AccountError::Taken)));
-}
-
-#[tokio::test]
-async fn two_locked_accounts_do_not_share_a_hash() {
-    let hasher = cheap();
-    let one = hasher.locked().expect("a locked hash");
-    let other = hasher.locked().expect("another locked hash");
-
-    assert_ne!(one.encoded(), other.encoded());
-}
-
-async fn accounts_held(pool: &PgPool) -> i64 {
-    sqlx::query("SELECT count(*) AS value FROM accounts")
-        .fetch_one(pool)
-        .await
-        .expect("counting the accounts")
-        .get("value")
-}
-
-#[tokio::test]
-async fn a_local_password_opens_a_session_without_provisioning_anything() {
-    let Some(pool) = control_plane("auth_local_end_to_end").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("correct horse")).await;
-    let sessions = Arc::new(backend::sessions(&pg));
-    let sign_in = SignIn::new(
-        AuthSources::new(Some(backend::local(&pg)), None::<NoProvider>),
-        backend::accounts(&pg),
-        Arc::clone(&sessions),
-        NoSecondFactor,
-        ProvisionPolicy::default(),
-    );
-
-    let admitted = sign_in
-        .begin(a_proof("person@example.com", "correct horse"), None)
-        .await
-        .expect("the password opens a session");
-
-    let Opened::Session(token) = admitted else {
-        panic!("an account with no factor is admitted at once");
-    };
-    let session = sessions.resolve(&token).await.expect("the session is live");
-    assert_eq!(session.account, account);
-    assert_eq!(
-        accounts_held(&pool).await,
-        1,
-        "signing in must not provision a second account for an address we hold"
-    );
-}
-
-#[tokio::test]
-async fn a_wrong_local_password_opens_nothing_and_provisions_nothing() {
-    let Some(pool) = control_plane("auth_local_refused_end_to_end").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    an_account(&pool, "person@example.com", Some("correct horse")).await;
-    let sign_in = SignIn::new(
-        AuthSources::new(Some(backend::local(&pg)), None::<NoProvider>),
-        backend::accounts(&pg),
-        Arc::new(backend::sessions(&pg)),
-        NoSecondFactor,
-        ProvisionPolicy::default(),
-    );
-
-    let refused = sign_in
-        .begin(a_proof("person@example.com", "wrong horse battery"), None)
-        .await;
-
-    assert!(refused.is_err());
-    assert_eq!(accounts_held(&pool).await, 1);
-}
-
-#[tokio::test]
-async fn a_local_identity_naming_no_account_is_not_provisioned() {
-    let Some(pool) = control_plane("auth_local_stranger").await else {
-        return;
-    };
-    let pg = at(&pool, NOW);
-    let identity = ResolvedIdentity {
-        issuer: Issuer::Local,
-        subject: Subject::try_from(Uuid::new_v4().to_string().as_str()).expect("a subject"),
-        email: Email::try_from("ghost@example.com").expect("an address"),
-        email_verified: true,
-    };
-
-    let refused = backend::accounts(&pg)
-        .provision(&identity, ProvisionPolicy::default())
-        .await;
-
-    assert!(matches!(refused, Err(AccountError::NotProvisioned)));
-    assert_eq!(
-        accounts_held(&pool).await,
-        0,
-        "a local identity is never a reason to create an account"
-    );
 }
 
 #[tokio::test]
@@ -758,7 +311,7 @@ async fn an_account_carries_no_name_until_somebody_writes_one() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let sessions = backend::sessions(&pg);
 
     let token = sessions
@@ -777,7 +330,7 @@ async fn a_chosen_name_travels_on_the_session() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let accounts = backend::accounts(&pg);
     let sessions = backend::sessions(&pg);
     let name = AccountName::try_from("Ines Martin").expect("an admitted name");
@@ -801,7 +354,7 @@ async fn emptying_the_name_writes_a_null_rather_than_a_blank() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let accounts = backend::accounts(&pg);
     let name = AccountName::try_from("Ines Martin").expect("an admitted name");
     accounts
@@ -828,7 +381,7 @@ async fn the_column_refuses_a_name_that_is_only_space() {
     let Some(pool) = control_plane("auth_blank_name").await else {
         return;
     };
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
 
     let refused = sqlx::query("UPDATE accounts SET name = $2 WHERE id = $1")
         .bind(account.as_uuid())
@@ -845,7 +398,7 @@ async fn a_portrait_travels_on_the_session() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let accounts = backend::accounts(&pg);
     let sessions = backend::sessions(&pg);
     let portrait = Portrait {
@@ -876,7 +429,7 @@ async fn a_dropped_portrait_leaves_both_columns_null() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let accounts = backend::accounts(&pg);
     accounts
         .set_portrait(
@@ -911,7 +464,7 @@ async fn the_columns_refuse_half_a_photo() {
     let Some(pool) = control_plane("auth_portrait_half").await else {
         return;
     };
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
 
     let refused = sqlx::query("UPDATE accounts SET photo_token = 'deadbeef' WHERE id = $1")
         .bind(account.as_uuid())
@@ -930,7 +483,7 @@ async fn a_type_the_build_does_not_know_reads_as_no_photo() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     sqlx::query(
         "UPDATE accounts SET photo_token = 'deadbeef', photo_type = 'image/gif' WHERE id = $1",
     )
@@ -953,7 +506,7 @@ async fn the_roll_names_every_live_session_and_marks_the_caller() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let sessions = backend::sessions(&pg);
     let phone = Agent::new("Mozilla/5.0 (iPhone)").expect("an agent");
     let here = sessions
@@ -980,7 +533,7 @@ async fn one_session_is_revoked_by_its_public_id_and_the_others_are_left() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
     let sessions = backend::sessions(&pg);
     let here = sessions
         .issue(account, None, None)
@@ -1017,8 +570,8 @@ async fn an_account_cannot_revoke_a_session_it_does_not_keep() {
         return;
     };
     let pg = at(&pool, NOW);
-    let mine = an_account(&pool, "person@example.com", Some("secret")).await;
-    let theirs = an_account(&pool, "other@example.com", Some("secret")).await;
+    let mine = an_account(&pool, "person@example.com").await;
+    let theirs = an_account(&pool, "other@example.com").await;
     let sessions = backend::sessions(&pg);
     let hers = sessions.issue(theirs, None, None).await.expect("a session");
     let current_one = sessions.issue(theirs, None, None).await.expect("another");
@@ -1050,8 +603,8 @@ async fn signing_out_the_others_spares_the_session_that_asked() {
         return;
     };
     let pg = at(&pool, NOW);
-    let account = an_account(&pool, "person@example.com", Some("secret")).await;
-    let theirs = an_account(&pool, "other@example.com", Some("secret")).await;
+    let account = an_account(&pool, "person@example.com").await;
+    let theirs = an_account(&pool, "other@example.com").await;
     let sessions = backend::sessions(&pg);
     let here = sessions
         .issue(account, None, None)

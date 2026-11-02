@@ -91,7 +91,7 @@ fn backend_of(pool: &PgPool) -> Postgres<FixedClock> {
 
 async fn an_org(pool: &PgPool, name: &str, owner: &str) -> (TenantId, AccountId) {
     let account = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(account)
         .bind(owner)
         .execute(pool)
@@ -131,6 +131,40 @@ fn draft(name: &str, project: Option<ProjectId>, definition: Definition) -> Rule
         enabled: true,
         definition,
     }
+}
+
+const WRITTEN_BEFORE: &str = "0707070707070707070707070188ac4fce811d847a9a7857031106017b7ea84abc28ce995241e1637f41e6c6b8d431d7e22c";
+
+#[tokio::test]
+async fn a_webhook_secret_written_before_the_second_factor_left_still_opens() {
+    let Some(pool) = control_plane("alerts_written_before", 2).await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO alert_channels (id, org_id, name, kind, target, secret_sealed, created_by, created_at) \
+         VALUES ($1, $2, 'pager', 'webhook', 'https://hooks.example.com/in', $3, $4, 0)",
+    )
+    .bind(id)
+    .bind(org.as_uuid())
+    .bind(hex::decode(WRITTEN_BEFORE).expect("a row"))
+    .bind(owner.as_uuid())
+    .execute(&pool)
+    .await
+    .expect("a channel written with the sealed secret");
+
+    let armed = committed!(pg, |channels: AlertChannels| channels
+        .armed(org, ferristrace_domain::ChannelId::new(id))
+        .await
+        .expect("read")
+        .expect("held"));
+
+    assert_eq!(
+        armed.secret,
+        Some(WebhookSecret::from_plaintext("whsec_0123456789abcdef"))
+    );
 }
 
 #[tokio::test]

@@ -54,7 +54,7 @@ async fn control_plane(schema: &str) -> Option<PgPool> {
 }
 
 async fn an_org(pool: &PgPool, owner: &str) -> TenantId {
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'chosen')")
+    sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(Uuid::new_v4())
         .bind(owner)
         .execute(pool)

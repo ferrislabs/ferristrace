@@ -1,5 +1,5 @@
-use super::errors::{InvalidCredential, WeakPassword};
-use super::value_objects::{Email, Issuer, Password, PasswordPolicy, Subject};
+use super::errors::InvalidCredential;
+use super::value_objects::{Email, Issuer, Subject};
 
 #[test]
 fn an_email_is_lowercased_and_trimmed() {
@@ -36,116 +36,27 @@ fn a_subject_cannot_be_blank() {
 }
 
 #[test]
-fn the_local_issuer_is_not_a_url() {
-    assert!(Issuer::Local.is_local());
-    assert_eq!(Issuer::Local.as_str(), "local");
+fn an_issuer_is_the_url_it_was_given_trimmed() {
+    let issuer = Issuer::new("  https://id.example ").expect("a url");
 
-    let federated = Issuer::federated("https://id.example").expect("a url");
-    assert!(!federated.is_local());
-    assert_eq!(federated.as_str(), "https://id.example");
-    assert_eq!(Issuer::federated("  "), Err(InvalidCredential::Issuer));
+    assert_eq!(issuer.as_str(), "https://id.example");
+    assert_eq!(Issuer::new("  "), Err(InvalidCredential::Issuer));
 }
 
 #[test]
-fn a_password_never_renders_itself() {
-    let password = Password::new("correct horse battery");
+fn a_trailing_slash_does_not_make_another_issuer() {
+    let bare = Issuer::new("https://x.example/realms/a").expect("a url");
+    let slashed = Issuer::new(" https://x.example/realms/a/ ").expect("a url");
 
-    assert_eq!(format!("{password:?}"), "Password(redacted)");
-    assert_eq!(password.exposed(), "correct horse battery");
-}
-
-#[test]
-fn a_password_shorter_than_the_floor_is_refused() {
-    let policy = PasswordPolicy::default();
-
-    assert_eq!(
-        policy.admits(&Password::new("short")),
-        Err(WeakPassword::TooShort(12))
-    );
-    assert_eq!(
-        policy.admits(&Password::new("elevenchars")),
-        Err(WeakPassword::TooShort(12))
-    );
-    assert_eq!(policy.admits(&Password::new("twelvechars!")), Ok(()));
-}
-
-#[test]
-fn a_password_long_enough_to_cost_us_is_refused() {
-    let policy = PasswordPolicy::default();
-
-    assert_eq!(policy.admits(&Password::new(&"a".repeat(128))), Ok(()));
-    assert_eq!(
-        policy.admits(&Password::new(&"a".repeat(129))),
-        Err(WeakPassword::TooLong(128))
-    );
-}
-
-#[test]
-fn a_password_of_spaces_is_refused_however_long_it_is() {
-    assert_eq!(
-        PasswordPolicy::default().admits(&Password::new(&" ".repeat(40))),
-        Err(WeakPassword::Blank)
-    );
-}
-
-#[test]
-fn nothing_but_length_is_asked_of_a_password() {
-    let policy = PasswordPolicy::default();
-
-    for chosen in [
-        "correct horse battery staple",
-        "aaaaaaaaaaaaaaaa",
-        "il pleut sur la ville",
-    ] {
-        assert_eq!(
-            policy.admits(&Password::new(chosen)),
-            Ok(()),
-            "{chosen} should be admitted"
-        );
-    }
-}
-
-#[test]
-fn the_floor_counts_characters_and_the_ceiling_counts_bytes() {
-    let policy = PasswordPolicy::default();
-    let four_glyphs = "🜛🜛🜛🜛";
-
-    assert_eq!(four_glyphs.len(), 16, "four glyphs, sixteen bytes");
-    assert_eq!(
-        policy.admits(&Password::new(four_glyphs)),
-        Err(WeakPassword::TooShort(12)),
-        "sixteen bytes must not pass for twelve characters"
-    );
-    assert_eq!(policy.admits(&Password::new(&"🜛".repeat(12))), Ok(()));
-    assert_eq!(
-        policy.admits(&Password::new(&"🜛".repeat(33))),
-        Err(WeakPassword::TooLong(128)),
-        "the ceiling is what we pay to hash, so it is counted in bytes"
-    );
-}
-
-#[test]
-fn a_policy_can_be_loosened_or_tightened() {
-    let strict = PasswordPolicy {
-        min_chars: 20,
-        max_bytes: 64,
-    };
-
-    assert_eq!(
-        strict.admits(&Password::new("twelvechars!")),
-        Err(WeakPassword::TooShort(20))
-    );
-    assert_eq!(
-        strict.admits(&Password::new(&"a".repeat(65))),
-        Err(WeakPassword::TooLong(64))
-    );
+    assert_eq!(bare, slashed);
+    assert_eq!(slashed.as_str(), "https://x.example/realms/a");
+    assert_eq!(Issuer::new("/"), Err(InvalidCredential::Issuer));
 }
 
 mod proptests {
     use proptest::prelude::*;
 
-    use super::super::value_objects::{MAX_PASSWORD_BYTES, MIN_PASSWORD_CHARS};
-    use super::{Email, InvalidCredential, Password, PasswordPolicy, WeakPassword};
+    use super::{Email, InvalidCredential};
 
     fn an_ascii_token() -> impl Strategy<Value = String> {
         "[a-zA-Z0-9]{1,8}"
@@ -187,45 +98,6 @@ mod proptests {
             let raw = format!("{local}@{domain}");
 
             prop_assert_eq!(Email::try_from(raw.as_str()), Err(InvalidCredential::Email));
-        }
-
-        #[test]
-        fn a_password_with_at_least_the_floor_of_printable_characters_is_admitted(
-            chars in prop::collection::vec(
-                0x21u8..=0x7eu8,
-                MIN_PASSWORD_CHARS..=MIN_PASSWORD_CHARS + 40
-            )
-        ) {
-            let spelling = String::from_utf8(chars).expect("ascii bytes");
-            let password = Password::new(&spelling);
-
-            prop_assert_eq!(PasswordPolicy::default().admits(&password), Ok(()));
-        }
-
-        #[test]
-        fn a_password_shorter_than_the_floor_is_refused_whatever_it_contains(
-            chars in prop::collection::vec(0x21u8..=0x7eu8, 1..MIN_PASSWORD_CHARS)
-        ) {
-            let spelling = String::from_utf8(chars).expect("ascii bytes");
-            let password = Password::new(&spelling);
-
-            prop_assert_eq!(
-                PasswordPolicy::default().admits(&password),
-                Err(WeakPassword::TooShort(MIN_PASSWORD_CHARS))
-            );
-        }
-
-        #[test]
-        fn a_password_of_only_whitespace_is_refused_whatever_its_length(
-            length in MIN_PASSWORD_CHARS..=MAX_PASSWORD_BYTES,
-            space in prop_oneof![Just(' '), Just('\t'), Just('\n')],
-        ) {
-            let password = Password::new(&space.to_string().repeat(length));
-
-            prop_assert_eq!(
-                PasswordPolicy::default().admits(&password),
-                Err(WeakPassword::Blank)
-            );
         }
     }
 }

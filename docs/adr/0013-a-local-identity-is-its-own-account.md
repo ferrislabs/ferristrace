@@ -1,6 +1,6 @@
 # 0013 — A local identity is its own account
 
-- Status: accepted
+- Status: superseded by 0028
 - Date: 2026-10-24
 
 ## Context

@@ -36,6 +36,7 @@ ee = ["dep:ferristrace-ee"]
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }
+tower.workspace = true
 
 [lints]
 workspace = true

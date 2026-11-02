@@ -21,7 +21,7 @@ pub struct PostgresExport<C> {
     orgs: PostgresOrgs,
     projects: PostgresProjects,
     teams: PostgresTeams,
-    roster: PostgresRoster<C>,
+    roster: PostgresRoster,
     keys: PostgresApiKeys<C>,
     audit: PostgresAuditTrail<C>,
 }

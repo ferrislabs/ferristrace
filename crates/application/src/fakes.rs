@@ -5,9 +5,9 @@ use ferristrace_domain::{
     AuditTrail, ControlPlane, Created, Email, ExportSource, Fingerprint, IssueDecisions, IssuedKey,
     KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName,
     OrgRole, Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
-    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked,
-    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch,
-    SessionToken, Snapshot, Status, StoreError, TeamId, TenantId, UnixSeconds,
+    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch, SessionToken, Snapshot,
+    Status, StoreError, TeamId, TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -33,7 +33,6 @@ pub struct Probing;
 impl Stack for Probing {
     type Repos = Recording;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -349,14 +348,9 @@ impl ControlPlane for FakeControlPlane {
         Ok(Some(the_account()))
     }
 
-    async fn create_locked_account(&self, _email: &Email) -> Result<AccountId, ProvisionError> {
+    async fn create_account(&self, _email: &Email) -> Result<AccountId, ProvisionError> {
         self.handle.write();
         Ok(the_account())
-    }
-
-    async fn invite(&self, _account: AccountId, _digest: SecretHash) -> Result<(), ProvisionError> {
-        self.handle.write();
-        Ok(())
     }
 
     async fn claim_project(
@@ -386,10 +380,6 @@ impl ControlPlane for FakeControlPlane {
 
     async fn revoke_key(&self, _prefix: &str) -> Result<Option<Revoked>, ProvisionError> {
         Ok(None)
-    }
-
-    async fn memberships_of(&self, _account: AccountId) -> Result<Vec<TenantId>, ProvisionError> {
-        Ok(Vec::new())
     }
 }
 

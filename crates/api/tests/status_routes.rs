@@ -271,7 +271,6 @@ struct TestStack;
 impl Stack for TestStack {
     type Repos = Fakes;
     type Clock = FixedClock;
-    type Hasher = Inert;
     type Mailer = Couriered;
     type Photos = NoPhotos;
     type SpanStore = Inert;
@@ -328,7 +327,6 @@ impl Harness {
     fn ferristrace(&self, role: OrgRole) -> Arc<Ferristrace<TestStack>> {
         let adapters = Adapters {
             clock: FixedClock::at(NOW),
-            hasher: Inert::default(),
             mailer: self.courier.clone(),
             webhooks: Inert::default(),
             photos: NoPhotos,

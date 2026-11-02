@@ -211,7 +211,6 @@ struct TestStack<P>(std::marker::PhantomData<P>);
 impl<P: Photos + Send + Sync + 'static> Stack for TestStack<P> {
     type Repos = Fakes;
     type Clock = Inert;
-    type Hasher = Inert;
     type Mailer = Inert;
     type Photos = P;
     type SpanStore = Inert;
@@ -238,7 +237,6 @@ fn state<P: Photos + Send + Sync + 'static>(
     };
     let adapters = Adapters {
         clock: Inert::default(),
-        hasher: Inert::default(),
         mailer: Inert::default(),
         webhooks: Inert::default(),
         photos,
