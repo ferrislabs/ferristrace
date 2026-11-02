@@ -6,7 +6,7 @@ use ferristrace_domain::{
     Bootstrapped, ControlPlane, Email, OrgName, OrgRole, ProjectId, ProjectName, Provisioning,
     ResetToken, TenantId,
 };
-use ferristrace_storage::{INVITE_WINDOW, PostgresControlPlane};
+use ferristrace_postgres::{INVITE_WINDOW, PostgresControlPlane};
 use uuid::Uuid;
 
 use crate::config::Config;

@@ -12,7 +12,10 @@ path = "src/main.rs"
 [dependencies]
 ferristrace-api.workspace = true
 ferristrace-domain.workspace = true
-ferristrace-storage.workspace = true
+ferristrace-clickhouse.workspace = true
+ferristrace-infra.workspace = true
+ferristrace-postgres.workspace = true
+ferristrace-redis.workspace = true
 ferristrace-ee = { workspace = true, optional = true }
 anyhow.workspace = true
 axum.workspace = true

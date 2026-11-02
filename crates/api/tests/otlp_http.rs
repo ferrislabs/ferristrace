@@ -6,7 +6,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use ferristrace_api::router;
 use ferristrace_domain::{DecompressedBytes, Ingest, QuotaPolicy, TenantId, Unmetered};
-use ferristrace_storage::{Allowance, MemoryMeter, MemorySink, StaticDirectory, StaticQuota};
+use ferristrace_infra::{Allowance, MemoryMeter, MemorySink, StaticDirectory, StaticQuota};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;

@@ -1,7 +1,8 @@
 use std::net::SocketAddr;
 
+use ferristrace_clickhouse::SpanStoreSettings;
 use ferristrace_domain::DecompressedBytes;
-use ferristrace_storage::{Allowance, PhotoStoreSettings, SpanStoreSettings};
+use ferristrace_infra::{Allowance, PhotoStoreSettings};
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
 use serde::{Deserialize, Serialize};

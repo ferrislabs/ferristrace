@@ -1,0 +1,27 @@
+[package]
+name = "ferristrace-clickhouse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ferristrace-domain.workspace = true
+ferristrace-infra.workspace = true
+clickhouse.workspace = true
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_repr.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+clickhouse = { workspace = true, features = ["test-util"] }
+ferristrace-domain = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

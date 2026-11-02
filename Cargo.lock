@@ -1085,8 +1085,8 @@ dependencies = [
  "axum",
  "bytes",
  "ferristrace-domain",
+ "ferristrace-infra",
  "ferristrace-otlp",
- "ferristrace-storage",
  "flate2",
  "hex",
  "opentelemetry-proto",
@@ -1113,6 +1113,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferristrace-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "clickhouse",
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "hex",
+ "serde",
+ "serde_repr",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ferristrace-domain"
 version = "0.1.0"
 dependencies = [
@@ -1132,6 +1149,34 @@ dependencies = [
 [[package]]
 name = "ferristrace-ee"
 version = "0.1.0"
+
+[[package]]
+name = "ferristrace-infra"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "base64 0.23.1",
+ "chacha20poly1305",
+ "ferristrace-domain",
+ "hex",
+ "hmac 0.13.0",
+ "jsonwebtoken",
+ "lettre",
+ "openidconnect",
+ "rand 0.10.3",
+ "reqwest",
+ "rsa",
+ "serde_json",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
 
 [[package]]
 name = "ferristrace-macros"
@@ -1159,10 +1204,31 @@ version = "0.1.0"
 dependencies = [
  "ferristrace-application",
  "ferristrace-domain",
+ "ferristrace-infra",
  "ferristrace-macros",
+ "hex",
+ "rand 0.10.3",
  "sqlx",
+ "thiserror 2.0.21",
+ "time",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ferristrace-redis"
+version = "0.1.0"
+dependencies = [
+ "ferristrace-domain",
+ "ferristrace-infra",
+ "ferristrace-postgres",
+ "redis",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1173,9 +1239,12 @@ dependencies = [
  "axum",
  "clap",
  "ferristrace-api",
+ "ferristrace-clickhouse",
  "ferristrace-domain",
  "ferristrace-ee",
- "ferristrace-storage",
+ "ferristrace-infra",
+ "ferristrace-postgres",
+ "ferristrace-redis",
  "figment",
  "reqwest",
  "serde",
@@ -1185,40 +1254,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "ferristrace-storage"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "axum",
- "base64 0.23.1",
- "chacha20poly1305",
- "clickhouse",
- "ferristrace-domain",
- "hex",
- "hmac 0.13.0",
- "jsonwebtoken",
- "lettre",
- "openidconnect",
- "rand 0.10.3",
- "redis",
- "reqwest",
- "rsa",
- "serde",
- "serde_json",
- "serde_repr",
- "sha2 0.11.1",
- "sqlx",
- "subtle",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-stream",
- "tracing",
- "uuid",
- "zeroize",
 ]
 
 [[package]]

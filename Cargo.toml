@@ -6,7 +6,9 @@ members = [
     "crates/macros",
     "crates/postgres",
     "crates/otlp",
-    "crates/storage",
+    "crates/clickhouse",
+    "crates/redis",
+    "crates/infra",
     "crates/api",
     "crates/ee",
     "apps/server",
@@ -17,7 +19,9 @@ default-members = [
     "crates/macros",
     "crates/postgres",
     "crates/otlp",
-    "crates/storage",
+    "crates/clickhouse",
+    "crates/redis",
+    "crates/infra",
     "crates/api",
     "apps/server",
 ]
@@ -33,7 +37,9 @@ ferristrace-application = { path = "crates/application" }
 ferristrace-macros = { path = "crates/macros" }
 ferristrace-postgres = { path = "crates/postgres" }
 ferristrace-otlp = { path = "crates/otlp" }
-ferristrace-storage = { path = "crates/storage" }
+ferristrace-clickhouse = { path = "crates/clickhouse" }
+ferristrace-redis = { path = "crates/redis" }
+ferristrace-infra = { path = "crates/infra" }
 ferristrace-api = { path = "crates/api" }
 ferristrace-ee = { path = "crates/ee" }
 

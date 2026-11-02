@@ -16,6 +16,9 @@ use ferristrace_api::{
     reset_router, roster_router, router, second_factor_router, session_router, team_router,
     trace_server, usage_router, web_router,
 };
+use ferristrace_clickhouse::{
+    ClickhouseIssues, ClickhouseReader, ClickhouseSink, SpanStoreSettings, open_span_store,
+};
 use ferristrace_domain::{
     AuthSources, Catalogue, ChangePassword, Clock, DecompressedBytes, Email, Explore,
     FederatedSignIn, Ingest, IngestKey, Issues, Mailer, Metering, NoPhotos, NoProvider,
@@ -24,15 +27,18 @@ use ferristrace_domain::{
     SessionLifetime, Sessions, SignIn, SinkError, Span, SpanSink, Squad, TenantDirectory, TenantId,
     UnknownKey, UsageMeter, UsageReader, Whoami,
 };
-use ferristrace_storage::{
-    Allowance, Argon2Hasher, CONTROL_PLANE, ClickhouseIssues, ClickhouseReader, ClickhouseSink,
-    LocalPasswordProvider, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
-    PhotoStoreSettings, PostgresAccounts, PostgresDecisions, PostgresDirectory, PostgresFactors,
-    PostgresFlows, PostgresMemberships, PostgresOrgs, PostgresProjects, PostgresResets,
-    PostgresRoster, PostgresSessions, PostgresTeams, PostgresUsage, RedisMeter, S3Photos,
-    SecretSeal, SmtpMailer, SpanStoreSettings, StaticDirectory, StaticQuota, SystemClock,
-    load_allowances, open_span_store,
+use ferristrace_infra::{
+    Allowance, Argon2Hasher, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
+    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, StaticQuota,
+    SystemClock,
 };
+use ferristrace_postgres::{
+    CONTROL_PLANE, LocalPasswordProvider, PostgresAccounts, PostgresDecisions, PostgresDirectory,
+    PostgresFactors, PostgresFlows, PostgresMemberships, PostgresOrgs, PostgresProjects,
+    PostgresResets, PostgresRoster, PostgresSessions, PostgresTeams, PostgresUsage,
+    load_allowances,
+};
+use ferristrace_redis::RedisMeter;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;

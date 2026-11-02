@@ -23,7 +23,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 ferristrace-domain.workspace = true
-ferristrace-storage.workspace = true
+ferristrace-infra.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
 serde = { workspace = true, features = ["derive"] }

@@ -129,7 +129,9 @@ jobs:
           shared-key: rust-postgres
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: the control plane schema and the usage counter
-        run: cargo test -p ferristrace-storage --test control_plane --test usage_counter --test usage_history --test auth --test memberships --test roster --test teams --test projects --locked
+        run: |
+          cargo test -p ferristrace-postgres --test control_plane --test usage_history --test auth --test memberships --test roster --test teams --test projects --locked
+          cargo test -p ferristrace-redis --test usage_counter --locked
 
   clickhouse:
     runs-on: ubuntu-latest
@@ -162,9 +164,9 @@ jobs:
           shared-key: rust-clickhouse
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: migrations up, down and up again against a real server
-        run: cargo test -p ferristrace-storage --test clickhouse_migrations --test span_sink --locked
+        run: cargo test -p ferristrace-clickhouse --test clickhouse_migrations --test span_sink --locked
       - name: small versus large batches
-        run: cargo run -p ferristrace-storage --example batching_benchmark --release --locked
+        run: cargo run -p ferristrace-clickhouse --example batching_benchmark --release --locked
 
   self-hosting:
     runs-on: ubuntu-latest
@@ -202,7 +204,7 @@ jobs:
           applied=$(docker compose exec -T clickhouse clickhouse-client \
             --user=comettrace --password=comettrace --database=comettrace \
             --query="SELECT max(version) FROM schema_migrations FINAL")
-          shipped=$(ls ../crates/storage/migrations/clickhouse/*.up.sql | wc -l | tr -d " ")
+          shipped=$(ls ../crates/clickhouse/migrations/clickhouse/*.up.sql | wc -l | tr -d " ")
           test "$applied" = "$shipped" ||
             { echo "the span schema is at $applied of $shipped"; exit 1; }
       - name: the server migrated its control plane

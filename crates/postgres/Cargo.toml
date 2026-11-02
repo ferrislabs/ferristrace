@@ -8,10 +8,20 @@ publish = false
 [dependencies]
 ferristrace-application.workspace = true
 ferristrace-domain.workspace = true
+ferristrace-infra.workspace = true
 ferristrace-macros.workspace = true
+hex.workspace = true
+rand.workspace = true
 sqlx.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ferristrace-domain = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
