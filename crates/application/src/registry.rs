@@ -4,8 +4,9 @@ use ferristrace_domain::{
     AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
     AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, DeployMarks, ExportSource,
     FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions,
-    Memberships, OidcFlows, Orgs, Pages, Postmortems, Projects, ResetStore, Roll, Schedules,
-    SessionRoll, SessionStore, Squads, StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
+    Memberships, ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages, Postmortems, Projects,
+    ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads, StatusOutbox, StatusPages,
+    StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +78,8 @@ pub mod domain {
     pub struct LocalPasswords;
     #[derive(Debug)]
     pub struct Memberships;
+    #[derive(Debug)]
+    pub struct ModelPrices;
     #[derive(Debug)]
     pub struct Orgs;
     #[derive(Debug)]
@@ -275,6 +278,16 @@ pub trait DeployRepos: WatchRepos + RepoFor<domain::DeployMarks, Repo: DeployMar
 
 impl<R> DeployRepos for R where R: WatchRepos + RepoFor<domain::DeployMarks, Repo: DeployMarks> {}
 
+pub trait LlmRepos:
+    ReadRepos + RecordingRepos + RepoFor<domain::ModelPrices, Repo: ModelPriceBook>
+{
+}
+
+impl<R> LlmRepos for R where
+    R: ReadRepos + RecordingRepos + RepoFor<domain::ModelPrices, Repo: ModelPriceBook>
+{
+}
+
 pub trait AlertRepos:
     ReadRepos + RecordingRepos + WatchRepos + RepoFor<domain::Projects, Repo: Projects>
 {
@@ -345,6 +358,7 @@ pub trait Repositories:
     + IdentityRepos
     + ProvisioningRepos
     + DeployRepos
+    + LlmRepos
 {
 }
 
@@ -367,5 +381,6 @@ impl<R> Repositories for R where
         + IdentityRepos
         + ProvisioningRepos
         + DeployRepos
+        + LlmRepos
 {
 }

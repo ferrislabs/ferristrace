@@ -11,6 +11,7 @@ mod identity;
 mod incidents;
 mod ingestion;
 mod issues;
+mod llm;
 mod logs;
 mod metrics;
 mod oncall;

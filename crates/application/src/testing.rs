@@ -2,22 +2,23 @@ use core::future::Future;
 
 pub use ferristrace_domain::testing::{
     AlertLedger, Bench, Couriered, Crew, IncidentLedger, Notebook, OncallLedger, PostmortemLedger,
-    QueuedLetter, StatusLedger,
+    PriceLedger, QueuedLetter, StatusLedger,
 };
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
-    AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,
-    ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
-    Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, HashError, IngestKey,
-    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter, LogBucket, LogPage,
-    LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
-    MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, Password,
-    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant,
-    Release, ReleaseDetail, ReleaseFilter, ReleaseReader, ResetError, ResetToken, ResolvedIdentity,
-    Scope, SeriesSet, ServiceFilter, ServiceSeries, ServiceSummary, SignInProof, SinkError, Span,
-    SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink, StatusMailer, StoreError,
-    TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
-    UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl, Window,
+    AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, CallPage,
+    CallQuery, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes,
+    DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint,
+    HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
+    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric,
+    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
+    PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId,
+    QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, ResetError,
+    ResetToken, ResolvedIdentity, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
+    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
+    SpanSink, StatusMailer, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
+    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender,
+    WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -305,6 +306,21 @@ impl ReleaseReader for Inert {
         _org: TenantId,
         _filter: &ReleaseFilter,
     ) -> Result<Vec<Deploy>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+
+impl LlmReader for Inert {
+    async fn calls(&self, _org: TenantId, _query: &CallQuery) -> Result<CallPage, StoreError> {
+        Ok(CallPage::default())
+    }
+
+    async fn models(
+        &self,
+        _org: TenantId,
+        _window: Window,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<SeenModel>, StoreError> {
         Ok(Vec::new())
     }
 }

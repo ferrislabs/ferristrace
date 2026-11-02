@@ -2,6 +2,7 @@ mod cluster_read;
 mod culprits;
 mod export;
 mod issues;
+mod llm_read;
 mod log_read;
 mod log_sink;
 mod metric_read;

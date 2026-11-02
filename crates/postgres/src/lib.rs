@@ -16,6 +16,7 @@ mod incidents;
 mod keys;
 mod local;
 mod memberships;
+mod model_prices;
 mod oncall;
 mod orgs;
 mod postgres;
@@ -47,6 +48,7 @@ pub use incidents::{PostgresIncidentAttachments, PostgresIncidentTimeline, Postg
 pub use keys::{KeyError, PostgresDirectory};
 pub use local::LocalPasswordProvider;
 pub use memberships::{MembershipError, PostgresMemberships};
+pub use model_prices::PostgresModelPrices;
 pub use oncall::{PostgresPages, PostgresSchedules};
 pub use orgs::PostgresOrgs;
 pub use postgres::{CONTROL_PLANE, OVERAGE_FEATURE, SELF_HOSTED_PLAN, load_allowances};

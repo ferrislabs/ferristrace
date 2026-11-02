@@ -232,6 +232,25 @@ impl DeployFeed for Store {
     }
 }
 
+impl ferristrace_domain::LlmReader for Store {
+    async fn calls(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _query: &ferristrace_domain::CallQuery,
+    ) -> Result<ferristrace_domain::CallPage, ferristrace_domain::StoreError> {
+        Ok(ferristrace_domain::CallPage::default())
+    }
+
+    async fn models(
+        &self,
+        _org: ferristrace_domain::TenantId,
+        _window: ferristrace_domain::Window,
+        _project: Option<ferristrace_domain::ProjectId>,
+    ) -> Result<Vec<ferristrace_domain::SeenModel>, ferristrace_domain::StoreError> {
+        Ok(Vec::new())
+    }
+}
+
 impl ReleaseReader for Store {
     async fn releases(
         &self,

@@ -72,6 +72,12 @@ pub const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../migrations/clickhouse/0010_releases.up.sql"),
         down: include_str!("../../migrations/clickhouse/0010_releases.down.sql"),
     },
+    Migration {
+        version: 11,
+        name: "llm_calls",
+        up: include_str!("../../migrations/clickhouse/0011_llm_calls.up.sql"),
+        down: include_str!("../../migrations/clickhouse/0011_llm_calls.down.sql"),
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -322,6 +328,32 @@ mod tests {
         );
         assert!(parts[3].contains("'deploy', 'deployment.event'"), "{up}");
         assert!(parts[3].contains("toUInt64(0) AS requests"), "{up}");
+    }
+
+    #[test]
+    fn an_llm_call_is_one_row_per_genai_span_keyed_by_tenant_and_time() {
+        let up = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "llm_calls")
+            .expect("an llm_calls migration")
+            .up;
+        let parts: Vec<&str> = statements(up).collect();
+
+        assert_eq!(parts.len(), 3, "{up}");
+        assert!(parts[0].contains("ORDER BY (tenant_id, time,"), "{up}");
+        assert!(parts[0].contains("TTL expire_at DELETE"), "{up}");
+        for select in &parts[1..] {
+            assert!(
+                select.contains("attributes['gen_ai.request.model'] != ''"),
+                "{select}"
+            );
+            assert!(
+                select.contains("attributes['gen_ai.usage.cache_read.input_tokens']"),
+                "{select}"
+            );
+        }
+        assert!(parts[1].starts_with("INSERT INTO llm_calls"), "{up}");
+        assert!(parts[2].contains("MATERIALIZED VIEW"), "{up}");
     }
 
     #[test]
