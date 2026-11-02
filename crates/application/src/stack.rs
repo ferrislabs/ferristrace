@@ -1,7 +1,7 @@
 use ferristrace_domain::{
-    AuthProvider, Authorizer, Clock, IssueReader, LogReader, LogSink, Mailer, PasswordHasher,
-    Photos, ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader, SpanSink, TenantDirectory,
-    UsageMeter, UsageReader,
+    AuthProvider, Authorizer, Clock, IssueReader, LogReader, LogSink, Mailer, MetricReader,
+    MetricSink, PasswordHasher, Photos, ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader,
+    SpanSink, TenantDirectory, UsageMeter, UsageReader,
 };
 
 use crate::registry::UnitOfWork;
@@ -15,9 +15,10 @@ pub trait Stack: Send + Sync + 'static {
     type SpanStore: SpanReader + SpanPages + Send + Sync + 'static;
     type IssueStore: IssueReader + Send + Sync + 'static;
     type LogStore: LogReader + Send + Sync + 'static;
+    type MetricStore: MetricReader + Send + Sync + 'static;
     type Meter: UsageMeter + UsageReader + Send + Sync + 'static;
     type Oidc: Authorizer + AuthProvider + Send + Sync + 'static;
-    type Sink: SpanSink + LogSink + Send + Sync + 'static;
+    type Sink: SpanSink + LogSink + MetricSink + Send + Sync + 'static;
     type Quota: QuotaPolicy + Send + Sync + 'static;
     type Directory: TenantDirectory + Send + Sync + 'static;
 }
@@ -32,6 +33,7 @@ pub struct Adapters<S: Stack> {
     pub span_store: Option<S::SpanStore>,
     pub issue_store: Option<S::IssueStore>,
     pub log_store: Option<S::LogStore>,
+    pub metric_store: Option<S::MetricStore>,
     pub oidc: Option<S::Oidc>,
     pub provision: ProvisionPolicy,
 }
@@ -47,6 +49,7 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) span_store: Option<S::SpanStore>,
     pub(crate) issue_store: Option<S::IssueStore>,
     pub(crate) log_store: Option<S::LogStore>,
+    pub(crate) metric_store: Option<S::MetricStore>,
     pub(crate) oidc: Option<S::Oidc>,
     pub(crate) provision: ProvisionPolicy,
 }
@@ -63,6 +66,7 @@ impl<S: Stack> Ferristrace<S> {
             span_store: adapters.span_store,
             issue_store: adapters.issue_store,
             log_store: adapters.log_store,
+            metric_store: adapters.metric_store,
             oidc: adapters.oidc,
             provision: adapters.provision,
         }

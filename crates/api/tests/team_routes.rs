@@ -292,6 +292,7 @@ impl Stack for TestStack {
     type SpanStore = Inert;
     type IssueStore = Inert;
     type LogStore = Inert;
+    type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -313,6 +314,7 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         span_store: None,
         issue_store: None,
         log_store: None,
+        metric_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

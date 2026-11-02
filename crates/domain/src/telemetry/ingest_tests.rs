@@ -11,6 +11,7 @@ use super::value_objects::{
     Admission, DecompressedBytes, IngestKey, LogPayload, Payload, RetentionDays, Scope, Severity,
     SpanId, SpanKind, SpanStatus, TenantId, TraceId,
 };
+use crate::metrics::{Metric, MetricData, MetricPayload, MetricPoint, MetricSink};
 use crate::testing;
 
 #[derive(Debug, Default)]
@@ -489,4 +490,164 @@ async fn a_log_sink_failure_surfaces_and_meters_nothing() {
 
     assert_eq!(outcome, Err(IngestError::Sink(SinkError::Unavailable)));
     assert!(meter.readings().is_empty());
+}
+
+#[derive(Debug, Default)]
+struct RecordingMetrics(Mutex<Vec<(Scope, Vec<Metric>)>>);
+
+impl RecordingMetrics {
+    fn batches(&self) -> Vec<(Scope, Vec<Metric>)> {
+        self.0.lock().expect("sink lock").clone()
+    }
+}
+
+impl MetricSink for RecordingMetrics {
+    fn accept_metrics(
+        &self,
+        scope: Scope,
+        metrics: Vec<Metric>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        self.0.lock().expect("sink lock").push((scope, metrics));
+        async { Ok(()) }
+    }
+}
+
+impl MetricSink for UnavailableSink {
+    async fn accept_metrics(&self, _scope: Scope, _metrics: Vec<Metric>) -> Result<(), SinkError> {
+        Err(SinkError::Unavailable)
+    }
+}
+
+fn a_metric() -> Metric {
+    Metric {
+        name: "queue.depth".into(),
+        unit: "1".into(),
+        description: "jobs waiting".into(),
+        service_name: "worker".into(),
+        data: MetricData::Gauge(vec![MetricPoint {
+            time_unix_nanos: 5,
+            value: 3.0,
+            attributes: BTreeMap::new(),
+            exemplars: Vec::new(),
+        }]),
+    }
+}
+
+fn some_metrics(bytes: u64) -> MetricPayload {
+    MetricPayload {
+        metrics: vec![a_metric(), a_metric()],
+        decompressed: DecompressedBytes::new(bytes),
+    }
+}
+
+#[tokio::test]
+async fn a_known_key_sends_its_metrics_under_its_scope_and_meters_them_once() {
+    let tenant = TenantId::new(Uuid::from_u128(43));
+    let week = RetentionDays::try_from(7).expect("a week");
+    let scope = Scope::of(tenant).retained_for(Some(week));
+    let sink = RecordingMetrics::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(RetainingDirectory(scope), Unmetered, &sink, &meter);
+
+    let resolved = ingest
+        .accept_metrics(&IngestKey::from_plaintext("live"), some_metrics(1024))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(resolved, tenant);
+    assert_eq!(sink.batches(), vec![(scope, vec![a_metric(), a_metric()])]);
+    assert_eq!(
+        meter.readings(),
+        vec![(tenant, DecompressedBytes::new(1024))],
+        "one export is one meter record, however many metrics it carries"
+    );
+}
+
+#[tokio::test]
+async fn metrics_from_an_unknown_key_reach_neither_the_sink_nor_the_meter() {
+    let sink = RecordingMetrics::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(FakeDirectory::default(), Unmetered, &sink, &meter);
+
+    let outcome = ingest
+        .accept_metrics(&IngestKey::from_plaintext("absent"), some_metrics(512))
+        .await;
+
+    assert_eq!(outcome, Err(IngestError::UnknownKey(UnknownKey)));
+    assert!(sink.batches().is_empty());
+    assert!(meter.readings().is_empty());
+}
+
+#[tokio::test]
+async fn metrics_over_the_cap_are_refused_like_spans() {
+    let tenant = TenantId::new(Uuid::from_u128(4));
+    let sink = RecordingMetrics::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        HardCap(1024),
+        &sink,
+        &meter,
+    );
+
+    let outcome = ingest
+        .accept_metrics(&IngestKey::from_plaintext("live"), some_metrics(4096))
+        .await;
+
+    assert_eq!(
+        outcome,
+        Err(IngestError::Capped {
+            allowance: DecompressedBytes::new(1024)
+        })
+    );
+    assert!(sink.batches().is_empty());
+    assert!(meter.readings().is_empty());
+}
+
+#[tokio::test]
+async fn a_metric_sink_failure_surfaces_and_meters_nothing() {
+    let tenant = TenantId::new(Uuid::from_u128(1));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        UnavailableSink,
+        &meter,
+    );
+
+    let outcome = ingest
+        .accept_metrics(&IngestKey::from_plaintext("live"), some_metrics(64))
+        .await;
+
+    assert_eq!(outcome, Err(IngestError::Sink(SinkError::Unavailable)));
+    assert!(meter.readings().is_empty());
+}
+
+#[tokio::test]
+async fn an_export_whose_metrics_were_all_skipped_is_still_metered() {
+    let tenant = TenantId::new(Uuid::from_u128(44));
+    let sink = RecordingMetrics::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        &sink,
+        &meter,
+    );
+
+    ingest
+        .accept_metrics(
+            &IngestKey::from_plaintext("live"),
+            MetricPayload {
+                metrics: Vec::new(),
+                decompressed: DecompressedBytes::new(300),
+            },
+        )
+        .await
+        .expect("an export of summaries only is accepted");
+
+    assert_eq!(
+        meter.readings(),
+        vec![(tenant, DecompressedBytes::new(300))]
+    );
 }

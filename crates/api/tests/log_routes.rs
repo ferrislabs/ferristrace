@@ -238,6 +238,7 @@ impl Stack for TestStack {
     type SpanStore = Inert;
     type IssueStore = Inert;
     type LogStore = Store;
+    type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -255,6 +256,7 @@ fn state(shelf: Option<Arc<Shelf>>) -> AppState<TestStack> {
         span_store: None,
         issue_store: None,
         log_store: shelf.map(Store),
+        metric_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

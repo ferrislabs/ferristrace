@@ -463,6 +463,7 @@ where
     type SpanStore = Inert;
     type IssueStore = Inert;
     type LogStore = Inert;
+    type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Z;
     type Sink = Inert;
@@ -494,6 +495,7 @@ where
         span_store: None,
         issue_store: None,
         log_store: None,
+        metric_store: None,
         oidc,
         provision: ProvisionPolicy::default(),
     };

@@ -2,15 +2,16 @@ use core::future::Future;
 
 pub use ferristrace_domain::testing::Notebook;
 use ferristrace_domain::{
-    AccountId, Admission, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditFilter, AuditPage,
-    AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock, Counted, DecompressedBytes,
-    Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
-    KeyScopes, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Occurrence,
-    PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId,
-    QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity, Scope, ServiceSummary,
-    SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink,
-    StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
-    UnknownKey, UsageMeter, UsageReader, Window,
+    AccountId, Admission, Aggregation, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditFilter,
+    AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock, Counted,
+    DecompressedBytes, Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader,
+    IssuedKey, KeyId, KeyName, KeyScopes, LogBucket, LogPage, LogQuery, LogReader, LogRecord,
+    LogSink, Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink,
+    Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow,
+    ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet,
+    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
+    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
+    UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -170,6 +171,36 @@ impl SpanSink for Inert {
 impl LogSink for Inert {
     async fn accept_logs(&self, _scope: Scope, _records: Vec<LogRecord>) -> Result<(), SinkError> {
         Ok(())
+    }
+}
+
+impl MetricSink for Inert {
+    async fn accept_metrics(&self, _scope: Scope, _metrics: Vec<Metric>) -> Result<(), SinkError> {
+        Ok(())
+    }
+}
+
+impl MetricReader for Inert {
+    async fn catalogue(
+        &self,
+        _org: TenantId,
+        _search: Option<&str>,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<MetricDescriptor>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _org: TenantId,
+        _kind: MetricKind,
+        _aggregation: Aggregation,
+        query: &MetricQuery,
+    ) -> Result<SeriesSet, StoreError> {
+        Ok(SeriesSet {
+            step_nanos: query.step_nanos(),
+            ..SeriesSet::default()
+        })
     }
 }
 

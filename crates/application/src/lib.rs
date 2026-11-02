@@ -10,6 +10,7 @@ mod identity;
 mod ingestion;
 mod issues;
 mod logs;
+mod metrics;
 mod organisation;
 mod profile;
 mod provisioning;

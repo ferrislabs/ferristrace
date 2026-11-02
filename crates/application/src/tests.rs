@@ -21,6 +21,7 @@ fn adapters() -> Adapters<Probing> {
         span_store: None,
         issue_store: None,
         log_store: None,
+        metric_store: None,
         oidc: None,
         provision: the_policy(),
     }

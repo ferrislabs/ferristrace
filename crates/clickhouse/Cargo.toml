@@ -21,6 +21,8 @@ uuid.workspace = true
 [dev-dependencies]
 clickhouse = { workspace = true, features = ["test-util"] }
 ferristrace-domain = { workspace = true, features = ["testing"] }
+ferristrace-otlp.workspace = true
+opentelemetry-proto.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

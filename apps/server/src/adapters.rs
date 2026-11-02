@@ -3,15 +3,16 @@ use std::sync::Arc;
 use ferristrace_application::Stack;
 use ferristrace_application::registry::Repositories;
 use ferristrace_clickhouse::{
-    ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseReader, ClickhouseSink,
+    ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
+    ClickhouseMetricSink, ClickhouseReader, ClickhouseSink,
 };
 use ferristrace_domain::telemetry::{
     BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
 };
 use ferristrace_domain::{
-    DecompressedBytes, Email, IngestKey, LogRecord, LogSink, Mailer, NoPhotos, Photo, PhotoError,
-    Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span, SpanSink,
-    TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
+    DecompressedBytes, Email, IngestKey, LogRecord, LogSink, Mailer, Metric, MetricSink, NoPhotos,
+    Photo, PhotoError, Photos, Pictured, Portrait, ResetError, ResetToken, Scope, SinkError, Span,
+    SpanSink, TenantDirectory, TenantId, UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
     Argon2Hasher, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer, StaticDirectory,
@@ -32,6 +33,7 @@ impl Stack for Production {
     type SpanStore = ClickhouseReader;
     type IssueStore = ClickhouseIssues;
     type LogStore = ClickhouseLogReader;
+    type MetricStore = ClickhouseMetricReader;
     type Meter = Arc<Meter>;
     type Oidc = OidcProvider;
     type Sink = Arc<Sink>;
@@ -48,6 +50,7 @@ const _: fn() = || {
 pub(crate) struct Stored {
     pub(crate) spans: ClickhouseSink<SystemClock>,
     pub(crate) logs: ClickhouseLogSink<SystemClock>,
+    pub(crate) metrics: ClickhouseMetricSink<SystemClock>,
 }
 
 #[derive(Debug)]
@@ -70,6 +73,15 @@ impl LogSink for Sink {
         match self {
             Self::Memory(sink) => sink.accept_logs(scope, records).await,
             Self::Store(store) => store.logs.accept_logs(scope, records).await,
+        }
+    }
+}
+
+impl MetricSink for Sink {
+    async fn accept_metrics(&self, scope: Scope, metrics: Vec<Metric>) -> Result<(), SinkError> {
+        match self {
+            Self::Memory(sink) => sink.accept_metrics(scope, metrics).await,
+            Self::Store(store) => store.metrics.accept_metrics(scope, metrics).await,
         }
     }
 }

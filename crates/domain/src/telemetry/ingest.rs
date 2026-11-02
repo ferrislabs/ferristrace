@@ -3,6 +3,7 @@ use super::ports::{LogSink, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter};
 use super::value_objects::{
     Admission, DecompressedBytes, IngestKey, LogPayload, Payload, Scope, TenantId,
 };
+use crate::metrics::{MetricPayload, MetricSink};
 
 #[derive(Debug, Clone)]
 pub struct Ingest<D, Q, S, M> {
@@ -74,6 +75,24 @@ where
     ) -> Result<TenantId, IngestError> {
         let scope = self.admit(key, payload.decompressed).await?;
         self.sink.accept_logs(scope, payload.records).await?;
+        Ok(self.metered(scope, payload.decompressed).await)
+    }
+}
+
+impl<D, Q, S, M> Ingest<D, Q, S, M>
+where
+    D: TenantDirectory,
+    Q: QuotaPolicy,
+    S: MetricSink,
+    M: UsageMeter,
+{
+    pub async fn accept_metrics(
+        &self,
+        key: &IngestKey,
+        payload: MetricPayload,
+    ) -> Result<TenantId, IngestError> {
+        let scope = self.admit(key, payload.decompressed).await?;
+        self.sink.accept_metrics(scope, payload.metrics).await?;
         Ok(self.metered(scope, payload.decompressed).await)
     }
 }
