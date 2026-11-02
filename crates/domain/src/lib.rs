@@ -6,6 +6,7 @@ pub mod access;
 pub mod alerts;
 pub mod audit;
 pub mod catalogue;
+pub mod cluster;
 pub mod explore;
 pub mod export;
 pub mod identity;
@@ -50,6 +51,10 @@ pub use catalogue::{
     ProjectName, Projects, Renamed,
 };
 pub use clock::{Clock, UnixSeconds};
+pub use cluster::{
+    ClusterFilter, ClusterReader, ClusterSnapshot, ClusterView, FRESH_SECS, Node, Pod, PodPhase,
+    PodReason, WorkloadSummary, assess, fresh_window,
+};
 pub use explore::{
     BadWindow, Explore, ExploreError, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary,
     SpanReader, TraceFilter, TraceOrder, TraceSummary, Window,

@@ -9,11 +9,12 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, Aggregation, ApiKey, ApiKeys, ApiSecret, Exemplar, IssuedKey, KeyId, KeyName,
-    KeyScopes, LiveSession, Membership, Memberships, MetricDescriptor, MetricKind, MetricQuery,
-    MetricReader, NoPhotos, OrgRole, ProjectId, ProvisionPolicy, ReadGrant, Series, SeriesSet,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SpanId, StoreError,
-    TenantId, TraceId, UnixSeconds, WhoamiError,
+    AccountId, Agent, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
+    ClusterSnapshot, Exemplar, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership,
+    Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, OrgRole,
+    ProjectId, ProvisionPolicy, ReadGrant, Series, SeriesSet, Session, SessionError, SessionId,
+    SessionRoll, SessionStore, SessionToken, SpanId, StoreError, TenantId, TraceId, UnixSeconds,
+    WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -253,6 +254,17 @@ impl MetricReader for Store {
                 },
             ],
         })
+    }
+}
+
+impl ClusterReader for Store {
+    async fn snapshot(
+        &self,
+        _org: TenantId,
+        _window: Window,
+        _filter: &ClusterFilter,
+    ) -> Result<ClusterSnapshot, StoreError> {
+        Ok(ClusterSnapshot::default())
     }
 }
 

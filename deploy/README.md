@@ -577,6 +577,98 @@ ALTER TABLE spans MATERIALIZE COLUMN k8s_pod;
 ALTER TABLE spans MATERIALIZE INDEX spans_by_pod;
 ```
 
+## Kubernetes cluster view
+
+The Infrastructure > Kubernetes page and
+`GET /api/orgs/{org}/cluster?cluster&namespace&project` show the nodes,
+workloads and pods of the clusters the Collector reports on, from the
+metrics it already sends: FerrisTrace never talks to the Kubernetes API.
+Every value is the latest one stored in the last 10 minutes, so a pod or a
+node that stopped reporting drops out on its own.
+
+| Receiver | Metrics read |
+| --- | --- |
+| `k8s_cluster` | `k8s.pod.phase`, `k8s.container.restarts`, `k8s.container.ready`, `k8s.node.condition_ready` or `k8s.node.condition` (`condition=Ready`), `k8s.deployment.desired` / `available`, `k8s.statefulset.desired_pods` / `ready_pods`, `k8s.daemonset.desired_scheduled_nodes` / `ready_nodes` |
+| `kubeletstats` | `k8s.pod.cpu.usage` (or the older `k8s.pod.cpu.utilization`, in cores), `k8s.pod.memory.working_set`, `k8s.node.cpu.usage` (or `utilization`), `k8s.node.memory.working_set`, `k8s.node.memory.available` |
+
+A pod is unhealthy, with a reason, when its containers restarted in the
+last 10 minutes (`restarting`), when it is Running but a container is not
+ready (`not ready`), when its phase is Pending, Failed or Unknown (the phase
+name), or when its node is not ready (`node not ready`). The services a pod
+serves are the `service.name` of the spans that carried its `k8s.pod.name`
+in the same 10 minutes, and each pod links to its traces and logs through
+the `pod` filter.
+
+Run `k8s_cluster` once per cluster (a Deployment with one replica) and
+`kubeletstats` on every node (a DaemonSet, with `K8S_NODE_NAME` from the
+downward API), both with a service account allowed to read nodes, pods,
+workloads and `nodes/stats`. Set `k8s.cluster.name` to tell clusters
+apart, and export with an ingest key:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+      http: {}
+  k8s_cluster:
+    auth_type: serviceAccount
+    collection_interval: 30s
+    node_conditions_to_report: [Ready]
+  kubeletstats:
+    auth_type: serviceAccount
+    endpoint: https://${env:K8S_NODE_NAME}:10250
+    insecure_skip_verify: true
+    collection_interval: 30s
+    metric_groups: [node, pod]
+
+processors:
+  k8sattributes:
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+      - sources:
+          - from: connection
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.node.name
+        - k8s.deployment.name
+        - k8s.statefulset.name
+        - k8s.daemonset.name
+        - k8s.cronjob.name
+        - k8s.job.name
+  resource:
+    attributes:
+      - key: k8s.cluster.name
+        value: prod-eu-1
+        action: upsert
+  batch: {}
+
+exporters:
+  otlphttp:
+    endpoint: http://localhost:4318
+    headers:
+      authorization: Bearer ${env:FERRISTRACE_INGEST_KEY}
+
+service:
+  pipelines:
+    metrics:
+      receivers: [k8s_cluster, kubeletstats]
+      processors: [k8sattributes, resource, batch]
+      exporters: [otlphttp]
+    traces:
+      receivers: [otlp]
+      processors: [k8sattributes, resource, batch]
+      exporters: [otlphttp]
+```
+
+When nothing reports, the route answers empty lists and the page shows
+this configuration. Docker hosts have no view yet.
+
 ## Multi-tenancy
 
 Organisations exist and every span carries one, but a self-hosted
