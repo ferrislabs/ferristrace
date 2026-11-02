@@ -3,6 +3,7 @@ use ferristrace_domain::{
     AccountId, Decision, Fingerprint, IssueDecisions, ProjectId, Recorded, Status, StoreError,
 };
 use sqlx::Row;
+use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use crate::unit_of_work::{Postgres, SharedTx};
@@ -57,26 +58,7 @@ impl IssueDecisions for PostgresDecisions {
             .await
             .map_err(|_| StoreError::Unreachable)?;
 
-        rows.iter()
-            .map(|row| {
-                let print: Vec<u8> = row.get("fingerprint");
-                let bytes = print
-                    .try_into()
-                    .map_err(|_| StoreError::Unreachable)
-                    .map(Fingerprint::new)?;
-                Ok(Recorded {
-                    project: ProjectId::new(row.get("project_id")),
-                    print: bytes,
-                    decision: Decision {
-                        status: Status::parse(row.get::<String, _>("status").as_str())
-                            .unwrap_or_default(),
-                        owner: row.get::<Option<Uuid>, _>("owner_id").map(AccountId::new),
-                        decided_at_unix_nanos: unsigned(row.get("decided_at")),
-                        decided_by: row.get::<Option<Uuid>, _>("decided_by").map(AccountId::new),
-                    },
-                })
-            })
-            .collect()
+        rows.iter().map(read_recorded).collect()
     }
 
     async fn decide(
@@ -121,6 +103,24 @@ impl IssueDecisions for PostgresDecisions {
             .map(|_| ())
             .map_err(|_| StoreError::Unreachable)
     }
+}
+
+pub(crate) fn read_recorded(row: &PgRow) -> Result<Recorded, StoreError> {
+    let print: Vec<u8> = row.get("fingerprint");
+    let bytes = print
+        .try_into()
+        .map_err(|_| StoreError::Unreachable)
+        .map(Fingerprint::new)?;
+    Ok(Recorded {
+        project: ProjectId::new(row.get("project_id")),
+        print: bytes,
+        decision: Decision {
+            status: Status::parse(row.get::<String, _>("status").as_str()).unwrap_or_default(),
+            owner: row.get::<Option<Uuid>, _>("owner_id").map(AccountId::new),
+            decided_at_unix_nanos: unsigned(row.get("decided_at")),
+            decided_by: row.get::<Option<Uuid>, _>("decided_by").map(AccountId::new),
+        },
+    })
 }
 
 fn signed(value: u64) -> i64 {

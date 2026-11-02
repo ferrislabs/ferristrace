@@ -11,8 +11,9 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
     ProvisionPolicy, ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus, StoreError, TenantId,
-    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window,
+    SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader,
+    SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
+    WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -125,6 +126,17 @@ fn with_an_exception(mut span: Span, at: u64) -> Span {
     span
 }
 
+impl SpanPages for TwoSpans {
+    async fn page(
+        &self,
+        _org: TenantId,
+        _after: Option<&SpanCursor>,
+        _limit: u32,
+    ) -> Result<SpanPage, StoreError> {
+        Ok(SpanPage::default())
+    }
+}
+
 impl SpanReader for TwoSpans {
     async fn services(
         &self,
@@ -186,6 +198,17 @@ impl SpanReader for TwoSpans {
 }
 
 struct NoSpans;
+
+impl SpanPages for NoSpans {
+    async fn page(
+        &self,
+        _org: TenantId,
+        _after: Option<&SpanCursor>,
+        _limit: u32,
+    ) -> Result<SpanPage, StoreError> {
+        Ok(SpanPage::default())
+    }
+}
 
 impl SpanReader for NoSpans {
     async fn services(
@@ -256,7 +279,7 @@ impl RepoFor<domain::ApiKeys> for Fakes {
 
 struct TestStack<R>(std::marker::PhantomData<R>);
 
-impl<R: SpanReader + Send + Sync + 'static> Stack for TestStack<R> {
+impl<R: SpanReader + SpanPages + Send + Sync + 'static> Stack for TestStack<R> {
     type Repos = Fakes;
     type Clock = Inert;
     type Hasher = Inert;
@@ -271,7 +294,7 @@ impl<R: SpanReader + Send + Sync + 'static> Stack for TestStack<R> {
     type Directory = Inert;
 }
 
-fn state<R: SpanReader + Send + Sync + 'static>(reader: R) -> AppState<TestStack<R>> {
+fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppState<TestStack<R>> {
     let adapters = Adapters {
         clock: Inert::default(),
         hasher: Inert::default(),
@@ -291,7 +314,7 @@ fn state<R: SpanReader + Send + Sync + 'static>(reader: R) -> AppState<TestStack
 
 async fn served<R>(reader: R, request: Request<Body>) -> (StatusCode, String)
 where
-    R: SpanReader + Send + Sync + 'static,
+    R: SpanReader + SpanPages + Send + Sync + 'static,
 {
     let response = explore_router(state(reader))
         .oneshot(request)
@@ -505,6 +528,17 @@ async fn an_exception_on_a_span_reaches_the_waterfall_with_its_place_in_it() {
 
 #[derive(Debug, Default)]
 struct Remembering(Mutex<Option<TraceFilter>>);
+
+impl SpanPages for Remembering {
+    async fn page(
+        &self,
+        _org: TenantId,
+        _after: Option<&SpanCursor>,
+        _limit: u32,
+    ) -> Result<SpanPage, StoreError> {
+        Ok(SpanPage::default())
+    }
+}
 
 impl SpanReader for Remembering {
     async fn services(

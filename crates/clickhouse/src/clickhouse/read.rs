@@ -123,6 +123,10 @@ impl ClickhouseReader {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
+
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
+    }
 }
 
 impl SpanReader for ClickhouseReader {
@@ -282,7 +286,7 @@ fn read_span(trace: TraceId, row: SpanRow, events: Vec<SpanEvent>) -> Result<Spa
     })
 }
 
-fn map_of(pairs: Vec<(String, String)>) -> BTreeMap<Box<str>, Box<str>> {
+pub(crate) fn map_of(pairs: Vec<(String, String)>) -> BTreeMap<Box<str>, Box<str>> {
     pairs
         .into_iter()
         .map(|(key, value)| (key.into(), value.into()))
@@ -306,7 +310,7 @@ pub(crate) fn held(error: &dyn core::fmt::Display) -> StoreError {
     StoreError::Unreachable
 }
 
-fn read_kind(spelling: &str) -> SpanKind {
+pub(crate) fn read_kind(spelling: &str) -> SpanKind {
     match spelling {
         "internal" => SpanKind::Internal,
         "server" => SpanKind::Server,
@@ -317,7 +321,7 @@ fn read_kind(spelling: &str) -> SpanKind {
     }
 }
 
-fn read_status(spelling: &str) -> SpanStatus {
+pub(crate) fn read_status(spelling: &str) -> SpanStatus {
     match spelling {
         "ok" => SpanStatus::Ok,
         "error" => SpanStatus::Error,

@@ -7,9 +7,9 @@ use ferristrace_domain::{
     Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
     KeyScopes, Mailer, Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher,
     PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity,
-    Scope, ServiceSummary, SignInProof, SinkError, Span, SpanReader, SpanSink, StoreError,
-    TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
-    UsageMeter, UsageReader, Window,
+    Scope, ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages,
+    SpanReader, SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
+    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -103,6 +103,17 @@ impl SpanReader for Inert {
         _project: Option<ProjectId>,
     ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
+    }
+}
+
+impl SpanPages for Inert {
+    async fn page(
+        &self,
+        _org: TenantId,
+        _after: Option<&SpanCursor>,
+        _limit: u32,
+    ) -> Result<SpanPage, StoreError> {
+        Ok(SpanPage::default())
     }
 }
 

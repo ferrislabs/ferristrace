@@ -1,4 +1,4 @@
-import { Copy, Upload } from 'lucide-react'
+import { Copy, Download, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -109,6 +109,22 @@ function Retention({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
   )
 }
 
+function Export({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
+  return (
+    <Card className="flex flex-wrap items-center gap-3 p-4">
+      <span className="flex min-w-0 flex-1 flex-col leading-5">
+        <span className="text-heading">Export organisation data</span>
+        <span className="text-caption text-muted-foreground">{isOwner ? 'A tar.gz holding the control plane (projects, teams, members, keys without secrets, issue decisions, audit log) and every span, one JSON object per line. Each export is recorded in the audit log.' : 'Only an owner can export the organisation.'}</span>
+      </span>
+      {isOwner ? (
+        <Button size="sm" asChild><a href={`/api/orgs/${card.id}/export`} download><Download />Export organisation data</a></Button>
+      ) : (
+        <Button size="sm" disabled><Download />Export organisation data</Button>
+      )}
+    </Card>
+  )
+}
+
 export function OrgGeneral() {
   const { active } = useOrganisations()
   const { card, nothing } = useOrgCard()
@@ -146,6 +162,7 @@ export function OrgGeneral() {
         <>
           <Identity card={card} />
           <Retention card={card} isOwner={active?.role === 'owner'} />
+          <Export card={card} isOwner={active?.role === 'owner'} />
           <Danger title={`Delete ${card.name}`} text="Deletes every project, signal, member and key of the organisation. Export first if you need anything." action="Delete organisation" onClick={() => setDel(true)} />
           <ConfirmDelete open={del} onOpenChange={setDel} name={card.name} what="organisation" body="Every project, signal, member, team, key and alert is deleted. This cannot be undone." />
         </>

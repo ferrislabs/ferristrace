@@ -5,6 +5,7 @@ mod audit;
 mod borrowed;
 mod catalogue;
 mod explore;
+mod export;
 mod identity;
 mod ingestion;
 mod issues;
