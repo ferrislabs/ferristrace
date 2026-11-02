@@ -8,6 +8,7 @@ import { Alerts } from '@/pages/Alerts'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
 import { Kubernetes } from '@/pages/Infra'
+import { KubernetesNode } from '@/pages/InfraNode'
 import { IssueDetail } from '@/pages/IssueDetail'
 import { Issues } from '@/pages/Issues'
 import { Logs } from '@/pages/Logs'
@@ -142,6 +143,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/incidents', Incidents, real),
     inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra/kubernetes', Kubernetes, real),
+    inShell('/infra/kubernetes/nodes/$name', KubernetesNode, real),
     inShell('/traces', Traces, {}),
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, {}),
