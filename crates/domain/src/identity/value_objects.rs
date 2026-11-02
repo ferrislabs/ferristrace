@@ -614,7 +614,7 @@ impl TotpSecret {
 
     pub fn base32(&self) -> String {
         let mut rendered = String::with_capacity(BASE32_CHARS);
-        for chunk in self.0.chunks_exact(5) {
+        for chunk in self.0.as_chunks::<5>().0 {
             let bits =
                 u64::from_be_bytes([0, 0, 0, chunk[0], chunk[1], chunk[2], chunk[3], chunk[4]]);
             for place in (0..8).rev() {

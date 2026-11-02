@@ -43,7 +43,7 @@ place that names a concrete adapter. See ADR 0023 and ADR 0024.
 
 ## Working on it
 
-Rust 1.97.0, edition 2024, pinned in `rust-toolchain.toml`. Node 26 and
+Rust 1.99.1, edition 2024, pinned in `rust-toolchain.toml`. Node 26 and
 pnpm 10 for the front end.
 
 ```sh
