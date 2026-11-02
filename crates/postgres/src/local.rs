@@ -56,11 +56,16 @@ impl LocalPasswordProvider {
 
     async fn upgrade(&self, account: Uuid, hash: &PasswordHash) {
         let mut tx = self.tx.lock().await;
-        let done = sqlx::query("UPDATE accounts SET password_hash = $2 WHERE id = $1")
-            .bind(account)
-            .bind(hash.encoded())
-            .execute(&mut **tx)
-            .await;
+        let done = async {
+            let mut kept = sqlx::Connection::begin(&mut **tx).await?;
+            sqlx::query("UPDATE accounts SET password_hash = $2 WHERE id = $1")
+                .bind(account)
+                .bind(hash.encoded())
+                .execute(&mut *kept)
+                .await?;
+            kept.commit().await
+        }
+        .await;
         if let Err(error) = done {
             tracing::error!(%error, "the password hash was not upgraded");
         }

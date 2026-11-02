@@ -97,11 +97,12 @@ impl PostgresAccounts {
         }
 
         let mut tx = self.tx.lock().await;
+        let mut kept = sqlx::Connection::begin(&mut **tx).await?;
 
         let existing: Option<Uuid> = if policy.link_by_email {
             sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
                 .bind(identity.email.as_str())
-                .fetch_optional(&mut **tx)
+                .fetch_optional(&mut *kept)
                 .await?
                 .map(|row| row.get("id"))
         } else {
@@ -115,7 +116,7 @@ impl PostgresAccounts {
                 sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
                     .bind(account)
                     .bind(identity.email.as_str())
-                    .execute(&mut **tx)
+                    .execute(&mut *kept)
                     .await?;
                 account
             }
@@ -126,8 +127,10 @@ impl PostgresAccounts {
             .bind(identity.issuer.as_str())
             .bind(identity.subject.as_str())
             .bind(account)
-            .execute(&mut **tx)
+            .execute(&mut *kept)
             .await?;
+
+        kept.commit().await?;
 
         Ok(AccountId::new(account))
     }

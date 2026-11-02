@@ -189,6 +189,8 @@ fn adapters_of(
     }
 }
 
+const DIRECTORY_CONNECTIONS: u32 = 2;
+
 async fn control_plane_pool(config: &Config) -> anyhow::Result<Option<PgPool>> {
     let Some(url) = config.database_url.as_deref() else {
         return Ok(None);
@@ -258,7 +260,10 @@ fn directory_of(pool: Option<&PgPool>) -> Directory {
         );
         return Directory::Nothing(StaticDirectory::default());
     };
-    Directory::ControlPlane(PostgresDirectory::new(pool.clone(), SystemClock))
+    let own = PgPoolOptions::new()
+        .max_connections(DIRECTORY_CONNECTIONS)
+        .connect_lazy_with(pool.connect_options().as_ref().clone());
+    Directory::ControlPlane(PostgresDirectory::new(own, SystemClock))
 }
 
 fn gateway_of(
