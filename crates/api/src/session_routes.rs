@@ -10,7 +10,7 @@ use ferristrace_domain::{LiveSession, RollError, SessionId, SessionRoll, Session
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 
 const MILLIS_PER_SECOND: u64 = 1_000;
 

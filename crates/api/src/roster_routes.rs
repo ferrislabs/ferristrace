@@ -13,7 +13,7 @@ use ferristrace_domain::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 use crate::whoami_routes::photo_url;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;

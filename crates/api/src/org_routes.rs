@@ -15,7 +15,7 @@ use ferristrace_domain::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 use crate::session_cookie;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;

@@ -11,7 +11,7 @@ use ferristrace_domain::{
 };
 use serde::Deserialize;
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 
 #[derive(Debug, Deserialize)]
 pub struct Chosen {

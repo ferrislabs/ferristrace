@@ -4,21 +4,18 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::header::HeaderName;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use ferristrace_domain::{
-    Explore, ExploreError, Memberships, ProjectId, ServiceSummary, SessionStore, SessionToken,
-    Span, SpanKind, SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder,
-    TraceSummary, Window,
+    Explore, ExploreError, Memberships, ProjectId, ServiceSummary, SessionStore, Span, SpanKind,
+    SpanReader, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::session_cookie;
+use crate::carried::{NotCarried, carried};
 
-const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 const NANOS_PER_MILLI: u64 = 1_000_000;
 const NANOS_PER_MICRO: u64 = 1_000;
 
@@ -264,31 +261,6 @@ where
         return Err(LookRefused::NoSuchTrace);
     }
     Ok(Json(laid_out(id, spans)))
-}
-
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-pub enum NotCarried {
-    #[error("the request carries no x-requested-with header")]
-    NotFromOurOrigin,
-    #[error("the request carries no live session")]
-    NoSession,
-}
-
-impl IntoResponse for NotCarried {
-    fn into_response(self) -> Response {
-        let status = match self {
-            Self::NotFromOurOrigin => StatusCode::FORBIDDEN,
-            Self::NoSession => StatusCode::UNAUTHORIZED,
-        };
-        (status, self.to_string()).into_response()
-    }
-}
-
-pub(crate) fn carried(headers: &HeaderMap) -> Result<SessionToken, NotCarried> {
-    if !headers.contains_key(&REQUESTED_WITH) {
-        return Err(NotCarried::NotFromOurOrigin);
-    }
-    session_cookie::carried(headers).ok_or(NotCarried::NoSession)
 }
 
 impl From<NotCarried> for LookRefused {

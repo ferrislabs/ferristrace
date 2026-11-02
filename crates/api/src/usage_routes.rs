@@ -11,7 +11,8 @@ use ferristrace_domain::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::explore_routes::{LookRefused, carried};
+use crate::carried::carried;
+use crate::explore_routes::LookRefused;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
 

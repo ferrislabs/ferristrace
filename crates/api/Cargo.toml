@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 ferristrace-domain.workspace = true
 ferristrace-otlp.workspace = true
+ferristrace-application.workspace = true
 axum.workspace = true
 bytes.workspace = true
 hex.workspace = true

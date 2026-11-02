@@ -13,7 +13,7 @@ use ferristrace_domain::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::explore_routes::{NotCarried, carried};
+use crate::carried::{NotCarried, carried};
 use crate::session_cookie::{self, SessionCookie};
 
 #[derive(Debug, Serialize)]
