@@ -1,5 +1,5 @@
-use crate::key::IngestKey;
-use crate::tenant::{TenantDirectory, TenantId, UnknownKey};
+use crate::telemetry::IngestKey;
+use crate::telemetry::{TenantDirectory, TenantId, UnknownKey};
 
 pub async fn a_directory_resolves_the_key_it_holds<D: TenantDirectory>(
     directory: &D,
