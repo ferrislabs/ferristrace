@@ -6,10 +6,10 @@ import { InputGroup } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Switch } from '@/components/ui/switch'
 import { Table, Td, Th, Tr, Kbd } from '@/components/ui/misc'
-import { PageHeader, ServiceDot } from '@/components/cmt/bits'
-import { Sparkline } from '@/components/cmt/charts'
+import { PageHeader, ServiceDot } from '@/components/ft/bits'
+import { Sparkline } from '@/components/ft/charts'
 import { useServices } from '@/data/services'
-import { EmptyState } from '@/components/cmt/bits'
+import { EmptyState } from '@/components/ft/bits'
 import { cn } from '@/lib/utils'
 
 const ms = (s: string) => (s === '—' ? -1 : parseFloat(s) * (s.endsWith(' s') ? 1000 : s.endsWith('µs') ? 0.001 : 1))

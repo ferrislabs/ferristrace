@@ -22,7 +22,7 @@ export function Billing() {
       </Card>
       <Card className="overflow-x-auto">
         <Table aria-label="Invoices"><thead><tr><Th>Invoice</Th><Th className="w-[130px]">Date</Th><Th numeric className="w-[120px]">Amount</Th><Th className="w-[100px]">Status</Th><Th className="w-[100px]"><span className="sr-only">Download</span></Th></tr></thead>
-          <tbody>{['CMT-2026-0010', 'CMT-2026-0009', 'CMT-2026-0008'].map((n, i) => <Tr key={n}><Td className="font-mono">{n}</Td><Td className="font-mono">2026-{String(10 - i).padStart(2, '0')}-01</Td><Td numeric>€[PRICE]</Td><Td><Badge variant="success">Paid</Badge></Td><Td numeric><Button variant="ghost" size="sm">PDF</Button></Td></Tr>)}</tbody></Table>
+          <tbody>{['FT-2026-0010', 'FT-2026-0009', 'FT-2026-0008'].map((n, i) => <Tr key={n}><Td className="font-mono">{n}</Td><Td className="font-mono">2026-{String(10 - i).padStart(2, '0')}-01</Td><Td numeric>€[PRICE]</Td><Td><Badge variant="success">Paid</Badge></Td><Td numeric><Button variant="ghost" size="sm">PDF</Button></Td></Tr>)}</tbody></Table>
       </Card>
     </>
   )

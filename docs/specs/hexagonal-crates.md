@@ -42,7 +42,7 @@ Invariants
     bound on the stack named in `apps/server`]
   - No port is defined in an adapter crate.  [review]
   - HTTP routes, status codes, response bodies, cookies, gRPC codes, CLI
-    commands and output, the `comettrace` binary name, `COMETTRACE_*`
+    commands and output, the `ferristrace` binary name, `FERRISTRACE_*`
     settings, token prefixes, and both migration sets are unchanged.
     [test: existing suites and the self-hosting CI job]
 
@@ -51,8 +51,8 @@ Out of scope
   - Cucumber scenarios or an e2e crate.
   - Any new feature, route, migration or setting.
   - Removing the `&T` and `Arc<T>` blanket impls on ports.
-  - Renaming the binary, the image, the `COMETTRACE_` prefix or the
-    `comettrace` database.
+  - Renaming the binary, the image, the `FERRISTRACE_` prefix or the
+    `ferristrace` database.
 
 Design
   Crates, all under `crates/`, all named `ferristrace-*`:
@@ -85,7 +85,7 @@ Design
     otlp          unchanged apart from its name.
     api           `AppState<S>`, a `Session` extractor, DTOs, routers.
     ee            unchanged apart from its name.
-  apps/server     package `ferristrace-server`, binary `comettrace`:
+  apps/server     package `ferristrace-server`, binary `ferristrace`:
                   configuration, the `Stack` impl, the adapter enums,
                   wiring, the loops that call application jobs, serving.
 

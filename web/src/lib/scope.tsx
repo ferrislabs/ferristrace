@@ -4,8 +4,8 @@ type Chosen = { org: string | undefined; project: string | undefined }
 type Ctx = Chosen & { chooseOrg: (org: string) => void; chooseProject: (project: string | undefined) => void }
 
 const ScopeContext = createContext<Ctx | null>(null)
-const ORG = 'cmt-org'
-const PROJECT = 'cmt-project'
+const ORG = 'ft-org'
+const PROJECT = 'ft-project'
 
 function remembered(key: string): string | undefined {
   try {

@@ -11,7 +11,7 @@ use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError}
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const AN_HOUR: u64 = 3_600_000_000_000;
@@ -168,7 +168,7 @@ async fn a_token_no_session_carries_reads_nothing() {
 
     let refused = metering(999, &rolled)
         .consumption(
-            &SessionToken::from_plaintext("ct_ss_nope"),
+            &SessionToken::from_plaintext("ft_ss_nope"),
             an_org(MINE),
             a_month(),
         )

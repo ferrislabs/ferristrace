@@ -48,7 +48,7 @@ export const K8S_EVENTS = [
 export type CStatus = 'running' | 'restarting' | 'exited' | 'unhealthy'
 export const DOCKER_HOSTS = ['edge-1 (Docker 27.3)', 'edge-2 (Docker 27.3)', 'build-runner (Docker 26.1)']
 export const CONTAINERS: { name: string; image: string; compose: string; status: CStatus; health: string; up: string; cpu: number; mem: string; memPct: number; net: string; restarts: number; ports: string }[] = [
-  { name: 'comettrace-agent', image: 'otel/opentelemetry-collector-contrib:0.111.0', compose: 'observability', status: 'running', health: 'healthy', up: '40 d', cpu: 3, mem: '96 MiB / 512 MiB', memPct: 19, net: '1.2 MB/s ↑', restarts: 0, ports: '4317, 4318' },
+  { name: 'ferristrace-agent', image: 'otel/opentelemetry-collector-contrib:0.111.0', compose: 'observability', status: 'running', health: 'healthy', up: '40 d', cpu: 3, mem: '96 MiB / 512 MiB', memPct: 19, net: '1.2 MB/s ↑', restarts: 0, ports: '4317, 4318' },
   { name: 'edge-proxy', image: 'caddy:2.8', compose: 'edge', status: 'running', health: 'healthy', up: '12 d', cpu: 21, mem: '140 MiB / 1 GiB', memPct: 14, net: '38 MB/s ↓', restarts: 0, ports: '80, 443' },
   { name: 'storefront-ssr', image: 'acme/storefront-web:2.14.1', compose: 'storefront', status: 'running', health: 'healthy', up: '28 min', cpu: 54, mem: '780 MiB / 1 GiB', memPct: 76, net: '6.4 MB/s ↓', restarts: 0, ports: '3000' },
   { name: 'image-resizer', image: 'acme/imgproxy:3.24', compose: 'storefront', status: 'running', health: 'healthy', up: '9 d', cpu: 38, mem: '410 MiB / 2 GiB', memPct: 20, net: '22 MB/s ↑', restarts: 0, ports: '8080' },

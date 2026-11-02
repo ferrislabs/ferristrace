@@ -1,4 +1,4 @@
-# Contributing to Comettrace
+# Contributing to Ferristrace
 
 Thanks for considering it. This page says how to get the stack running, how
 to run the tests, what the code is held to, and what a pull request needs.
@@ -11,7 +11,7 @@ where a vulnerability goes instead of an issue.
 
 ## Sign off your commits
 
-Comettrace takes contributions under the [Developer Certificate of
+Ferristrace takes contributions under the [Developer Certificate of
 Origin](DCO). It is a one-line statement that you wrote the patch or
 otherwise have the right to submit it under the project's licence. There is
 no CLA and no copyright assignment.
@@ -40,9 +40,9 @@ picks it on its own) and, for the front end, Node 26 with pnpm 10.
 
 ```sh
 git clone git@github.com:ferrislabs/ferristrace.git
-cd comettrace/deploy
+cd ferristrace/deploy
 docker compose up --build --detach
-docker compose exec server comettrace bootstrap --email you@example.com
+docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
 That brings up Postgres, ClickHouse, Redis and the server, applies both sets
@@ -66,14 +66,14 @@ and **skip silently without one**, so set the matching `REQUIRE_*` variable
 to turn a missing backend into a failure instead of a pass:
 
 ```sh
-DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
+DATABASE_URL=postgres://ferristrace:ferristrace@localhost:5432/ferristrace \
   REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
 
-CLICKHOUSE_URL=http://localhost:8123 CLICKHOUSE_USER=comettrace \
-  CLICKHOUSE_PASSWORD=comettrace REQUIRE_CLICKHOUSE_URL=1 \
+CLICKHOUSE_URL=http://localhost:8123 CLICKHOUSE_USER=ferristrace \
+  CLICKHOUSE_PASSWORD=ferristrace REQUIRE_CLICKHOUSE_URL=1 \
   cargo test -p ferristrace-clickhouse
 
-DATABASE_URL=postgres://comettrace:comettrace@localhost:5432/comettrace \
+DATABASE_URL=postgres://ferristrace:ferristrace@localhost:5432/ferristrace \
   REDIS_URL=redis://localhost:6379 REQUIRE_REDIS_URL=1 \
   cargo test -p ferristrace-redis
 ```

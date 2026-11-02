@@ -45,7 +45,7 @@ macros        <- application, postgres
   its context's repository bundle.
 - `apps/server` defines the one `Stack` impl, the adapter enums chosen at
   start, and the wiring. The package is `ferristrace-server`; its binary is
-  still `comettrace`, so the image, the compose file and every documented
+  still `ferristrace`, so the image, the compose file and every documented
   command are unchanged.
 
 The `layers` CI job fails if `domain` or `application` gains sqlx, axum,

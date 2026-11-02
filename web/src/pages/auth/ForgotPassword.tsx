@@ -15,7 +15,7 @@ export function ForgotPassword() {
     <AuthFrame
       title="Reset your password"
       intro="We send a link that sets a new password. It can be spent once."
-      footer={<>A self-hosted server only sends the mail when a relay is configured. Without one, an administrator runs <span className="font-mono">comettrace reset-password --email you@example.com</span> and hands you the link.</>}
+      footer={<>A self-hosted server only sends the mail when a relay is configured. Without one, an administrator runs <span className="font-mono">ferristrace reset-password --email you@example.com</span> and hands you the link.</>}
     >
       {ask.isSuccess ? (
         <>

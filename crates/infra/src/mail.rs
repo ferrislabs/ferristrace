@@ -51,7 +51,7 @@ impl SmtpMailer {
         Message::builder()
             .from(self.from.clone())
             .to(recipient)
-            .subject("Reset your comettrace password")
+            .subject("Reset your ferristrace password")
             .header(ContentType::TEXT_PLAIN)
             .body(format!(
                 "Open this link to choose a new password. It works once and expires within the hour.\n\n{}\n\nIf you did not ask for this, nothing has changed and you can ignore it.\n",
@@ -86,7 +86,7 @@ mod tests {
             relay: "mail.example.com".to_owned(),
             username: "postmaster".to_owned(),
             password: "secret".to_owned(),
-            from: "Comettrace <no-reply@example.com>".to_owned(),
+            from: "Ferristrace <no-reply@example.com>".to_owned(),
             base_url: "https://app.example.com/".to_owned(),
         })
         .expect("usable settings")
@@ -94,18 +94,18 @@ mod tests {
 
     #[test]
     fn a_link_carries_the_token_under_the_configured_host() {
-        let token = ResetToken::from_plaintext("ct_pr_abc");
+        let token = ResetToken::from_plaintext("ft_pr_abc");
 
         assert_eq!(
             mailer().reset_link(&token),
-            "https://app.example.com/reset?token=ct_pr_abc",
+            "https://app.example.com/reset?token=ft_pr_abc",
             "the trailing slash of the base url is not doubled"
         );
     }
 
     #[test]
     fn a_composed_message_names_both_parties_and_carries_the_link() {
-        let token = ResetToken::from_plaintext("ct_pr_abc");
+        let token = ResetToken::from_plaintext("ft_pr_abc");
 
         let message = mailer()
             .compose(
@@ -117,7 +117,7 @@ mod tests {
 
         assert!(rendered.contains("no-reply@example.com"), "{rendered}");
         assert!(rendered.contains("person@example.com"), "{rendered}");
-        assert!(rendered.contains("ct_pr_abc"), "{rendered}");
+        assert!(rendered.contains("ft_pr_abc"), "{rendered}");
         assert!(rendered.contains("works once"), "{rendered}");
     }
 

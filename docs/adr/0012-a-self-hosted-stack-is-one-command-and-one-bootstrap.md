@@ -16,7 +16,7 @@ deployment including the hosted one.
 
 ## Decision
 
-`comettrace bootstrap --email <address>` creates the account if it is
+`ferristrace bootstrap --email <address>` creates the account if it is
 absent, creates one organisation owned by it, and prints a single-use
 reset token. **It does nothing when an organisation already exists**, so it
 is safe to run again, safe to put in an entrypoint, and cannot quietly
@@ -36,7 +36,7 @@ the process is listening. Because migrations run before either listener
 starts, a server that answers it has already applied both schemas — which
 is what `depends_on: service_healthy` needs to mean.
 
-The compose file carries `comettrace` as the default password for
+The compose file carries `ferristrace` as the default password for
 Postgres and ClickHouse, so `docker compose up` works on a clean machine
 with no preparation, which is the acceptance criterion. **No database port
 is published to the host**: only 4317 and 4318 are, so those defaults are
@@ -109,7 +109,7 @@ absolute of publishing nothing, so it is bound to `127.0.0.1`.
 
 The reason survives the change, narrowed. A port on the loopback answers
 processes on this machine and nothing that can reach it over a network, so
-`comettrace/comettrace` is still not offered to anybody who finds the
+`ferristrace/ferristrace` is still not offered to anybody who finds the
 host. `POSTGRES_BIND` is what would widen that, and the README says to set
 a password before touching it.
 

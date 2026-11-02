@@ -29,9 +29,9 @@ the table it is about to fill.
 
 Roles are granted by the operator from the command line:
 
-- `comettrace create-org --name <name> --owner <email>` creates the
+- `ferristrace create-org --name <name> --owner <email>` creates the
   organisation and makes an existing account its owner, in one transaction.
-- `comettrace grant-role --org <id> --member <email> --role <role>` gives an
+- `ferristrace grant-role --org <id> --member <email> --role <role>` gives an
   existing account a role, replacing the one it already held.
 
 Both require an account to exist already — they appoint, they do not invite.

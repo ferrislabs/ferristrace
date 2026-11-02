@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Field, Input } from '@/components/ui/input'
 import { Alert, Skeleton, Table, Td, Th, Tr } from '@/components/ui/misc'
-import { QrCode } from '@/components/cmt/QrCode'
+import { QrCode } from '@/components/ft/QrCode'
 import { methodsQuery } from '@/auth/api'
 import { because } from '@/auth/client'
 import { MIN_PASSWORD_CHARS, passwordProblem, useChangePassword } from '@/data/password'
@@ -45,7 +45,7 @@ export function Security() {
     const url = URL.createObjectURL(new Blob([`${(codes ?? []).join('\n')}\n`], { type: 'text/plain' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = 'comettrace-recovery-codes.txt'
+    a.download = 'ferristrace-recovery-codes.txt'
     a.click()
     URL.revokeObjectURL(url)
     toast.success('Recovery codes downloaded')

@@ -71,13 +71,13 @@ fn a_quoted_value_does_not_separate_them() {
 #[test]
 fn only_the_last_segment_of_a_path_is_kept() {
     assert!(same(
-        "cannot open /var/lib/comettrace/queue.db",
+        "cannot open /var/lib/ferristrace/queue.db",
         "cannot open /tmp/queue.db"
     ));
     assert!(
         !same(
-            "cannot open /var/lib/comettrace/queue.db",
-            "cannot open /var/lib/comettrace/spool.db"
+            "cannot open /var/lib/ferristrace/queue.db",
+            "cannot open /var/lib/ferristrace/spool.db"
         ),
         "a different file is a different error"
     );

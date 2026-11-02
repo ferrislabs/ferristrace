@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { InputGroup } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
-import { LineChart } from '@/components/cmt/charts'
+import { LineChart } from '@/components/ft/charts'
 import { useMetricSeries, useMetrics } from '@/data/metrics'
 import { cn } from '@/lib/utils'
 

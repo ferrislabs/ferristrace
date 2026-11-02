@@ -214,7 +214,7 @@ impl SessionStore for Issuing {
         _from: Option<&Agent>,
     ) -> Result<SessionToken, SessionError> {
         *self.0.lock().expect("the lock") += 1;
-        Ok(SessionToken::from_plaintext("ct_ss_issued"))
+        Ok(SessionToken::from_plaintext("ft_ss_issued"))
     }
 
     async fn resolve(&self, _token: &SessionToken) -> Result<Session, SessionError> {
@@ -242,7 +242,7 @@ fn an_address() -> Email {
 }
 
 fn a_session() -> SessionToken {
-    SessionToken::from_plaintext("ct_ss_live")
+    SessionToken::from_plaintext("ft_ss_live")
 }
 
 fn a_secret() -> TotpSecret {
@@ -495,7 +495,7 @@ async fn the_code_of_the_moment_spends_the_challenge_and_opens_a_session() {
         .await
         .expect("a session");
 
-    assert_eq!(token.exposed(), "ct_ss_issued");
+    assert_eq!(token.exposed(), "ft_ss_issued");
     assert_eq!(store.live_challenges(), 0);
 }
 
@@ -596,7 +596,7 @@ async fn a_recovery_code_spends_a_challenge_once() {
         .verify(&twice, &Answer::Recovery(codes[0].clone()), None)
         .await;
 
-    assert_eq!(opened.exposed(), "ct_ss_issued");
+    assert_eq!(opened.exposed(), "ft_ss_issued");
     assert_eq!(refused, Err(FactorError::Refused));
     assert_eq!(store.recovery_held(), RECOVERY_CODES - 1);
 }

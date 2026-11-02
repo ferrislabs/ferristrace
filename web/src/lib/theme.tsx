@@ -6,7 +6,7 @@ const ThemeContext = createContext<Ctx | null>(null)
 
 function read(): ThemePref {
   try {
-    const v = localStorage.getItem('cmt-theme')
+    const v = localStorage.getItem('ft-theme')
     return v === 'light' || v === 'dark' ? v : 'system'
   } catch {
     return 'system'
@@ -29,7 +29,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setPref = (p: ThemePref) => {
     setPrefState(p)
     try {
-      localStorage.setItem('cmt-theme', p)
+      localStorage.setItem('ft-theme', p)
     } catch {
     }
   }

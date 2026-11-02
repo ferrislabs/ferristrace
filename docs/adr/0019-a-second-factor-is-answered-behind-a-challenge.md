@@ -76,7 +76,7 @@ nothing.
 
 The challenge is `second_step_challenges`: a digest, the account, a five
 minute window, and an attempt count. Five answers close it. The token behind
-the digest travels in a `ct_second_step` cookie carrying the same flags as the
+the digest travels in a `ft_second_step` cookie carrying the same flags as the
 session cookie, `HttpOnly` included.
 
 The domain reaches all of this through two ports rather than one. `SignIn`

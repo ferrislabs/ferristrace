@@ -104,7 +104,7 @@ fn hasher() -> Reversing {
 
 #[tokio::test]
 async fn a_refused_password_does_not_spend_the_token() {
-    let token = ResetToken::from_plaintext("ct_pr_one");
+    let token = ResetToken::from_plaintext("ft_pr_one");
     let store = Pending::holding(token.hash());
     let reset = ResetPassword::new(&store, hasher(), Dropped);
 
@@ -131,7 +131,7 @@ async fn a_refused_password_does_not_spend_the_token() {
 async fn the_policy_is_asked_before_the_store_is_touched() {
     let store = Pending::default();
     let reset = ResetPassword::new(&store, hasher(), Dropped);
-    let unknown = ResetToken::from_plaintext("ct_pr_never_issued");
+    let unknown = ResetToken::from_plaintext("ft_pr_never_issued");
 
     let refused = reset.confirm(&unknown, &Password::new("short")).await;
 
@@ -144,7 +144,7 @@ async fn the_policy_is_asked_before_the_store_is_touched() {
 
 #[tokio::test]
 async fn a_chosen_password_reaches_the_store_hashed() {
-    let token = ResetToken::from_plaintext("ct_pr_one");
+    let token = ResetToken::from_plaintext("ft_pr_one");
     let store = Pending::holding(token.hash());
     let reset = ResetPassword::new(&store, hasher(), Dropped);
 
@@ -163,7 +163,7 @@ async fn a_chosen_password_reaches_the_store_hashed() {
 
 #[tokio::test]
 async fn a_tightened_policy_is_the_one_that_is_asked() {
-    let token = ResetToken::from_plaintext("ct_pr_one");
+    let token = ResetToken::from_plaintext("ft_pr_one");
     let store = Pending::holding(token.hash());
     let reset = ResetPassword::new(&store, hasher(), Dropped).with_policy(PasswordPolicy {
         min_chars: 30,

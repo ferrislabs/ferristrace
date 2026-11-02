@@ -14,7 +14,7 @@ use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::{Span, SpanId, SpanKind, SpanStatus, TenantId, TraceId};
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 
@@ -224,7 +224,7 @@ async fn a_token_no_session_carries_is_refused_before_anything_is_read() {
 
     let refused = explore
         .traces(
-            &SessionToken::from_plaintext("ct_ss_nope"),
+            &SessionToken::from_plaintext("ft_ss_nope"),
             an_org(MINE),
             &a_filter(),
         )

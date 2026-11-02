@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { Avatar, Table, Td, Th } from '@/components/ui/misc'
-import { EmptyState, PageHeader } from '@/components/cmt/bits'
+import { EmptyState, PageHeader } from '@/components/ft/bits'
 import { useMembers } from '@/data/members'
 import { nameOf, initialsOf } from '@/data/profile'
 import {

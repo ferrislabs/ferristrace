@@ -58,7 +58,7 @@ export function Projects() {
         </Table>
         {catalogue.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{projects ? 'No project yet. Telemetry arrives under one, so a deployment needs at least one.' : nothing}</p> : null}
       </Card>
-      <p className="m-0 text-caption text-muted-foreground">Renaming a project keeps its keys and its signals: nothing anywhere holds the name. Draw a key for one with <span className="font-mono">comettrace issue-key</span>.</p>
+      <p className="m-0 text-caption text-muted-foreground">Renaming a project keeps its keys and its signals: nothing anywhere holds the name. Draw a key for one with <span className="font-mono">ferristrace issue-key</span>.</p>
       <NewProject open={adding} onOpenChange={setAdding} />
     </>
   )

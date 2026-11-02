@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Segmented } from '@/components/ui/segmented'
 import { Alert } from '@/components/ui/misc'
-import { PageHeader } from '@/components/cmt/bits'
+import { PageHeader } from '@/components/ft/bits'
 import { SNIPPETS, ingestKeyCommand, otlpEndpoint, useFirstSignals, type Arrival } from '@/data/onboarding'
 import { Link } from '@/lib/router'
 

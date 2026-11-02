@@ -445,7 +445,7 @@ impl Mailer for &Outbox {
 }
 
 fn a_reset_token(seed: &str) -> ResetToken {
-    ResetToken::from_plaintext(&format!("ct_pr_{seed}"))
+    ResetToken::from_plaintext(&format!("ft_pr_{seed}"))
 }
 
 #[tokio::test]

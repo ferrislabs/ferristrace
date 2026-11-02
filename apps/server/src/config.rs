@@ -9,8 +9,8 @@ use figment::providers::{Env, Format, Serialized, Toml};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const FILE: &str = "comettrace.toml";
-const PREFIX: &str = "COMETTRACE_";
+const FILE: &str = "ferristrace.toml";
+const PREFIX: &str = "FERRISTRACE_";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -296,7 +296,7 @@ mod tests {
                 r#"
                 [spans]
                 url = "http://clickhouse:8123"
-                database = "comettrace"
+                database = "ferristrace"
                 retention_days = 7
                 "#,
             )?;
@@ -305,7 +305,7 @@ mod tests {
             let spans = config.spans.expect("a span store");
 
             assert_eq!(spans.retention_days, 7);
-            assert_eq!(spans.database.as_deref(), Some("comettrace"));
+            assert_eq!(spans.database.as_deref(), Some("ferristrace"));
             Ok(())
         });
     }
@@ -318,7 +318,7 @@ mod tests {
                 r#"
                 [objects]
                 endpoint = "https://abc123.r2.cloudflarestorage.com"
-                bucket = "comettrace-avatars"
+                bucket = "ferristrace-avatars"
                 access_key_id = "AKIAEXAMPLE"
                 secret_access_key = "a secret"
                 "#,
@@ -327,7 +327,7 @@ mod tests {
             let config: Config = figment().extract()?;
             let objects = config.objects.expect("an object store");
 
-            assert_eq!(objects.bucket, "comettrace-avatars");
+            assert_eq!(objects.bucket, "ferristrace-avatars");
             assert_eq!(
                 objects.region, None,
                 "r2 has one region and the store names it"
@@ -385,7 +385,7 @@ mod tests {
                 relay = "mail.example.com"
                 username = "postmaster"
                 password = "secret"
-                from = "Comettrace <no-reply@example.com>"
+                from = "Ferristrace <no-reply@example.com>"
                 base_url = "https://app.example.com"
                 "#,
             )?;

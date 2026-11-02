@@ -20,7 +20,7 @@ mod identity;
 use identity::{Directed, Fakes, Nowhere, state};
 
 const GOOD: &str = "correct horse";
-const TOKEN: &str = "ct_ss_0123456789";
+const TOKEN: &str = "ft_ss_0123456789";
 
 #[derive(Clone)]
 struct OnePassword;
@@ -178,7 +178,7 @@ fn sign_in_request(password: &str, with_header: bool) -> Request<Body> {
         .uri("/auth/sign-in")
         .header(CONTENT_TYPE, "application/json");
     if with_header {
-        builder = builder.header("x-requested-with", "comettrace");
+        builder = builder.header("x-requested-with", "ferristrace");
     }
     builder.body(Body::from(body)).expect("a request")
 }
@@ -246,8 +246,8 @@ async fn signing_out_revokes_the_session_and_clears_the_cookie() {
             Request::builder()
                 .method("POST")
                 .uri("/auth/sign-out")
-                .header("x-requested-with", "comettrace")
-                .header(COOKIE, format!("ct_session={TOKEN}"))
+                .header("x-requested-with", "ferristrace")
+                .header(COOKIE, format!("ft_session={TOKEN}"))
                 .body(Body::empty())
                 .expect("a request"),
         )
@@ -273,7 +273,7 @@ async fn signing_out_without_a_cookie_still_clears_it() {
             Request::builder()
                 .method("POST")
                 .uri("/auth/sign-out")
-                .header("x-requested-with", "comettrace")
+                .header("x-requested-with", "ferristrace")
                 .body(Body::empty())
                 .expect("a request"),
         )
@@ -300,9 +300,9 @@ async fn a_factor_turns_the_right_password_into_a_challenge_and_not_a_session() 
         .get(SET_COOKIE)
         .and_then(|value| value.to_str().ok())
         .expect("a cookie");
-    assert!(cookie.starts_with("ct_second_step=ct_2f_"), "{cookie}");
+    assert!(cookie.starts_with("ft_second_step=ft_2f_"), "{cookie}");
     assert!(cookie.contains("HttpOnly"), "{cookie}");
-    assert!(!cookie.contains("ct_session="), "{cookie}");
+    assert!(!cookie.contains("ft_session="), "{cookie}");
     assert_eq!(gate.challenges(), 1);
     assert!(
         !sessions.holds(TOKEN),

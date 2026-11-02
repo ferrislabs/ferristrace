@@ -13,7 +13,7 @@ use crate::SECONDS_PER_HOUR;
 use crate::config::Config;
 
 #[derive(Debug, Parser)]
-#[command(name = "comettrace", about = "OTLP ingestion and its control plane")]
+#[command(name = "ferristrace", about = "OTLP ingestion and its control plane")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
@@ -224,7 +224,7 @@ where
             );
             eprintln!("Draw its first ingest key with:");
             eprintln!(
-                "  comettrace issue-key --org {} --project {}",
+                "  ferristrace issue-key --org {} --project {}",
                 founded.org, founded.project
             );
             match &founded.invitation {
@@ -293,7 +293,7 @@ where
         .context("creating the project")?;
 
     eprintln!("{org} now holds {}. Draw a key for it with:", name.as_str());
-    eprintln!("  comettrace issue-key --org {org} --project {project}");
+    eprintln!("  ferristrace issue-key --org {org} --project {project}");
     println!("{project}");
     Ok(())
 }
@@ -314,7 +314,7 @@ where
         owner.as_str(),
         name.as_str()
     );
-    eprintln!("  comettrace issue-key --org {org}");
+    eprintln!("  ferristrace issue-key --org {org}");
     println!("{org}");
     Ok(())
 }

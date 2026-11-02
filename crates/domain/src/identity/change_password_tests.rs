@@ -13,7 +13,7 @@ use crate::clock::UnixSeconds;
 use crate::secret::{SecretHash, SessionToken};
 use crate::telemetry::TenantId;
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const CURRENT: &str = "the current one";
 
 fn an_account() -> AccountId {
@@ -220,7 +220,7 @@ async fn a_token_no_session_carries_changes_nothing() {
 
     let refused = changing(&written)
         .change(
-            &SessionToken::from_plaintext("ct_ss_nope"),
+            &SessionToken::from_plaintext("ft_ss_nope"),
             &Password::new(CURRENT),
             &Password::new("a long enough one"),
         )

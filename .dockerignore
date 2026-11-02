@@ -12,7 +12,7 @@ docs
 deploy
 deny.toml
 cliff.toml
-comettrace.toml
+ferristrace.toml
 .env
 
 target

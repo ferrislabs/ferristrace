@@ -50,7 +50,7 @@ async fn one_text(client: &Client, query: &str) -> String {
 
 #[tokio::test]
 async fn migrations_apply_once_and_rerunning_changes_nothing() {
-    let Some(client) = fresh_database("comettrace_migrate_once").await else {
+    let Some(client) = fresh_database("ferristrace_migrate_once").await else {
         return;
     };
     let migrator = ClickhouseMigrator::new(client);
@@ -71,7 +71,7 @@ async fn migrations_apply_once_and_rerunning_changes_nothing() {
 
 #[tokio::test]
 async fn the_spans_table_carries_the_intended_key_partition_and_ttl() {
-    let Some(client) = fresh_database("comettrace_migrate_shape").await else {
+    let Some(client) = fresh_database("ferristrace_migrate_shape").await else {
         return;
     };
     ClickhouseMigrator::new(client.clone())
@@ -115,7 +115,7 @@ async fn the_spans_table_carries_the_intended_key_partition_and_ttl() {
 
 #[tokio::test]
 async fn the_promoted_columns_sit_beside_the_attribute_map() {
-    let Some(client) = fresh_database("comettrace_migrate_columns").await else {
+    let Some(client) = fresh_database("ferristrace_migrate_columns").await else {
         return;
     };
     ClickhouseMigrator::new(client.clone())
@@ -149,7 +149,7 @@ async fn the_promoted_columns_sit_beside_the_attribute_map() {
 
 #[tokio::test]
 async fn up_then_down_then_up_leaves_one_recorded_version() {
-    let Some(client) = fresh_database("comettrace_migrate_cycle").await else {
+    let Some(client) = fresh_database("ferristrace_migrate_cycle").await else {
         return;
     };
     let migrator = ClickhouseMigrator::new(client.clone());

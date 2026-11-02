@@ -13,7 +13,7 @@ use crate::secret::{SecretHash, SessionToken};
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const ME: u128 = 9;
@@ -265,7 +265,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let held = Held::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
 
     let refused = roster(OrgRole::Owner, &held)
-        .members(&SessionToken::from_plaintext("ct_ss_nope"), an_org(MINE))
+        .members(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(RosterError::NoSession));

@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, Table, Td, Th } from '@/components/ui/misc'
-import { Kpi, PageHeader, ServiceDot } from '@/components/cmt/bits'
-import { LineChart } from '@/components/cmt/charts'
+import { Kpi, PageHeader, ServiceDot } from '@/components/ft/bits'
+import { LineChart } from '@/components/ft/charts'
 import { useRelease, useReleaseSeries, useReleases } from '@/data/releases'
 import { NotFound } from './NotFound'
 import { initialsOf } from '@/data/profile'
@@ -39,7 +39,7 @@ export function Releases() {
             })}
           </tbody>
         </Table>
-        <p className="m-0 px-5 py-3 text-caption text-muted-foreground">Deltas compare the hour after the deploy with the hour before. Send a deploy event from CI: <span className="font-mono">npx comettrace deploy --release 2.14.1</span></p>
+        <p className="m-0 px-5 py-3 text-caption text-muted-foreground">Deltas compare the hour after the deploy with the hour before. Send a deploy event from CI: <span className="font-mono">npx ferristrace deploy --release 2.14.1</span></p>
       </div>
     </>
   )
@@ -59,7 +59,7 @@ export function ReleaseDetail() {
         <h1 className="font-mono text-title">{r.version}</h1>
         {bad ? <Badge variant="warning"><TriangleAlert />Regressed after deploy</Badge> : <Badge variant="success"><CircleCheck />Healthy</Badge>}
         <span className="flex-1" />
-        {bad ? <Button size="sm" onClick={() => toast('A rollback is triggered from your CI', { description: 'Comettrace posts the link to the previous release 2.14.0.' })}>Compare with 2.14.0</Button> : null}
+        {bad ? <Button size="sm" onClick={() => toast('A rollback is triggered from your CI', { description: 'Ferristrace posts the link to the previous release 2.14.0.' })}>Compare with 2.14.0</Button> : null}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-control text-muted-foreground">
         <span>Project <span className="font-semibold text-foreground">{r.project}</span></span><span>Deployed <span className="font-mono text-foreground">{r.deployed}</span></span><span>By <span className="text-foreground">{r.by}</span></span><span className="inline-flex items-center gap-1"><GitCommitHorizontal className="size-3.5" aria-hidden /><span className="font-mono text-foreground">{r.commit}</span></span><span>Adoption <span className="font-mono text-foreground">{r.adoption} %</span></span>

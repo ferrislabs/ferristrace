@@ -129,12 +129,12 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: comettrace
-          POSTGRES_PASSWORD: comettrace
-          POSTGRES_DB: comettrace
+          POSTGRES_USER: ferristrace
+          POSTGRES_PASSWORD: ferristrace
+          POSTGRES_DB: ferristrace
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U comettrace"
+          --health-cmd "pg_isready -U ferristrace"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -147,7 +147,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      DATABASE_URL: postgres://comettrace:comettrace@localhost:5432/comettrace
+      DATABASE_URL: postgres://ferristrace:ferristrace@localhost:5432/ferristrace
       REQUIRE_DATABASE_URL: "1"
       REDIS_URL: redis://localhost:6379
       REQUIRE_REDIS_URL: "1"
@@ -174,7 +174,7 @@ jobs:
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
         env:
-          CLICKHOUSE_PASSWORD: comettrace
+          CLICKHOUSE_PASSWORD: ferristrace
         ports: ["8123:8123"]
         options: >-
           --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
@@ -184,7 +184,7 @@ jobs:
     env:
       CLICKHOUSE_URL: http://localhost:8123
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: comettrace
+      CLICKHOUSE_PASSWORD: ferristrace
       REQUIRE_CLICKHOUSE_URL: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -214,13 +214,13 @@ jobs:
         with:
           context: .
           load: true
-          tags: comettrace:local
+          tags: ferristrace:local
           cache-from: type=gha,scope=self-hosting
           cache-to: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'type=gha,mode=max,scope=self-hosting' || '' }}
       - name: how big the image is
         run: |
           set -eu
-          bytes=$(docker image inspect comettrace:local --format '{{.Size}}')
+          bytes=$(docker image inspect ferristrace:local --format '{{.Size}}')
           mib=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1048576 }')
           echo "The runtime image is **${mib} MiB** uncompressed." >> "$GITHUB_STEP_SUMMARY"
       - name: the stack comes up on a clean machine
@@ -232,11 +232,11 @@ jobs:
         run: |
           set -eu
           exists=$(docker compose exec -T clickhouse clickhouse-client \
-            --user=comettrace --password=comettrace --database=comettrace \
+            --user=ferristrace --password=ferristrace --database=ferristrace \
             --query="EXISTS TABLE spans")
           test "$exists" = "1" || { echo "the spans table is missing"; exit 1; }
           applied=$(docker compose exec -T clickhouse clickhouse-client \
-            --user=comettrace --password=comettrace --database=comettrace \
+            --user=ferristrace --password=ferristrace --database=ferristrace \
             --query="SELECT max(version) FROM schema_migrations FINAL")
           shipped=$(ls ../crates/clickhouse/migrations/clickhouse/*.up.sql | wc -l | tr -d " ")
           test "$applied" = "$shipped" ||
@@ -245,8 +245,8 @@ jobs:
         working-directory: deploy
         run: |
           set -eu
-          tables=$(docker compose exec -T postgres psql --username comettrace \
-            --dbname comettrace --tuples-only --no-align \
+          tables=$(docker compose exec -T postgres psql --username ferristrace \
+            --dbname ferristrace --tuples-only --no-align \
             --command "SELECT count(*) FROM information_schema.tables \
                        WHERE table_schema = 'public' AND table_name IN \
                        ('accounts', 'orgs', 'org_members', 'api_keys', 'sessions')")
@@ -255,12 +255,12 @@ jobs:
         working-directory: deploy
         run: |
           set -eu
-          docker compose exec -T server comettrace bootstrap \
+          docker compose exec -T server ferristrace bootstrap \
             --email operator@example.com > token.txt 2> bootstrap.log
           cat bootstrap.log
           test -s token.txt || { echo "no token was printed"; exit 1; }
-          grep -q '^ct_pr_' token.txt || { echo "that is not a reset token"; exit 1; }
-          docker compose exec -T server comettrace bootstrap \
+          grep -q '^ft_pr_' token.txt || { echo "that is not a reset token"; exit 1; }
+          docker compose exec -T server ferristrace bootstrap \
             --email someone.else@example.com 2>&1 | tee second.log
           grep -q "already holds an organisation" second.log \
             || { echo "bootstrap was not idempotent"; exit 1; }
@@ -268,7 +268,7 @@ jobs:
         working-directory: deploy
         run: |
           set -eu
-          token=$(grep -m1 "^ct_pr_" token.txt)
+          token=$(grep -m1 "^ft_pr_" token.txt)
           curl --fail --silent --show-error -X POST \
             http://localhost:4318/auth/reset/confirm \
             -H 'x-requested-with: ci' -H 'content-type: application/json' \
@@ -278,7 +278,7 @@ jobs:
             -H 'x-requested-with: ci' -H 'content-type: application/json' \
             -d '{"email":"operator@example.com","password":"a long enough one"}' \
             --cookie-jar jar.txt
-          grep -q ct_session jar.txt || { echo "no session cookie was set"; exit 1; }
+          grep -q ft_session jar.txt || { echo "no session cookie was set"; exit 1; }
       - name: a short password is refused with the rule that refused it
         working-directory: deploy
         run: |
@@ -286,7 +286,7 @@ jobs:
           code=$(curl --silent --output body.txt --write-out '%{http_code}' -X POST \
             http://localhost:4318/auth/reset/confirm \
             -H 'x-requested-with: ci' -H 'content-type: application/json' \
-            -d '{"token":"ct_pr_whatever","password":"short"}')
+            -d '{"token":"ft_pr_whatever","password":"short"}')
           test "$code" = "422" || { echo "a weak password answered $code"; exit 1; }
           grep -q "at least 12 characters" body.txt || { cat body.txt; exit 1; }
       - name: the app is served and every deep link reaches it
@@ -295,7 +295,7 @@ jobs:
           set -eu
           curl --fail --silent --show-error http://localhost:4318/ > root.html
           grep -qi "<!doctype html" root.html || { head -c 200 root.html; exit 1; }
-          for deep in /traces /traces/abc123 /reset?token=ct_pr_abc; do
+          for deep in /traces /traces/abc123 /reset?token=ft_pr_abc; do
             code=$(curl --silent --output /dev/null --write-out "%{http_code}" "http://localhost:4318$deep")
             test "$code" = "200" || { echo "$deep answered $code"; exit 1; }
           done
@@ -313,8 +313,8 @@ jobs:
         working-directory: deploy
         run: |
           set -eu
-          org=$(docker compose exec -T postgres psql --username comettrace \
-            --dbname comettrace --tuples-only --no-align \
+          org=$(docker compose exec -T postgres psql --username ferristrace \
+            --dbname ferristrace --tuples-only --no-align \
             --command "SELECT id FROM orgs LIMIT 1" | tr -d '[:space:]')
           curl --fail --silent --show-error "http://localhost:4318/api/orgs/$org" \
             -H 'x-requested-with: ci' --cookie jar.txt > card.json
@@ -342,17 +342,17 @@ jobs:
         working-directory: deploy
         run: |
           set -eu
-          org=$(docker compose exec -T postgres psql --username comettrace \
-            --dbname comettrace --tuples-only --no-align \
+          org=$(docker compose exec -T postgres psql --username ferristrace \
+            --dbname ferristrace --tuples-only --no-align \
             --command "SELECT id FROM orgs LIMIT 1" | tr -d '[:space:]')
-          key=$(docker compose exec -T server comettrace issue-key --org "$org" 2>/dev/null \
-            | grep -m1 "^ct_" | tr -d "[:space:]")
+          key=$(docker compose exec -T server ferristrace issue-key --org "$org" 2>/dev/null \
+            | grep -m1 "^ft_" | tr -d "[:space:]")
           accepted=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
             http://localhost:4318/v1/traces -H "authorization: Bearer $key" \
             -H 'content-type: application/x-protobuf' --data-binary '')
           test "$accepted" = "200" || { echo "an issued key answered $accepted"; exit 1; }
           refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
-            http://localhost:4318/v1/traces -H "authorization: Bearer ct_live_nonsense.nonsense" \
+            http://localhost:4318/v1/traces -H "authorization: Bearer ft_live_nonsense.nonsense" \
             -H 'content-type: application/x-protobuf' --data-binary '')
           test "$refused" = "401" || { echo "an unissued key answered $refused"; exit 1; }
       - name: what the server said

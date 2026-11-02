@@ -66,7 +66,7 @@ async fn the_memory_sink_honours_the_contract() {
 
 #[tokio::test]
 async fn the_clickhouse_sink_honours_the_contract() {
-    let Some(client) = prepared("comettrace_sink_contract").await else {
+    let Some(client) = prepared("ferristrace_sink_contract").await else {
         return;
     };
     let first = TenantId::new(Uuid::from_u128(1));
@@ -183,7 +183,7 @@ fn sink_with(client: &Client, limits: BatchLimits) -> ClickhouseSink<FixedClock>
 
 #[tokio::test]
 async fn the_row_threshold_flushes_without_an_explicit_call() {
-    let Some(client) = prepared("comettrace_sink_rows").await else {
+    let Some(client) = prepared("ferristrace_sink_rows").await else {
         return;
     };
     let sink = sink_with(
@@ -207,7 +207,7 @@ async fn the_row_threshold_flushes_without_an_explicit_call() {
 
 #[tokio::test]
 async fn one_buffer_carries_rows_from_several_tenants() {
-    let Some(client) = prepared("comettrace_sink_shared").await else {
+    let Some(client) = prepared("ferristrace_sink_shared").await else {
         return;
     };
     let sink = sink_with(
@@ -245,7 +245,7 @@ async fn one_buffer_carries_rows_from_several_tenants() {
 
 #[tokio::test(start_paused = true)]
 async fn the_interval_flushes_once_the_period_has_elapsed() {
-    let Some(client) = prepared("comettrace_sink_period").await else {
+    let Some(client) = prepared("ferristrace_sink_period").await else {
         return;
     };
     let sink = sink_with(
@@ -273,7 +273,7 @@ async fn the_interval_flushes_once_the_period_has_elapsed() {
 
 #[tokio::test]
 async fn expire_at_is_the_clock_plus_the_retention() {
-    let Some(client) = prepared("comettrace_sink_expiry").await else {
+    let Some(client) = prepared("ferristrace_sink_expiry").await else {
         return;
     };
     let sink = sink_with(
@@ -297,7 +297,7 @@ async fn expire_at_is_the_clock_plus_the_retention() {
 
 #[tokio::test]
 async fn a_timestamp_the_store_cannot_hold_is_refused() {
-    let Some(client) = prepared("comettrace_sink_timestamp").await else {
+    let Some(client) = prepared("ferristrace_sink_timestamp").await else {
         return;
     };
     let sink = sink_with(&client, BatchLimits::default());
@@ -986,7 +986,7 @@ async fn stored_project(client: &Client) -> Uuid {
 
 #[tokio::test]
 async fn a_span_carries_the_project_the_key_named() {
-    let Some(client) = prepared("comettrace_sink_project").await else {
+    let Some(client) = prepared("ferristrace_sink_project").await else {
         return;
     };
     let project = ProjectId::new(Uuid::from_u128(42));
@@ -1008,7 +1008,7 @@ async fn a_span_carries_the_project_the_key_named() {
 
 #[tokio::test]
 async fn a_span_from_a_key_naming_no_project_carries_none() {
-    let Some(client) = prepared("comettrace_sink_no_project").await else {
+    let Some(client) = prepared("ferristrace_sink_no_project").await else {
         return;
     };
     let sink = sink_with(
@@ -1301,7 +1301,7 @@ async fn another_organisations_events_are_not_read_with_a_shared_trace_id() {
 
 #[tokio::test]
 async fn spans_with_no_events_write_no_event_rows() {
-    let Some(client) = prepared("comettrace_no_events").await else {
+    let Some(client) = prepared("ferristrace_no_events").await else {
         return;
     };
     let sink = sink_with(&client, BatchLimits::default());
@@ -1320,7 +1320,7 @@ async fn spans_with_no_events_write_no_event_rows() {
 
 #[tokio::test]
 async fn an_event_expires_with_the_span_that_recorded_it() {
-    let Some(client) = prepared("comettrace_event_expiry").await else {
+    let Some(client) = prepared("ferristrace_event_expiry").await else {
         return;
     };
     let sink = sink_with(&client, BatchLimits::default());
@@ -1354,7 +1354,7 @@ async fn collapsed_rows(client: &Client) -> u64 {
 
 #[tokio::test]
 async fn a_resent_export_is_read_back_once() {
-    let Some(client) = prepared("comettrace_span_sink_resent").await else {
+    let Some(client) = prepared("ferristrace_span_sink_resent").await else {
         return;
     };
     let sink = sink_with(&client, BatchLimits::default());

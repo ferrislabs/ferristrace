@@ -25,7 +25,7 @@ export const BACKEND: Record<string, SignalView> = {
         table: ['Routes', '42 routes · sorted by 5xx', 'Filter routes, e.g. /api/checkout'],
         cols: [C('Route'), C('Service', 'cw-130'), C('Requests', 'num cw-100'), C('2xx', 'num cw-80'), C('4xx', 'num cw-80'), C('5xx', 'num cw-90', 'descending'), C('p50', 'num cw-80'), C('p95', 'num cw-80'), C('Share of time', 'cw-140')],
         rows: [['POST /api/checkout', 'checkout-api', '18.2/s', '91.4 %', '0.6 %', '8.0 %', '210 ms', '1.9 s', 62, true], ['POST /api/payments/refund', 'api-gateway', '0.4/s', '94.1 %', '2.0 %', '3.9 %', '180 ms', '640 ms', 2, true], ['POST /api/login', 'auth', '6.8/s', '81.2 %', '18.1 %', '0.7 %', '24 ms', '96 ms', 3], ['GET /api/products', 'api-gateway', '72.0/s', '99.1 %', '0.8 %', '0.1 %', '18 ms', '61 ms', 14], ['GET /api/cart', 'api-gateway', '41.3/s', '99.6 %', '0.4 %', '0.0 %', '12 ms', '48 ms', 6], ['GET /api/orders/{id}', 'api-gateway', '9.1/s', '96.0 %', '4.0 %', '0.0 %', '31 ms', '88 ms', 4], ['GET /healthz', 'api-gateway', '2.0/s', '100 %', '0 %', '0 %', '0.8 ms', '1.2 ms', 0]].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono'), X(r[4], 'num mono'), X(r[5], 'num mono ' + (r[9] ? 'warn-text strong' : ''), { warn: r[9] }), X(r[6], 'num mono'), X(r[7], 'num mono'), X(r[8] + ' %', 'mono small', { bar: r[8] })]),
-        foot: 'Routes come from http.route; without it, Comettrace groups by method and path with ids replaced. Click a route to see its traces.',
+        foot: 'Routes come from http.route; without it, Ferristrace groups by method and path with ids replaced. Click a route to see its traces.',
         empty: ['No HTTP requests yet', 'Requests appear once a service sends server spans with http.request.method and http.route. Most HTTP frameworks do it with their OpenTelemetry instrumentation.', 'npm i @opentelemetry/auto-instrumentations-node']
       },
       jobs: {
@@ -36,8 +36,8 @@ export const BACKEND: Record<string, SignalView> = {
         table: ['Jobs', '18 jobs', 'Filter jobs'],
         cols: [C('Job'), C('Queue', 'cw-120'), C('Processed', 'num cw-100'), C('Failed', 'num cw-90', 'descending'), C('Retries', 'num cw-80'), C('Wait p95', 'num cw-90'), C('Duration p95', 'num cw-110'), C('Last run', 'cw-110')],
         rows: [['payments.capture', 'payments', '4,812', '96', '211', '3.1 s', '1.4 s', '14:32:01', true], ['notifier.send_email', 'mail', '9,140', '64', '88', '1.2 s', '881 ms', '14:32:02', true], ['inventory.reserve', 'default', '12,330', '31', '40', '0.4 s', '154 ms', '14:32:00'], ['webhooks.deliver', 'webhooks', '6,021', '23', '310', '0.9 s', '420 ms', '14:09:12'], ['checkout.expire_carts', 'scheduled', '12', '0', '0', '—', '4.9 s', '14:30:00'], ['search.reindex', 'scheduled', '1', '0', '0', '—', '2 m 14 s', '13:00:00']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono ' + (r[8] ? 'warn-text strong' : ''), { warn: r[8] }), X(r[4], 'num mono'), X(r[5], 'num mono'), X(r[6], 'num mono'), X(r[7], 'mono sm')]),
-        foot: 'A job is a span with messaging.operation = process, or a span you mark with comettrace.job = true. Scheduled jobs show their next run.',
-        empty: ['No jobs yet', 'Jobs appear when your workers send consumer spans (messaging.operation = process) or spans tagged comettrace.job.', 'span.setAttribute("comettrace.job", true)']
+        foot: 'A job is a span with messaging.operation = process, or a span you mark with ferristrace.job = true. Scheduled jobs show their next run.',
+        empty: ['No jobs yet', 'Jobs appear when your workers send consumer spans (messaging.operation = process) or spans tagged ferristrace.job.', 'span.setAttribute("ferristrace.job", true)']
       },
       cache: {
         title: 'Cache', subtitle: 'Cache reads and writes, from Redis and Memcached client spans', group: ['Key pattern', 'Store'],
@@ -58,8 +58,8 @@ export const BACKEND: Record<string, SignalView> = {
         table: ['Templates', '9 templates', 'Filter templates'],
         cols: [C('Template'), C('Provider', 'cw-120'), C('Sent', 'num cw-90'), C('Failed', 'num cw-90', 'descending'), C('Send p95', 'num cw-90'), C('Last sent', 'cw-110')],
         rows: [['order_confirmation', 'smtp · mailgun', '1,210', '41', '940 ms', '14:32:02', true], ['password_reset', 'smtp · mailgun', '88', '9', '820 ms', '14:31:40', true], ['shipping_update', 'smtp · mailgun', '1,402', '8', '860 ms', '14:32:01'], ['cart_reminder', 'smtp · mailgun', '960', '6', '790 ms', '14:30:00'], ['invoice', 'smtp · mailgun', '244', '0', '1.1 s', '14:12:44']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono ' + (r[6] ? 'warn-text strong' : ''), { warn: r[6] }), X(r[4], 'num mono'), X(r[5], 'mono sm')]),
-        foot: 'Comettrace records the template, recipient domain and result, never the address or the body. Recipients show as *@domain.',
-        empty: ['No emails yet', 'Emails appear when your mailer sends a span named email.send with comettrace.email.template. Addresses and bodies are not recorded.', 'span.setAttribute("comettrace.email.template", "order_confirmation")']
+        foot: 'Ferristrace records the template, recipient domain and result, never the address or the body. Recipients show as *@domain.',
+        empty: ['No emails yet', 'Emails appear when your mailer sends a span named email.send with ferristrace.email.template. Addresses and bodies are not recorded.', 'span.setAttribute("ferristrace.email.template", "order_confirmation")']
       },
       queries: {
         title: 'Queries', subtitle: 'Database statements, from db client spans', group: ['Statement', 'Database'],
@@ -81,7 +81,7 @@ export const BACKEND: Record<string, SignalView> = {
         cols: [C('Host'), C('Services', 'cw-160'), C('CPU', 'cw-140', 'descending'), C('Memory', 'cw-140'), C('Disk', 'cw-140'), C('Load 1m', 'num cw-80'), C('Up', 'cw-90')],
         rows: [['app-3', 'checkout-api, api-gateway', 78, 71, 52, '3.1', '12 d'], ['app-1', 'api-gateway, auth', 46, 62, 49, '1.8', '12 d'], ['app-2', 'api-gateway, inventory', 39, 58, 50, '1.5', '12 d'], ['app-4', 'payments', 33, 66, 47, '1.2', '3 d'], ['worker-1', 'notifier, webhook-sender', 28, 55, 88, '0.9', '40 d'], ['worker-2', 'data jobs', 22, 49, 61, '0.7', '40 d']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'sm muted'), X(r[2] + ' %', 'mono small', { bar: r[2], barColor: r[2] >= 75 ? 'bar-w' : 'bar-p' }), X(r[3] + ' %', 'mono small', { bar: r[3], barColor: r[3] >= 85 ? 'bar-w' : 'bar-p' }), X(r[4] + ' %', 'mono small ' + (r[4] >= 85 ? 'warn-text strong' : ''), { bar: r[4], barColor: r[4] >= 85 ? 'bar-w' : 'bar-p', warn: r[4] >= 85 }), X(r[5], 'num mono'), X(r[6], 'mono sm')]),
         foot: 'Needs the hostmetrics receiver of the OpenTelemetry Collector, or the host metrics package of your SDK. Amber from 75 % CPU and 85 % disk.',
-        empty: ['No system metrics yet', 'Add the hostmetrics receiver to your OpenTelemetry Collector and point its exporter at Comettrace.', 'receivers:\n  hostmetrics:\n    scrapers: [cpu, memory, disk, load, network]']
+        empty: ['No system metrics yet', 'Add the hostmetrics receiver to your OpenTelemetry Collector and point its exporter at Ferristrace.', 'receivers:\n  hostmetrics:\n    scrapers: [cpu, memory, disk, load, network]']
       }
     }
 
@@ -106,7 +106,7 @@ export const FRONTEND: Record<string, SignalView> = {
         cols: [C('Error'), C('Where', 'cw-180'), C('Count', 'num cw-80', 'descending'), C('Sessions', 'num cw-90'), C('Browsers', 'cw-130'), C('First seen', 'cw-110'), C('Status', 'cw-90')],
         rows: [['TypeError: Cannot read properties of undefined (reading \'token\')', 'checkout.tsx:142', '214', '38', 'all', '14:06 today', 'New', 1], ['Failed to fetch: POST /api/checkout', 'api.ts:58', '96', '27', 'all', '14:05 today', 'New', 1], ['ResizeObserver loop completed with undelivered notifications', 'vendor', '61', '40', 'Chrome', 'Sep 12', 'Ignored'], ['ChunkLoadError: Loading chunk 412 failed', 'router.ts:31', '22', '19', 'Safari 17', 'Oct 18', 'Open'], ['SecurityError: The operation is insecure', 'storage.ts:9', '19', '7', 'Firefox', 'Oct 2', 'Open']].map((r: R) => [X(r[0], 'mono sm ' + (r[7] ? 'err-text strong' : ''), { title: r[0] }), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono'), X(r[4], 'sm'), X(r[5], 'mono sm'), X(r[6], 'sm ' + (r[6] === 'New' ? 'warn-text strong' : 'muted'), { warn: r[6] === 'New' })]),
         foot: 'Errors are log records with exception.* attributes from the browser. Upload source maps at build time to see your own file and line.',
-        empty: ['No front-end errors yet', 'Errors appear once the web SDK is set up. Upload source maps from your build so stacks point to your code.', 'npx comettrace sourcemaps upload ./dist --release 2.14.1']
+        empty: ['No front-end errors yet', 'Errors appear once the web SDK is set up. Upload source maps from your build so stacks point to your code.', 'npx ferristrace sourcemaps upload ./dist --release 2.14.1']
       },
       network: {
         title: 'Network', subtitle: 'fetch and XHR calls made by the browser, joined to their backend traces', group: ['Endpoint', 'Origin'],
@@ -128,7 +128,7 @@ export const FRONTEND: Record<string, SignalView> = {
         cols: [C('Session'), C('User', 'cw-120'), C('Started', 'cw-100', 'descending'), C('Pages', 'num cw-70'), C('Length', 'num cw-90'), C('Errors', 'num cw-80'), C('Device', 'cw-160'), C('Ended on', 'cw-120')],
         rows: [['ses_8f41…2c9a', 'usr_31d…', '14:31', '6', '3 m 40 s', '3', 'Safari 17 · iPhone', '/checkout', 1], ['ses_77b0…e112', 'usr_0a9…', '14:30', '4', '2 m 02 s', '1', 'Chrome 130 · Windows', '/checkout', 1], ['ses_19ca…7f03', 'usr_c42…', '14:29', '11', '9 m 15 s', '0', 'Chrome 130 · Android', '/account/orders'], ['ses_c0de…41aa', 'usr_9e1…', '14:28', '3', '1 m 10 s', '0', 'Firefox 131 · macOS', '/products/{sku}'], ['ses_5a2f…903b', 'usr_7b7…', '14:27', '7', '5 m 51 s', '0', 'Edge 130 · Windows', '/cart']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'mono sm'), X(r[3], 'num mono'), X(r[4], 'num mono'), X(r[5], 'num mono ' + (r[8] ? 'warn-text strong' : ''), { warn: r[8] }), X(r[6], 'sm'), X(r[7], 'mono sm muted')]),
         foot: 'A session ends after 30 min without activity. Users are the id you set with setUser(); without it they stay anonymous. No screen recording.',
-        empty: ['No sessions yet', 'Sessions start as soon as the web SDK sends its first page view. Set a pseudonymous user id to group visits by user.', "comettrace.setUser({ id: 'usr_31d…' })"]
+        empty: ['No sessions yet', 'Sessions start as soon as the web SDK sends its first page view. Set a pseudonymous user id to group visits by user.', "ferristrace.setUser({ id: 'usr_31d…' })"]
       },
       resources: {
         title: 'Resources', subtitle: 'Scripts, styles, images and fonts loaded by your pages', group: ['File', 'Type'],

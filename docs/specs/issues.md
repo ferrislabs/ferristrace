@@ -223,9 +223,9 @@ Verify (exit)
   cargo fmt --all
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
-  DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p comettrace-storage
-  CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p comettrace-storage
+  DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-storage
+  CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-storage
   cd web && pnpm typecheck
 
 Verify (loop)
-  cargo test -p comettrace-core issue::
+  cargo test -p ferristrace-core issue::

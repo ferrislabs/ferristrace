@@ -119,7 +119,7 @@ async fn stored(client: &Client, scope: Scope, spans: Vec<Span>) {
 
 #[tokio::test]
 async fn exceptions_that_differ_only_in_digits_are_one_issue_counted_twice() {
-    let Some(client) = prepared("comettrace_issues_grouped").await else {
+    let Some(client) = prepared("ferristrace_issues_grouped").await else {
         return;
     };
     let scope = Scope::of(tenant(1)).in_project(Some(project(10)));
@@ -181,7 +181,7 @@ async fn exceptions_that_differ_only_in_digits_are_one_issue_counted_twice() {
 
 #[tokio::test]
 async fn a_different_type_service_or_project_is_a_different_issue() {
-    let Some(client) = prepared("comettrace_issues_split").await else {
+    let Some(client) = prepared("ferristrace_issues_split").await else {
         return;
     };
     stored(
@@ -241,7 +241,7 @@ async fn a_different_type_service_or_project_is_a_different_issue() {
 
 #[tokio::test]
 async fn an_event_that_is_not_an_exception_never_becomes_an_issue() {
-    let Some(client) = prepared("comettrace_issues_only_exceptions").await else {
+    let Some(client) = prepared("ferristrace_issues_only_exceptions").await else {
         return;
     };
     stored(
@@ -279,7 +279,7 @@ async fn an_event_that_is_not_an_exception_never_becomes_an_issue() {
 
 #[tokio::test]
 async fn counting_is_scoped_to_the_window() {
-    let Some(client) = prepared("comettrace_issues_window").await else {
+    let Some(client) = prepared("ferristrace_issues_window").await else {
         return;
     };
     stored(
@@ -342,7 +342,7 @@ async fn counting_is_scoped_to_the_window() {
 
 #[tokio::test]
 async fn another_tenants_exceptions_are_never_counted() {
-    let Some(client) = prepared("comettrace_issues_tenants").await else {
+    let Some(client) = prepared("ferristrace_issues_tenants").await else {
         return;
     };
     stored(
@@ -376,7 +376,7 @@ async fn another_tenants_exceptions_are_never_counted() {
 
 #[tokio::test]
 async fn occurrences_answer_trace_ids_newest_first() {
-    let Some(client) = prepared("comettrace_issues_occurrences").await else {
+    let Some(client) = prepared("ferristrace_issues_occurrences").await else {
         return;
     };
     stored(
@@ -452,7 +452,7 @@ async fn occurrences_answer_trace_ids_newest_first() {
 
 #[tokio::test]
 async fn the_list_narrows_by_service_text_and_print() {
-    let Some(client) = prepared("comettrace_issues_filtered").await else {
+    let Some(client) = prepared("ferristrace_issues_filtered").await else {
         return;
     };
     stored(

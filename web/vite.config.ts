@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
-const server = process.env.COMETTRACE_SERVER ?? 'http://localhost:4318'
+const server = process.env.FERRISTRACE_SERVER ?? 'http://localhost:4318'
 const api = { target: server, changeOrigin: false }
 
 export default defineConfig({

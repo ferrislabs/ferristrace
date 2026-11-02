@@ -126,11 +126,11 @@ impl ControlPlane for FakeControlPlane {
             .expect("the lock")
             .issued
             .push((org, project));
-        Ok(IngestKey::from_plaintext("ct_live_abc.the-secret"))
+        Ok(IngestKey::from_plaintext("ft_live_abc.the-secret"))
     }
 
     async fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError> {
-        Ok(prefix == "ct_live_abc")
+        Ok(prefix == "ft_live_abc")
     }
 }
 
@@ -420,8 +420,8 @@ async fn a_revocation_says_whether_it_stopped_a_key() {
     let (control_plane, _held) = a_control_plane();
     let provisioning = Provisioning::new(control_plane);
 
-    assert_eq!(provisioning.revoke_key("ct_live_abc").await, Ok(true));
-    assert_eq!(provisioning.revoke_key("ct_live_zzz").await, Ok(false));
+    assert_eq!(provisioning.revoke_key("ft_live_abc").await, Ok(true));
+    assert_eq!(provisioning.revoke_key("ft_live_zzz").await, Ok(false));
 }
 
 #[tokio::test]

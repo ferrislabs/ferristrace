@@ -6,7 +6,7 @@ license.workspace = true
 publish = false
 
 [[bin]]
-name = "comettrace"
+name = "ferristrace"
 path = "src/main.rs"
 
 [dependencies]

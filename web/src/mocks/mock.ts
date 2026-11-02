@@ -131,7 +131,7 @@ export const NOTIFICATIONS: Notif[] = [
   { id: 'n1', kind: 'warn', title: 'checkout-api error rate above 2 %', meta: '4.1 % for 27 min · most errors from calls to payments', time: '14:32 · alert', unread: true, to: '/services/checkout-api' },
   { id: 'n2', kind: 'info', title: 'Incident posted on your status page', meta: '"Some card payments fail at checkout" · Karim · Identified', time: '14:22', unread: true, to: '/status-page' },
   { id: 'n3', kind: 'warn', title: 'webhook-sender stopped sending spans', meta: 'data-pipeline · no data for 23 min', time: '14:09', unread: true, to: '/services' },
-  { id: 'n4', kind: 'muted', title: 'Ingest key expires in 7 days', meta: 'storefront · cmt_ik_…a91f · issue a new one before Oct 31', time: '09:00', unread: false, to: '/settings/project/api-keys' },
+  { id: 'n4', kind: 'muted', title: 'Ingest key expires in 7 days', meta: 'storefront · ft_ik_…a91f · issue a new one before Oct 31', time: '09:00', unread: false, to: '/settings/project/api-keys' },
   { id: 'n5', kind: 'muted', title: 'Usage at 50 % of included', meta: 'Cloud · projected 92 % by the end of the month', time: 'Yesterday', unread: false, to: '/settings/usage' },
   { id: 'n6', kind: 'muted', title: 'nadia@acme.dev accepted the invitation', meta: 'member · storefront access', time: 'Oct 22', unread: false, to: '/settings/members' },
 ]
@@ -144,13 +144,13 @@ export const MEMBERS = [
   { email: 'karim@acme.dev', name: 'Karim Benali', role: 'member', joined: '2026-09-01' },
 ]
 export const INGEST_KEYS = [
-  { name: 'k8s-prod collector', prefix: 'cmt_ik_7Hq2', created: '2026-03-02', used: 'today 14:32:08', revoked: false },
-  { name: 'browser-rum', prefix: 'cmt_ik_Qm4x', created: '2026-05-11', used: 'today 12:28:40', revoked: false },
-  { name: 'old-staging', prefix: 'cmt_ik_P0aa', created: '2026-03-02', used: 'never', revoked: true },
+  { name: 'k8s-prod collector', prefix: 'ft_ik_7Hq2', created: '2026-03-02', used: 'today 14:32:08', revoked: false },
+  { name: 'browser-rum', prefix: 'ft_ik_Qm4x', created: '2026-05-11', used: 'today 12:28:40', revoked: false },
+  { name: 'old-staging', prefix: 'ft_ik_P0aa', created: '2026-03-02', used: 'never', revoked: true },
 ]
 export const QUERY_KEYS = [
-  { name: 'grafana-export', prefix: 'cmt_at_Zp81', by: 'ines@acme.dev', created: '2026-04-02', used: 'today 14:00:12' },
-  { name: 'ci-smoke-tests', prefix: 'cmt_at_Lr3c', by: 'marc@acme.dev', created: '2026-08-20', used: 'yesterday 22:10:03' },
+  { name: 'grafana-export', prefix: 'ft_at_Zp81', by: 'ines@acme.dev', created: '2026-04-02', used: 'today 14:00:12' },
+  { name: 'ci-smoke-tests', prefix: 'ft_at_Lr3c', by: 'marc@acme.dev', created: '2026-08-20', used: 'yesterday 22:10:03' },
 ]
 export const ALERT_RULES = [
   { name: 'New exception type', cond: 'An exception.type never seen in this project before', notify: 'Backend · Slack #alerts-backend', last: '14:05 today', on: true, fired: true },

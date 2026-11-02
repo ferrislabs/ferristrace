@@ -206,7 +206,7 @@ impl Default for ProvisionPolicy {
     }
 }
 
-pub const CHALLENGE_PREFIX: &str = "ct_2f_";
+pub const CHALLENGE_PREFIX: &str = "ft_2f_";
 
 pub const RECOVERY_CODES: usize = 10;
 

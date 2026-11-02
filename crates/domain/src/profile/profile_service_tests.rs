@@ -12,7 +12,7 @@ use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
 
-const TOKEN: &str = "ct_ss_live";
+const TOKEN: &str = "ft_ss_live";
 const ACCOUNT: u128 = 9;
 const SOMEBODY_ELSE: u128 = 10;
 
@@ -274,7 +274,7 @@ async fn a_token_no_session_carries_writes_nothing() {
 
     let refused = profile(&kept, &shelf)
         .rename(
-            &SessionToken::from_plaintext("ct_ss_nope"),
+            &SessionToken::from_plaintext("ft_ss_nope"),
             Some(&a_name("Somebody Else")),
         )
         .await;
@@ -405,7 +405,7 @@ async fn a_photo_is_not_served_to_a_token_no_session_carries() {
 
     let refused = profile(&kept, &shelf)
         .photo(
-            &SessionToken::from_plaintext("ct_ss_nope"),
+            &SessionToken::from_plaintext("ft_ss_nope"),
             an_account(ACCOUNT),
         )
         .await;
