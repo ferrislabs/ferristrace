@@ -181,7 +181,10 @@ forward!(Roster: Roll {
     fn of(&self, org: TenantId) -> Result<Vec<Member>, StoreError>;
     fn grant(&self, org: TenantId, account: AccountId, role: OrgRole) -> Result<Option<Member>, StoreError>;
     fn remove(&self, org: TenantId, account: AccountId) -> Result<bool, StoreError>;
-    fn admit(&self, org: TenantId, email: &Email, role: OrgRole, way_in: SecretHash) -> Result<Admitted, StoreError>;
+    fn standing_of(&self, email: &Email) -> Result<Option<Holder>, StoreError>;
+    fn create_locked(&self, email: &Email) -> Result<AccountId, StoreError>;
+    fn join(&self, org: TenantId, account: AccountId, role: OrgRole) -> Result<Option<Joined>, StoreError>;
+    fn open_way_in(&self, account: AccountId, digest: SecretHash) -> Result<(), StoreError>;
 });
 
 forward!(Teams: Squads {

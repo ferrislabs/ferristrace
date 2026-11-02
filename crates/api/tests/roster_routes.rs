@@ -7,10 +7,11 @@ use ferristrace_api::{AppState, SessionCookie, roster_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
+use ferristrace_domain::organisation::{Holder, Joined};
 use ferristrace_domain::{
-    AccountId, Admitted, Agent, Email, LiveSession, Member, Membership, Memberships, NoPhotos,
-    OrgRole, ProvisionPolicy, RESET_PREFIX, Roll, SecretHash, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, Agent, Email, LiveSession, Member, Membership, Memberships, NoPhotos, OrgRole,
+    ProvisionPolicy, RESET_PREFIX, Roll, SecretHash, Session, SessionError, SessionId, SessionRoll,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -110,7 +111,8 @@ impl Memberships for MemberOfMine {
 #[derive(Debug)]
 struct Kept {
     roll: Mutex<Vec<Member>>,
-    admission: Option<Admitted>,
+    holder: Option<Holder>,
+    already_in: bool,
     digests: Mutex<Vec<SecretHash>>,
 }
 
@@ -118,15 +120,38 @@ impl Kept {
     fn of(roll: Vec<Member>) -> Arc<Self> {
         Arc::new(Self {
             roll: Mutex::new(roll),
-            admission: None,
+            holder: None,
+            already_in: false,
             digests: Mutex::default(),
         })
     }
 
-    fn admitting(admission: Admitted) -> Arc<Self> {
+    fn awaiting() -> Arc<Self> {
+        Self::of(Vec::new())
+    }
+
+    fn standing(account: AccountId) -> Arc<Self> {
         Arc::new(Self {
             roll: Mutex::new(Vec::new()),
-            admission: Some(admission),
+            holder: Some(Holder {
+                account,
+                name: None,
+                photo: None,
+            }),
+            already_in: false,
+            digests: Mutex::default(),
+        })
+    }
+
+    fn already_in(account: AccountId) -> Arc<Self> {
+        Arc::new(Self {
+            roll: Mutex::new(Vec::new()),
+            holder: Some(Holder {
+                account,
+                name: None,
+                photo: None,
+            }),
+            already_in: true,
             digests: Mutex::default(),
         })
     }
@@ -168,15 +193,29 @@ impl Roll for Kept {
         Ok(roll.len() < before)
     }
 
-    async fn admit(
+    async fn standing_of(&self, _email: &Email) -> Result<Option<Holder>, StoreError> {
+        Ok(self.holder.clone())
+    }
+
+    async fn create_locked(&self, _email: &Email) -> Result<AccountId, StoreError> {
+        Ok(an_account(SOMEBODY))
+    }
+
+    async fn join(
         &self,
         _org: TenantId,
-        _email: &Email,
-        _role: OrgRole,
-        way_in: SecretHash,
-    ) -> Result<Admitted, StoreError> {
-        self.digests.lock().expect("the lock").push(way_in);
-        Ok(self.admission.clone().expect("a scripted admission"))
+        _account: AccountId,
+        role: OrgRole,
+    ) -> Result<Option<Joined>, StoreError> {
+        Ok((!self.already_in).then_some(Joined {
+            role,
+            joined_at_unix_nanos: JOINED,
+        }))
+    }
+
+    async fn open_way_in(&self, _account: AccountId, digest: SecretHash) -> Result<(), StoreError> {
+        self.digests.lock().expect("the lock").push(digest);
+        Ok(())
     }
 }
 
@@ -536,7 +575,7 @@ async fn an_account_this_organisation_never_held_is_no_member_to_remove() {
 
 #[tokio::test]
 async fn an_unknown_address_is_admitted_with_the_one_token_that_sets_its_password() {
-    let kept = Kept::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Member)));
+    let kept = Kept::awaiting();
 
     let (status, body) = served(
         OrgRole::Admin,
@@ -566,7 +605,7 @@ async fn an_unknown_address_is_admitted_with_the_one_token_that_sets_its_passwor
 
 #[tokio::test]
 async fn an_address_that_already_has_an_account_joins_without_a_token() {
-    let kept = Kept::admitting(Admitted::Standing(a_member(SOMEBODY, OrgRole::Admin)));
+    let kept = Kept::standing(an_account(SOMEBODY));
 
     let (status, body) = served(
         OrgRole::Owner,
@@ -588,7 +627,7 @@ async fn an_address_that_already_has_an_account_joins_without_a_token() {
 
 #[tokio::test]
 async fn an_address_already_on_the_roll_is_a_conflict_rather_than_a_second_invitation() {
-    let kept = Kept::admitting(Admitted::AlreadyIn);
+    let kept = Kept::already_in(an_account(SOMEBODY));
 
     let (status, body) = served(
         OrgRole::Owner,
@@ -608,7 +647,7 @@ async fn an_address_already_on_the_roll_is_a_conflict_rather_than_a_second_invit
 
 #[tokio::test]
 async fn an_administrator_cannot_invite_an_owner_and_no_account_is_made_for_one() {
-    let kept = Kept::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Owner)));
+    let kept = Kept::awaiting();
 
     let (status, _) = served(
         OrgRole::Admin,
@@ -628,7 +667,7 @@ async fn an_administrator_cannot_invite_an_owner_and_no_account_is_made_for_one(
 
 #[tokio::test]
 async fn something_that_is_not_an_address_is_refused_before_anybody_is_admitted() {
-    let kept = Kept::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Member)));
+    let kept = Kept::awaiting();
 
     let (status, body) = served(
         OrgRole::Owner,

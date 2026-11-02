@@ -1,7 +1,7 @@
-use super::entities::Member;
+use super::entities::{Holder, Member};
 use super::errors::RosterError;
 use super::ports::{Memberships, Roll};
-use super::value_objects::{Admitted, Invitation, OrgRole, Who};
+use super::value_objects::{Invitation, OrgRole, Who};
 use super::whoami::Whoami;
 use crate::identity::{AccountId, Email, SessionStore};
 use crate::secret::{ResetToken, SessionToken};
@@ -75,18 +75,37 @@ where
     ) -> Result<Invitation, RosterError> {
         let who = self.standing(token, org, OrgRole::Admin).await?;
         owners_only(&who, org, [role])?;
-        let way_in = ResetToken::random();
-        match self.roll.admit(org, email, role, way_in.hash()).await? {
-            Admitted::Awaiting(member) => Ok(Invitation {
-                member,
-                way_in: Some(way_in),
-            }),
-            Admitted::Standing(member) => Ok(Invitation {
-                member,
-                way_in: None,
-            }),
-            Admitted::AlreadyIn => Err(RosterError::AlreadyAMember),
+        let (holder, way_in) = match self.roll.standing_of(email).await? {
+            Some(holder) => (holder, None),
+            None => {
+                let account = self.roll.create_locked(email).await?;
+                let holder = Holder {
+                    account,
+                    name: None,
+                    photo: None,
+                };
+                (holder, Some(ResetToken::random()))
+            }
+        };
+        let joined = self
+            .roll
+            .join(org, holder.account, role)
+            .await?
+            .ok_or(RosterError::AlreadyAMember)?;
+        if let Some(way_in) = &way_in {
+            self.roll.open_way_in(holder.account, way_in.hash()).await?;
         }
+        Ok(Invitation {
+            member: Member {
+                account: holder.account,
+                email: email.clone(),
+                name: holder.name,
+                photo: holder.photo,
+                role: joined.role,
+                joined_at_unix_nanos: joined.joined_at_unix_nanos,
+            },
+            way_in,
+        })
     }
 
     async fn standing(

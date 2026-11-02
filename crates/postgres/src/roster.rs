@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use ferristrace_application::repository;
+use ferristrace_domain::organisation::{Holder, Joined};
 use ferristrace_domain::{
-    AccountId, Admitted, Clock, Email, Member, OrgRole, Roll, SecretHash, StoreError, TenantId,
-    UnixSeconds,
+    AccountId, Clock, Email, Member, OrgRole, Roll, SecretHash, StoreError, TenantId, UnixSeconds,
 };
 use sqlx::{Row, postgres::PgRow};
 use tokio::task;
@@ -113,23 +113,8 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
             })
     }
 
-    async fn admit(
-        &self,
-        org: TenantId,
-        email: &Email,
-        role: OrgRole,
-        way_in: SecretHash,
-    ) -> Result<Admitted, StoreError> {
-        let locked = self.locked().await?;
-        let now = to_nanos(self.clock.now());
-        let expires = to_nanos(
-            self.clock
-                .now()
-                .saturating_add_secs(WAY_IN_WINDOW.as_secs()),
-        );
-
+    async fn standing_of(&self, email: &Email) -> Result<Option<Holder>, StoreError> {
         let mut tx = self.tx.lock().await;
-
         let standing = sqlx::query(
             "SELECT id AS id, name AS name, photo_token AS photo_token, \
              photo_type AS photo_type FROM accounts WHERE email = $1",
@@ -139,82 +124,78 @@ impl<C: Clock + Send + Sync> Roll for PostgresRoster<C> {
         .await
         .map_err(|error| unreachable(&error))?;
 
-        let (account, name, photo) = match &standing {
-            Some(row) => (
-                row.get::<Uuid, _>("id"),
-                row.get::<Option<String>, _>("name"),
-                read_portrait(row),
-            ),
-            None => (
-                locked_account(&mut **tx, email, &locked)
-                    .await
-                    .map_err(|error| unreachable(&error))?,
-                None,
-                None,
-            ),
-        };
+        Ok(standing.as_ref().map(|row| Holder {
+            account: AccountId::new(row.get("id")),
+            name: row.get::<Option<String>, _>("name").map(Into::into),
+            photo: read_portrait(row),
+        }))
+    }
 
+    async fn create_locked(&self, email: &Email) -> Result<AccountId, StoreError> {
+        let locked = self.locked().await?;
+        let account = Uuid::new_v4();
+        let mut tx = self.tx.lock().await;
+        sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
+            .bind(account)
+            .bind(email.as_str())
+            .bind(&locked)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| unreachable(&error))?;
+        Ok(AccountId::new(account))
+    }
+
+    async fn join(
+        &self,
+        org: TenantId,
+        account: AccountId,
+        role: OrgRole,
+    ) -> Result<Option<Joined>, StoreError> {
+        let mut tx = self.tx.lock().await;
         let joined = sqlx::query(
             "INSERT INTO org_members (org_id, account_id, role) VALUES ($1, $2, $3::org_role) \
              ON CONFLICT (org_id, account_id) DO NOTHING \
-             RETURNING account_id AS account_id, role::text AS role, created_at AS created_at",
+             RETURNING role::text AS role, created_at AS created_at",
         )
         .bind(org.as_uuid())
-        .bind(account)
+        .bind(account.as_uuid())
         .bind(role.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
 
-        let Some(row) = joined else {
-            return Ok(Admitted::AlreadyIn);
-        };
+        joined
+            .as_ref()
+            .map(|row| {
+                Ok(Joined {
+                    role: known_role(row)?,
+                    joined_at_unix_nanos: read_nanos(row),
+                })
+            })
+            .transpose()
+    }
 
-        let member = Member {
-            account: AccountId::new(row.get("account_id")),
-            email: email.clone(),
-            name: name.map(Into::into),
-            photo,
-            role: known_role(&row)?,
-            joined_at_unix_nanos: read_nanos(&row),
-        };
-
-        if standing.is_some() {
-            return Ok(Admitted::Standing(member));
-        }
-
+    async fn open_way_in(&self, account: AccountId, digest: SecretHash) -> Result<(), StoreError> {
+        let now = to_nanos(self.clock.now());
+        let expires = to_nanos(
+            self.clock
+                .now()
+                .saturating_add_secs(WAY_IN_WINDOW.as_secs()),
+        );
+        let mut tx = self.tx.lock().await;
         sqlx::query(
             "INSERT INTO password_resets (digest, account_id, created_at, expires_at) \
              VALUES ($1, $2, $3, $4)",
         )
-        .bind(way_in.as_bytes().as_slice())
-        .bind(account)
+        .bind(digest.as_bytes().as_slice())
+        .bind(account.as_uuid())
         .bind(now)
         .bind(expires)
         .execute(&mut **tx)
         .await
         .map_err(|error| unreachable(&error))?;
-
-        Ok(Admitted::Awaiting(member))
+        Ok(())
     }
-}
-
-async fn locked_account<'c, E>(
-    executor: E,
-    email: &Email,
-    locked: &str,
-) -> Result<Uuid, sqlx::Error>
-where
-    E: sqlx::Executor<'c, Database = sqlx::Postgres>,
-{
-    let account = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, $3)")
-        .bind(account)
-        .bind(email.as_str())
-        .bind(locked)
-        .execute(executor)
-        .await
-        .map(|_| account)
 }
 
 fn read_member(row: &PgRow) -> Result<Member, StoreError> {

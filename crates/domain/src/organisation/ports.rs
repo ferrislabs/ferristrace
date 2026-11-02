@@ -1,8 +1,8 @@
 use core::future::Future;
 
-use super::entities::{Member, Membership, Organisation, Team};
+use super::entities::{Holder, Joined, Member, Membership, Organisation, Team};
 use super::errors::WhoamiError;
-use super::value_objects::{Admitted, Named, OrgName, OrgRole, TeamId, TeamName};
+use super::value_objects::{Named, OrgName, OrgRole, TeamId, TeamName};
 use crate::catalogue::ProjectId;
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
@@ -120,13 +120,28 @@ pub trait Roll {
         account: AccountId,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
-    fn admit(
+    fn standing_of(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<Option<Holder>, StoreError>> + Send;
+
+    fn create_locked(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<AccountId, StoreError>> + Send;
+
+    fn join(
         &self,
         org: TenantId,
-        email: &Email,
+        account: AccountId,
         role: OrgRole,
-        way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send;
+
+    fn open_way_in(
+        &self,
+        account: AccountId,
+        digest: SecretHash,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 impl<T: Roll + Sync> Roll for &T {
@@ -151,14 +166,35 @@ impl<T: Roll + Sync> Roll for &T {
         (*self).remove(org, account)
     }
 
-    fn admit(
+    fn standing_of(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<Option<Holder>, StoreError>> + Send {
+        (*self).standing_of(email)
+    }
+
+    fn create_locked(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<AccountId, StoreError>> + Send {
+        (*self).create_locked(email)
+    }
+
+    fn join(
         &self,
         org: TenantId,
-        email: &Email,
+        account: AccountId,
         role: OrgRole,
-        way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send {
-        (*self).admit(org, email, role, way_in)
+    ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send {
+        (*self).join(org, account, role)
+    }
+
+    fn open_way_in(
+        &self,
+        account: AccountId,
+        digest: SecretHash,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        (*self).open_way_in(account, digest)
     }
 }
 
@@ -184,14 +220,35 @@ impl<T: Roll + Send + Sync> Roll for std::sync::Arc<T> {
         self.as_ref().remove(org, account)
     }
 
-    fn admit(
+    fn standing_of(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<Option<Holder>, StoreError>> + Send {
+        self.as_ref().standing_of(email)
+    }
+
+    fn create_locked(
+        &self,
+        email: &Email,
+    ) -> impl Future<Output = Result<AccountId, StoreError>> + Send {
+        self.as_ref().create_locked(email)
+    }
+
+    fn join(
         &self,
         org: TenantId,
-        email: &Email,
+        account: AccountId,
         role: OrgRole,
-        way_in: SecretHash,
-    ) -> impl Future<Output = Result<Admitted, StoreError>> + Send {
-        self.as_ref().admit(org, email, role, way_in)
+    ) -> impl Future<Output = Result<Option<Joined>, StoreError>> + Send {
+        self.as_ref().join(org, account, role)
+    }
+
+    fn open_way_in(
+        &self,
+        account: AccountId,
+        digest: SecretHash,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.as_ref().open_way_in(account, digest)
     }
 }
 

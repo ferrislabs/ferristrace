@@ -37,3 +37,16 @@ pub struct Team {
     pub members: Vec<AccountId>,
     pub projects: Vec<Owned>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Holder {
+    pub account: AccountId,
+    pub name: Option<Box<str>>,
+    pub photo: Option<Portrait>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Joined {
+    pub role: OrgRole,
+    pub joined_at_unix_nanos: u64,
+}

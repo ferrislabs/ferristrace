@@ -1,4 +1,4 @@
-use ferristrace_domain::{AccountId, Admitted, Email, Member, OrgRole, Roll, SecretHash, TenantId};
+use ferristrace_domain::{AccountId, Email, Member, OrgRole, Roll, SecretHash, TenantId};
 use ferristrace_infra::{Argon2Hasher, FixedClock};
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
@@ -10,6 +10,53 @@ const A_DAY: i64 = 24 * 60 * 60 * 1_000_000_000;
 
 #[macro_use]
 mod backend;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Admitted {
+    Awaiting(Member),
+    Standing(Member),
+    AlreadyIn,
+}
+
+async fn admit(
+    pool: &PgPool,
+    org: TenantId,
+    email: &Email,
+    role: OrgRole,
+    way_in: SecretHash,
+) -> Result<Admitted, ferristrace_domain::StoreError> {
+    let backing = roster_backend(pool);
+    let roll = backend::roster(&backing);
+    let standing = roll.standing_of(email).await?;
+    let (holder, created) = match standing {
+        Some(holder) => (holder, false),
+        None => {
+            let account = roll.create_locked(email).await?;
+            let holder = ferristrace_domain::organisation::Holder {
+                account,
+                name: None,
+                photo: None,
+            };
+            (holder, true)
+        }
+    };
+    let Some(joined) = roll.join(org, holder.account, role).await? else {
+        return Ok(Admitted::AlreadyIn);
+    };
+    let member = Member {
+        account: holder.account,
+        email: email.clone(),
+        name: holder.name,
+        photo: holder.photo,
+        role: joined.role,
+        joined_at_unix_nanos: joined.joined_at_unix_nanos,
+    };
+    if !created {
+        return Ok(Admitted::Standing(member));
+    }
+    roll.open_way_in(holder.account, way_in).await?;
+    Ok(Admitted::Awaiting(member))
+}
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
     let url = backend::url()?;
@@ -293,8 +340,7 @@ async fn an_unknown_address_is_given_an_account_a_membership_and_one_way_in() {
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("new"), OrgRole::Member, a_digest(7))
+    let admitted = admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(7))
         .await
         .expect("the admission");
 
@@ -332,10 +378,15 @@ async fn an_address_that_already_has_an_account_joins_without_a_way_in() {
     let org = an_org(&pool, "owner@example.com").await;
     let standing = an_account(&pool, "known@example.com").await;
 
-    let admitted = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("known"), OrgRole::Admin, a_digest(9))
-        .await
-        .expect("the admission");
+    let admitted = admit(
+        &pool,
+        org,
+        &an_address("known"),
+        OrgRole::Admin,
+        a_digest(9),
+    )
+    .await
+    .expect("the admission");
 
     let Admitted::Standing(member) = admitted else {
         panic!("an address somebody already holds must join standing: {admitted:?}");
@@ -359,16 +410,14 @@ async fn admitting_an_address_twice_leaves_one_account_one_membership_and_one_wa
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    let first = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("new"), OrgRole::Member, a_digest(1))
+    let first = admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(1))
         .await
         .expect("the first admission");
     let Admitted::Awaiting(member) = first else {
         panic!("the first admission must create the account: {first:?}");
     };
 
-    let again = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("new"), OrgRole::Admin, a_digest(2))
+    let again = admit(&pool, org, &an_address("new"), OrgRole::Admin, a_digest(2))
         .await
         .expect("the second admission");
 
@@ -396,8 +445,7 @@ async fn deleting_an_organisation_takes_the_roll_with_it_and_leaves_the_accounts
         return;
     };
     let org = an_org(&pool, "owner@example.com").await;
-    backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("new"), OrgRole::Member, a_digest(3))
+    admit(&pool, org, &an_address("new"), OrgRole::Member, a_digest(3))
         .await
         .expect("the admission");
 
@@ -455,10 +503,15 @@ async fn an_admitted_standing_account_brings_its_name_with_it() {
     let standing = an_account(&pool, "known@example.com").await;
     named(&pool, standing, "Ines Martin").await;
 
-    let admitted = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("known"), OrgRole::Admin, a_digest(9))
-        .await
-        .expect("the admission");
+    let admitted = admit(
+        &pool,
+        org,
+        &an_address("known"),
+        OrgRole::Admin,
+        a_digest(9),
+    )
+    .await
+    .expect("the admission");
 
     let Admitted::Standing(member) = admitted else {
         panic!("an address somebody already holds must join standing: {admitted:?}");
@@ -473,10 +526,15 @@ async fn an_account_created_by_an_invitation_carries_no_name() {
     };
     let org = an_org(&pool, "owner@example.com").await;
 
-    let admitted = backend::roster(&roster_backend(&pool))
-        .admit(org, &an_address("stranger"), OrgRole::Member, a_digest(4))
-        .await
-        .expect("the admission");
+    let admitted = admit(
+        &pool,
+        org,
+        &an_address("stranger"),
+        OrgRole::Member,
+        a_digest(4),
+    )
+    .await
+    .expect("the admission");
 
     let Admitted::Awaiting(member) = admitted else {
         panic!("an unknown address must be given an account: {admitted:?}");

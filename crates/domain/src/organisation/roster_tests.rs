@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::entities::{Member, Membership};
+use super::entities::{Holder, Joined, Member, Membership};
 use super::errors::{RosterError, WhoamiError};
 use super::ports::{Memberships, Roll};
 use super::roster::Roster;
-use super::value_objects::{Admitted, Invitation, OrgRole};
+use super::value_objects::{Invitation, OrgRole};
 use super::whoami::Whoami;
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
@@ -92,13 +92,17 @@ struct Written {
     granted: Vec<(AccountId, OrgRole)>,
     removed: Vec<AccountId>,
     admitted: Vec<(String, OrgRole)>,
+    locked: usize,
+    way_ins: usize,
 }
 
 #[derive(Debug)]
 struct Held {
     roll: Mutex<Vec<Member>>,
     written: Mutex<Written>,
-    admission: Option<Admitted>,
+    holder: Option<Holder>,
+    already_in: bool,
+    asked: Mutex<Option<String>>,
 }
 
 impl Held {
@@ -106,15 +110,31 @@ impl Held {
         Self {
             roll: Mutex::new(roll),
             written: Mutex::default(),
-            admission: None,
+            holder: None,
+            already_in: false,
+            asked: Mutex::default(),
         }
     }
 
-    fn admitting(admission: Admitted) -> Self {
+    fn awaiting() -> Self {
+        Self::of(Vec::new())
+    }
+
+    fn standing(account: AccountId) -> Self {
         Self {
-            roll: Mutex::new(Vec::new()),
-            written: Mutex::default(),
-            admission: Some(admission),
+            holder: Some(Holder {
+                account,
+                name: None,
+                photo: None,
+            }),
+            ..Self::of(Vec::new())
+        }
+    }
+
+    fn already_in(account: AccountId) -> Self {
+        Self {
+            already_in: true,
+            ..Self::standing(account)
         }
     }
 
@@ -161,19 +181,46 @@ impl Roll for &Held {
         Ok(roll.len() < before)
     }
 
-    async fn admit(
+    async fn standing_of(&self, email: &Email) -> Result<Option<Holder>, StoreError> {
+        *self.asked.lock().expect("the lock") = Some(email.as_str().to_owned());
+        Ok(self.holder.clone())
+    }
+
+    async fn create_locked(&self, _email: &Email) -> Result<AccountId, StoreError> {
+        self.written.lock().expect("the lock").locked += 1;
+        Ok(an_account(SOMEBODY))
+    }
+
+    async fn join(
         &self,
         _org: TenantId,
-        email: &Email,
+        _account: AccountId,
         role: OrgRole,
-        _way_in: SecretHash,
-    ) -> Result<Admitted, StoreError> {
+    ) -> Result<Option<Joined>, StoreError> {
+        let asked = self
+            .asked
+            .lock()
+            .expect("the lock")
+            .clone()
+            .unwrap_or_default();
         self.written
             .lock()
             .expect("the lock")
             .admitted
-            .push((email.as_str().to_owned(), role));
-        Ok(self.admission.clone().unwrap_or(Admitted::AlreadyIn))
+            .push((asked, role));
+        Ok((!self.already_in).then_some(Joined {
+            role,
+            joined_at_unix_nanos: JOINED,
+        }))
+    }
+
+    async fn open_way_in(
+        &self,
+        _account: AccountId,
+        _digest: SecretHash,
+    ) -> Result<(), StoreError> {
+        self.written.lock().expect("the lock").way_ins += 1;
+        Ok(())
     }
 }
 
@@ -414,7 +461,7 @@ async fn the_last_owner_cannot_leave_either() {
 
 #[tokio::test]
 async fn an_unknown_address_is_admitted_with_a_way_in_of_its_own() {
-    let held = Held::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Member)));
+    let held = Held::awaiting();
 
     let Invitation { member, way_in } = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
@@ -432,7 +479,7 @@ async fn an_unknown_address_is_admitted_with_a_way_in_of_its_own() {
 
 #[tokio::test]
 async fn an_address_that_already_has_an_account_joins_without_a_new_way_in() {
-    let held = Held::admitting(Admitted::Standing(a_member(SOMEBODY, OrgRole::Admin)));
+    let held = Held::standing(an_account(SOMEBODY));
 
     let Invitation { member, way_in } = roster(OrgRole::Owner, &held)
         .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
@@ -445,7 +492,7 @@ async fn an_address_that_already_has_an_account_joins_without_a_new_way_in() {
 
 #[tokio::test]
 async fn an_address_already_on_the_roll_is_refused_rather_than_regranted() {
-    let held = Held::admitting(Admitted::AlreadyIn);
+    let held = Held::already_in(an_account(SOMEBODY));
 
     let refused = roster(OrgRole::Owner, &held)
         .invite(
@@ -461,7 +508,7 @@ async fn an_address_already_on_the_roll_is_refused_rather_than_regranted() {
 
 #[tokio::test]
 async fn an_administrator_cannot_invite_an_owner() {
-    let held = Held::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Owner)));
+    let held = Held::awaiting();
 
     let refused = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Owner)
@@ -476,7 +523,7 @@ async fn an_administrator_cannot_invite_an_owner() {
 
 #[tokio::test]
 async fn inviting_into_an_organisation_this_session_is_no_part_of_says_no_such_thing() {
-    let held = Held::admitting(Admitted::Awaiting(a_member(SOMEBODY, OrgRole::Member)));
+    let held = Held::awaiting();
 
     let refused = roster(OrgRole::Owner, &held)
         .invite(
@@ -489,4 +536,67 @@ async fn inviting_into_an_organisation_this_session_is_no_part_of_says_no_such_t
 
     assert_eq!(refused.err(), Some(RosterError::NotYours));
     assert!(held.written().admitted.is_empty());
+}
+
+#[tokio::test]
+async fn inviting_an_address_with_an_account_adds_a_membership_and_creates_nothing() {
+    let held = Held::standing(an_account(SOMEBODY));
+
+    let Invitation { member, way_in } = roster(OrgRole::Owner, &held)
+        .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
+        .await
+        .expect("an owner may invite");
+
+    assert_eq!(member.account, an_account(SOMEBODY));
+    assert_eq!(member.email, an_address("known"));
+    assert_eq!(member.role, OrgRole::Admin);
+    assert_eq!(member.joined_at_unix_nanos, JOINED);
+    assert!(way_in.is_none());
+    let written = held.written();
+    assert_eq!(
+        written.admitted,
+        vec![("known@example.com".to_owned(), OrgRole::Admin)]
+    );
+    assert_eq!(written.locked, 0, "no account may be created");
+    assert_eq!(written.way_ins, 0, "no way in may be opened");
+}
+
+#[tokio::test]
+async fn inviting_a_new_address_creates_one_locked_account_and_opens_one_way_in() {
+    let held = Held::awaiting();
+
+    let Invitation { member, way_in } = roster(OrgRole::Admin, &held)
+        .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
+        .await
+        .expect("an administrator may invite");
+
+    assert_eq!(member.account, an_account(SOMEBODY));
+    assert_eq!(member.name, None);
+    assert!(way_in.is_some());
+    let written = held.written();
+    assert_eq!(written.locked, 1);
+    assert_eq!(written.way_ins, 1);
+    assert_eq!(
+        written.admitted,
+        vec![("new@example.com".to_owned(), OrgRole::Member)]
+    );
+}
+
+#[tokio::test]
+async fn an_address_already_on_the_roll_opens_no_way_in_and_creates_no_account() {
+    let held = Held::already_in(an_account(SOMEBODY));
+
+    let refused = roster(OrgRole::Owner, &held)
+        .invite(
+            &token(),
+            an_org(MINE),
+            &an_address("already"),
+            OrgRole::Member,
+        )
+        .await;
+
+    assert_eq!(refused.err(), Some(RosterError::AlreadyAMember));
+    let written = held.written();
+    assert_eq!(written.locked, 0);
+    assert_eq!(written.way_ins, 0);
 }

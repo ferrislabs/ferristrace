@@ -85,13 +85,6 @@ impl Who {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Admitted {
-    Awaiting(Member),
-    Standing(Member),
-    AlreadyIn,
-}
-
 #[derive(Debug)]
 pub struct Invitation {
     pub member: Member,
