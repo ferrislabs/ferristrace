@@ -14,7 +14,7 @@ import { Metrics } from '@/pages/Metrics'
 import { NotFound } from '@/pages/NotFound'
 import { Onboarding } from '@/pages/Onboarding'
 import { Overview } from '@/pages/Overview'
-import { PublicStatus } from '@/pages/PublicStatus'
+import { PublicPostmortem, PublicStatus } from '@/pages/PublicStatus'
 import { ReleaseDetail, Releases } from '@/pages/Releases'
 import { ServiceDetail } from '@/pages/ServiceDetail'
 import { Services } from '@/pages/Services'
@@ -73,7 +73,15 @@ const resetPasswordRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): { token?: string } => ({ token: typeof search.token === 'string' ? search.token : undefined }),
 })
 
-const publicStatusRoute = createRoute({ getParentRoute: () => rootRoute, path: '/status/$slug', component: PublicStatus, staticData: mock })
+const publicStatusRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/status/$slug',
+  component: PublicStatus,
+  staticData: real,
+  validateSearch: (search: Record<string, unknown>): { notice?: string } => ({ notice: typeof search.notice === 'string' ? search.notice : undefined }),
+})
+
+const publicPostmortemRoute = createRoute({ getParentRoute: () => rootRoute, path: '/status/$slug/postmortems/$incident', component: PublicPostmortem, staticData: real })
 
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -114,6 +122,7 @@ const routeTree = rootRoute.addChildren([
   forgotPasswordRoute,
   resetPasswordRoute,
   publicStatusRoute,
+  publicPostmortemRoute,
   shellRoute.addChildren([
     inShell('/', Overview, {}),
     inShell('/onboarding', Onboarding, real),
@@ -134,7 +143,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/metrics', Metrics, {}),
     inShell('/backend/$view', () => <SignalPage group="backend" />),
     inShell('/frontend/$view', () => <SignalPage group="frontend" />),
-    inShell('/status-page', StatusPageEditor),
+    inShell('/status-page', StatusPageEditor, real),
     settingsRoute.addChildren(settingsChildren),
     inShell('$', NotFound, real),
   ]),

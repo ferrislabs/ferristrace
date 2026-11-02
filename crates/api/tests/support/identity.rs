@@ -451,7 +451,12 @@ impl<R, H, M, P, Z> Stack for Wired<R, H, M, P, Z>
 where
     R: ferristrace_application::registry::UnitOfWork,
     H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + ferristrace_domain::AlertMailer + Send + Sync + 'static,
+    M: Mailer
+        + ferristrace_domain::AlertMailer
+        + ferristrace_domain::StatusMailer
+        + Send
+        + Sync
+        + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {
@@ -483,7 +488,12 @@ pub fn state<R, H, M, P, Z>(
 where
     R: ferristrace_application::registry::UnitOfWork,
     H: PasswordHasher + Send + Sync + 'static,
-    M: Mailer + ferristrace_domain::AlertMailer + Send + Sync + 'static,
+    M: Mailer
+        + ferristrace_domain::AlertMailer
+        + ferristrace_domain::StatusMailer
+        + Send
+        + Sync
+        + 'static,
     P: Photos + Send + Sync + 'static,
     Z: Authorizer + AuthProvider + Send + Sync + 'static,
 {

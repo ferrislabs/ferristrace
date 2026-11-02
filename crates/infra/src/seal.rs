@@ -2,7 +2,7 @@ use core::fmt;
 
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use ferristrace_domain::{AckKey, SECRET_BYTES, TotpSecret};
+use ferristrace_domain::{AckKey, LinkKey, SECRET_BYTES, TotpSecret};
 use zeroize::{Zeroize, Zeroizing};
 
 const NONCE_BYTES: usize = 12;
@@ -59,6 +59,13 @@ impl SecretSeal {
 pub fn ack_key_from_hex(text: &str) -> Result<AckKey, BadKey> {
     let mut key = hex::decode(text.trim()).map_err(|_| BadKey)?;
     let derived = (key.len() == 32).then(|| AckKey::derive(&key));
+    key.zeroize();
+    derived.ok_or(BadKey)
+}
+
+pub fn status_key_from_hex(text: &str) -> Result<LinkKey, BadKey> {
+    let mut key = hex::decode(text.trim()).map_err(|_| BadKey)?;
+    let derived = (key.len() == 32).then(|| LinkKey::derive(&key));
     key.zeroize();
     derived.ok_or(BadKey)
 }
@@ -203,6 +210,35 @@ mod tests {
             "the key at rest is not in the link"
         );
         assert_eq!(super::ack_key_from_hex("nope").map(|_| ()), Err(BadKey));
+    }
+
+    #[test]
+    fn the_status_link_key_follows_the_key_at_rest() {
+        use ferristrace_domain::{LinkClaim, Purpose, StatusPageId, SubscriberId, UnixSeconds};
+        use uuid::Uuid;
+
+        let claim = LinkClaim {
+            purpose: Purpose::Unsubscribe,
+            page: StatusPageId::new(Uuid::from_u128(1)),
+            subscriber: SubscriberId::new(Uuid::from_u128(2)),
+        };
+        let mine = super::status_key_from_hex(&a_key()).expect("a key");
+        let again = super::status_key_from_hex(&format!(" {} ", a_key())).expect("a key");
+        let theirs = super::status_key_from_hex(&another_key()).expect("a key");
+
+        let token = mine.sign(&claim, UnixSeconds::new(100));
+
+        assert_eq!(
+            again.open(&token, Purpose::Unsubscribe, UnixSeconds::new(1)),
+            Ok(claim)
+        );
+        assert!(
+            theirs
+                .open(&token, Purpose::Unsubscribe, UnixSeconds::new(1))
+                .is_err()
+        );
+        assert!(!token.contains(&a_key()));
+        assert_eq!(super::status_key_from_hex("nope").map(|_| ()), Err(BadKey));
     }
 
     #[test]

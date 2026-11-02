@@ -90,6 +90,7 @@ pub enum Change {
     },
     Comment {
         body: CommentBody,
+        public: bool,
     },
     Alert {
         rule: RuleId,

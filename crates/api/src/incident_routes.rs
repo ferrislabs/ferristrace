@@ -196,7 +196,7 @@ fn detail_of(chronicle: &Chronicle, change: &Change) -> Value {
         }),
         Change::Title { from, to } => json!({"from": from.as_str(), "to": to.as_str()}),
         Change::Public { from, to } => json!({"from": from, "to": to}),
-        Change::Comment { body } => json!({"body": body.as_str()}),
+        Change::Comment { body, public } => json!({"body": body.as_str(), "public": public}),
         Change::Alert {
             rule,
             from,
@@ -380,6 +380,8 @@ impl PatchBody {
 #[derive(Debug, Deserialize)]
 pub struct CommentAsked {
     body: String,
+    #[serde(default)]
+    public: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -509,7 +511,13 @@ where
     let body = CommentBody::try_from(asked.body.as_str())?;
     let chronicle = state
         .app
-        .comment_on_incident(&who, TenantId::new(org), IncidentId::new(id), &body)
+        .comment_on_incident(
+            &who,
+            TenantId::new(org),
+            IncidentId::new(id),
+            &body,
+            asked.public,
+        )
         .await?;
     let entry = chronicle
         .entries

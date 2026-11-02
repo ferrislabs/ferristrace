@@ -21,6 +21,7 @@ mod provisioning;
 pub mod registry;
 mod roster;
 mod stack;
+mod status;
 mod teams;
 mod usage;
 

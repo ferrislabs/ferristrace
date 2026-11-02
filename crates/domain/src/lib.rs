@@ -18,6 +18,7 @@ pub mod organisation;
 pub mod postmortems;
 pub mod profile;
 pub mod provisioning;
+pub mod status;
 pub mod telemetry;
 
 #[cfg(any(test, feature = "testing"))]
@@ -115,6 +116,18 @@ pub use provisioning::{
     Provisioning, Revoked,
 };
 pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
+pub use status::{
+    ANNOUNCE_TICK_SECS, Accent, Announcement, BadStatusPage, Bulletin, CONFIRM_LIFETIME_SECS,
+    ClaimedLetter, Component, ComponentDraft, ComponentId, ComponentName, ComponentPatch,
+    ComponentStatus, DEGRADED_ERROR_PERCENT, DOWN_ERROR_PERCENT, Herald, Heralded, Intro, Invite,
+    Landing, Letter, LetterBody, LetterId, Link, LinkClaim, LinkKey, LinkNotice, LinkRefused,
+    Listed, MAX_COMPONENTS, Mode, Observed, PUBLIC_WINDOW_DAYS, PageDraft, PageName, PagePatch,
+    PublicComponent, PublicIncident, PublicPostmortem, PublicUpdate, PublicView, Purpose,
+    RESEND_AFTER_SECS, SERVICE_WINDOW_SECS, Saved, ServiceLoad, ServiceName, Sheet, Showcase, Slug,
+    StatusDesk, StatusError, StatusMailer, StatusOutbox, StatusPage, StatusPageId, StatusPages,
+    StatusSubscribers, Subscriber, SubscriberId, Subscriptions, Theme, UNSUBSCRIBE_LIFETIME_SECS,
+    UpdateKind,
+};
 pub use store::StoreError;
 pub use telemetry::{
     Admission, Allowance, BadRetention, BadSeverity, BillingHour, BillingMonth, Consumed,

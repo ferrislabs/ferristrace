@@ -1,86 +1,112 @@
-import { Bell, CircleCheck, TriangleAlert, Wrench } from 'lucide-react'
+import { Bell, CircleCheck, CircleX, FileText, TriangleAlert } from 'lucide-react'
+import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { StatusIndicator, UptimeBars } from './bits'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { StatusIndicator, type Status } from './bits'
 import { Logo } from './Logo'
-import { useStatusGroups, type StatusConfig } from '@/data/status-page'
+import { OVERALL_WORDS, type ComponentStatus, type PublicIncident, type PublicStatus } from '@/data/status-page'
 import { cn } from '@/lib/utils'
 
-export function StatusPageView({ c, compact }: { c: StatusConfig; compact?: boolean }) {
-  const groups = useStatusGroups()
-  const incident = c.state === 'incident'
+const INDICATOR: Record<ComponentStatus, Status> = { operational: 'operational', degraded: 'degraded', down: 'outage' }
+
+const BANNER: Record<ComponentStatus, { border: string; text: string; Icon: typeof CircleCheck }> = {
+  operational: { border: 'border-success-border', text: 'text-success-text', Icon: CircleCheck },
+  degraded: { border: 'border-warning-border', text: 'text-warning-text', Icon: TriangleAlert },
+  down: { border: 'border-destructive-border', text: 'text-destructive-text', Icon: CircleX },
+}
+
+const when = (ms: number) =>
+  new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+const capital = (word: string) => word.slice(0, 1).toUpperCase() + word.slice(1)
+
+export function StatusPageView({ view, compact, subscribe }: { view: PublicStatus; compact?: boolean; subscribe?: (email: string) => Promise<void> }) {
+  const { page } = view
+  const banner = BANNER[view.overall]
+  const open = view.incidents.filter((incident) => incident.status !== 'resolved')
+  const past = view.incidents.filter((incident) => incident.status === 'resolved')
   return (
-    <div className={cn(c.accent !== 'indigo' && `accent-${c.accent}`, 'min-h-full bg-sidebar text-foreground')}>
+    <div className={cn(page.theme.accent !== 'indigo' && `accent-${page.theme.accent}`, 'min-h-full bg-sidebar text-foreground')}>
       <header className="border-b bg-background">
         <div className="mx-auto flex h-16 max-w-[880px] items-center gap-3 px-6">
-          <span className="inline-flex size-8 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground" aria-hidden>{c.name.slice(0, 1)}</span>
-          <span className="text-[17px] font-bold">{c.name} <span className="font-normal text-muted-foreground">status</span></span>
-          <span className="flex-1" />
-          {!compact ? <a className="text-control text-muted-foreground" href="#">acme.dev</a> : null}
-          {c.showSubscribe ? <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-2.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-hover"><Bell className="size-3.5" aria-hidden />Subscribe</button> : null}
+          <span className="inline-flex size-8 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground" aria-hidden>{page.name.slice(0, 1)}</span>
+          <span className="text-[17px] font-bold">{page.name} <span className="font-normal text-muted-foreground">status</span></span>
         </div>
       </header>
       <main className="mx-auto flex max-w-[880px] flex-col gap-6 px-6 pb-16 pt-8">
-        {c.state === 'maintenance' ? (
-          <div className="flex items-start gap-2.5 rounded-md bg-accent-subtle px-4 py-3 text-control text-accent-text"><Wrench className="mt-0.5 size-4" aria-hidden /><div><span className="font-semibold">Scheduled maintenance · Thu Oct 22, 22:00 – 23:00 CEST</span><br />Payouts will be paused while we upgrade the payout ledger.</div></div>
-        ) : null}
-        <section aria-live="polite" className={cn('flex items-center gap-4 rounded-lg border bg-card px-6 py-5', incident ? 'border-warning-border' : 'border-success-border')}>
-          {incident ? <TriangleAlert className="size-7 text-warning-text" aria-hidden /> : <CircleCheck className="size-7 text-success-text" aria-hidden />}
-          <div className="flex flex-col gap-0.5"><h1 className="text-[24px] font-bold leading-8">{incident ? 'Degraded performance on Checkout' : 'All systems operational'}</h1><span className="text-control text-muted-foreground">Updated 14:41 CEST · refreshes every minute</span></div>
+        {page.intro ? <p className="m-0 whitespace-pre-wrap text-control text-muted-foreground">{page.intro}</p> : null}
+        <section aria-live="polite" className={cn('flex items-center gap-4 rounded-lg border bg-card px-6 py-5', banner.border)}>
+          <banner.Icon className={cn('size-7', banner.text)} aria-hidden />
+          <div className="flex flex-col gap-0.5"><h1 className="text-[24px] font-bold leading-8">{OVERALL_WORDS[view.overall]}</h1><span className="text-control text-muted-foreground">Refreshes every minute</span></div>
         </section>
-        {incident ? (
-          <article className="overflow-hidden rounded-lg border border-warning-border bg-card">
-            <div className="flex flex-col gap-1.5 border-b border-warning-border bg-warning-subtle px-5 py-4">
-              <div className="flex flex-wrap items-center gap-2"><Badge variant="warning"><TriangleAlert />Degraded performance</Badge><span className="text-control text-warning-text">Affects Checkout</span></div>
-              <h2 className="text-[18px] font-bold leading-[26px]">Some card payments fail at checkout</h2>
-            </div>
-            <ol className="m-0 flex list-none flex-col px-5 pb-4 pt-1">
-              {c.updates.map((u, i) => (
-                <li key={i} className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 border-b border-border-subtle py-3">
-                  <div className="flex flex-col"><span className="text-control font-semibold">{u.status}</span><time className="font-mono text-caption text-muted-foreground">{u.time}</time></div>
-                  <p className="m-0 text-[15px] leading-[23px]">{u.text}</p>
-                </li>
-              ))}
-            </ol>
-          </article>
-        ) : null}
+        {open.map((incident, index) => <IncidentCard key={`${incident.opened_ms}-${index}`} incident={incident} />)}
         <section className="overflow-hidden rounded-lg border bg-card" aria-label="Components">
-          <div className="flex items-center gap-3 border-b px-5 py-3.5"><h2 className="flex-1 text-base font-bold">Components</h2><span className="text-caption text-muted-foreground">Last {c.days} days</span></div>
-          {groups.map((g) => {
-            const items = g.items.filter((i) => !c.hidden.includes(i.name))
-            if (!items.length) return null
-            return (
-              <div key={g.name}>
-                <div className="px-5 pt-2.5 text-[11px] font-semibold uppercase tracking-[.05em] text-muted-foreground">{g.name}</div>
-                {items.map((i) => (
-                  <div key={i.name} className="flex flex-col gap-2.5 border-b border-border-subtle px-5 pb-4 pt-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold">{i.name}</span>
-                      {c.showDesc ? <span className="text-caption text-muted-foreground">{i.desc}</span> : null}
-                      <span className="flex-1" />
-                      {i.live && incident ? <StatusIndicator status="degraded" /> : i.name === 'Payouts' && c.state === 'maintenance' ? <StatusIndicator status="maintenance" label="Maintenance tonight" /> : <StatusIndicator status="operational" />}
-                    </div>
-                    {c.showUptime ? <UptimeBars days={c.days} bad={i.bad} fresh={i.fresh} live={i.live} incident={incident} name={i.name} /> : null}
-                  </div>
-                ))}
-              </div>
-            )
-          })}
-        </section>
-        {c.showPast ? (
-          <section className="flex flex-col gap-3" aria-label="Past incidents">
-            <h2 className="text-[18px] font-bold">Past incidents</h2>
-            <div className="rounded-lg border bg-card">
-              {[['Oct 20, 2026', incident ? 'Some card payments fail at checkout' : '', incident ? 'Ongoing · Degraded · Checkout' : ''], ['Oct 19, 2026', '', ''], ['Sep 17, 2026', 'Checkout unavailable for 12 minutes', 'Resolved in 12 min · Partial outage'], ['Aug 29, 2026', 'Slow API responses', 'Resolved in 41 min · Degraded · Public API']].map(([d, t, m]) => (
-                <div key={d} className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 border-b border-border-subtle px-5 py-3.5">
-                  <time className="text-control font-semibold">{d}</time>
-                  {t ? <div className="flex flex-col"><span className="font-semibold">{t}</span><span className="text-caption text-muted-foreground">{m}</span></div> : <span className="text-control text-muted-foreground">No incidents reported.</span>}
-                </div>
-              ))}
+          <div className="flex items-center gap-3 border-b px-5 py-3.5"><h2 className="flex-1 text-base font-bold">Components</h2></div>
+          {view.components.length === 0 ? <div className="px-5 py-4 text-control text-muted-foreground">No components are shown yet.</div> : null}
+          {view.components.map((component) => (
+            <div key={component.name} className="flex items-center gap-2 border-b border-border-subtle px-5 py-3 last:border-b-0">
+              <span className="flex-1 font-semibold">{component.name}</span>
+              <StatusIndicator status={INDICATOR[component.status]} />
             </div>
+          ))}
+        </section>
+        {past.length ? (
+          <section className="flex flex-col gap-3" aria-label="Past incidents">
+            <h2 className="text-[18px] font-bold">Resolved in the last seven days</h2>
+            {past.map((incident, index) => <IncidentCard key={`${incident.opened_ms}-${index}`} incident={incident} />)}
           </section>
         ) : null}
+        {!compact && subscribe ? <SubscribeForm subscribe={subscribe} /> : null}
       </main>
-      {c.poweredBy ? <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1">Subscribe by email, RSS or webhook.</span><Logo className="size-3.5" />Powered by FerrisTrace</div></footer> : null}
+      <footer className="border-t bg-background"><div className="mx-auto flex max-w-[880px] items-center gap-2 px-6 py-5 text-caption text-muted-foreground"><span className="flex-1" /><Logo className="size-3.5" />Powered by FerrisTrace</div></footer>
     </div>
+  )
+}
+
+function IncidentCard({ incident }: { incident: PublicIncident }) {
+  const resolved = incident.status === 'resolved'
+  return (
+    <article className={cn('overflow-hidden rounded-lg border bg-card', !resolved && 'border-warning-border')}>
+      <div className={cn('flex flex-col gap-1.5 border-b px-5 py-4', !resolved && 'border-warning-border bg-warning-subtle')}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={resolved ? 'success' : 'warning'}>{capital(incident.status)}</Badge>
+          <span className="text-control text-muted-foreground">Since {when(incident.opened_ms)}{incident.resolved_ms !== null ? ` · resolved ${when(incident.resolved_ms)}` : ''}</span>
+          {incident.postmortem_url ? <a className="ml-auto inline-flex items-center gap-1 text-control" href={incident.postmortem_url}><FileText className="size-3.5" aria-hidden />Postmortem</a> : null}
+        </div>
+        <h2 className="text-[18px] font-bold leading-[26px]">{incident.title}</h2>
+      </div>
+      <ol className="m-0 flex list-none flex-col px-5 pb-4 pt-1">
+        {incident.updates.map((update, index) => (
+          <li key={`${update.at_ms}-${index}`} className="grid grid-cols-[130px_minmax(0,1fr)] gap-x-4 border-b border-border-subtle py-3 last:border-b-0">
+            <div className="flex flex-col"><span className="text-control font-semibold">{update.kind === 'status' ? capital(update.text) : 'Update'}</span><time className="font-mono text-caption text-muted-foreground">{when(update.at_ms)}</time></div>
+            <p className="m-0 whitespace-pre-wrap text-[15px] leading-[23px]">{update.kind === 'status' ? `The incident is ${update.text}.` : update.text}</p>
+          </li>
+        ))}
+      </ol>
+    </article>
+  )
+}
+
+function SubscribeForm({ subscribe }: { subscribe: (email: string) => Promise<void> }) {
+  const [email, setEmail] = useState('')
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
+  return (
+    <section className="flex flex-col gap-2 rounded-lg border bg-card px-5 py-4" aria-label="Subscribe">
+      <h2 className="flex items-center gap-1.5 text-base font-bold"><Bell className="size-4" aria-hidden />Get incident updates by email</h2>
+      {state === 'sent' ? (
+        <p className="m-0 text-control text-muted-foreground">If this address can subscribe, a confirmation link is on its way. Open it within seven days.</p>
+      ) : (
+        <form className="flex flex-wrap gap-2" onSubmit={(event) => {
+          event.preventDefault()
+          setState('sending')
+          subscribe(email.trim()).then(() => setState('sent'), () => setState('failed'))
+        }}>
+          <Input type="email" required aria-label="Email address" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} className="max-w-[320px]" />
+          <Button type="submit" variant="primary" size="sm" className="h-8" disabled={state === 'sending' || !email.trim()}>Subscribe</Button>
+          {state === 'failed' ? <span className="w-full text-control text-destructive-text">That address was not accepted.</span> : null}
+        </form>
+      )}
+    </section>
   )
 }

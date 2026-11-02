@@ -378,6 +378,41 @@ write. Writes are audited as `postmortem.drafted`, `postmortem.edited`,
 `postmortem.published` and `postmortem.unpublished`. The incident page of the
 app shows the editor, with a preview that renders markdown without raw HTML.
 
+## Status pages
+
+An organisation keeps status pages, each served without a session at
+`/status/{slug}` (the app) and `/api/status/{slug}` (JSON, with
+`Access-Control-Allow-Origin: *`). A slug is 3 to 48 lowercase letters, digits
+or hyphens, unique across the deployment; `confirm` and `unsubscribe` are
+reserved. A page stays private (`404`) until an administrator makes it public;
+members preview it at `GET /api/orgs/{org}/status-pages/{id}/preview`.
+"Hide from search" adds `<meta name="robots" content="noindex">`.
+
+A component takes its status from an alert rule (down while a critical rule
+fires, degraded while a warning or info rule fires), from a service's error
+rate over the last five minutes (degraded at 5 %, down at 25 %, read from the
+span store; without one it shows operational), or from a status set by hand.
+Only components marked public are shown. The page shows the organisation's
+incidents marked public that are open or were resolved within seven days, with
+their status changes and the comments posted with "Post publicly on the status
+page" (`"public": true` on `POST .../incidents/{id}/comments`); private
+comments, owners, alerts, attachments and email addresses never appear. A
+published postmortem of a shown incident is linked and served at
+`/status/{slug}/postmortems/{incident}`, with email addresses redacted.
+
+Visitors subscribe by email (`POST /api/status/{slug}/subscribe` always answers
+`202`). A confirmation link is mailed and lasts seven days; a second request
+within the hour sends nothing more. Confirmed subscribers are mailed when a
+public incident opens, changes status or gets a public comment, from an outbox
+drained every 30 seconds under the same advisory lock as the alert duties, with
+the alert retries. Every email carries an unsubscribe link valid 90 days. Both
+links are HMAC-signed under a key derived from `secrets.at_rest_key`: without
+it nobody can subscribe, and pages are served all the same; without a mail
+relay the emails are retried and then abandoned. Writes are audited as
+`status_page.created`, `status_page.updated`, `status_page.deleted`,
+`status_component.created`, `status_component.updated` and
+`status_component.deleted`.
+
 ## Profile photos
 
 Without a bucket, everybody is shown under their initials, taken from the

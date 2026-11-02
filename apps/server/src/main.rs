@@ -22,12 +22,13 @@ use ferristrace_clickhouse::{
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
 use ferristrace_domain::{
-    AckKey, Clock, Drained, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
+    ANNOUNCE_TICK_SECS, AckKey, Clock, Drained, Heralded, LinkKey, PAGE_TICK_SECS, Paged,
+    ProvisionPolicy, TenantId, Tick,
 };
 use ferristrace_infra::{
     Argon2Hasher, HttpWebhooks, MailSettings, MemoryMeter, MemorySink, OidcProvider, OidcSettings,
     PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
-    WebhookSettings, ack_key_from_hex,
+    WebhookSettings, ack_key_from_hex, status_key_from_hex,
 };
 use ferristrace_postgres::{
     CONTROL_PLANE, INVITE_WINDOW, Postgres, PostgresDirectory, load_allowances,
@@ -53,6 +54,7 @@ const MIN_FLUSH_WAIT: Duration = Duration::from_millis(100);
 const EVALUATE_EVERY: Duration = Duration::from_secs(60);
 const DELIVER_EVERY: Duration = Duration::from_secs(10);
 const ESCALATE_EVERY: Duration = Duration::from_secs(PAGE_TICK_SECS);
+const ANNOUNCE_EVERY: Duration = Duration::from_secs(ANNOUNCE_TICK_SECS);
 
 #[derive(Default)]
 struct Optional {
@@ -125,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
     let (stop, stopped) = watch::channel(false);
     let mut watching = watch_alerts(state.as_ref(), held.explore, &stopped);
     watching.extend(watch_pages(state.as_ref(), &stopped));
+    watching.extend(watch_status(state.as_ref(), &stopped));
     let gateway = Arc::new(gateway_of(
         directory_of(pool.as_ref(), default_retention_days(config.spans.as_ref())),
         allowances,
@@ -190,6 +193,7 @@ fn control_plane(
     let hasher = Argon2Hasher::new().context("preparing the password hasher")?;
     let seal = seal_of(config)?;
     let ack = ack_key_of(config)?;
+    let links = status_key_of(config)?;
     let mailer = relay_of(config)?;
     let repos = Postgres::new(pool.clone(), SystemClock)
         .with_hasher(hasher.clone())
@@ -203,7 +207,11 @@ fn control_plane(
         meter,
         optional,
     );
-    let app = Arc::new(Ferristrace::<Production>::new(repos, adapters).with_ack_key(ack));
+    let app = Arc::new(
+        Ferristrace::<Production>::new(repos, adapters)
+            .with_ack_key(ack)
+            .with_status_key(links),
+    );
     Ok(AppState::new(app, cookie_of(config))
         .with_default_retention_days(default_retention_days(config.spans.as_ref())))
 }
@@ -477,6 +485,18 @@ fn ack_key_of(config: &Config) -> anyhow::Result<Option<AckKey>> {
     Ok(Some(key))
 }
 
+fn status_key_of(config: &Config) -> anyhow::Result<Option<LinkKey>> {
+    let Some(secrets) = &config.secrets else {
+        tracing::warn!(
+            "no secrets.at_rest_key is configured, so nobody can subscribe to a status page by \
+             email; the pages themselves are served"
+        );
+        return Ok(None);
+    };
+    let key = status_key_from_hex(&secrets.at_rest_key).context("reading secrets.at_rest_key")?;
+    Ok(Some(key))
+}
+
 fn relay_of(config: &Config) -> anyhow::Result<Relay> {
     let Some(mail) = &config.mail else {
         tracing::warn!(
@@ -547,6 +567,46 @@ fn watch_pages(state: Option<&State>, stopped: &watch::Receiver<bool>) -> Option
         Arc::clone(&state.app),
         stopped.clone(),
     )))
+}
+
+fn watch_status(state: Option<&State>, stopped: &watch::Receiver<bool>) -> Option<JoinHandle<()>> {
+    let state = state?;
+    tracing::info!("status page subscribers are mailed every thirty seconds");
+    Some(tokio::spawn(announce_status(
+        Arc::clone(&state.app),
+        stopped.clone(),
+    )))
+}
+
+async fn announce_status(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(ANNOUNCE_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.announce_status().await {
+            Ok(Heralded::Skipped) => tracing::debug!("another replica is mailing subscribers"),
+            Ok(Heralded::Worked {
+                sent: 0,
+                retried: 0,
+                abandoned: 0,
+            }) => {}
+            Ok(Heralded::Worked {
+                sent,
+                retried,
+                abandoned,
+            }) => tracing::info!(
+                sent,
+                retried,
+                abandoned,
+                "status page subscribers were mailed"
+            ),
+            Err(error) => {
+                tracing::error!(%error, "the status page subscribers could not be mailed");
+            }
+        }
+    }
 }
 
 async fn escalate_pages(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {

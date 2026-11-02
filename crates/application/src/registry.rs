@@ -5,7 +5,7 @@ use ferristrace_domain::{
     AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
     IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships, OidcFlows, Orgs,
     Pages, Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads,
-    UsageHistory,
+    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +91,12 @@ pub mod domain {
     pub struct Schedules;
     #[derive(Debug)]
     pub struct Sessions;
+    #[derive(Debug)]
+    pub struct StatusOutbox;
+    #[derive(Debug)]
+    pub struct StatusPages;
+    #[derive(Debug)]
+    pub struct StatusSubscribers;
     #[derive(Debug)]
     pub struct Teams;
     #[derive(Debug)]
@@ -277,6 +283,7 @@ pub trait IncidentRepos:
     AlertRepos
     + RepoFor<domain::IncidentAttachments, Repo: IncidentAttachments>
     + RepoFor<domain::Roster, Repo: Roll>
+    + RepoFor<domain::StatusOutbox, Repo: StatusOutbox>
 {
 }
 
@@ -284,6 +291,7 @@ impl<R> IncidentRepos for R where
     R: AlertRepos
         + RepoFor<domain::IncidentAttachments, Repo: IncidentAttachments>
         + RepoFor<domain::Roster, Repo: Roll>
+        + RepoFor<domain::StatusOutbox, Repo: StatusOutbox>
 {
 }
 
@@ -298,12 +306,27 @@ impl<R> PostmortemRepos for R where
 {
 }
 
+pub trait StatusRepos:
+    PostmortemRepos
+    + RepoFor<domain::StatusPages, Repo: StatusPages>
+    + RepoFor<domain::StatusSubscribers, Repo: StatusSubscribers>
+{
+}
+
+impl<R> StatusRepos for R where
+    R: PostmortemRepos
+        + RepoFor<domain::StatusPages, Repo: StatusPages>
+        + RepoFor<domain::StatusSubscribers, Repo: StatusSubscribers>
+{
+}
+
 pub trait Repositories:
     ReadRepos
     + AlertRepos
     + IncidentRepos
     + OncallRepos
     + PostmortemRepos
+    + StatusRepos
     + AuditRepos
     + ExportRepos
     + AccessRepos
@@ -324,6 +347,7 @@ impl<R> Repositories for R where
         + IncidentRepos
         + OncallRepos
         + PostmortemRepos
+        + StatusRepos
         + AuditRepos
         + ExportRepos
         + AccessRepos

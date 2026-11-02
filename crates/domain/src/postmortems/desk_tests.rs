@@ -105,6 +105,7 @@ impl World {
                 60_000,
                 Change::Comment {
                     body: CommentBody::try_from("rolled back").expect("a body"),
+                    public: false,
                 },
             ),
         ] {
@@ -207,6 +208,7 @@ async fn there_is_one_postmortem_per_incident_and_an_untouched_draft_is_regenera
             author: Author::Account(account(ME)),
             change: Change::Comment {
                 body: CommentBody::try_from("fixed it").expect("a body"),
+                public: false,
             },
             at_ms: OPENED_MS + 120_000,
         },

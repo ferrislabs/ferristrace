@@ -31,7 +31,7 @@ pub(crate) fn encode_change(change: &Change) -> (Option<&str>, String) {
         }),
         Change::Title { from, to } => json!({"from": from.as_str(), "to": to.as_str()}),
         Change::Public { from, to } => json!({"from": from, "to": to}),
-        Change::Comment { .. } => json!({}),
+        Change::Comment { public, .. } => json!({"public": public}),
         Change::Alert {
             rule,
             from,
@@ -60,7 +60,7 @@ pub(crate) fn encode_change(change: &Change) -> (Option<&str>, String) {
         Change::Acknowledged { page } => json!({"page": page.to_string()}),
     };
     let body = match change {
-        Change::Comment { body } => Some(body.as_str()),
+        Change::Comment { body, .. } => Some(body.as_str()),
         _ => None,
     };
     (body, detail.to_string())
@@ -119,6 +119,10 @@ pub(crate) fn decode_change(
         },
         EntryKind::Comment => Change::Comment {
             body: CommentBody::try_from(body?).ok()?,
+            public: detail
+                .get("public")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
         EntryKind::Alert => {
             let (from, to) = pair(&detail, AlertStatus::parse)?;
@@ -220,6 +224,11 @@ mod tests {
             },
             Change::Comment {
                 body: CommentBody::try_from("rolled back").expect("a body"),
+                public: true,
+            },
+            Change::Comment {
+                body: CommentBody::try_from("the db is full").expect("a body"),
+                public: false,
             },
             Change::Alert {
                 rule: RuleId::new(Uuid::from_u128(2)),

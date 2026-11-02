@@ -70,6 +70,12 @@ fn the_spellings_are_stable_and_dotted() {
             "postmortem.edited",
             "postmortem.published",
             "postmortem.unpublished",
+            "status_page.created",
+            "status_page.updated",
+            "status_page.deleted",
+            "status_component.created",
+            "status_component.updated",
+            "status_component.deleted",
         ]
     );
 }
@@ -169,4 +175,15 @@ fn a_detail_keeps_its_facts_in_order() {
             .collect::<Vec<_>>(),
         vec!["from", "to", "team"]
     );
+}
+
+#[test]
+fn status_pages_and_their_components_are_targets_of_their_own() {
+    for (kind, spelled) in [
+        (TargetKind::StatusPage, "status_page"),
+        (TargetKind::StatusComponent, "status_component"),
+    ] {
+        assert_eq!(kind.as_str(), spelled);
+        assert_eq!(TargetKind::parse(spelled), Some(kind));
+    }
 }
