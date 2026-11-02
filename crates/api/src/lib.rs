@@ -12,6 +12,7 @@ mod issue_routes;
 mod key_routes;
 mod log_routes;
 mod methods;
+mod metric_routes;
 mod oidc_routes;
 mod org_routes;
 mod password_routes;
@@ -33,13 +34,16 @@ pub use catalogue_routes::{ProjectRefused, catalogue_router};
 pub use error::ApiError;
 pub use explore_routes::{LookRefused, explore_router};
 pub use export_routes::{ExportRefused, export_router};
-pub use grpc::{LogsGateway, TraceGateway, logs_server, trace_server};
+pub use grpc::{
+    LogsGateway, MetricsGateway, TraceGateway, logs_server, metrics_server, trace_server,
+};
 pub use health::health_router;
 pub use http::{MAX_DECOMPRESSED_BYTES, router};
 pub use issue_routes::{IssueRefused, issue_router};
 pub use key_routes::{KeyRefused, key_router};
 pub use log_routes::{LogRefused, log_router};
 pub use methods::{SignInMethods, methods_router};
+pub use metric_routes::{MetricRefused, metric_router};
 pub use oidc_routes::{FederatedRefused, oidc_router};
 pub use org_routes::{OrgRefused, org_router};
 pub use password_routes::{ChangeRefused, password_router};

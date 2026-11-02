@@ -146,3 +146,5 @@ Verify (exit, per PR)
   DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
   CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-clickhouse
   cd web && pnpm typecheck && pnpm build
+
+Amended: 2026-11-02 metrics: resource attributes are merged into each point's attributes (the point wins), so series group by host or Kubernetes keys; exemplars without a trace id are dropped at ingest; `agg` is optional and defaults to avg (gauge), rate (sum), p95 (histogram); `metric_catalogue` is keyed by (tenant, name, project) so a project-bound key keeps sight of a name shared across projects; histograms accept p50, p95, p99, avg, rate only.

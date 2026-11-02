@@ -54,6 +54,12 @@ pub const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../migrations/clickhouse/0007_logs.up.sql"),
         down: include_str!("../../migrations/clickhouse/0007_logs.down.sql"),
     },
+    Migration {
+        version: 8,
+        name: "metrics",
+        up: include_str!("../../migrations/clickhouse/0008_metrics.up.sql"),
+        down: include_str!("../../migrations/clickhouse/0008_metrics.down.sql"),
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -225,6 +231,23 @@ mod tests {
         assert!(up.contains("TTL expire_at DELETE"), "{up}");
         assert!(up.contains("trace_id TYPE bloom_filter"), "{up}");
         assert!(up.contains("body TYPE tokenbf_v1"), "{up}");
+    }
+
+    #[test]
+    fn every_metric_table_leads_with_the_tenant_and_expires_each_row() {
+        let up = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "metrics")
+            .expect("a metrics migration")
+            .up;
+        let tables: Vec<&str> = statements(up).collect();
+
+        assert_eq!(tables.len(), 4, "{up}");
+        for table in &tables {
+            assert!(table.contains("ORDER BY (tenant_id, name"), "{table}");
+            assert!(table.contains("TTL expire_at DELETE"), "{table}");
+        }
+        assert!(tables[3].contains("ReplacingMergeTree(last_seen)"), "{up}");
     }
 
     #[test]

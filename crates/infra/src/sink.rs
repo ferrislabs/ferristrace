@@ -2,7 +2,9 @@ use core::future::Future;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use ferristrace_domain::{LogRecord, LogSink, Scope, SinkError, Span, SpanSink};
+use ferristrace_domain::{
+    LogRecord, LogSink, Metric, MetricSink, Scope, SinkError, Span, SpanSink,
+};
 
 const DEFAULT_RETENTION: usize = 1024;
 
@@ -12,6 +14,8 @@ struct State {
     recent: VecDeque<(Scope, Span)>,
     logs_accepted: u64,
     recent_logs: VecDeque<(Scope, LogRecord)>,
+    metrics_accepted: u64,
+    recent_metrics: VecDeque<(Scope, Metric)>,
 }
 
 #[derive(Debug)]
@@ -60,6 +64,34 @@ impl MemorySink {
             .iter()
             .cloned()
             .collect()
+    }
+
+    pub fn metrics_accepted(&self) -> u64 {
+        self.state.lock().expect("sink state").metrics_accepted
+    }
+
+    pub fn recent_metrics(&self) -> Vec<(Scope, Metric)> {
+        self.state
+            .lock()
+            .expect("sink state")
+            .recent_metrics
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    fn push_metrics(&self, scope: Scope, metrics: Vec<Metric>) {
+        let mut state = self.state.lock().expect("sink state");
+        state.metrics_accepted += metrics.len() as u64;
+        if self.retention == 0 {
+            return;
+        }
+        for metric in metrics {
+            while state.recent_metrics.len() >= self.retention {
+                state.recent_metrics.pop_front();
+            }
+            state.recent_metrics.push_back((scope, metric));
+        }
     }
 
     fn push_logs(&self, scope: Scope, records: Vec<LogRecord>) {
@@ -113,13 +145,24 @@ impl LogSink for MemorySink {
     }
 }
 
+impl MetricSink for MemorySink {
+    fn accept_metrics(
+        &self,
+        scope: Scope,
+        metrics: Vec<Metric>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        self.push_metrics(scope, metrics);
+        async { Ok(()) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use ferristrace_domain::{
-        LogRecord, LogSink, Scope, Severity, Span, SpanId, SpanKind, SpanSink, SpanStatus,
-        TenantId, TraceId,
+        LogRecord, LogSink, Metric, MetricData, MetricPoint, MetricSink, Scope, Severity, Span,
+        SpanId, SpanKind, SpanSink, SpanStatus, TenantId, TraceId,
     };
     use uuid::Uuid;
 
@@ -210,5 +253,36 @@ mod tests {
         assert_eq!(sink.accepted(), 0);
         assert_eq!(sink.recent_logs().len(), 1);
         assert_eq!(&*sink.recent_logs()[0].1.body, "second");
+    }
+
+    fn a_gauge(name: &str) -> Metric {
+        Metric {
+            name: name.into(),
+            unit: "1".into(),
+            description: "".into(),
+            service_name: "orders".into(),
+            data: MetricData::Gauge(vec![MetricPoint {
+                time_unix_nanos: 1,
+                value: 1.0,
+                attributes: BTreeMap::new(),
+                exemplars: Vec::new(),
+            }]),
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_metrics_are_counted_and_retained_apart_from_spans_and_logs() {
+        let tenant = TenantId::new(Uuid::from_u128(6));
+        let sink = MemorySink::with_retention(1);
+
+        sink.accept_metrics(Scope::of(tenant), vec![a_gauge("first"), a_gauge("second")])
+            .await
+            .expect("the sink accepts");
+
+        assert_eq!(sink.metrics_accepted(), 2);
+        assert_eq!(sink.accepted(), 0);
+        assert_eq!(sink.logs_accepted(), 0);
+        assert_eq!(sink.recent_metrics().len(), 1);
+        assert_eq!(&*sink.recent_metrics()[0].1.name, "second");
     }
 }

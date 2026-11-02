@@ -217,6 +217,7 @@ impl<P: Photos + Send + Sync + 'static> Stack for TestStack<P> {
     type SpanStore = Inert;
     type IssueStore = Inert;
     type LogStore = Inert;
+    type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -242,6 +243,7 @@ fn state<P: Photos + Send + Sync + 'static>(
         span_store: None,
         issue_store: None,
         log_store: None,
+        metric_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

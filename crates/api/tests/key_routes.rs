@@ -419,6 +419,7 @@ impl Stack for TestStack {
     type SpanStore = Looked;
     type IssueStore = Looked;
     type LogStore = Inert;
+    type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -449,6 +450,7 @@ impl Harness {
             span_store: Some(self.looked.clone()),
             issue_store: Some(self.looked.clone()),
             log_store: None,
+            metric_store: None,
             oidc: None,
             provision: ProvisionPolicy::default(),
         };

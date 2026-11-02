@@ -12,10 +12,13 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
-use ferristrace_api::{AppState, health_router, logs_server, router, trace_server, web_router};
+use ferristrace_api::{
+    AppState, health_router, logs_server, metrics_server, router, trace_server, web_router,
+};
 use ferristrace_application::{Adapters, Ferristrace, Ingestion};
 use ferristrace_clickhouse::{
-    ClickhouseIssues, ClickhouseLogReader, ClickhouseReader, SpanStoreSettings, open_span_store,
+    ClickhouseIssues, ClickhouseLogReader, ClickhouseMetricReader, ClickhouseReader,
+    SpanStoreSettings, open_span_store,
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
 use ferristrace_domain::{Clock, ProvisionPolicy, TenantId};
@@ -47,6 +50,7 @@ struct Optional {
     span_store: Option<ClickhouseReader>,
     issue_store: Option<ClickhouseIssues>,
     log_store: Option<ClickhouseLogReader>,
+    metric_store: Option<ClickhouseMetricReader>,
     oidc: Option<OidcProvider>,
 }
 
@@ -80,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
         reader,
         grouping,
         logs,
+        metrics,
     } = spans_of(&config).await?;
     let held = Held {
         explore: reader.is_some(),
@@ -94,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
                 span_store: reader,
                 issue_store: grouping,
                 log_store: logs,
+                metric_store: metrics,
                 oidc: oidc_of(&config).await?,
             };
             Some(control_plane(
@@ -199,6 +205,7 @@ fn adapters_of(
         span_store: optional.span_store,
         issue_store: optional.issue_store,
         log_store: optional.log_store,
+        metric_store: optional.metric_store,
         oidc: optional.oidc,
         provision: ProvisionPolicy::default(),
     }
@@ -299,12 +306,13 @@ struct Opened {
     reader: Option<ClickhouseReader>,
     grouping: Option<ClickhouseIssues>,
     logs: Option<ClickhouseLogReader>,
+    metrics: Option<ClickhouseMetricReader>,
 }
 
 async fn spans_of(config: &Config) -> anyhow::Result<Opened> {
     let Some(spans) = config.spans.clone() else {
         tracing::warn!(
-            "no span store is configured, so accepted spans and logs are held in memory \
+            "no span store is configured, so accepted spans, logs and metrics are held in memory \
              and lost when this process ends, and nothing can be read back; \
              set spans.url to keep them"
         );
@@ -313,6 +321,7 @@ async fn spans_of(config: &Config) -> anyhow::Result<Opened> {
             reader: None,
             grouping: None,
             logs: None,
+            metrics: None,
         });
     };
     let settings = SpanStoreSettings::from(spans);
@@ -322,16 +331,18 @@ async fn spans_of(config: &Config) -> anyhow::Result<Opened> {
     tracing::info!(
         url = %settings.url,
         retention_days = settings.retention_days,
-        "spans and logs are written to the span store"
+        "spans, logs and metrics are written to the span store"
     );
     Ok(Opened {
         sink: Sink::Store(Box::new(Stored {
             spans: store.sink,
             logs: store.logs,
+            metrics: store.metrics,
         })),
         reader: Some(store.reader),
         grouping: Some(store.issues),
         logs: Some(store.log_reader),
+        metrics: Some(store.metric_reader),
     })
 }
 
@@ -340,12 +351,14 @@ async fn flush_store(sink: Arc<Sink>) {
         return;
     };
     loop {
-        let spans = store.spans.time_left().await;
-        let logs = store.logs.time_left().await;
-        let wait = match (spans, logs) {
-            (Some(spans), Some(logs)) => Some(spans.min(logs)),
-            (left, None) | (None, left) => left,
-        }
+        let wait = [
+            store.spans.time_left().await,
+            store.logs.time_left().await,
+            store.metrics.time_left().await,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
         .unwrap_or(FLUSH_FALLBACK)
         .max(MIN_FLUSH_WAIT);
         tokio::time::sleep(wait).await;
@@ -358,6 +371,11 @@ async fn flush_store(sink: Arc<Sink>) {
             Ok(0) => {}
             Ok(rows) => tracing::debug!(rows, "a log batch was committed on its deadline"),
             Err(error) => tracing::error!(%error, "a log batch could not be committed"),
+        }
+        match store.metrics.flush().await {
+            Ok(0) => {}
+            Ok(rows) => tracing::debug!(rows, "a metric batch was committed on its deadline"),
+            Err(error) => tracing::error!(%error, "a metric batch could not be committed"),
         }
     }
 }
@@ -375,6 +393,11 @@ async fn flush_once(sink: &Sink) {
         Ok(0) => {}
         Ok(rows) => tracing::info!(rows, "the last log batch was committed before leaving"),
         Err(error) => tracing::error!(%error, "the last log batch was lost"),
+    }
+    match store.metrics.flush().await {
+        Ok(0) => {}
+        Ok(rows) => tracing::info!(rows, "the last metric batch was committed before leaving"),
+        Err(error) => tracing::error!(%error, "the last metric batch was lost"),
     }
 }
 
@@ -479,7 +502,8 @@ async fn serve_grpc(
 ) -> anyhow::Result<()> {
     Server::builder()
         .add_service(trace_server(Arc::clone(&gateway)))
-        .add_service(logs_server(gateway))
+        .add_service(logs_server(Arc::clone(&gateway)))
+        .add_service(metrics_server(gateway))
         .serve_with_shutdown(address, shutdown())
         .await
         .context("serving OTLP over gRPC")

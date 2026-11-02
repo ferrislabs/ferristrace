@@ -88,7 +88,7 @@ fn convert(
 
 const MOST_SEVERE: u8 = 24;
 
-fn optional_id<T>(
+pub(crate) fn optional_id<T>(
     bytes: &[u8],
     read: impl Fn(&[u8]) -> Result<T, InvalidId>,
 ) -> Result<Option<T>, DecodeError> {

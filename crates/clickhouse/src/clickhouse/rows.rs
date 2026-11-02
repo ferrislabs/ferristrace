@@ -219,7 +219,7 @@ impl<'a> LogRow<'a> {
     }
 }
 
-fn borrowed(pairs: &BTreeMap<Box<str>, Box<str>>) -> BTreeMap<&str, &str> {
+pub(crate) fn borrowed(pairs: &BTreeMap<Box<str>, Box<str>>) -> BTreeMap<&str, &str> {
     pairs
         .iter()
         .map(|(key, value)| (&**key, &**value))
@@ -246,10 +246,10 @@ pub(crate) fn said<'a>(event: &'a SpanEvent, key: &str) -> &'a str {
         .unwrap_or_default()
 }
 
-fn nanos(value: u64) -> Result<i64, SinkError> {
+pub(crate) fn nanos(value: u64) -> Result<i64, SinkError> {
     i64::try_from(value).map_err(|_| SinkError::TimestampOutOfRange)
 }
 
-fn seconds(value: UnixSeconds) -> Result<u32, SinkError> {
+pub(crate) fn seconds(value: UnixSeconds) -> Result<u32, SinkError> {
     u32::try_from(value.get()).map_err(|_| SinkError::TimestampOutOfRange)
 }

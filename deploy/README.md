@@ -47,7 +47,7 @@ docker compose exec server ferristrace issue-key --org <the printed org id>
 
 An owner or an administrator can also create one in the web application,
 under Settings > Project > Api keys, with the `ingest` scope. A key with
-the `read` scope reads services, traces, logs and issues through `/api` with the
+the `read` scope reads services, traces, logs, metrics and issues through `/api` with the
 same bearer header, and a key bound to a project reads only that project.
 
 Every change made to an organisation, from the web application or from the
@@ -59,10 +59,11 @@ token or a password, and nothing in FerrisTrace edits or deletes an entry;
 deleting the organisation deletes its log.
 
 Then point any OTLP exporter at `http://localhost:4318` (traces on
-`/v1/traces`, logs on `/v1/logs`) or at `localhost:4317` over gRPC, with the
-key as a bearer token. Both signals take protobuf, gzip or not, count their
-decompressed bytes in the organisation's usage and quota, and refuse a body
-over 4 MiB with 413 rather than truncating it:
+`/v1/traces`, logs on `/v1/logs`, metrics on `/v1/metrics`) or at
+`localhost:4317` over gRPC, with the key as a bearer token. Every signal
+takes protobuf, gzip or not, counts its decompressed bytes in the
+organisation's usage and quota, and refuses a body over 4 MiB with 413
+rather than truncating it:
 
 ```sh
 curl -X POST http://localhost:4318/v1/traces \
@@ -74,11 +75,22 @@ curl -X POST http://localhost:4318/v1/logs \
   -H "authorization: Bearer <the printed key>" \
   -H 'content-type: application/x-protobuf' \
   --data-binary @logs.pb
+
+curl -X POST http://localhost:4318/v1/metrics \
+  -H "authorization: Bearer <the printed key>" \
+  -H 'content-type: application/x-protobuf' \
+  --data-binary @metrics.pb
 ```
 
 Logs are kept in the span store beside the spans and expire with the
 organisation's retention. They are read back through
 `GET /api/orgs/<org>/logs` and `GET /api/orgs/<org>/logs/histogram`.
+
+Gauges, sums and explicit-bucket histograms are kept the same way, with
+their exemplars, and read back through `GET /api/orgs/<org>/metrics` and
+`GET /api/orgs/<org>/metrics/<name>/series`. Exponential histograms and
+summaries are accepted and counted in usage but not stored yet; the server
+logs a warning the first time it skips one.
 
 ## Coming from a Comettrace deployment
 

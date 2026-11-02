@@ -1113,7 +1113,9 @@ dependencies = [
  "clickhouse",
  "ferristrace-domain",
  "ferristrace-infra",
+ "ferristrace-otlp",
  "hex",
+ "opentelemetry-proto",
  "serde",
  "serde_repr",
  "thiserror 2.0.21",
@@ -1193,6 +1195,7 @@ dependencies = [
  "prost",
  "serde_json",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

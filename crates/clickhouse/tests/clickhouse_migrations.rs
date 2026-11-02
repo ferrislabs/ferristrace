@@ -174,11 +174,21 @@ async fn up_then_down_then_up_leaves_one_recorded_version() {
         .await
         .expect("counting the table")
         .value;
+    let metrics_gone = client
+        .query(
+            "SELECT count() AS value FROM system.tables \
+             WHERE database = currentDatabase() AND name LIKE 'metric_%'",
+        )
+        .fetch_one::<Count>()
+        .await
+        .expect("counting the tables")
+        .value;
     let again = migrator.up().await.expect("the second up");
 
     assert_eq!(reverted.len(), MIGRATIONS.len());
     assert_eq!(gone, 0, "the down step left the spans table behind");
     assert_eq!(logs_gone, 0, "the down step left the logs table behind");
+    assert_eq!(metrics_gone, 0, "the down step left a metric table behind");
     assert_eq!(
         again,
         MIGRATIONS.iter().map(|m| m.version).collect::<Vec<_>>()
@@ -242,4 +252,67 @@ async fn the_logs_table_carries_the_intended_key_partition_ttl_and_indexes() {
     assert!(indexes.contains("trace_id:bloom_filter"), "{indexes}");
     assert!(indexes.contains("body:tokenbf_v1"), "{indexes}");
     assert_eq!(trace_type, "FixedString(16)");
+}
+
+#[tokio::test]
+async fn the_metric_tables_lead_with_the_tenant_and_expire_each_row() {
+    let Some(client) = fresh_database("ferristrace_migrate_metrics").await else {
+        return;
+    };
+    ClickhouseMigrator::new(client.clone())
+        .up()
+        .await
+        .expect("the migrations apply");
+    let described = async |table: &str, column: &str| {
+        one_text(
+            &client,
+            &format!(
+                "SELECT {column} AS value FROM system.tables \
+                 WHERE database = currentDatabase() AND name = '{table}'"
+            ),
+        )
+        .await
+    };
+
+    for table in ["metric_points", "metric_histograms", "metric_exemplars"] {
+        assert_eq!(
+            described(table, "sorting_key").await,
+            "tenant_id, name, time",
+            "{table}"
+        );
+        assert_eq!(described(table, "engine").await, "MergeTree", "{table}");
+        assert!(
+            described(table, "create_table_query")
+                .await
+                .contains("TTL expire_at"),
+            "{table}"
+        );
+    }
+    assert_eq!(
+        described("metric_catalogue", "sorting_key").await,
+        "tenant_id, name, project_id"
+    );
+    assert_eq!(
+        described("metric_catalogue", "engine").await,
+        "ReplacingMergeTree"
+    );
+    assert!(
+        described("metric_catalogue", "create_table_query")
+            .await
+            .contains("TTL expire_at")
+    );
+    let kinds = one_text(
+        &client,
+        "SELECT type AS value FROM system.columns \
+         WHERE database = currentDatabase() AND table = 'metric_points' AND name = 'kind'",
+    )
+    .await;
+    let counts = one_text(
+        &client,
+        "SELECT type AS value FROM system.columns \
+         WHERE database = currentDatabase() AND table = 'metric_histograms' AND name = 'counts'",
+    )
+    .await;
+    assert_eq!(kinds, "Enum8(\'gauge\' = 1, \'sum\' = 2)");
+    assert_eq!(counts, "Array(UInt64)");
 }

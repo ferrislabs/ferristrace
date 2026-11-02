@@ -4,8 +4,8 @@ use clickhouse::Client;
 use ferristrace_domain::Clock;
 
 use crate::clickhouse::{
-    BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMigrator,
-    ClickhouseReader, ClickhouseSink, MigrateError,
+    BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
+    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, MigrateError,
 };
 
 const DEFAULT_RETENTION_DAYS: u64 = 30;
@@ -57,6 +57,8 @@ pub struct SpanStore<C> {
     pub issues: ClickhouseIssues,
     pub logs: ClickhouseLogSink<C>,
     pub log_reader: ClickhouseLogReader,
+    pub metrics: ClickhouseMetricSink<C>,
+    pub metric_reader: ClickhouseMetricReader,
 }
 
 pub async fn open<C: Clock + Clone>(
@@ -71,6 +73,13 @@ pub async fn open<C: Clock + Clone>(
         tracing::info!(?ran, "the span schema was migrated");
     }
     Ok(SpanStore {
+        metrics: ClickhouseMetricSink::new(
+            &client,
+            BatchLimits::default(),
+            settings.retention(),
+            clock.clone(),
+        ),
+        metric_reader: ClickhouseMetricReader::new(client.clone()),
         logs: ClickhouseLogSink::new(
             &client,
             BatchLimits::default(),

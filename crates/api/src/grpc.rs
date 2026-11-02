@@ -2,13 +2,19 @@ use std::fmt;
 use std::sync::Arc;
 
 use ferristrace_application::{Ingestion, Stack};
-use ferristrace_domain::{DecompressedBytes, LogPayload, Payload};
-use ferristrace_otlp::{logs_of, spans_of};
+use ferristrace_domain::{DecompressedBytes, LogPayload, MetricPayload, Payload};
+use ferristrace_otlp::{logs_of, metrics_of, spans_of};
 use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::{
     LogsService, LogsServiceServer,
 };
 use opentelemetry_proto::tonic::collector::logs::v1::{
     ExportLogsServiceRequest, ExportLogsServiceResponse,
+};
+use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::{
+    MetricsService, MetricsServiceServer,
+};
+use opentelemetry_proto::tonic::collector::metrics::v1::{
+    ExportMetricsServiceRequest, ExportMetricsServiceResponse,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
     TraceService, TraceServiceServer,
@@ -112,5 +118,54 @@ impl<S: Stack> LogsService for LogsGateway<S> {
             .await
             .map_err(ApiError::from)?;
         Ok(Response::new(ExportLogsServiceResponse::default()))
+    }
+}
+
+pub struct MetricsGateway<S: Stack> {
+    ingest: Arc<Ingestion<S>>,
+}
+
+impl<S: Stack> MetricsGateway<S> {
+    pub fn new(ingest: Arc<Ingestion<S>>) -> Self {
+        Self { ingest }
+    }
+}
+
+pub fn metrics_server<S: Stack>(
+    ingest: Arc<Ingestion<S>>,
+) -> MetricsServiceServer<MetricsGateway<S>> {
+    MetricsServiceServer::new(MetricsGateway::new(ingest))
+        .accept_compressed(CompressionEncoding::Gzip)
+}
+
+impl<S: Stack> fmt::Debug for MetricsGateway<S> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MetricsGateway")
+            .finish_non_exhaustive()
+    }
+}
+
+#[tonic::async_trait]
+impl<S: Stack> MetricsService for MetricsGateway<S> {
+    async fn export(
+        &self,
+        request: Request<ExportMetricsServiceRequest>,
+    ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
+        let key = auth::key_of(request.metadata())?;
+        let message = request.into_inner();
+        let decompressed = DecompressedBytes::new(message.encoded_len() as u64);
+        let metrics = metrics_of(message).map_err(ApiError::from)?;
+        self.ingest
+            .accept_metrics(
+                &key,
+                MetricPayload {
+                    metrics,
+                    decompressed,
+                },
+            )
+            .await
+            .map_err(ApiError::from)?;
+        Ok(Response::new(ExportMetricsServiceResponse::default()))
     }
 }

@@ -127,7 +127,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/traces', Traces, {}),
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, {}),
-    inShell('/metrics', Metrics),
+    inShell('/metrics', Metrics, {}),
     inShell('/backend/$view', () => <SignalPage group="backend" />),
     inShell('/frontend/$view', () => <SignalPage group="frontend" />),
     inShell('/status-page', StatusPageEditor),

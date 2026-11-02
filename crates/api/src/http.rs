@@ -8,9 +8,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use bytes::Bytes;
 use ferristrace_application::{Ingestion, Stack};
-use ferristrace_domain::{DecompressedBytes, LogPayload, Payload};
-use ferristrace_otlp::{decode_logs, decode_traces};
+use ferristrace_domain::{DecompressedBytes, LogPayload, MetricPayload, Payload};
+use ferristrace_otlp::{decode_logs, decode_metrics, decode_traces};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
 use tower_http::decompression::RequestDecompressionLayer;
@@ -26,6 +27,7 @@ pub fn router<S: Stack>(ingest: Arc<Ingestion<S>>) -> Router {
     Router::new()
         .route("/v1/traces", post(traces::<S>))
         .route("/v1/logs", post(logs::<S>))
+        .route("/v1/metrics", post(metrics::<S>))
         .layer(RequestBodyLimitLayer::new(MAX_DECOMPRESSED_BYTES))
         .layer(RequestDecompressionLayer::new().gzip(true))
         .with_state(ingest)
@@ -74,6 +76,29 @@ async fn logs<S: Stack>(
         .await?;
     Ok(accepted(
         ExportLogsServiceResponse::default().encode_to_vec(),
+    ))
+}
+
+async fn metrics<S: Stack>(
+    State(ingest): State<Arc<Ingestion<S>>>,
+    headers: HeaderMap,
+    Bearer(key): Bearer,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    require_protobuf(&headers)?;
+    let decompressed = DecompressedBytes::new(body.len() as u64);
+    let metrics = decode_metrics(&body)?;
+    ingest
+        .accept_metrics(
+            &key,
+            MetricPayload {
+                metrics,
+                decompressed,
+            },
+        )
+        .await?;
+    Ok(accepted(
+        ExportMetricsServiceResponse::default().encode_to_vec(),
     ))
 }
 

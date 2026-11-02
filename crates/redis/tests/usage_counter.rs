@@ -41,6 +41,7 @@ impl Stack for Wired {
     type SpanStore = Inert;
     type IssueStore = Inert;
     type LogStore = Inert;
+    type MetricStore = Inert;
     type Meter = RedisMeter<FixedClock>;
     type Oidc = Inert;
     type Sink = Inert;
@@ -61,6 +62,7 @@ async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristr
             span_store: None,
             issue_store: None,
             log_store: None,
+            metric_store: None,
             oidc: None,
             provision: ProvisionPolicy::default(),
         },

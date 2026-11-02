@@ -10,6 +10,7 @@ pub mod export;
 pub mod identity;
 pub mod issue;
 pub mod logs;
+pub mod metrics;
 pub mod organisation;
 pub mod profile;
 pub mod provisioning;
@@ -58,6 +59,12 @@ pub use issue::{
 pub use logs::{
     BadLogQuery, Buckets, DEFAULT_BUCKETS, DEFAULT_LOG_LIMIT, LogBucket, LogCursor, LogPage,
     LogQuery, LogReader, LogSearch, MAX_BUCKETS, MAX_LOG_LIMIT,
+};
+pub use metrics::{
+    Aggregation, BadAggregation, BadMetricKind, BadMetricQuery, Exemplar, HistogramPoint,
+    MAX_EXEMPLARS, MAX_GROUP_BY, MIN_STEP_NANOS, Metric, MetricData, MetricDescriptor, MetricError,
+    MetricKind, MetricPayload, MetricPoint, MetricQuery, MetricReader, MetricSearch, MetricSink,
+    STEPS, Series, SeriesSet, Temporality,
 };
 pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
