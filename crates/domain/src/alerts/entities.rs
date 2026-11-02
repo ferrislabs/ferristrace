@@ -1,3 +1,4 @@
+use super::culprits::Culprits;
 use super::errors::DeliveryError;
 use super::value_objects::{
     AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Condition, Definition,
@@ -123,6 +124,7 @@ pub struct AlertEvent {
     pub to: AlertStatus,
     pub value: Option<f64>,
     pub at_ms: u64,
+    pub context: Option<Culprits>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +151,7 @@ pub struct Dispatch {
     pub value: Option<f64>,
     pub labels: Labels,
     pub at_ms: u64,
+    pub context: Option<Culprits>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

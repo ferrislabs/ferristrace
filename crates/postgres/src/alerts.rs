@@ -11,7 +11,7 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use crate::alert_codec::{decode, encode, encode_labels, labels_of};
+use crate::alert_codec::{culprits_of, decode, encode, encode_culprits, encode_labels, labels_of};
 use crate::keys::to_nanos;
 use crate::unit_of_work::{Postgres, SharedTx};
 
@@ -272,8 +272,8 @@ impl AlertEvents for PostgresAlertEvents {
         let mut tx = self.tx.lock().await;
         sqlx::query(
             "INSERT INTO alert_events \
-             (id, rule_id, org_id, labels, from_status, to_status, value, at_ms) \
-             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)",
+             (id, rule_id, org_id, labels, from_status, to_status, value, at_ms, context) \
+             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9::jsonb)",
         )
         .bind(event.id.as_uuid())
         .bind(event.rule.as_uuid())
@@ -283,6 +283,7 @@ impl AlertEvents for PostgresAlertEvents {
         .bind(event.to.as_str())
         .bind(event.value)
         .bind(signed(event.at_ms))
+        .bind(event.context.as_ref().map(encode_culprits))
         .execute(&mut **tx)
         .await
         .map_err(unreachable("record an alert event"))?;
@@ -299,7 +300,8 @@ impl AlertEvents for PostgresAlertEvents {
     ) -> Result<Vec<AlertEvent>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
-            "SELECT id, labels::text AS labels, from_status, to_status, value, at_ms \
+            "SELECT id, labels::text AS labels, from_status, to_status, value, at_ms, \
+             context::text AS context \
              FROM alert_events \
              WHERE org_id = $1 AND rule_id = $2 AND at_ms >= $3 AND at_ms <= $4 \
              ORDER BY at_ms DESC, id DESC LIMIT $5",
@@ -324,6 +326,7 @@ impl AlertEvents for PostgresAlertEvents {
                     to: status_of(row, "to_status")?,
                     value: row.get("value"),
                     at_ms: unsigned(row.get("at_ms")),
+                    context: row.get::<Option<&str>, _>("context").and_then(culprits_of),
                 })
             })
             .collect()
@@ -407,6 +410,7 @@ impl PostgresAlertOutbox {
                 value,
                 labels: labels_of(row.get::<&str, _>("labels")).ok_or_else(|| refused("labels"))?,
                 at_ms,
+                context: row.get::<Option<&str>, _>("context").and_then(culprits_of),
             },
             channel: Channel {
                 id: channel,
@@ -451,7 +455,7 @@ impl AlertOutbox for PostgresAlertOutbox {
              o.next_at_ms AS next_at_ms, o.last_error AS last_error, \
              a.name AS rule_name, a.definition->>'severity' AS severity, \
              e.labels::text AS labels, e.from_status AS from_status, e.to_status AS to_status, \
-             e.value AS value, e.at_ms AS at_ms, \
+             e.value AS value, e.at_ms AS at_ms, e.context::text AS context, \
              c.name AS channel_name, c.kind AS kind, c.target AS target, \
              c.secret_sealed AS secret_sealed \
              FROM alert_outbox o \

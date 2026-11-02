@@ -117,6 +117,7 @@ fn the_resolved_story() -> (Incident, Chronicle, Vec<Attachment>) {
                 to: AlertStatus::Firing,
                 value: Some(9.5),
                 labels: Labels::none(),
+                context: None,
             },
             BASE_MS,
         ),

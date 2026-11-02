@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, get, json, patch, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
-import type { AlertStatus } from './alerts'
+import type { AlertContext, AlertStatus } from './alerts'
 import { nothingYet } from './orgs'
 
 export type IncidentSeverity = 'sev1' | 'sev2' | 'sev3' | 'sev4'
@@ -42,7 +42,7 @@ export type TimelineEntry = { at_ms: number; author: Author } & (
   | { kind: 'title'; detail: Pair<string> }
   | { kind: 'public'; detail: Pair<boolean> }
   | { kind: 'comment'; detail: { body: string; public: boolean } }
-  | { kind: 'alert'; detail: { alert: { id: string; name: string | null }; from: AlertStatus; to: AlertStatus; value: number | null; labels: Record<string, string> } }
+  | { kind: 'alert'; detail: { alert: { id: string; name: string | null }; from: AlertStatus; to: AlertStatus; value: number | null; labels: Record<string, string>; context?: AlertContext } }
   | { kind: 'attachment'; detail: Attachment }
   | { kind: 'paged'; detail: { page: string; step: number; target: Person | null } }
   | { kind: 'acknowledged'; detail: { page: string } }

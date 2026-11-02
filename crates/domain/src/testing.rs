@@ -419,6 +419,7 @@ impl crate::alerts::AlertOutbox for AlertLedger {
                         value: event.value,
                         labels: event.labels.clone(),
                         at_ms: event.at_ms,
+                        context: event.context.clone(),
                     },
                     channel: channel.clone(),
                 });

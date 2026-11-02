@@ -5,10 +5,10 @@ use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
     AccountId, AlertChannels, AlertError, AlertEvent, AlertEvents, AlertOutbox, AlertRules,
     AlertSeverity, AlertStates, AlertStatus, ChannelKind, ChannelName, Comparison, Condition,
-    Definition, DefinitionParts, DeliveryStatus, Destination, Duty, Evaluator, EventId, Followers,
-    Labels, NoDataPolicy, Notification, NotificationId, Observation, Paging, ProbeError, ProjectId,
-    RuleDraft, RuleName, RuleState, SeriesState, Settlement, Signal, SignalProbe, TenantId, Tick,
-    TraceMeasure, TraceSignal, UnixSeconds, WebhookSecret, Window,
+    CulpritPod, Culprits, Definition, DefinitionParts, DeliveryStatus, Destination, Duty,
+    Evaluator, EventId, Followers, Labels, NoDataPolicy, Notification, NotificationId, Observation,
+    Paging, ProbeError, ProjectId, RuleDraft, RuleName, RuleState, SeriesState, Settlement, Signal,
+    SignalProbe, TenantId, Tick, TraceMeasure, TraceSignal, UnixSeconds, WebhookSecret, Window,
 };
 use ferristrace_infra::{FixedClock, SecretSeal};
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -20,6 +20,27 @@ use uuid::Uuid;
 mod backend;
 
 const NOW: u64 = 1_700_000_040;
+fn blamed() -> Culprits {
+    Culprits::new(
+        vec![
+            CulpritPod {
+                name: "checkout-1".into(),
+                node: Some("node-a".into()),
+                count: 7,
+            },
+            CulpritPod {
+                name: "checkout-2".into(),
+                node: None,
+                count: 3,
+            },
+        ],
+        9,
+        vec!["node-a".into(), "node-b".into()],
+        vec!["1.4.2".into()],
+        &Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
+    )
+}
+
 const KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
 async fn control_plane(schema: &str, connections: u32) -> Option<PgPool> {
@@ -243,18 +264,19 @@ async fn rules_channels_states_and_events_read_back_whole() {
                     to: AlertStatus::Firing,
                     value: None,
                     at_ms,
+                    context: (at_ms == 20).then(blamed),
                 })
                 .await
                 .expect("recorded");
         }
-        let read: Vec<u64> = events
+        let history = events
             .history(org, rule.id, 15, 40, 100)
             .await
-            .expect("read")
-            .iter()
-            .map(|event| event.at_ms)
-            .collect();
+            .expect("read");
+        let read: Vec<u64> = history.iter().map(|event| event.at_ms).collect();
         assert_eq!(read, vec![30, 20]);
+        assert_eq!(history[0].context, None);
+        assert_eq!(history[1].context, Some(blamed()));
         assert_eq!(events.prune(15).await.expect("pruned"), 1);
         assert!(
             events
@@ -311,6 +333,7 @@ async fn queued(pg: &Postgres<FixedClock>, pool: &PgPool, count: usize) -> Tenan
                 to: AlertStatus::Firing,
                 value: Some(9.0),
                 at_ms: NOW * 1_000 + at as u64,
+                context: Some(blamed()),
             };
             events.record(&event).await.expect("recorded");
             outbox
@@ -400,6 +423,7 @@ async fn a_retried_notification_waits_and_an_abandoned_one_is_never_claimed_agai
         assert_eq!(claimed.len(), 1);
         assert_eq!(claimed[0].dispatch.name.as_ref(), "Checkout errors");
         assert_eq!(claimed[0].dispatch.severity, AlertSeverity::Critical);
+        assert_eq!(claimed[0].dispatch.context, Some(blamed()));
         outbox
             .settle(
                 claimed[0].notification.id,
@@ -467,6 +491,17 @@ impl SignalProbe for &Slow {
             labels: Labels::none(),
             value: Some(9.0),
         }])
+    }
+
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &Signal,
+        _window: Window,
+        _labels: &Labels,
+    ) -> Result<Culprits, ProbeError> {
+        Ok(Culprits::default())
     }
 }
 

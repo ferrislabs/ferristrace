@@ -6,7 +6,7 @@ use ferristrace_domain::{
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::alert_codec::{encode_labels, labels_of};
+use crate::alert_codec::{culprits_from, culprits_value, encode_labels, labels_of};
 
 fn id_of(value: Option<Uuid>) -> Value {
     value.map_or(Value::Null, |id| Value::String(id.to_string()))
@@ -38,12 +38,14 @@ pub(crate) fn encode_change(change: &Change) -> (Option<&str>, String) {
             to,
             value,
             labels,
+            context,
         } => json!({
             "rule": rule.to_string(),
             "from": from.as_str(),
             "to": to.as_str(),
             "value": value,
             "labels": encode_labels(labels),
+            "context": context.as_ref().map_or(Value::Null, culprits_value),
         }),
         Change::Attachment(attachment) => json!({
             "id": attachment.id.to_string(),
@@ -141,6 +143,7 @@ pub(crate) fn decode_change(
                 to,
                 value: detail.get("value").and_then(Value::as_f64),
                 labels: labels_of(text(&detail, "labels")?)?,
+                context: detail.get("context").and_then(culprits_from),
             }
         }
         EntryKind::Attachment => {
@@ -194,12 +197,26 @@ mod tests {
 
     use ferristrace_domain::{
         AccountId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
-        Change, CommentBody, IncidentId, IncidentSeverity, IncidentStatus, IncidentTitle, KeyId,
-        Labels, PageId, Reference, RuleId,
+        Change, CommentBody, CulpritPod, Culprits, IncidentId, IncidentSeverity, IncidentStatus,
+        IncidentTitle, KeyId, Labels, PageId, Reference, RuleId,
     };
     use uuid::Uuid;
 
     use super::{author_of, author_parts, decode_change, encode_change};
+
+    fn blamed() -> Culprits {
+        Culprits::new(
+            vec![CulpritPod {
+                name: "mail-1".into(),
+                node: Some("node-a".into()),
+                count: 4,
+            }],
+            6,
+            vec!["node-a".into()],
+            vec!["2.0.1".into()],
+            &Labels::none(),
+        )
+    }
 
     #[test]
     fn every_change_reads_back_from_what_is_stored() {
@@ -250,6 +267,15 @@ mod tests {
                 to: AlertStatus::Ok,
                 value: Some(1.5),
                 labels: Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
+                context: Some(blamed()),
+            },
+            Change::Alert {
+                rule: RuleId::new(Uuid::from_u128(2)),
+                from: AlertStatus::Pending,
+                to: AlertStatus::Firing,
+                value: None,
+                labels: Labels::none(),
+                context: None,
             },
             Change::Attachment(Attachment {
                 id: AttachmentId::new(Uuid::from_u128(4)),

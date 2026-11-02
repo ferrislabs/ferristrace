@@ -1,7 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use ferristrace_domain::{DeliveryError, Dispatch, WebhookSecret, WebhookSender, WebhookUrl};
+use ferristrace_domain::{
+    Culprits, DeliveryError, Dispatch, WebhookSecret, WebhookSender, WebhookUrl,
+};
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
 use reqwest::header::CONTENT_TYPE;
@@ -50,7 +52,7 @@ impl HttpWebhooks {
     }
 
     pub fn body_of(&self, dispatch: &Dispatch) -> Vec<u8> {
-        json!({
+        let mut body = json!({
             "alert": {
                 "id": dispatch.rule.to_string(),
                 "name": &*dispatch.name,
@@ -70,14 +72,41 @@ impl HttpWebhooks {
             "at_ms": dispatch.at_ms,
             "org": dispatch.org.to_string(),
             "url_to_alert": self.link_to(dispatch),
-        })
-        .to_string()
-        .into_bytes()
+        });
+        if let (Some(context), Some(fields)) = (&dispatch.context, body.as_object_mut()) {
+            fields.insert("context".to_owned(), context_of(context));
+        }
+        body.to_string().into_bytes()
     }
 
     fn refuses(&self, address: IpAddr) -> bool {
         !self.settings.allow_private && private(address)
     }
+}
+
+fn context_of(context: &Culprits) -> Value {
+    json!({
+        "pods": context
+            .pods()
+            .iter()
+            .map(|pod| json!({
+                "name": &*pod.name,
+                "node": pod.node.as_deref(),
+                "count": pod.count,
+            }))
+            .collect::<Vec<_>>(),
+        "others": context.others(),
+        "nodes": context.nodes(),
+        "versions": context.versions(),
+        "labels": Value::Object(
+            context
+                .labels()
+                .pairs()
+                .iter()
+                .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+                .collect::<Map<_, _>>()
+        ),
+    })
 }
 
 pub fn signature(secret: &WebhookSecret, body: &[u8]) -> String {
@@ -215,6 +244,64 @@ mod tests {
     use ferristrace_domain::{WebhookSecret, WebhookSender, WebhookUrl};
 
     use super::{HttpWebhooks, WebhookSettings, private, signature};
+
+    #[test]
+    fn the_context_joins_the_payload_only_when_something_is_known() {
+        use std::collections::BTreeMap;
+
+        use ferristrace_domain::{
+            AlertSeverity, AlertStatus, CulpritPod, Culprits, Dispatch, Labels, RuleId, TenantId,
+        };
+        use uuid::Uuid;
+
+        let mut dispatch = Dispatch {
+            rule: RuleId::new(Uuid::from_u128(7)),
+            name: "Queue".into(),
+            severity: AlertSeverity::Warning,
+            org: TenantId::new(Uuid::from_u128(1)),
+            from: AlertStatus::Pending,
+            to: AlertStatus::Firing,
+            value: Some(3.0),
+            labels: Labels::none(),
+            at_ms: 5,
+            context: Some(Culprits::new(
+                vec![CulpritPod {
+                    name: "mail-1".into(),
+                    node: Some("node-a".into()),
+                    count: 4,
+                }],
+                1,
+                vec!["node-a".into()],
+                vec!["2.0.1".into()],
+                &Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
+            )),
+        };
+        let hooks = HttpWebhooks::new(WebhookSettings::default());
+
+        let with: serde_json::Value =
+            serde_json::from_slice(&hooks.body_of(&dispatch)).expect("json");
+        dispatch.context = None;
+        let without: serde_json::Value =
+            serde_json::from_slice(&hooks.body_of(&dispatch)).expect("json");
+
+        assert_eq!(
+            with["context"],
+            serde_json::json!({
+                "pods": [{"name": "mail-1", "node": "node-a", "count": 4}],
+                "others": 0,
+                "nodes": ["node-a"],
+                "versions": ["2.0.1"],
+                "labels": {"queue": "mail"},
+            })
+        );
+        assert!(without.get("context").is_none(), "{without}");
+        let mut stripped = with.clone();
+        stripped
+            .as_object_mut()
+            .expect("an object")
+            .remove("context");
+        assert_eq!(stripped, without, "every other field is unchanged");
+    }
 
     fn url(text: &str) -> WebhookUrl {
         WebhookUrl::try_from(text).expect("a url")

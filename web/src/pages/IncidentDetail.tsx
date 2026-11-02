@@ -9,7 +9,7 @@ import { Input, NativeSelect, Textarea } from '@/components/ui/input'
 import { Alert } from '@/components/ui/misc'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState } from '@/components/ft/bits'
-import { StateBadge } from './alerts/bits'
+import { AlertContext, StateBadge } from './alerts/bits'
 import { SeverityPill, StatusPill } from './Incidents'
 import {
   SEVERITIES, STATUSES, attachmentLink, personOf, useChangeIncident, useCommentIncident, useIncident,
@@ -205,6 +205,7 @@ function Told({ entry }: { entry: TimelineEntry }) {
           <BellRing className="size-3.5" aria-hidden />The alert <span className="font-semibold">{entry.detail.alert.name ?? 'a deleted rule'}</span> went from {entry.detail.from.replace('_', ' ')} to <StateBadge status={entry.detail.to} />
           {entry.detail.value !== null ? <span className="font-mono text-caption text-muted-foreground">value {entry.detail.value.toLocaleString('en-US', { maximumFractionDigits: 6 })}</span> : null}
           {Object.keys(entry.detail.labels).length ? <span className="font-mono text-caption text-muted-foreground">{labelOf(entry.detail.labels)}</span> : null}
+          {entry.detail.context ? <span className="basis-full"><AlertContext context={entry.detail.context} /></span> : null}
         </span>
       )
     case 'attachment':

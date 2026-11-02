@@ -1,12 +1,14 @@
 use super::alert_book::{seen_or_silent, window_ending};
-use super::entities::{AlertEvent, Notification, Observation, Rule, SeriesState, Tick};
+use super::culprits::Culprits;
+use super::entities::{AlertEvent, Notification, Observation, Rule, SeriesState, Tick, Transition};
 use super::errors::AlertError;
 use super::ports::{AlertDuty, AlertEvents, AlertOutbox, AlertRules, AlertStates, SignalProbe};
 use super::state_machine::next_state;
 use super::value_objects::{
-    AlertStatus, DeliveryStatus, Duty, EventId, HISTORY_DAYS, NotificationId,
+    AlertStatus, DeliveryStatus, Duty, EventId, HISTORY_DAYS, Labels, NotificationId,
 };
 use crate::clock::UnixSeconds;
+use crate::explore::Window;
 use crate::incidents::{Followers, IncidentTimeline, Incidents};
 use crate::oncall::{Origin, PageSource, Pages, Paging, Schedules};
 
@@ -91,6 +93,29 @@ where
         })
     }
 
+    async fn culprits_of(
+        &self,
+        rule: &Rule,
+        transition: &Transition,
+        window: Window,
+        labels: &Labels,
+    ) -> Option<Culprits> {
+        if transition.to != AlertStatus::Firing || !transition.notifies() {
+            return None;
+        }
+        self.probe
+            .culprits(
+                rule.org,
+                rule.project,
+                rule.definition.signal(),
+                window,
+                labels,
+            )
+            .await
+            .ok()
+            .filter(|culprits| !culprits.is_empty())
+    }
+
     async fn evaluate(&self, rule: &Rule, now_ms: u64) -> Result<Option<usize>, AlertError> {
         let definition = &rule.definition;
         let window = window_ending(now_ms, definition.window_secs())?;
@@ -132,6 +157,9 @@ where
             };
             left_firing |= transition.from == AlertStatus::Firing;
             moved += 1;
+            let context = self
+                .culprits_of(rule, &transition, window, &observation.labels)
+                .await;
             let event = AlertEvent {
                 id: EventId::fresh(),
                 rule: rule.id,
@@ -141,6 +169,7 @@ where
                 to: transition.to,
                 value: transition.value,
                 at_ms: transition.at_ms,
+                context,
             };
             self.events.record(&event).await?;
             self.followers.tell(&event).await?;

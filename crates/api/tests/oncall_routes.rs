@@ -903,6 +903,18 @@ impl ferristrace_domain::PlacementReader for Failing {
     }
 }
 
+impl ferristrace_domain::CulpritReader for Failing {
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl ferristrace_domain::SpanReader for Failing {
     async fn services(
         &self,

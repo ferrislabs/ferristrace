@@ -117,6 +117,18 @@ impl WebhookSender for Inert {
     }
 }
 
+impl ferristrace_domain::CulpritReader for Inert {
+    async fn culprits(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _signal: &ferristrace_domain::Signal,
+        _window: ferristrace_domain::Window,
+    ) -> Result<ferristrace_domain::Culprits, StoreError> {
+        Ok(ferristrace_domain::Culprits::default())
+    }
+}
+
 impl ferristrace_domain::PlacementReader for Inert {
     async fn placements(
         &self,

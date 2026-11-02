@@ -1,8 +1,9 @@
 use clickhouse::query::Query;
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    Buckets, LogBucket, LogCursor, LogPage, LogQuery, LogReader, LogRecord, Severity, SpanId,
-    StoreError, TenantId, TraceId,
+    Buckets, CulpritPod, CulpritReader, Culprits, Labels, LogBucket, LogCursor, LogPage, LogQuery,
+    LogReader, LogRecord, MAX_CULPRIT_FACETS, MAX_CULPRIT_PODS, ProjectId, Severity, Signal,
+    SpanId, StoreError, TenantId, TraceId, Window,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -37,6 +38,23 @@ const COUNTS: &str = "SELECT \
    WHERE {filters} \
    GROUP BY slot, level";
 
+const CULPRIT_PODS: &str = "SELECT k8s_pod AS value, \
+     argMaxIf(k8s_node, time, k8s_node != '') AS node, \
+     count() AS hits \
+   FROM logs WHERE {filters} AND k8s_pod != '' \
+   GROUP BY k8s_pod ORDER BY hits DESC, value LIMIT {pods}";
+
+const CULPRIT_PODS_SEEN: &str = "SELECT uniqExact(k8s_pod) AS total \
+   FROM logs WHERE {filters} AND k8s_pod != ''";
+
+const CULPRIT_NODES: &str = "SELECT k8s_node AS value, '' AS node, count() AS hits \
+   FROM logs WHERE {filters} AND k8s_node != '' \
+   GROUP BY k8s_node ORDER BY hits DESC, value LIMIT {facets}";
+
+const CULPRIT_VERSIONS: &str = "SELECT resource['service.version'] AS value, '' AS node, count() AS hits \
+   FROM logs WHERE {filters} AND resource['service.version'] != '' \
+   GROUP BY value ORDER BY hits DESC, value LIMIT {facets}";
+
 const ZERO_TRACE: &str = "00000000000000000000000000000000";
 const ZERO_SPAN: &str = "0000000000000000";
 
@@ -64,6 +82,18 @@ struct RecordRow {
     trace_hex: String,
     span_hex: String,
     tiebreak: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct CulpritRow {
+    value: String,
+    node: String,
+    hits: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct SeenRow {
+    total: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -169,6 +199,71 @@ impl<'a> Filters<'a> {
             };
         }
         query
+    }
+}
+
+impl ClickhouseLogReader {
+    async fn culprit_rows(
+        &self,
+        template: &str,
+        org: TenantId,
+        query: &LogQuery,
+    ) -> Result<Vec<CulpritRow>, StoreError> {
+        let filters = Filters::of(org, query, false);
+        let sql = filters
+            .sql(template)
+            .replace("{pods}", &MAX_CULPRIT_PODS.to_string())
+            .replace("{facets}", &MAX_CULPRIT_FACETS.to_string());
+        filters
+            .bind(self.client.query(&sql))
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))
+    }
+
+    async fn pods_seen(&self, org: TenantId, query: &LogQuery) -> Result<u64, StoreError> {
+        let filters = Filters::of(org, query, false);
+        let sql = filters.sql(CULPRIT_PODS_SEEN);
+        let seen: SeenRow = filters
+            .bind(self.client.query(&sql))
+            .fetch_one()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(seen.total)
+    }
+}
+
+impl CulpritReader for ClickhouseLogReader {
+    async fn culprits(
+        &self,
+        org: TenantId,
+        project: Option<ProjectId>,
+        signal: &Signal,
+        window: Window,
+    ) -> Result<Culprits, StoreError> {
+        let Signal::Logs(logs) = signal else {
+            return Ok(Culprits::default());
+        };
+        let query = logs.query(project, window);
+        let pods = self.culprit_rows(CULPRIT_PODS, org, &query).await?;
+        let total = self.pods_seen(org, &query).await?;
+        let nodes = self.culprit_rows(CULPRIT_NODES, org, &query).await?;
+        let versions = self.culprit_rows(CULPRIT_VERSIONS, org, &query).await?;
+        Ok(Culprits::new(
+            pods.into_iter()
+                .map(|row| CulpritPod {
+                    name: row.value.into(),
+                    node: Some(row.node)
+                        .filter(|node| !node.is_empty())
+                        .map(Into::into),
+                    count: row.hits,
+                })
+                .collect(),
+            total,
+            nodes.into_iter().map(|row| row.value.into()).collect(),
+            versions.into_iter().map(|row| row.value.into()).collect(),
+            &Labels::none(),
+        ))
     }
 }
 

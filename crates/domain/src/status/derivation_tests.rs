@@ -280,6 +280,7 @@ fn public_updates_hold_status_changes_and_public_comments_only_newest_first() {
                 to: AlertStatus::Ok,
                 value: Some(1.0),
                 labels: Labels::none(),
+                context: None,
             },
             6,
         ),

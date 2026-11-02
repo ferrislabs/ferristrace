@@ -332,6 +332,7 @@ where
             value: None,
             labels: Labels::new(BTreeMap::from([("test".into(), "true".into())])),
             at_ms: now.get() * MILLIS_PER_SECOND,
+            context: None,
         };
         let mut deliveries = Vec::new();
         for channel in rule.definition.channels() {

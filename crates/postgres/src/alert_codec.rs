@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use ferristrace_domain::{
-    Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-    Labels, LogSignal, MetricSignal, NoDataPolicy, Placement, PlacementName, ScheduleId, Severity,
-    Signal, TraceMeasure, TraceSignal, Workload,
+    Aggregation, AlertSeverity, ChannelId, Comparison, Condition, CulpritPod, Culprits, Definition,
+    DefinitionParts, Labels, LogSignal, MetricSignal, NoDataPolicy, Placement, PlacementName,
+    ScheduleId, Severity, Signal, TraceMeasure, TraceSignal, Workload,
 };
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -233,6 +233,58 @@ fn decode_labels(value: &Value) -> Option<Labels> {
 
 pub(crate) fn labels_of(text: &str) -> Option<Labels> {
     decode_labels(&serde_json::from_str(text).ok()?)
+}
+
+pub(crate) fn culprits_value(culprits: &Culprits) -> Value {
+    json!({
+        "pods": Value::Array(
+            culprits
+                .pods()
+                .iter()
+                .map(|pod| json!({
+                    "name": &*pod.name,
+                    "node": text(pod.node.as_deref()),
+                    "count": pod.count,
+                }))
+                .collect()
+        ),
+        "others": culprits.others(),
+        "nodes": texts(culprits.nodes().iter().map(|node| &**node)),
+        "versions": texts(culprits.versions().iter().map(|version| &**version)),
+        "labels": object(culprits.labels().pairs().iter().map(|(key, value)| (&**key, &**value))),
+    })
+}
+
+pub(crate) fn encode_culprits(culprits: &Culprits) -> String {
+    culprits_value(culprits).to_string()
+}
+
+pub(crate) fn culprits_from(value: &Value) -> Option<Culprits> {
+    let pods = value
+        .get("pods")?
+        .as_array()?
+        .iter()
+        .map(|pod| {
+            Some(CulpritPod {
+                name: string(pod, "name")?,
+                node: string(pod, "node"),
+                count: pod.get("count")?.as_u64()?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let others = value.get("others")?.as_u64()?;
+    let named = u64::try_from(pods.len()).ok()?;
+    Some(Culprits::new(
+        pods,
+        named.saturating_add(others),
+        strings(value, "nodes")?,
+        strings(value, "versions")?,
+        &decode_labels(value.get("labels")?)?,
+    ))
+}
+
+pub(crate) fn culprits_of(text: &str) -> Option<Culprits> {
+    culprits_from(&serde_json::from_str(text).ok()?)
 }
 
 #[cfg(test)]
