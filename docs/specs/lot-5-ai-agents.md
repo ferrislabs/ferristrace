@@ -116,3 +116,4 @@ Verify (exit, per PR)
   DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
   CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-clickhouse
   cd web && pnpm typecheck && pnpm build
+Amended: 2026-11-02 5A as built: agents are on only when an issuer and an audience are both set, otherwise sign-in keeps working, agent tokens get 401 and Settings says why; the OIDC sign-in client cannot be registered as an agent; the verifier also requires `jti` and `azp` or `client_id`, refuses a `typ` other than Bearer and checks `nbf`; the JWKS URI must be on the issuer host and documents are capped at 1 MiB; a failed refetch keeps the cached keys; an unknown, revoked or other-organisation client gets 401, a registered agent out of scope 403; agents are listed by admins only; the audit entry names the matched route.
