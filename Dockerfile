@@ -34,7 +34,7 @@ FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a
 
 WORKDIR /usr/local/src/comettrace/web
 
-RUN corepack enable
+RUN npm install --global corepack@0.36.0 && corepack enable
 
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 

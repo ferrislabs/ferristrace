@@ -36,7 +36,7 @@ you will know which.
 ## Getting the stack up
 
 You need Docker, Rust 1.97.0 (pinned in `rust-toolchain.toml`, so `rustup`
-picks it on its own) and, for the front end, Node 22 with pnpm 10.
+picks it on its own) and, for the front end, Node 26 with pnpm 10.
 
 ```sh
 git clone git@github.com:ferrislabs/ferristrace.git
