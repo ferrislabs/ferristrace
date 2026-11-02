@@ -648,3 +648,228 @@ impl crate::identity::Mailer for Couriered {
         Ok(())
     }
 }
+
+#[derive(Debug, Default)]
+struct Kept {
+    incidents: Vec<crate::incidents::Incident>,
+    timeline: Vec<crate::incidents::TimelineEntry>,
+    attachments: Vec<(TenantId, crate::incidents::Attachment)>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IncidentLedger {
+    kept: Arc<Mutex<Kept>>,
+}
+
+impl IncidentLedger {
+    fn with<T>(&self, work: impl FnOnce(&mut Kept) -> T) -> T {
+        work(&mut self.kept.lock().expect("the incident ledger lock"))
+    }
+
+    pub fn incidents(&self) -> Vec<crate::incidents::Incident> {
+        self.with(|kept| kept.incidents.clone())
+    }
+
+    pub fn timeline(&self) -> Vec<crate::incidents::TimelineEntry> {
+        self.with(|kept| kept.timeline.clone())
+    }
+
+    pub fn put(&self, incident: crate::incidents::Incident) {
+        self.with(|kept| kept.incidents.push(incident));
+    }
+}
+
+impl crate::incidents::Incidents for IncidentLedger {
+    async fn list(
+        &self,
+        org: TenantId,
+        filter: &crate::incidents::IncidentFilter,
+    ) -> Result<Vec<crate::incidents::Incident>, StoreError> {
+        Ok(self.with(|kept| {
+            let mut found: Vec<crate::incidents::Incident> = kept
+                .incidents
+                .iter()
+                .filter(|incident| incident.org == org)
+                .filter(|incident| filter.scope.admits(incident.status))
+                .filter(|incident| filter.project.is_none() || incident.project == filter.project)
+                .cloned()
+                .collect();
+            found.sort_by_key(|incident| core::cmp::Reverse(incident.opened_ms));
+            found
+        }))
+    }
+
+    async fn get(
+        &self,
+        org: TenantId,
+        id: crate::incidents::IncidentId,
+    ) -> Result<Option<crate::incidents::Incident>, StoreError> {
+        Ok(self.with(|kept| {
+            kept.incidents
+                .iter()
+                .find(|incident| incident.org == org && incident.id == id)
+                .cloned()
+        }))
+    }
+
+    async fn open(&self, incident: &crate::incidents::Incident) -> Result<(), StoreError> {
+        self.with(|kept| kept.incidents.push(incident.clone()));
+        Ok(())
+    }
+
+    async fn keep(&self, incident: &crate::incidents::Incident) -> Result<bool, StoreError> {
+        Ok(self.with(|kept| {
+            kept.incidents
+                .iter_mut()
+                .find(|held| held.org == incident.org && held.id == incident.id)
+                .map(|held| *held = incident.clone())
+                .is_some()
+        }))
+    }
+
+    async fn following(
+        &self,
+        org: TenantId,
+        rule: crate::alerts::RuleId,
+    ) -> Result<Vec<crate::incidents::IncidentId>, StoreError> {
+        Ok(self.with(|kept| {
+            kept.incidents
+                .iter()
+                .filter(|incident| {
+                    incident.org == org
+                        && incident.opened_from_alert == Some(rule)
+                        && incident.status.is_open()
+                })
+                .map(|incident| incident.id)
+                .collect()
+        }))
+    }
+}
+
+impl crate::incidents::IncidentTimeline for IncidentLedger {
+    async fn append(&self, entry: &crate::incidents::TimelineEntry) -> Result<(), StoreError> {
+        self.with(|kept| kept.timeline.push(entry.clone()));
+        Ok(())
+    }
+
+    async fn of(
+        &self,
+        org: TenantId,
+        incident: crate::incidents::IncidentId,
+    ) -> Result<Vec<crate::incidents::TimelineEntry>, StoreError> {
+        Ok(self.with(|kept| {
+            kept.timeline
+                .iter()
+                .filter(|entry| entry.org == org && entry.incident == incident)
+                .cloned()
+                .collect()
+        }))
+    }
+}
+
+impl crate::incidents::IncidentAttachments for IncidentLedger {
+    async fn attach(
+        &self,
+        org: TenantId,
+        attachment: &crate::incidents::Attachment,
+    ) -> Result<(), StoreError> {
+        self.with(|kept| kept.attachments.push((org, attachment.clone())));
+        Ok(())
+    }
+
+    async fn of(
+        &self,
+        org: TenantId,
+        incident: crate::incidents::IncidentId,
+    ) -> Result<Vec<crate::incidents::Attachment>, StoreError> {
+        Ok(self.with(|kept| {
+            kept.attachments
+                .iter()
+                .filter(|(held, attachment)| *held == org && attachment.incident == incident)
+                .map(|(_, attachment)| attachment.clone())
+                .collect()
+        }))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Crew {
+    members: Arc<Mutex<Vec<(TenantId, crate::organisation::Member)>>>,
+}
+
+impl Crew {
+    pub fn seat(&self, org: TenantId, account: crate::identity::AccountId, email: &str) {
+        self.members.lock().expect("the crew lock").push((
+            org,
+            crate::organisation::Member {
+                account,
+                email: crate::identity::Email::try_from(email).expect("an address"),
+                name: None,
+                photo: None,
+                role: crate::organisation::OrgRole::Member,
+                joined_at_unix_nanos: 0,
+            },
+        ));
+    }
+}
+
+impl crate::organisation::Roll for Crew {
+    async fn of(&self, org: TenantId) -> Result<Vec<crate::organisation::Member>, StoreError> {
+        Ok(self
+            .members
+            .lock()
+            .expect("the crew lock")
+            .iter()
+            .filter(|(held, _)| *held == org)
+            .map(|(_, member)| member.clone())
+            .collect())
+    }
+
+    async fn grant(
+        &self,
+        _org: TenantId,
+        _account: crate::identity::AccountId,
+        _role: crate::organisation::OrgRole,
+    ) -> Result<Option<crate::organisation::Member>, StoreError> {
+        Ok(None)
+    }
+
+    async fn remove(
+        &self,
+        _org: TenantId,
+        _account: crate::identity::AccountId,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn standing_of(
+        &self,
+        _email: &crate::identity::Email,
+    ) -> Result<Option<crate::organisation::Holder>, StoreError> {
+        Ok(None)
+    }
+
+    async fn create_locked(
+        &self,
+        _email: &crate::identity::Email,
+    ) -> Result<crate::identity::AccountId, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn join(
+        &self,
+        _org: TenantId,
+        _account: crate::identity::AccountId,
+        _role: crate::organisation::OrgRole,
+    ) -> Result<Option<crate::organisation::Joined>, StoreError> {
+        Ok(None)
+    }
+
+    async fn open_way_in(
+        &self,
+        _account: crate::identity::AccountId,
+        _digest: crate::secret::SecretHash,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}

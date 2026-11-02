@@ -309,6 +309,25 @@ deployment whose receivers live on its own network can lift that with
 `config.alerts.allowPrivateWebhooks`), at the price of letting any admin
 point the server at internal services.
 
+## Incidents
+
+An incident needs only the control plane. Any member of the organisation may
+declare one, change its title, severity (`sev1` to `sev4`), status
+(`investigating`, `identified`, `monitoring`, `resolved`), owner and public
+flag, comment on it and attach a trace, a logs search or a metric chart. A
+read key reads incidents and never changes them (`403`). An incident is never
+deleted: resolve it instead, and change its status back to reopen it.
+
+Every change appends one entry to the incident's timeline in
+`incident_events`, which the application only ever inserts into; every
+write is in the audit log as `incident.opened`, `incident.updated`,
+`incident.commented`, `incident.attached`, `incident.resolved` or
+`incident.reopened`.
+
+An incident declared from a firing alert follows it: each later state change
+of that rule appends an `alert` entry, written by the system in the same
+transaction as the alert's history event, until the incident is resolved.
+
 ## Profile photos
 
 Without a bucket, everybody is shown under their initials, taken from the

@@ -6,7 +6,9 @@ use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{AppState, SessionCookie, alert_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{AlertLedger, Couriered, Inert, Notebook, Untransacted};
+use ferristrace_application::testing::{
+    AlertLedger, Couriered, IncidentLedger, Inert, Notebook, Untransacted,
+};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, Agent, AlertEvent, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned,
@@ -285,6 +287,14 @@ repo!(AlertEvents, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertOutbox, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertChannels, AlertLedger, |fakes| fakes.ledger.clone());
 repo!(AlertDuty, AlertLedger, |fakes| fakes.ledger.clone());
+repo!(Incidents, IncidentLedger, |fakes| {
+    let _ = fakes;
+    IncidentLedger::default()
+});
+repo!(IncidentTimeline, IncidentLedger, |fakes| {
+    let _ = fakes;
+    IncidentLedger::default()
+});
 
 struct TestStack;
 

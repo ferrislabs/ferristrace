@@ -9,6 +9,7 @@ pub mod catalogue;
 pub mod explore;
 pub mod export;
 pub mod identity;
+pub mod incidents;
 pub mod issue;
 pub mod logs;
 pub mod metrics;
@@ -63,6 +64,13 @@ pub use identity::{
     ResetStore, ResolvedIdentity, RollError, SECRET_BYTES, SecondFactors, SecondStep, Session,
     SessionError, SessionId, SessionLifetime, SessionRoll, SessionStore, Sessions, SignIn,
     SignInError, SignInProof, Standing, Step, Subject, TotpCode, TotpSecret, WeakPassword,
+};
+pub use incidents::{
+    AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,
+    Briefed, Change, Chronicle, CommentBody, Dossier, EntryKind, Followers, Incident,
+    IncidentAttachments, IncidentDesk, IncidentDraft, IncidentError, IncidentFilter, IncidentId,
+    IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
+    IncidentTitle, Incidents, Person, Reference, TimelineEntry, TimelineId,
 };
 pub use issue::{
     BadFingerprint, Counted, Decision, EXCEPTION_EVENT, Fingerprint, Issue, IssueDecisions,

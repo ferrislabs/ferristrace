@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertBook, AlertError, AlertEvent, Buckets, ChannelBook, ChannelId, ChannelName,
-    ChannelView, Clock, Courier, Definition, Delivery, Destination, Drained, Evaluator,
+    ChannelView, Clock, Courier, Definition, Delivery, Destination, Drained, Evaluator, Followers,
     IssuedChannel, Labels, LogQuery, LogReader, LogSignal, MetricQuery, MetricReader, MetricSignal,
     Observation, Preview, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId, RulePatch,
     ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, TenantId, Tick, TraceMeasure,
@@ -494,7 +494,7 @@ where
         async move { self.deliver_once().await }
     }
 
-    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, incidents, incident_timeline, unavailable = AlertError::StoreUnreachable)]
     async fn evaluate_once(&self) -> Result<Tick, AlertError> {
         Evaluator::new(
             alert_rules,
@@ -503,6 +503,7 @@ where
             alert_outbox,
             alert_duty,
             self.signal_readers(),
+            Followers::new(incidents, incident_timeline),
         )
         .tick(self.clock.now())
         .await

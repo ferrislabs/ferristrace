@@ -1,6 +1,7 @@
 import { CircleX, Copy, ScrollText, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from '@/lib/router'
+import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,7 @@ export function TraceDetail() {
         <span className="flex-1" />
         <Button size="sm" onClick={() => { void navigator.clipboard?.writeText(t.id); toast.success('Trace id copied') }}><Copy />Copy id</Button>
         <Button asChild size="sm"><Link to="/logs" search={logsFilter}><ScrollText />Logs for this trace</Link></Button>
+        <AttachToIncident attachment={{ kind: 'trace', reference: t.id, label: t.root.slice(0, 200) }} />
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-control text-muted-foreground">
         <span>Duration <span className="font-mono font-semibold text-foreground">{t.dur}</span></span><span>Spans <span className="font-mono text-foreground">{t.spans}</span></span><span>Services <span className="font-mono text-foreground">{services.length}</span></span><span>Started <span className="font-mono text-foreground">{stamp(t.startedAtMs)}</span></span><span className="font-mono">{t.id}</span>

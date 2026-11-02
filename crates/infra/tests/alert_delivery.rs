@@ -6,13 +6,13 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
-use ferristrace_domain::testing::{AlertLedger, Couriered};
+use ferristrace_domain::testing::{AlertLedger, Couriered, IncidentLedger};
 use ferristrace_domain::{
     AccountId, AlertChannels, AlertRules, AlertSeverity, AlertStatus, ChannelId, ChannelKind,
     ChannelName, Comparison, Condition, Courier, Definition, DefinitionParts, DeliveryStatus,
-    Destination, Drained, Evaluator, Labels, NoDataPolicy, Observation, ProbeError, ProjectId,
-    RuleDraft, RuleName, Signal, SignalProbe, TenantId, TraceMeasure, TraceSignal, UnixSeconds,
-    WebhookSecret, Window,
+    Destination, Drained, Evaluator, Followers, Labels, NoDataPolicy, Observation, ProbeError,
+    ProjectId, RuleDraft, RuleName, Signal, SignalProbe, TenantId, TraceMeasure, TraceSignal,
+    UnixSeconds, WebhookSecret, Window,
 };
 use ferristrace_infra::{HttpWebhooks, SIGNATURE_HEADER, WebhookSettings, signature};
 use uuid::Uuid;
@@ -174,6 +174,7 @@ async fn spec_l2_2_each_firing_and_recovery_sends_one_email_and_one_signed_webho
             ledger.clone(),
             ledger.clone(),
             &probe,
+            Followers::new(IncidentLedger::default(), IncidentLedger::default()),
         )
         .tick(now)
         .await
@@ -258,6 +259,7 @@ async fn spec_l2_2_a_failing_webhook_is_retried_then_recorded_as_abandoned() {
             ledger.clone(),
             ledger.clone(),
             &probe,
+            Followers::new(IncidentLedger::default(), IncidentLedger::default()),
         )
         .tick(UnixSeconds::new(START + minute * 60))
         .await

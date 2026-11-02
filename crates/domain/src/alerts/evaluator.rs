@@ -5,22 +5,24 @@ use super::ports::{AlertDuty, AlertEvents, AlertOutbox, AlertRules, AlertStates,
 use super::state_machine::next_state;
 use super::value_objects::{DeliveryStatus, Duty, EventId, HISTORY_DAYS, NotificationId};
 use crate::clock::UnixSeconds;
+use crate::incidents::{Followers, IncidentTimeline, Incidents};
 
 pub const TICK_SECS: u64 = 60;
 const MILLIS_PER_SECOND: u64 = 1_000;
 const MILLIS_PER_DAY: u64 = 86_400_000;
 
 #[derive(Debug)]
-pub struct Evaluator<R, T, E, O, D, P> {
+pub struct Evaluator<R, T, E, O, D, P, I, L> {
     rules: R,
     states: T,
     events: E,
     outbox: O,
     duty: D,
     probe: P,
+    followers: Followers<I, L>,
 }
 
-impl<R, T, E, O, D, P> Evaluator<R, T, E, O, D, P>
+impl<R, T, E, O, D, P, I, L> Evaluator<R, T, E, O, D, P, I, L>
 where
     R: AlertRules,
     T: AlertStates,
@@ -28,8 +30,18 @@ where
     O: AlertOutbox,
     D: AlertDuty,
     P: SignalProbe,
+    I: Incidents,
+    L: IncidentTimeline,
 {
-    pub fn new(rules: R, states: T, events: E, outbox: O, duty: D, probe: P) -> Self {
+    pub fn new(
+        rules: R,
+        states: T,
+        events: E,
+        outbox: O,
+        duty: D,
+        probe: P,
+        followers: Followers<I, L>,
+    ) -> Self {
         Self {
             rules,
             states,
@@ -37,6 +49,7 @@ where
             outbox,
             duty,
             probe,
+            followers,
         }
     }
 
@@ -118,6 +131,7 @@ where
                 at_ms: transition.at_ms,
             };
             self.events.record(&event).await?;
+            self.followers.tell(&event).await?;
             if !transition.notifies() {
                 continue;
             }

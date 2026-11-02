@@ -53,6 +53,12 @@ fn the_spellings_are_stable_and_dotted() {
             "channel.created",
             "channel.updated",
             "channel.deleted",
+            "incident.opened",
+            "incident.updated",
+            "incident.commented",
+            "incident.attached",
+            "incident.resolved",
+            "incident.reopened",
         ]
     );
 }

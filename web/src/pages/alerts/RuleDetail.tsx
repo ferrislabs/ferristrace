@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Siren, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { because } from '@/auth/client'
 import { Badge } from '@/components/ui/badge'
@@ -7,9 +7,10 @@ import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
 import { conditionOf, duration, scopeOf, signalLink, unitOf, useAlertHistory, useChannels, useDeleteRule, withUnit, type AlertStatus, type Rule } from '@/data/alerts'
 import { useMetricCatalogue } from '@/data/metrics'
+import { useDeclareIncident } from '@/data/incidents'
 import { useState } from 'react'
 import { stamp } from '@/lib/format'
-import { Link } from '@/lib/router'
+import { Link, useNavigate } from '@/lib/router'
 import { labelOf } from '@/components/ft/MetricChart'
 import { StateBadge } from './bits'
 
@@ -19,6 +20,8 @@ export function RuleDetail({ rule, project, mayChange, onEdit, onClose }: { rule
   const history = useAlertHistory(rule?.id ?? null)
   const { channels } = useChannels()
   const remove = useDeleteRule()
+  const declare = useDeclareIncident()
+  const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
   const catalogue = useMetricCatalogue(rule?.signal.kind === 'metrics' ? rule.signal.name : '', rule?.project ?? undefined)
   const metricName = rule?.signal.kind === 'metrics' ? rule.signal.name : ''
@@ -42,6 +45,15 @@ export function RuleDetail({ rule, project, mayChange, onEdit, onClose }: { rule
               {rule.enabled ? null : <Badge variant="outline">Disabled</Badge>}
               <Button asChild variant="ghost" size="sm" className="ml-auto"><Link to={link.to} search={link.search}>{link.label}</Link></Button>
             </div>
+            {state.status === 'firing' ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive-border bg-destructive-subtle px-3 py-2 text-control">
+                <span className="flex-1">This alert is firing. An incident declared from it follows its later changes in its timeline.</span>
+                <Button size="sm" variant="primary" disabled={declare.isPending} onClick={() => declare.mutate({ alert: rule.id }, {
+                  onSuccess: (incident) => { toast.success('Incident declared', { description: incident.title }); onClose(); navigate(`/incidents/${incident.id}`) },
+                  onError: (error) => toast.error(because(error, 'The incident was not declared')),
+                })}><Siren />Declare incident from this alert</Button>
+              </div>
+            ) : null}
             <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-control">
               <dt className="text-muted-foreground">Scope</dt><dd className="m-0 font-mono">{scopeOf(rule.signal)}</dd>
               <dt className="text-muted-foreground">Project</dt><dd className="m-0">{project}</dd>

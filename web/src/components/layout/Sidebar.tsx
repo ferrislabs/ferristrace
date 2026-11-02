@@ -9,6 +9,7 @@ import { NotificationsPanel } from './Notifications'
 import { useNotifications } from '@/data/notifications'
 import { useIssues } from '@/data/issues'
 import { useAlerts } from '@/data/alerts'
+import { useIncidents } from '@/data/incidents'
 import { initialsOf, nameOf } from '@/data/profile'
 import { useAccount, useOrganisations, useSignOut } from '@/auth/session'
 import { useTheme, type ThemePref } from '@/lib/theme'
@@ -27,6 +28,7 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const signingOut = useSignOut()
   const newIssues = issues.filter((x) => x.status === 'unresolved' || x.regressed).length
   const firing = (alerts ?? []).filter((r) => r.enabled && r.state.status === 'firing').length
+  const ongoing = useIncidents('open').incidents?.length ?? 0
   const { pref, setPref } = useTheme()
   const navigate = useNavigate()
   const who = account ? nameOf(account) : null
@@ -70,6 +72,7 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
                     <span className="flex-1 truncate">{i.label}</span>
                     {i.badge && i.to === '/issues' && newIssues ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${newIssues} new issues`}>{newIssues} new</span> : null}
                     {i.badge && i.to === '/alerts' && firing ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${firing} alerts firing`}>{firing} firing</span> : null}
+                    {i.badge && i.to === '/incidents' && ongoing ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${ongoing} open incidents`}>{ongoing} open</span> : null}
                     {!i.badge && i.keys ? <span className="flex gap-0.5"><Kbd>G</Kbd><Kbd>{i.keys}</Kbd></span> : null}
                   </NavLink>
                 ))}

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState, PageHeader, SeverityBadge } from '@/components/ft/bits'
+import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import {
   ANY,
   RANGES,
@@ -211,11 +212,18 @@ export function Logs() {
   }
   const range = isPinned(query) ? `${stamp(query.fromMs as number)} to ${stamp(query.toMs as number)}` : `last ${RANGES.find(([, ms]) => ms === query.rangeMs)?.[0] ?? 'window'}`
   const unconfigured = failed instanceof ApiError && failed.status === 503
+  const pinnedNow = () => (isPinned(query) ? query : { ...query, fromMs: Date.now() - query.rangeMs, toMs: Date.now() })
+  const attachment = {
+    kind: 'logs' as const,
+    reference: encode(pinnedNow()) ?? '',
+    label: ['Logs', query.services.join(', '), query.severities.join(', '), query.q ? `"${query.q}"` : '', query.trace ? `trace ${query.trace.slice(0, 8)}` : ''].filter(Boolean).join(' · ').slice(0, 200),
+  }
   const invalid = failed instanceof ApiError && failed.status === 422
 
   return (
     <>
       <PageHeader title="Logs" meta={`Newest first · ${range}${live ? ' · live' : ''}`}>
+        <AttachToIncident attachment={attachment} />
         <Switch checked={live} onCheckedChange={setLive} label={<span className="inline-flex items-center gap-1.5"><Radio className="size-3.5" aria-hidden />Live</span>} />
       </PageHeader>
       <div className="flex flex-wrap items-center gap-2" role="search">

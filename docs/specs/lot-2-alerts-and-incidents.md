@@ -201,3 +201,5 @@ Verify (exit, per PR)
   DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
   CLICKHOUSE_URL=... REQUIRE_CLICKHOUSE_URL=1 cargo test -p ferristrace-clickhouse
   cd web && pnpm typecheck && pnpm build
+
+Amended: 2026-11-02 2B: an incident timeline records alert changes into or out of firing only, like notifications; `deploy` entries arrive with lot 3 deploy markers; per-comment public flags arrive with 2E.

@@ -5,21 +5,24 @@ use std::time::Duration;
 
 use clickhouse::Client;
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{AlertLedger, Couriered, Inert, Untransacted};
+use ferristrace_application::testing::{
+    AlertLedger, Couriered, Crew, IncidentLedger, Inert, Untransacted,
+};
 use ferristrace_application::{Adapters, Ferristrace, SignalReaders, Stack};
 use ferristrace_clickhouse::{
     BatchLimits, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
     ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink,
 };
 use ferristrace_domain::{
-    AccountId, Agent, Aggregation, AlertRules, AlertSeverity, AlertStatus, Assigned, Clock,
-    Comparison, Condition, Created, Definition, DefinitionParts, Labels, LiveSession, LogRecord,
-    LogSignal, LogSink, Membership, Memberships, Metric, MetricData, MetricPoint, MetricSignal,
-    MetricSink, NoDataPolicy, NoPhotos, Observation, Project, ProjectId, ProjectName, Projects,
-    ProvisionPolicy, RuleDraft, RuleName, Scope, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, Severity, Signal, SignalProbe, Span, SpanId, SpanKind, SpanSink,
-    SpanStatus, StoreError, TeamId, TenantId, Tick, TraceId, TraceMeasure, TraceSignal,
-    UnixSeconds, WhoamiError, Window,
+    AccountId, Agent, Aggregation, AlertRules, AlertSeverity, AlertStatus, Assigned, Author,
+    Change, Clock, CommentBody, Comparison, Condition, Created, Definition, DefinitionParts,
+    EntryKind, IncidentDraft, IncidentPatch, IncidentSeverity, IncidentStatus, Labels, LiveSession,
+    LogRecord, LogSignal, LogSink, Membership, Memberships, Metric, MetricData, MetricPoint,
+    MetricSignal, MetricSink, NoDataPolicy, NoPhotos, Observation, OrgRole, Project, ProjectId,
+    ProjectName, Projects, ProvisionPolicy, Reader, RuleDraft, RuleName, Scope, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Severity, Signal,
+    SignalProbe, Span, SpanId, SpanKind, SpanSink, SpanStatus, StoreError, TeamId, TenantId, Tick,
+    TraceId, TraceMeasure, TraceSignal, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -435,53 +438,6 @@ impl Clock for Moving {
 #[derive(Clone)]
 struct Nobody;
 
-impl SessionStore for Nobody {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Err(SessionError::Unknown)
-    }
-
-    async fn resolve(&self, _token: &SessionToken) -> Result<Session, SessionError> {
-        Err(SessionError::Unknown)
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for Nobody {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
-    }
-}
-
-impl Memberships for Nobody {
-    async fn of(&self, _account: AccountId) -> Result<Vec<Membership>, WhoamiError> {
-        Ok(Vec::new())
-    }
-}
-
 impl Projects for Nobody {
     async fn of(&self, _tenant: TenantId) -> Result<Vec<Project>, StoreError> {
         Ok(Vec::new())
@@ -514,7 +470,79 @@ impl Projects for Nobody {
     }
 }
 
-struct Ledgered(AlertLedger);
+const SESSION: &str = "ft_ss_on_call";
+const ON_CALL: u128 = 9;
+
+#[derive(Clone)]
+struct OnCall;
+
+impl SessionStore for OnCall {
+    async fn issue(
+        &self,
+        _account: AccountId,
+        _org: Option<TenantId>,
+        _from: Option<&Agent>,
+    ) -> Result<SessionToken, SessionError> {
+        Err(SessionError::Unknown)
+    }
+
+    async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
+        if token.exposed() != SESSION {
+            return Err(SessionError::Unknown);
+        }
+        Ok(Session {
+            account: AccountId::new(Uuid::from_u128(ON_CALL)),
+            email: "oncall@example.com".try_into().expect("an address"),
+            name: None,
+            photo: None,
+            org: None,
+            expires_at: UnixSeconds::new(0),
+        })
+    }
+
+    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
+        Ok(())
+    }
+}
+
+impl SessionRoll for OnCall {
+    async fn live(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<Vec<LiveSession>, SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
+        Ok(false)
+    }
+
+    async fn revoke_others(
+        &self,
+        _account: AccountId,
+        _current: &SessionToken,
+    ) -> Result<u64, SessionError> {
+        Ok(0)
+    }
+}
+
+impl Memberships for OnCall {
+    async fn of(&self, _account: AccountId) -> Result<Vec<Membership>, WhoamiError> {
+        Ok(vec![Membership {
+            org: org(1),
+            name: "Acme".into(),
+            role: OrgRole::Member,
+        }])
+    }
+}
+
+#[derive(Clone, Default)]
+struct Ledgered {
+    alerts: AlertLedger,
+    incidents: IncidentLedger,
+    crew: Crew,
+}
 
 impl Untransacted for Ledgered {}
 
@@ -524,24 +552,32 @@ macro_rules! repo {
             type Repo = $repo;
 
             fn build(&self, (): &()) -> Self::Repo {
-                let $held = &self.0;
+                let $held = self;
                 $built
             }
         }
     };
 }
 
-repo!(Sessions, Nobody, |_held| Nobody);
-repo!(Memberships, Nobody, |_held| Nobody);
+repo!(Sessions, OnCall, |_held| OnCall);
+repo!(Memberships, OnCall, |_held| OnCall);
 repo!(Projects, Nobody, |_held| Nobody);
 repo!(ApiKeys, Inert, |_held| Inert::default());
 repo!(Audit, Inert, |_held| Inert::default());
-repo!(AlertRules, AlertLedger, |held| held.clone());
-repo!(AlertStates, AlertLedger, |held| held.clone());
-repo!(AlertEvents, AlertLedger, |held| held.clone());
-repo!(AlertOutbox, AlertLedger, |held| held.clone());
-repo!(AlertChannels, AlertLedger, |held| held.clone());
-repo!(AlertDuty, AlertLedger, |held| held.clone());
+repo!(Roster, Crew, |held| held.crew.clone());
+repo!(AlertRules, AlertLedger, |held| held.alerts.clone());
+repo!(AlertStates, AlertLedger, |held| held.alerts.clone());
+repo!(AlertEvents, AlertLedger, |held| held.alerts.clone());
+repo!(AlertOutbox, AlertLedger, |held| held.alerts.clone());
+repo!(AlertChannels, AlertLedger, |held| held.alerts.clone());
+repo!(AlertDuty, AlertLedger, |held| held.alerts.clone());
+repo!(Incidents, IncidentLedger, |held| held.incidents.clone());
+repo!(IncidentTimeline, IncidentLedger, |held| held
+    .incidents
+    .clone());
+repo!(IncidentAttachments, IncidentLedger, |held| held
+    .incidents
+    .clone());
 
 struct Watching;
 
@@ -606,7 +642,10 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
     .expect("fresh");
     let clock = Moving::default();
     let app = Ferristrace::<Watching>::new(
-        Ledgered(ledger.clone()),
+        Ledgered {
+            alerts: ledger.clone(),
+            ..Ledgered::default()
+        },
         Adapters {
             clock: clock.clone(),
             hasher: Inert::default(),
@@ -671,4 +710,169 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
     let rate = firing.value.expect("a value");
     assert!(rate > 5.0 && rate <= 50.0, "{rate}");
     assert_eq!(firing.labels, Labels::none());
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recovery_in_order() {
+    let Some(client) = prepared("ferristrace_alert_spec_l2_4").await else {
+        return;
+    };
+    let mut spans = Vec::new();
+    let mut seed = 0u32;
+    for second in (0..25 * 60).step_by(10) {
+        seed += 1;
+        spans.push(a_span(seed, "checkout", "POST /pay", second, 20, false));
+        if (6 * 60..12 * 60).contains(&second) {
+            seed += 1;
+            spans.push(a_span(seed, "checkout", "POST /pay", second + 1, 20, true));
+        }
+    }
+    stored(&client, Scope::of(org(1)), spans).await;
+    let ledgered = Ledgered::default();
+    ledgered.crew.seat(
+        org(1),
+        AccountId::new(Uuid::from_u128(ON_CALL)),
+        "oncall@example.com",
+    );
+    let rule = AlertRules::create(
+        &ledgered.alerts,
+        org(1),
+        &RuleDraft {
+            name: RuleName::try_from("Checkout errors").expect("a name"),
+            project: None,
+            enabled: true,
+            definition: Definition::new(DefinitionParts {
+                signal: traces(Some("checkout"), None, TraceMeasure::ErrorRate),
+                condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
+                window_secs: 300,
+                pending_secs: 120,
+                severity: AlertSeverity::Warning,
+                no_data: NoDataPolicy::Ok,
+                channels: Vec::new(),
+            })
+            .expect("a definition"),
+        },
+        AccountId::new(Uuid::from_u128(ON_CALL)),
+    )
+    .await
+    .expect("kept")
+    .expect("fresh")
+    .id;
+    let clock = Moving::default();
+    let app = Ferristrace::<Watching>::new(
+        ledgered.clone(),
+        Adapters {
+            clock: clock.clone(),
+            hasher: Inert::default(),
+            mailer: Couriered::default(),
+            webhooks: Couriered::default(),
+            photos: NoPhotos,
+            meter: Inert::default(),
+            span_store: Some(ClickhouseReader::new(client)),
+            issue_store: None,
+            log_store: None,
+            metric_store: None,
+            oidc: None,
+            provision: ProvisionPolicy::default(),
+        },
+    );
+    let me = Reader::Session(SessionToken::from_plaintext(SESSION));
+    for minute in [7, 9] {
+        clock.to(minute * 60);
+        app.evaluate_alerts().await.expect("a tick");
+    }
+
+    clock.to(9 * 60 + 10);
+    let declared = app
+        .open_incident(
+            &me,
+            org(1),
+            &IncidentDraft {
+                alert: Some(rule),
+                ..IncidentDraft::default()
+            },
+        )
+        .await
+        .expect("declared from the firing alert");
+    let id = declared.incident.id;
+    clock.to(9 * 60 + 20);
+    app.amend_incident(
+        &me,
+        org(1),
+        id,
+        IncidentPatch {
+            status: Some(IncidentStatus::Identified),
+            ..IncidentPatch::default()
+        },
+    )
+    .await
+    .expect("identified");
+    clock.to(9 * 60 + 30);
+    app.amend_incident(
+        &me,
+        org(1),
+        id,
+        IncidentPatch {
+            severity: Some(IncidentSeverity::Sev1),
+            ..IncidentPatch::default()
+        },
+    )
+    .await
+    .expect("escalated");
+    clock.to(9 * 60 + 40);
+    app.comment_on_incident(
+        &me,
+        org(1),
+        id,
+        &CommentBody::try_from("rolled back the payment service").expect("a body"),
+    )
+    .await
+    .expect("commented");
+    for minute in [10, 18] {
+        clock.to(minute * 60);
+        app.evaluate_alerts().await.expect("a tick");
+    }
+    let dossier = app.incident(&me, org(1), id).await.expect("a read");
+
+    assert_eq!(declared.incident.opened_from_alert, Some(rule));
+    assert_eq!(declared.incident.severity, IncidentSeverity::Sev3);
+    assert_eq!(declared.incident.title.as_str(), "Checkout errors");
+    let told: Vec<(EntryKind, Author, u64)> = dossier
+        .chronicle
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.change.kind(),
+                entry.author.clone(),
+                entry.at_ms / 1_000 - BASE_SECONDS,
+            )
+        })
+        .collect();
+    let person = Author::Account(AccountId::new(Uuid::from_u128(ON_CALL)));
+    assert_eq!(
+        told,
+        vec![
+            (EntryKind::Opened, person.clone(), 9 * 60 + 10),
+            (EntryKind::Status, person.clone(), 9 * 60 + 20),
+            (EntryKind::Severity, person.clone(), 9 * 60 + 30),
+            (EntryKind::Comment, person, 9 * 60 + 40),
+            (EntryKind::Alert, Author::System, 18 * 60),
+        ],
+        "the recovery lands after the earlier entries, and staying firing adds nothing"
+    );
+    let Change::Alert {
+        rule: told_rule,
+        from,
+        to,
+        ..
+    } = &dossier.chronicle.entries[4].change
+    else {
+        panic!("an alert entry");
+    };
+    assert_eq!(
+        (*told_rule, *from, *to),
+        (rule, AlertStatus::Firing, AlertStatus::Ok)
+    );
 }

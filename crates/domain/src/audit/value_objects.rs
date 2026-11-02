@@ -101,10 +101,16 @@ pub enum Action {
     ChannelCreated,
     ChannelUpdated,
     ChannelDeleted,
+    IncidentOpened,
+    IncidentUpdated,
+    IncidentCommented,
+    IncidentAttached,
+    IncidentResolved,
+    IncidentReopened,
 }
 
 impl Action {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 38] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -137,6 +143,12 @@ impl Action {
         Self::ChannelCreated,
         Self::ChannelUpdated,
         Self::ChannelDeleted,
+        Self::IncidentOpened,
+        Self::IncidentUpdated,
+        Self::IncidentCommented,
+        Self::IncidentAttached,
+        Self::IncidentResolved,
+        Self::IncidentReopened,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -173,6 +185,12 @@ impl Action {
             Self::ChannelCreated => "channel.created",
             Self::ChannelUpdated => "channel.updated",
             Self::ChannelDeleted => "channel.deleted",
+            Self::IncidentOpened => "incident.opened",
+            Self::IncidentUpdated => "incident.updated",
+            Self::IncidentCommented => "incident.commented",
+            Self::IncidentAttached => "incident.attached",
+            Self::IncidentResolved => "incident.resolved",
+            Self::IncidentReopened => "incident.reopened",
         }
     }
 
@@ -198,10 +216,11 @@ pub enum TargetKind {
     Issue,
     Alert,
     Channel,
+    Incident,
 }
 
 impl TargetKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -211,6 +230,7 @@ impl TargetKind {
         Self::Issue,
         Self::Alert,
         Self::Channel,
+        Self::Incident,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -224,6 +244,7 @@ impl TargetKind {
             Self::Issue => "issue",
             Self::Alert => "alert",
             Self::Channel => "channel",
+            Self::Incident => "incident",
         }
     }
 

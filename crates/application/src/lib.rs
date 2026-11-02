@@ -8,6 +8,7 @@ mod catalogue;
 mod explore;
 mod export;
 mod identity;
+mod incidents;
 mod ingestion;
 mod issues;
 mod logs;
