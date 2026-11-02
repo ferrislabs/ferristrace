@@ -15,6 +15,9 @@ mod errors;
 mod evaluator;
 #[cfg(test)]
 mod evaluator_tests;
+mod llm_signal;
+#[cfg(test)]
+mod llm_signal_tests;
 mod ports;
 mod state_machine;
 #[cfg(test)]
@@ -44,8 +47,8 @@ pub use state_machine::next_state;
 pub use value_objects::{
     AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Comparison, Condition,
     Definition, DefinitionParts, DeliveryStatus, Destination, Duty, EmailList, EventId,
-    HISTORY_DAYS, Labels, LogSignal, MAX_ADDRESSES, MAX_CHANNEL_NAME_BYTES, MAX_PENDING_SECS,
-    MAX_RULE_NAME_BYTES, MAX_WINDOW_SECS, MIN_WINDOW_SECS, MetricSignal, NoDataPolicy,
-    NotificationId, RuleId, RuleName, Signal, TraceMeasure, TraceSignal, WEBHOOK_SECRET_BYTES,
-    WebhookSecret, WebhookUrl,
+    HISTORY_DAYS, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MAX_ADDRESSES,
+    MAX_CHANNEL_NAME_BYTES, MAX_PENDING_SECS, MAX_RULE_NAME_BYTES, MAX_WINDOW_SECS,
+    MIN_WINDOW_SECS, MetricSignal, NoDataPolicy, NotificationId, RuleId, RuleName, Signal,
+    TraceMeasure, TraceSignal, WEBHOOK_SECRET_BYTES, WebhookSecret, WebhookUrl,
 };

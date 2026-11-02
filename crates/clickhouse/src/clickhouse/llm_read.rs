@@ -134,6 +134,7 @@ fn key_of(group_by: GroupBy) -> &'static str {
         GroupBy::Customer => "customer",
         GroupBy::Environment => "environment",
         GroupBy::Provider => "provider",
+        GroupBy::Total => "'all'",
     }
 }
 

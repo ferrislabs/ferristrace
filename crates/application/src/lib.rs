@@ -2,6 +2,8 @@ extern crate self as ferristrace_application;
 
 mod access;
 mod alerts;
+#[cfg(test)]
+mod alerts_llm_tests;
 mod audit;
 mod borrowed;
 mod catalogue;

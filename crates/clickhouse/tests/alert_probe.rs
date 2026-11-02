@@ -6,11 +6,12 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, StatusLedger, Untransacted,
+    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, PriceLedger, StatusLedger,
+    Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, SignalReaders, Stack};
 use ferristrace_clickhouse::{
-    BatchLimits, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
+    BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
     ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink,
 };
 use ferristrace_domain::{
@@ -177,7 +178,14 @@ async fn the_probe_reads_the_trace_measures_of_one_organisation() {
     )
     .await;
     let reader = ClickhouseReader::new(client);
-    let probe = SignalReaders::<_, Inert, Inert>::new(Some(&reader), None, None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<_, Inert, Inert, Inert, PriceLedger>::new(
+        Some(&reader),
+        None,
+        None,
+        None,
+        &prices,
+    );
     let minute = window(0, 60);
 
     let count = only(
@@ -314,7 +322,14 @@ async fn the_probe_counts_the_logs_a_query_matches() {
     .expect("the sink accepts");
     sink.flush().await.expect("the sink flushes");
     let reader = ClickhouseLogReader::new(client);
-    let probe = SignalReaders::<Inert, _, Inert>::new(None, Some(&reader), None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<Inert, _, Inert, Inert, PriceLedger>::new(
+        None,
+        Some(&reader),
+        None,
+        None,
+        &prices,
+    );
     let errors = Signal::Logs(LogSignal {
         services: vec!["checkout".into()],
         severities: vec![Severity::Error, Severity::Fatal],
@@ -374,7 +389,14 @@ async fn the_probe_reads_a_metric_per_label_set_and_through_a_filter() {
     .expect("the sink accepts");
     sink.flush().await.expect("the sink flushes");
     let reader = ClickhouseMetricReader::new(client);
-    let probe = SignalReaders::<Inert, Inert, _>::new(None, None, Some(&reader));
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<Inert, Inert, _, Inert, PriceLedger>::new(
+        None,
+        None,
+        Some(&reader),
+        None,
+        &prices,
+    );
     let grouped = Signal::Metrics(MetricSignal {
         name: "queue.depth".into(),
         aggregation: Aggregation::Max,
@@ -545,6 +567,7 @@ struct Ledgered {
     incidents: IncidentLedger,
     crew: Crew,
     oncall: OncallLedger,
+    prices: PriceLedger,
 }
 
 impl Untransacted for Ledgered {}
@@ -581,6 +604,7 @@ repo!(IncidentTimeline, IncidentLedger, |held| held
 repo!(IncidentAttachments, IncidentLedger, |held| held
     .incidents
     .clone());
+repo!(ModelPrices, PriceLedger, |held| held.prices.clone());
 repo!(Schedules, OncallLedger, |held| held.oncall.clone());
 repo!(Pages, OncallLedger, |held| held.oncall.clone());
 repo!(StatusOutbox, StatusLedger, |held| {
@@ -947,7 +971,14 @@ async fn the_probe_counts_only_the_spans_and_logs_of_the_placement_a_rule_watche
     log_sink.flush().await.expect("the sink flushes");
     let spans = ClickhouseReader::new(client.clone());
     let logs = ClickhouseLogReader::new(client);
-    let probe = SignalReaders::<_, _, Inert>::new(Some(&spans), Some(&logs), None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<_, _, Inert, Inert, PriceLedger>::new(
+        Some(&spans),
+        Some(&logs),
+        None,
+        None,
+        &prices,
+    );
     let traced = |pod: &str, operation: Option<&str>| {
         Signal::Traces(TraceSignal {
             service: Some("checkout".into()),
@@ -1063,7 +1094,14 @@ async fn spec_l3_5_a_trace_probe_names_five_pods_counts_the_rest_and_keeps_to_it
     )
     .await;
     let reader = ClickhouseReader::new(client);
-    let probe = SignalReaders::<_, Inert, Inert>::new(Some(&reader), None, None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<_, Inert, Inert, Inert, PriceLedger>::new(
+        Some(&reader),
+        None,
+        None,
+        None,
+        &prices,
+    );
 
     let culprits = named(
         &probe,
@@ -1161,7 +1199,14 @@ async fn spec_l3_5_a_log_probe_names_five_pods_counts_the_rest_and_keeps_to_its_
     .expect("the sink accepts");
     sink.flush().await.expect("the sink flushes");
     let reader = ClickhouseLogReader::new(client);
-    let probe = SignalReaders::<Inert, _, Inert>::new(None, Some(&reader), None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<Inert, _, Inert, Inert, PriceLedger>::new(
+        None,
+        Some(&reader),
+        None,
+        None,
+        &prices,
+    );
     let errors = Signal::Logs(LogSignal {
         services: vec!["checkout".into()],
         severities: vec![Severity::Error],
@@ -1194,7 +1239,10 @@ async fn spec_l3_5_a_log_probe_names_five_pods_counts_the_rest_and_keeps_to_its_
 
 #[tokio::test]
 async fn spec_l3_5_a_metric_probe_names_the_labels_of_the_series_that_fired() {
-    let probe = SignalReaders::<Inert, Inert, Inert>::new(None, None, None);
+    let prices = PriceLedger::default();
+    let probe = SignalReaders::<Inert, Inert, Inert, Inert, PriceLedger>::new(
+        None, None, None, None, &prices,
+    );
     let signal = Signal::Metrics(MetricSignal {
         name: "queue.depth".into(),
         aggregation: Aggregation::Max,
@@ -1278,4 +1326,269 @@ async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
     assert_eq!(context.pods().len(), 5);
     assert_eq!(context.others(), 4);
     assert_eq!(context.nodes().len(), 2);
+}
+
+struct Spending;
+
+impl Stack for Spending {
+    type Repos = Ledgered;
+    type Clock = Moving;
+    type Hasher = Inert;
+    type Mailer = Couriered;
+    type Photos = NoPhotos;
+    type SpanStore = Inert;
+    type IssueStore = ClickhouseIssues;
+    type LogStore = Inert;
+    type MetricStore = Inert;
+    type Meter = Inert;
+    type Oidc = Inert;
+    type Sink = Inert;
+    type Quota = Inert;
+    type Directory = Inert;
+    type Webhooks = Couriered;
+}
+
+fn an_llm_call(seed: u32, second: u64, feature: &str, model: &str) -> Span {
+    let mut span = a_span(seed, "assistant", "chat", second, 250, false);
+    span.kind = SpanKind::Client;
+    for (key, value) in [
+        ("gen_ai.provider.name", "openai"),
+        ("gen_ai.operation.name", "chat"),
+        ("gen_ai.request.model", model),
+        ("gen_ai.usage.input_tokens", "1000000"),
+        ("gen_ai.usage.output_tokens", "0"),
+        ("ferristrace.feature", feature),
+    ] {
+        span.attributes.insert(key.into(), value.into());
+    }
+    span
+}
+
+async fn gpt_4o_at_two_dollars_a_million() -> PriceLedger {
+    let prices = PriceLedger::default();
+    ferristrace_domain::ModelPrices::create(
+        &prices,
+        org(1),
+        &ferristrace_domain::PriceDraft {
+            provider: ferristrace_domain::Provider::try_from("openai").expect("a provider"),
+            model: ferristrace_domain::ModelPattern::try_from("gpt-4o").expect("a model"),
+            rates: ferristrace_domain::Rates::new(2_000_000, 0, None).expect("rates"),
+            effective_from_ms: 0,
+        },
+        AccountId::new(Uuid::from_u128(9)),
+    )
+    .await
+    .expect("kept")
+    .expect("fresh");
+    prices
+}
+
+fn spend_signal(
+    measure: ferristrace_domain::LlmMeasure,
+    group_by: ferristrace_domain::LlmGroup,
+    feature: Option<&str>,
+) -> Signal {
+    Signal::Llm(ferristrace_domain::LlmSignal {
+        measure,
+        group_by,
+        feature: feature.map(Into::into),
+        customer: None,
+        model: None,
+        project: None,
+    })
+}
+
+#[tokio::test]
+async fn the_probe_reads_spend_for_one_group_or_one_per_feature() {
+    let Some(client) = prepared("ferristrace_alert_probe_llm").await else {
+        return;
+    };
+    let mut spans: Vec<Span> = (1..=3)
+        .map(|seed| an_llm_call(seed, 10 * u64::from(seed), "ticket-summary", "gpt-4o"))
+        .collect();
+    spans.push(an_llm_call(10, 15, "search", "gpt-4o"));
+    spans.push(an_llm_call(11, 16, "search", "mystery"));
+    stored(&client, Scope::of(org(1)), spans).await;
+    stored(
+        &client,
+        Scope::of(org(2)),
+        vec![an_llm_call(20, 12, "ticket-summary", "gpt-4o")],
+    )
+    .await;
+    let issues = ClickhouseIssues::new(client);
+    let prices = gpt_4o_at_two_dollars_a_million().await;
+    let probe = SignalReaders::<Inert, Inert, Inert, _, PriceLedger>::new(
+        None,
+        None,
+        None,
+        Some(&issues),
+        &prices,
+    );
+    let minute = window(0, 60);
+    let measure = ferristrace_domain::LlmMeasure::Cost;
+    let group = ferristrace_domain::LlmGroup::None;
+
+    let ticket = only(
+        &observed(
+            &probe,
+            org(1),
+            &spend_signal(measure, group, Some("ticket-summary")),
+            minute,
+        )
+        .await,
+    );
+    let everything =
+        only(&observed(&probe, org(1), &spend_signal(measure, group, None), minute).await);
+    let calls = only(
+        &observed(
+            &probe,
+            org(1),
+            &spend_signal(ferristrace_domain::LlmMeasure::Calls, group, None),
+            minute,
+        )
+        .await,
+    );
+    let per_feature = observed(
+        &probe,
+        org(1),
+        &spend_signal(measure, ferristrace_domain::LlmGroup::Feature, None),
+        minute,
+    )
+    .await;
+    let nothing = observed(
+        &probe,
+        org(1),
+        &spend_signal(measure, group, Some("absent")),
+        minute,
+    )
+    .await;
+
+    assert_eq!(ticket, Some(6.0));
+    assert_eq!(everything, Some(8.0), "the unpriced call adds nothing");
+    assert_eq!(calls, Some(5.0));
+    let mut by_feature: Vec<(String, Option<f64>)> = per_feature
+        .iter()
+        .map(|seen| (seen.labels.pairs()["feature"].to_string(), seen.value))
+        .collect();
+    by_feature.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        by_feature,
+        vec![
+            ("search".to_owned(), Some(2.0)),
+            ("ticket-summary".to_owned(), Some(6.0)),
+        ]
+    );
+    assert!(nothing.is_empty());
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn spec_l4_4_a_cost_rule_fires_when_the_priced_calls_cross_ten_dollars_and_records_the_event()
+{
+    let Some(client) = prepared("ferristrace_alert_spec_l4_4").await else {
+        return;
+    };
+    let mut spans: Vec<Span> = (1..=3)
+        .map(|seed| an_llm_call(seed, 10 * u64::from(seed), "ticket-summary", "gpt-4o"))
+        .collect();
+    spans.extend(
+        (4..=6)
+            .map(|seed| an_llm_call(seed, 20 * 60 + u64::from(seed), "ticket-summary", "gpt-4o")),
+    );
+    spans.extend((7..=9).map(|seed| an_llm_call(seed, 30 + u64::from(seed), "search", "gpt-4o")));
+    stored(&client, Scope::of(org(1)), spans).await;
+    let ledger = AlertLedger::default();
+    AlertRules::create(
+        &ledger,
+        org(1),
+        &RuleDraft {
+            name: RuleName::try_from("Ticket spend").expect("a name"),
+            project: None,
+            enabled: true,
+            definition: Definition::new(DefinitionParts {
+                signal: spend_signal(
+                    ferristrace_domain::LlmMeasure::Cost,
+                    ferristrace_domain::LlmGroup::Feature,
+                    Some("ticket-summary"),
+                ),
+                condition: Condition::new(Comparison::Above, 10.0).expect("a threshold"),
+                window_secs: 3_600,
+                pending_secs: 0,
+                severity: AlertSeverity::Critical,
+                no_data: NoDataPolicy::Ok,
+                channels: Vec::new(),
+                page: None,
+            })
+            .expect("a definition"),
+        },
+        AccountId::new(Uuid::from_u128(9)),
+    )
+    .await
+    .expect("kept")
+    .expect("fresh");
+    let clock = Moving::default();
+    let app = Ferristrace::<Spending>::new(
+        Ledgered {
+            alerts: ledger.clone(),
+            prices: gpt_4o_at_two_dollars_a_million().await,
+            ..Ledgered::default()
+        },
+        Adapters {
+            clock: clock.clone(),
+            hasher: Inert::default(),
+            mailer: Couriered::default(),
+            webhooks: Couriered::default(),
+            photos: NoPhotos,
+            meter: Inert::default(),
+            span_store: None,
+            issue_store: Some(ClickhouseIssues::new(client)),
+            log_store: None,
+            metric_store: None,
+            oidc: None,
+            provision: ProvisionPolicy::default(),
+        },
+    );
+
+    clock.to(10 * 60);
+    let early = app.evaluate_alerts().await.expect("a tick");
+    let before = ledger.states()[0].1.state.status;
+    clock.to(30 * 60);
+    let late = app.evaluate_alerts().await.expect("a tick");
+
+    assert!(
+        matches!(
+            early,
+            Tick::Evaluated {
+                rules: 1,
+                failed: 0,
+                ..
+            }
+        ),
+        "{early:?}"
+    );
+    assert_eq!(before, AlertStatus::Ok);
+    assert!(
+        matches!(
+            late,
+            Tick::Evaluated {
+                rules: 1,
+                failed: 0,
+                ..
+            }
+        ),
+        "{late:?}"
+    );
+    let events = ledger.events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].to, AlertStatus::Firing);
+    assert_eq!(events[0].value, Some(12.0));
+    let named = Labels::new(BTreeMap::from([(
+        "feature".into(),
+        "ticket-summary".into(),
+    )]));
+    assert_eq!(events[0].labels, named);
+    assert_eq!(
+        events[0].context.as_ref().expect("a context").labels(),
+        &named
+    );
 }

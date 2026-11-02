@@ -21,6 +21,8 @@ pub enum BadRule {
     BlankKey,
     #[error("a metric rule groups and filters by at most {max} attribute keys")]
     GroupBy { max: usize },
+    #[error("an llm filter value cannot be blank")]
+    LlmFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

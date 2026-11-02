@@ -4,10 +4,11 @@ use std::collections::BTreeMap;
 use ferristrace_domain::{
     Aggregation, AlertBook, AlertError, AlertEvent, Buckets, ChannelBook, ChannelId, ChannelName,
     ChannelView, Clock, Courier, CulpritReader, Culprits, Definition, Delivery, Destination,
-    Drained, Evaluator, Followers, IssuedChannel, Labels, LogQuery, LogReader, LogSignal,
-    MetricQuery, MetricReader, MetricSignal, Observation, Paging, Preview, ProbeError, ProjectId,
-    Reader, Readers, RuleDraft, RuleId, RulePatch, ServiceFilter, SessionToken, Signal,
-    SignalProbe, SpanReader, TenantId, Tick, TraceMeasure, TraceSignal, Watched, Whoami, Window,
+    Drained, Evaluator, Followers, IssuedChannel, Labels, LlmReader, LlmSignal, LogQuery,
+    LogReader, LogSignal, MetricQuery, MetricReader, MetricSignal, ModelPrices, Observation,
+    Paging, Preview, PriceBook, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId,
+    RulePatch, ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, Spend, TenantId, Tick,
+    TraceMeasure, TraceSignal, Watched, Whoami, Window,
 };
 
 use crate::registry::AlertRepos;
@@ -17,27 +18,39 @@ const NANOS_PER_MILLI: f64 = 1_000_000.0;
 const PERCENT: f64 = 100.0;
 
 #[derive(Debug)]
-pub struct SignalReaders<'a, R, L, M> {
+pub struct SignalReaders<'a, R, L, M, I, P> {
     spans: Option<&'a R>,
     logs: Option<&'a L>,
     metrics: Option<&'a M>,
+    llm: Option<&'a I>,
+    prices: &'a P,
 }
 
-impl<'a, R, L, M> SignalReaders<'a, R, L, M> {
-    pub fn new(spans: Option<&'a R>, logs: Option<&'a L>, metrics: Option<&'a M>) -> Self {
+impl<'a, R, L, M, I, P> SignalReaders<'a, R, L, M, I, P> {
+    pub fn new(
+        spans: Option<&'a R>,
+        logs: Option<&'a L>,
+        metrics: Option<&'a M>,
+        llm: Option<&'a I>,
+        prices: &'a P,
+    ) -> Self {
         Self {
             spans,
             logs,
             metrics,
+            llm,
+            prices,
         }
     }
 }
 
-impl<R, L, M> SignalProbe for SignalReaders<'_, R, L, M>
+impl<R, L, M, I, P> SignalProbe for SignalReaders<'_, R, L, M, I, P>
 where
     R: SpanReader + CulpritReader + Sync,
     L: LogReader + CulpritReader + Sync,
     M: MetricReader + Sync,
+    I: LlmReader + Sync,
+    P: ModelPrices + Sync,
 {
     async fn observe(
         &self,
@@ -61,6 +74,10 @@ where
                 let reader = self.metrics.ok_or(ProbeError::Unavailable)?;
                 measured(reader, org, project, metric, window).await
             }
+            Signal::Llm(llm) => {
+                let reader = self.llm.ok_or(ProbeError::Unavailable)?;
+                spent(reader, self.prices, org, project, llm, window).await
+            }
         }
     }
 
@@ -81,7 +98,7 @@ where
                 let reader = self.logs.ok_or(ProbeError::Unavailable)?;
                 reader.culprits(org, project, signal, window).await?
             }
-            Signal::Metrics(_) => Culprits::of_labels(labels),
+            Signal::Metrics(_) | Signal::Llm(_) => Culprits::of_labels(labels),
         })
     }
 }
@@ -233,6 +250,20 @@ async fn measured<M: MetricReader>(
         .collect())
 }
 
+async fn spent<I: LlmReader, P: ModelPrices>(
+    reader: &I,
+    prices: &P,
+    org: TenantId,
+    project: Option<ProjectId>,
+    llm: &LlmSignal,
+    window: Window,
+) -> Result<Vec<Observation>, ProbeError> {
+    let query = llm.query(project, window);
+    let held = prices.list(org).await?;
+    let read = reader.spend(org, &query).await?;
+    Ok(llm.observe(&Spend::priced(read, &PriceBook::new(&held), &query)))
+}
+
 fn folded(aggregation: Aggregation, values: impl Iterator<Item = f64>) -> Option<f64> {
     let values: Vec<f64> = values.filter(|value| value.is_finite()).collect();
     if values.is_empty() {
@@ -254,11 +285,16 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: AlertRepos,
 {
-    fn signal_readers(&self) -> SignalReaders<'_, S::SpanStore, S::LogStore, S::MetricStore> {
+    fn signal_readers<'a, P>(
+        &'a self,
+        prices: &'a P,
+    ) -> SignalReaders<'a, S::SpanStore, S::LogStore, S::MetricStore, S::IssueStore, P> {
         SignalReaders::new(
             self.span_store.as_ref(),
             self.log_store.as_ref(),
             self.metric_store.as_ref(),
+            self.issue_store.as_ref(),
+            prices,
         )
     }
 
@@ -390,7 +426,7 @@ where
         .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, model_prices, unavailable = AlertError::StoreUnreachable)]
     pub async fn preview_alert(
         &self,
         who: &Reader,
@@ -413,7 +449,7 @@ where
             org,
             project,
             definition,
-            &self.signal_readers(),
+            &self.signal_readers(&model_prices),
             self.clock.now(),
         )
         .await
@@ -523,7 +559,7 @@ where
         async move { self.deliver_once().await }
     }
 
-    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, incidents, incident_timeline, schedules, pages, unavailable = AlertError::StoreUnreachable)]
+    #[transactional(alert_rules, alert_states, alert_events, alert_outbox, alert_duty, incidents, incident_timeline, schedules, pages, model_prices, unavailable = AlertError::StoreUnreachable)]
     async fn evaluate_once(&self) -> Result<Tick, AlertError> {
         Evaluator::new(
             alert_rules,
@@ -531,7 +567,7 @@ where
             alert_events,
             alert_outbox,
             alert_duty,
-            self.signal_readers(),
+            self.signal_readers(&model_prices),
             Followers::new(incidents, incident_timeline),
             Paging::new(schedules, pages).escalating_after(self.escalate_after_secs),
         )

@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertSeverity, ChannelId, Comparison, Condition, CulpritPod, Culprits, Definition,
-    DefinitionParts, Labels, LogSignal, MetricSignal, NoDataPolicy, Placement, PlacementName,
-    ScheduleId, Severity, Signal, TraceMeasure, TraceSignal, Workload,
+    DefinitionParts, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MetricSignal,
+    NoDataPolicy, Placement, PlacementName, ProjectId, ScheduleId, Severity, Signal, TraceMeasure,
+    TraceSignal, Workload,
 };
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -104,6 +105,17 @@ fn signal_of(signal: &Signal) -> Value {
             "group_by": texts(metric.group_by.iter().map(|key| &**key)),
             "filter": object(metric.filter.iter().map(|(key, value)| (&**key, &**value))),
         }),
+        Signal::Llm(llm) => json!({
+            "kind": "llm",
+            "measure": llm.measure.as_str(),
+            "group_by": llm.group_by.as_str(),
+            "filter": {
+                "feature": text(llm.feature.as_deref()),
+                "customer": text(llm.customer.as_deref()),
+                "model": text(llm.model.as_deref()),
+                "project": llm.project.map_or(Value::Null, |project| Value::String(project.to_string())),
+            },
+        }),
     }
 }
 
@@ -190,8 +202,31 @@ fn decode_signal(value: &Value) -> Option<Signal> {
             group_by: strings(value, "group_by")?,
             filter: decode_labels(value.get("filter")?)?.pairs().clone(),
         })),
+        "llm" => decode_llm(value),
         _ => None,
     }
+}
+
+fn decode_llm(value: &Value) -> Option<Signal> {
+    let filter = value.get("filter").filter(|held| !held.is_null());
+    let named = |key: &str| -> Option<Option<Box<str>>> {
+        match filter.and_then(|held| held.get(key)) {
+            None | Some(Value::Null) => Some(None),
+            Some(held) => held.as_str().map(|text| Some(text.into())),
+        }
+    };
+    let project = match filter.and_then(|held| held.get("project")) {
+        None | Some(Value::Null) => None,
+        Some(held) => Some(ProjectId::new(Uuid::try_parse(held.as_str()?).ok()?)),
+    };
+    Some(Signal::Llm(LlmSignal {
+        measure: LlmMeasure::parse(value.get("measure")?.as_str()?)?,
+        group_by: LlmGroup::parse(value.get("group_by")?.as_str()?)?,
+        feature: named("feature")?,
+        customer: named("customer")?,
+        model: named("model")?,
+        project,
+    }))
 }
 
 pub(crate) fn decode(text: &str) -> Option<Definition> {
@@ -293,8 +328,8 @@ mod tests {
 
     use ferristrace_domain::{
         Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-        Labels, LogSignal, MetricSignal, NoDataPolicy, ScheduleId, Severity, Signal, TraceMeasure,
-        TraceSignal,
+        Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MetricSignal, NoDataPolicy, ProjectId,
+        ScheduleId, Severity, Signal, TraceMeasure, TraceSignal,
     };
     use uuid::Uuid;
 
@@ -327,7 +362,9 @@ mod tests {
             match read.signal() {
                 Signal::Traces(traces) => assert!(traces.placement.is_empty()),
                 Signal::Logs(logs) => assert!(logs.placement.is_empty()),
-                Signal::Metrics(_) => panic!("a metric signal from a trace or log one"),
+                Signal::Metrics(_) | Signal::Llm(_) => {
+                    panic!("a metric or llm signal from a trace or log one")
+                }
             }
         }
     }
@@ -398,11 +435,55 @@ mod tests {
                 group_by: vec!["queue".into()],
                 filter: BTreeMap::from([("env".into(), "prod".into())]),
             }),
+            Signal::Llm(LlmSignal {
+                measure: LlmMeasure::P95,
+                group_by: LlmGroup::Customer,
+                feature: Some("ticket-summary".into()),
+                customer: None,
+                model: Some("gpt-4o".into()),
+                project: Some(ProjectId::new(Uuid::from_u128(8))),
+            }),
+            Signal::Llm(LlmSignal {
+                measure: LlmMeasure::Cost,
+                group_by: LlmGroup::None,
+                feature: None,
+                customer: None,
+                model: None,
+                project: None,
+            }),
         ] {
             let definition = kept(signal);
 
             assert_eq!(decode(&encode(&definition)), Some(definition));
         }
+    }
+
+    #[test]
+    fn an_llm_signal_with_a_bad_measure_group_or_filter_leaves_the_definition_unreadable() {
+        for signal in [
+            r#"{"kind":"llm","measure":"spend","group_by":"none","filter":{}}"#,
+            r#"{"kind":"llm","measure":"cost","group_by":"user","filter":{}}"#,
+            r#"{"kind":"llm","measure":"cost","group_by":"none","filter":{"project":"nope"}}"#,
+            r#"{"kind":"llm","measure":"cost","group_by":"none","filter":{"feature":3}}"#,
+        ] {
+            let stored = format!(
+                r#"{{"signal":{signal},"condition":{{"op":">","threshold":1.0}},"window_s":300,"pending_s":0,"severity":"warning","no_data":"ok","channels":[]}}"#
+            );
+
+            assert_eq!(decode(&stored), None, "{signal}");
+        }
+    }
+
+    #[test]
+    fn an_llm_signal_without_a_filter_reads_as_unfiltered() {
+        let stored = r#"{"signal":{"kind":"llm","measure":"calls","group_by":"model"},"condition":{"op":">","threshold":1.0},"window_s":300,"pending_s":0,"severity":"warning","no_data":"ok","channels":[]}"#;
+
+        let read = decode(stored).expect("it reads");
+
+        assert!(matches!(
+            read.signal(),
+            Signal::Llm(llm) if llm.feature.is_none() && llm.project.is_none()
+        ));
     }
 
     #[test]

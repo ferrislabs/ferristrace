@@ -8,7 +8,7 @@ use ferristrace_api::{AppState, SessionCookie, oncall_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
     AlertLedger, Bench, Couriered, Crew, IncidentLedger, Inert, Notebook, OncallLedger,
-    StatusLedger, Untransacted,
+    PriceLedger, StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
@@ -244,6 +244,10 @@ repo!(AlertChannels, AlertLedger, |fakes| fakes
     .alerts
     .clone());
 repo!(AlertDuty, AlertLedger, |fakes| fakes.harness.alerts.clone());
+repo!(ModelPrices, PriceLedger, |fakes| {
+    let _ = fakes;
+    PriceLedger::default()
+});
 repo!(Incidents, IncidentLedger, |fakes| fakes
     .harness
     .incidents

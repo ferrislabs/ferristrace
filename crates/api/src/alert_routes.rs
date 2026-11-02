@@ -11,9 +11,9 @@ use ferristrace_application::registry::AlertRepos;
 use ferristrace_domain::{
     Aggregation, AlertError, AlertEvent, AlertSeverity, BadChannel, BadRule, ChannelId,
     ChannelKind, ChannelName, ChannelView, Comparison, Condition, Definition, DefinitionParts,
-    Delivery, Destination, IssuedChannel, Labels, LogSignal, MetricSignal, NoDataPolicy, Preview,
-    ProjectId, RuleDraft, RuleId, RuleName, RulePatch, ScheduleId, SeriesState, Severity, Signal,
-    TenantId, TraceMeasure, TraceSignal, Watched,
+    Delivery, Destination, IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal,
+    MetricSignal, NoDataPolicy, Preview, ProjectId, RuleDraft, RuleId, RuleName, RulePatch,
+    ScheduleId, SeriesState, Severity, Signal, TenantId, TraceMeasure, TraceSignal, Watched,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
@@ -83,6 +83,29 @@ enum SignalBody {
         #[serde(default)]
         filter: BTreeMap<String, String>,
     },
+    Llm {
+        measure: String,
+        #[serde(default = "ungrouped")]
+        group_by: String,
+        #[serde(default)]
+        filter: LlmFilterBody,
+    },
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct LlmFilterBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    feature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    customer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project: Option<Uuid>,
+}
+
+fn ungrouped() -> String {
+    LlmGroup::None.as_str().to_owned()
 }
 
 fn counted() -> String {
@@ -130,6 +153,16 @@ impl SignalBody {
                     .iter()
                     .map(|(key, value)| (key.to_string(), value.to_string()))
                     .collect(),
+            },
+            Signal::Llm(llm) => Self::Llm {
+                measure: llm.measure.as_str().to_owned(),
+                group_by: llm.group_by.as_str().to_owned(),
+                filter: LlmFilterBody {
+                    feature: llm.feature.as_deref().map(ToOwned::to_owned),
+                    customer: llm.customer.as_deref().map(ToOwned::to_owned),
+                    model: llm.model.as_deref().map(ToOwned::to_owned),
+                    project: llm.project.map(ProjectId::as_uuid),
+                },
             },
         }
     }
@@ -203,6 +236,20 @@ impl SignalBody {
                     .into_iter()
                     .map(|(key, value)| (key.trim().into(), value.into()))
                     .collect(),
+            })),
+            Self::Llm {
+                measure,
+                group_by,
+                filter,
+            } => Ok(Signal::Llm(LlmSignal {
+                measure: LlmMeasure::parse(measure.trim())
+                    .ok_or(AlertRefused::Malformed("measure"))?,
+                group_by: LlmGroup::parse(group_by.trim())
+                    .ok_or(AlertRefused::Malformed("group_by"))?,
+                feature: filter.feature.map(|held| held.trim().into()),
+                customer: filter.customer.map(|held| held.trim().into()),
+                model: filter.model.map(|held| held.trim().into()),
+                project: filter.project.map(ProjectId::new),
             })),
         }
     }

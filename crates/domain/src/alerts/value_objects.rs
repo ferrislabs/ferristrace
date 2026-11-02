@@ -301,11 +301,52 @@ pub struct MetricSignal {
     pub filter: BTreeMap<Box<str>, Box<str>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LlmMeasure {
+    Cost,
+    Tokens,
+    Calls,
+    P95,
+}
+
+spelled!(LlmMeasure {
+    Cost => "cost",
+    Tokens => "tokens",
+    Calls => "calls",
+    P95 => "p95",
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LlmGroup {
+    None,
+    Feature,
+    Customer,
+    Model,
+}
+
+spelled!(LlmGroup {
+    None => "none",
+    Feature => "feature",
+    Customer => "customer",
+    Model => "model",
+});
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmSignal {
+    pub measure: LlmMeasure,
+    pub group_by: LlmGroup,
+    pub feature: Option<Box<str>>,
+    pub customer: Option<Box<str>>,
+    pub model: Option<Box<str>>,
+    pub project: Option<ProjectId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signal {
     Traces(TraceSignal),
     Logs(LogSignal),
     Metrics(MetricSignal),
+    Llm(LlmSignal),
 }
 
 impl Signal {
@@ -314,11 +355,16 @@ impl Signal {
             Self::Traces(_) => "traces",
             Self::Logs(_) => "logs",
             Self::Metrics(_) => "metrics",
+            Self::Llm(_) => "llm",
         }
     }
 
     pub fn groups(&self) -> bool {
-        matches!(self, Self::Metrics(metric) if !metric.group_by.is_empty())
+        match self {
+            Self::Metrics(metric) => !metric.group_by.is_empty(),
+            Self::Llm(llm) => llm.group_by != LlmGroup::None,
+            Self::Traces(_) | Self::Logs(_) => false,
+        }
     }
 
     fn check(&self) -> Result<(), BadRule> {
@@ -361,6 +407,16 @@ impl Signal {
                 keys.dedup();
                 if keys.len() > MAX_GROUP_BY {
                     return Err(BadRule::GroupBy { max: MAX_GROUP_BY });
+                }
+                Ok(())
+            }
+            Self::Llm(llm) => {
+                if [&llm.feature, &llm.customer, &llm.model]
+                    .into_iter()
+                    .flatten()
+                    .any(|held| held.trim().is_empty())
+                {
+                    return Err(BadRule::LlmFilter);
                 }
                 Ok(())
             }
