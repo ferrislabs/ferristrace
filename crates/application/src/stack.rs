@@ -1,7 +1,7 @@
-use crate::registry::Repositories;
+use crate::registry::UnitOfWork;
 
 pub trait Stack: Send + Sync + 'static {
-    type Repos: Repositories;
+    type Repos: UnitOfWork;
 }
 
 #[derive(Debug)]
