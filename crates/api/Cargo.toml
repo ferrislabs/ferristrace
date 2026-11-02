@@ -23,6 +23,7 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+ferristrace-application = { workspace = true, features = ["testing"] }
 ferristrace-domain.workspace = true
 ferristrace-infra.workspace = true
 opentelemetry-proto.workspace = true
