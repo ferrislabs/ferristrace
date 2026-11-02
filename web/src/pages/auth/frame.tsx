@@ -6,7 +6,7 @@ export function AuthFrame({ title, intro, children, footer }: { title: string; i
       <div className="flex w-full max-w-[380px] flex-col gap-4">
         <div className="flex w-full flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
           <div className="flex items-center gap-2 text-[17px] font-bold">
-            <Logo className="size-5" />
+            <Logo className="size-7" />
             FerrisTrace
           </div>
           <div className="flex flex-col gap-1">
