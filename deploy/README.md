@@ -542,6 +542,41 @@ span and for a span written before it had a project. `kind` is one of
 the epoch, which exceed 2^53, so read them with a parser that keeps 64 bits.
 Export needs the span store: without ClickHouse the route answers 503.
 
+## Filtering by Kubernetes placement
+
+When the Collector runs the `k8sattributes` processor, every span, log
+record and metric point carries `k8s.cluster.name`, `k8s.namespace.name`,
+`k8s.pod.name`, `k8s.node.name` and the name of the workload that owns the
+pod (`k8s.deployment.name`, `k8s.statefulset.name`, `k8s.daemonset.name`,
+`k8s.cronjob.name`, `k8s.job.name`). The traces, services, operations,
+series, logs, log histogram and metric series routes accept `cluster`,
+`namespace`, `workload`, `pod` and `node` query parameters, and
+`GET /api/orgs/{org}/placements?from&to` lists what was seen in a window
+for the pickers in the web query bars.
+
+A `workload` is either `kind:name` (`deployment:checkout`,
+`cronjob:backup`), which matches that one attribute, or a bare name, which
+matches the workload that owns the pod: the first of deployment,
+statefulset, daemonset, cronjob and job that is set. A pod started by a
+CronJob is therefore found by `backup` or `cronjob:backup`, and by its Job
+only as `job:backup-28472`. A trace matches when any of its spans in the
+window ran in the placement; its summary still covers the whole trace.
+
+ClickHouse migration 9 adds `k8s_cluster`, `k8s_namespace`, `k8s_pod`,
+`k8s_node` and `k8s_workload` to `spans`, `logs` (read from the resource),
+`metric_points` and `metric_histograms` as `MATERIALIZED` columns, with
+bloom filter indexes on pod, node and workload. The migration rewrites
+nothing: parts written before it compute the columns from the attribute map
+when they are read, so old rows are found by the same filters, only without
+the index. Parts written afterwards, and old parts once ClickHouse merges
+them, store the columns and skip granules through the indexes. To make old
+data fast at once, run this per table, at the cost of rewriting it:
+
+```sql
+ALTER TABLE spans MATERIALIZE COLUMN k8s_pod;
+ALTER TABLE spans MATERIALIZE INDEX spans_by_pod;
+```
+
 ## Multi-tenancy
 
 Organisations exist and every span carries one, but a self-hosted

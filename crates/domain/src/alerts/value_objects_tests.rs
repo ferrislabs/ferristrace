@@ -16,6 +16,7 @@ fn traces(service: Option<&str>, operation: Option<&str>) -> Signal {
         operation: operation.map(Into::into),
         environment: None,
         measure: TraceMeasure::ErrorRate,
+        placement: crate::placement::Placement::default(),
     })
 }
 

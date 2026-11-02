@@ -15,6 +15,7 @@ pub mod logs;
 pub mod metrics;
 pub mod oncall;
 pub mod organisation;
+pub mod placement;
 pub mod postmortems;
 pub mod profile;
 pub mod provisioning;
@@ -102,6 +103,11 @@ pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
     OrgName, OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError,
     SettingError, Squad, Squads, Team, TeamError, TeamId, TeamName, Who, Whoami, WhoamiError,
+};
+pub use placement::{
+    BadPlacement, CLUSTER_KEY, MAX_PLACEMENT_BYTES, MAX_PLACEMENTS, NAMESPACE_KEY, NODE_KEY,
+    POD_KEY, Placement, PlacementName, PlacementReader, Placements, SeenPod, SeenWorkload,
+    Workload, WorkloadKind,
 };
 pub use postmortems::{
     BadPostmortem, MAX_BODY_BYTES, Postmortem, PostmortemBody, PostmortemDesk, PostmortemError,

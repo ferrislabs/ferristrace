@@ -892,6 +892,17 @@ impl ferristrace_domain::Clock for Moving {
 
 struct Failing;
 
+impl ferristrace_domain::PlacementReader for Failing {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: ferristrace_domain::Window,
+        _project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Placements, StoreError> {
+        Ok(ferristrace_domain::Placements::default())
+    }
+}
+
 impl ferristrace_domain::SpanReader for Failing {
     async fn services(
         &self,
@@ -996,6 +1007,7 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
                     operation: None,
                     environment: None,
                     measure: ferristrace_domain::TraceMeasure::ErrorRate,
+                    placement: ferristrace_domain::Placement::default(),
                 }),
                 condition: ferristrace_domain::Condition::new(
                     ferristrace_domain::Comparison::Above,

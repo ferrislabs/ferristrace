@@ -116,6 +116,17 @@ impl WebhookSender for Inert {
     }
 }
 
+impl ferristrace_domain::PlacementReader for Inert {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: ferristrace_domain::Window,
+        _project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Placements, StoreError> {
+        Ok(ferristrace_domain::Placements::default())
+    }
+}
+
 impl SpanReader for Inert {
     async fn services(
         &self,

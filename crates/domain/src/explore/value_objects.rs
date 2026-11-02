@@ -1,6 +1,7 @@
 use super::errors::BadWindow;
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
+use crate::placement::Placement;
 use crate::telemetry::TraceId;
 
 const DEFAULT_LIMIT: u32 = 50;
@@ -50,6 +51,7 @@ pub struct TraceFilter {
     pub only_errors: bool,
     pub at_least_nanos: Option<u64>,
     pub order: TraceOrder,
+    pub placement: Placement,
     limit: u32,
 }
 
@@ -63,6 +65,7 @@ impl TraceFilter {
             only_errors: false,
             at_least_nanos: None,
             order: TraceOrder::default(),
+            placement: Placement::default(),
             limit: DEFAULT_LIMIT,
         }
     }
@@ -105,6 +108,7 @@ pub struct ServiceFilter {
     pub window: Window,
     pub project: Option<ProjectId>,
     pub environment: Option<Box<str>>,
+    pub placement: Placement,
 }
 
 impl ServiceFilter {
@@ -113,6 +117,7 @@ impl ServiceFilter {
             window,
             project: None,
             environment: None,
+            placement: Placement::default(),
         }
     }
 

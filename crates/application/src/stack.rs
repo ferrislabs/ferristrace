@@ -1,8 +1,8 @@
 use ferristrace_domain::{
     AckKey, AlertMailer, AuthProvider, Authorizer, Clock, ESCALATE_AFTER_SECS, IssueReader,
     LinkKey, LogReader, LogSink, Mailer, MetricReader, MetricSink, PasswordHasher, Photos,
-    ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory,
-    UsageMeter, UsageReader, WebhookSender,
+    PlacementReader, ProvisionPolicy, QuotaPolicy, SpanPages, SpanReader, SpanSink, StatusMailer,
+    TenantDirectory, UsageMeter, UsageReader, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -13,7 +13,7 @@ pub trait Stack: Send + Sync + 'static {
     type Hasher: PasswordHasher + Send + Sync + 'static;
     type Mailer: Mailer + AlertMailer + StatusMailer + Send + Sync + 'static;
     type Photos: Photos + Send + Sync + 'static;
-    type SpanStore: SpanReader + SpanPages + Send + Sync + 'static;
+    type SpanStore: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static;
     type IssueStore: IssueReader + Send + Sync + 'static;
     type LogStore: LogReader + Send + Sync + 'static;
     type MetricStore: MetricReader + Send + Sync + 'static;

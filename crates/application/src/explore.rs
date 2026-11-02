@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    Explore, ExploreError, Reader, Readers, ServiceFilter, ServiceSeries, ServiceSummary, Span,
-    TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
+    Explore, ExploreError, Placements, ProjectId, Reader, Readers, ServiceFilter, ServiceSeries,
+    ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary, Whoami, Window,
 };
 
 use crate::registry::ReadRepos;
@@ -99,6 +99,25 @@ where
             reader,
         )
         .trace(who, org, id)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn placements(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Placements, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .placements(who, org, window, project)
         .await
     }
 }

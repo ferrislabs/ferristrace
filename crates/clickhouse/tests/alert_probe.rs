@@ -126,6 +126,7 @@ fn traces(service: Option<&str>, operation: Option<&str>, measure: TraceMeasure)
         operation: operation.map(Into::into),
         environment: None,
         measure,
+        placement: ferristrace_domain::Placement::default(),
     })
 }
 
@@ -319,6 +320,7 @@ async fn the_probe_counts_the_logs_a_query_matches() {
         severities: vec![Severity::Error, Severity::Fatal],
         text: Some("payment".into()),
         attributes: vec![("region".into(), "eu".into())],
+        placement: ferristrace_domain::Placement::default(),
     });
 
     let counted = only(&observed(&probe, org(1), &errors, window(0, 60)).await);
@@ -885,4 +887,101 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
         (*told_rule, *from, *to),
         (rule, AlertStatus::Firing, AlertStatus::Ok)
     );
+}
+
+fn placed_on(pod: &str) -> ferristrace_domain::Placement {
+    ferristrace_domain::Placement {
+        pod: Some(ferristrace_domain::PlacementName::try_from(pod).expect("a pod")),
+        ..ferristrace_domain::Placement::default()
+    }
+}
+
+#[tokio::test]
+async fn the_probe_counts_only_the_spans_and_logs_of_the_placement_a_rule_watches() {
+    let Some(client) = prepared("ferristrace_alert_probe_placement").await else {
+        return;
+    };
+    let on = |mut span: Span, pod: &str| {
+        span.attributes.insert("k8s.pod.name".into(), pod.into());
+        span
+    };
+    stored(
+        &client,
+        Scope::of(org(1)),
+        vec![
+            on(a_span(1, "checkout", "pay", 1, 10, true), "checkout-1"),
+            on(a_span(2, "checkout", "pay", 2, 10, false), "checkout-1"),
+            on(a_span(3, "checkout", "pay", 3, 10, true), "checkout-2"),
+        ],
+    )
+    .await;
+    let log_sink = ClickhouseLogSink::new(
+        &client,
+        limits(),
+        Duration::from_secs(7 * DAY),
+        FixedClock::at(NOW),
+    );
+    let log = |second: u64, pod: &str| LogRecord {
+        time_unix_nanos: nanos(second),
+        observed_unix_nanos: nanos(second),
+        severity: Severity::Error,
+        severity_number: 17,
+        service_name: "checkout".into(),
+        body: "declined".into(),
+        attributes: BTreeMap::new(),
+        resource: BTreeMap::from([("k8s.pod.name".into(), pod.into())]),
+        trace_id: None,
+        span_id: None,
+    };
+    log_sink
+        .accept_logs(
+            Scope::of(org(1)),
+            vec![
+                log(1, "checkout-1"),
+                log(2, "checkout-2"),
+                log(3, "checkout-2"),
+            ],
+        )
+        .await
+        .expect("the sink accepts");
+    log_sink.flush().await.expect("the sink flushes");
+    let spans = ClickhouseReader::new(client.clone());
+    let logs = ClickhouseLogReader::new(client);
+    let probe = SignalReaders::<_, _, Inert>::new(Some(&spans), Some(&logs), None);
+    let traced = |pod: &str, operation: Option<&str>| {
+        Signal::Traces(TraceSignal {
+            service: Some("checkout".into()),
+            operation: operation.map(Into::into),
+            environment: None,
+            measure: TraceMeasure::Count,
+            placement: placed_on(pod),
+        })
+    };
+    let logged = |pod: &str| {
+        Signal::Logs(LogSignal {
+            services: Vec::new(),
+            severities: vec![Severity::Error],
+            text: None,
+            attributes: Vec::new(),
+            placement: placed_on(pod),
+        })
+    };
+
+    let one = only(&observed(&probe, org(1), &traced("checkout-1", None), window(0, 60)).await);
+    let operation = only(
+        &observed(
+            &probe,
+            org(1),
+            &traced("checkout-2", Some("pay")),
+            window(0, 60),
+        )
+        .await,
+    );
+    let lines = only(&observed(&probe, org(1), &logged("checkout-2"), window(0, 60)).await);
+    let stranger = only(&observed(&probe, org(2), &logged("checkout-2"), window(0, 60)).await);
+
+    assert_eq!(one, Some(2.0));
+    assert_eq!(operation, Some(1.0));
+    assert_eq!(lines, Some(2.0));
+    assert_eq!(stranger, Some(0.0));
 }

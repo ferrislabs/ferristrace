@@ -230,11 +230,8 @@ where
             return Ok(observed);
         };
         for project in projects {
-            let filter = ServiceFilter {
-                window,
-                project,
-                environment: None,
-            };
+            let mut filter = ServiceFilter::over(window);
+            filter.project = project;
             let Ok(services) = spans.services(page.org, &filter).await else {
                 continue;
             };

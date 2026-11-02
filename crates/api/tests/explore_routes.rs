@@ -9,11 +9,12 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
-    ProvisionPolicy, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Span, SpanCursor, SpanEvent,
-    SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId,
-    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError,
+    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, Placement,
+    PlacementName, PlacementReader, Placements, ProjectId, ProvisionPolicy, SeenPod, SeenWorkload,
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session, SessionError, SessionId,
+    SessionRoll, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind,
+    SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId,
+    TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -245,6 +246,28 @@ impl SpanPages for NoSpans {
     }
 }
 
+impl PlacementReader for NoSpans {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: Window,
+        _project: Option<ProjectId>,
+    ) -> Result<Placements, StoreError> {
+        Ok(Placements::default())
+    }
+}
+
+impl PlacementReader for TwoSpans {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: Window,
+        _project: Option<ProjectId>,
+    ) -> Result<Placements, StoreError> {
+        Ok(Placements::default())
+    }
+}
+
 impl SpanReader for NoSpans {
     async fn services(
         &self,
@@ -331,7 +354,7 @@ impl RepoFor<domain::ApiKeys> for Fakes {
 
 struct TestStack<R>(std::marker::PhantomData<R>);
 
-impl<R: SpanReader + SpanPages + Send + Sync + 'static> Stack for TestStack<R> {
+impl<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static> Stack for TestStack<R> {
     type Repos = Fakes;
     type Clock = Inert;
     type Hasher = Inert;
@@ -349,7 +372,9 @@ impl<R: SpanReader + SpanPages + Send + Sync + 'static> Stack for TestStack<R> {
     type Webhooks = Inert;
 }
 
-fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppState<TestStack<R>> {
+fn state<R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static>(
+    reader: R,
+) -> AppState<TestStack<R>> {
     let adapters = Adapters {
         clock: Inert::default(),
         hasher: Inert::default(),
@@ -372,7 +397,7 @@ fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppSta
 
 async fn served<R>(reader: R, request: Request<Body>) -> (StatusCode, String)
 where
-    R: SpanReader + SpanPages + Send + Sync + 'static,
+    R: SpanReader + SpanPages + PlacementReader + Send + Sync + 'static,
 {
     let response = explore_router(state(reader))
         .oneshot(request)
@@ -588,7 +613,37 @@ async fn an_exception_on_a_span_reaches_the_waterfall_with_its_place_in_it() {
 type ServiceAsked = (Option<String>, ServiceFilter);
 
 #[derive(Debug, Default)]
-struct Remembering(Mutex<Option<TraceFilter>>, Mutex<Vec<ServiceAsked>>);
+struct Remembering(
+    Mutex<Option<TraceFilter>>,
+    Mutex<Vec<ServiceAsked>>,
+    Mutex<Vec<(Window, Option<ProjectId>)>>,
+);
+
+impl PlacementReader for Remembering {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Placements, StoreError> {
+        self.2.lock().expect("the lock").push((window, project));
+        Ok(Placements {
+            clusters: vec!["prod".into()],
+            namespaces: vec!["shop".into()],
+            workloads: vec![SeenWorkload {
+                kind: WorkloadKind::StatefulSet,
+                name: "postgres".into(),
+                namespace: "shop".into(),
+            }],
+            pods: vec![SeenPod {
+                name: "postgres-0".into(),
+                namespace: "shop".into(),
+                node: "node-a".into(),
+            }],
+            nodes: vec!["node-a".into()],
+        })
+    }
+}
 
 impl Remembering {
     fn services_asked(&self) -> Vec<ServiceAsked> {
@@ -865,4 +920,142 @@ async fn an_empty_environment_is_no_filter() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(asked.services_asked()[0].1.environment, None);
+}
+
+fn placed() -> Placement {
+    Placement {
+        cluster: Some(PlacementName::try_from("prod").expect("a cluster")),
+        namespace: Some(PlacementName::try_from("shop").expect("a namespace")),
+        workload: Some(Workload::try_from("statefulset:postgres").expect("a workload")),
+        pod: Some(PlacementName::try_from("postgres-0").expect("a pod")),
+        node: Some(PlacementName::try_from("node-a").expect("a node")),
+    }
+}
+
+const PLACED: &str =
+    "cluster=prod&namespace=shop&workload=statefulset:postgres&pod=postgres-0&node=node-a";
+
+#[tokio::test]
+async fn a_placement_reaches_the_store_from_every_explore_route() {
+    let asked = Arc::new(Remembering::default());
+    let org = org(MINE);
+    for route in [
+        format!("/api/orgs/{org}/traces?from=1000&to=2000&{PLACED}"),
+        format!("/api/orgs/{org}/services?from=1000&to=2000&{PLACED}"),
+        format!("/api/orgs/{org}/services/checkout/operations?from=1000&to=2000&{PLACED}"),
+        format!("/api/orgs/{org}/services/checkout/series?from=1000&to=2000&{PLACED}"),
+        format!("/api/orgs/{org}/series?from=1000&to=2000&{PLACED}"),
+    ] {
+        let (status, body) =
+            served(Arc::clone(&asked), looking(&route, Some(&session()), true)).await;
+
+        assert_eq!(status, StatusCode::OK, "{route}: {body}");
+    }
+
+    let traced = asked.0.lock().expect("the lock").clone().expect("a filter");
+    assert_eq!(traced.placement, placed());
+    let services = asked.services_asked();
+    assert_eq!(services.len(), 4);
+    for (_, filter) in services {
+        assert_eq!(filter.placement, placed());
+    }
+}
+
+#[tokio::test]
+async fn a_placement_left_blank_filters_nothing() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!(
+        "/api/orgs/{}/services?from=1000&to=2000&pod=&node=%20",
+        org(MINE)
+    );
+
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(asked.services_asked()[0].1.placement.is_empty());
+}
+
+#[tokio::test]
+async fn a_placement_that_is_no_kubernetes_name_is_refused_before_the_store_is_asked() {
+    let asked = Arc::new(Remembering::default());
+    let org = org(MINE);
+    for (route, field) in [
+        (
+            format!("/api/orgs/{org}/traces?from=1000&to=2000&pod=a%20b"),
+            "pod",
+        ),
+        (
+            format!("/api/orgs/{org}/services?from=1000&to=2000&workload=replicaset:api"),
+            "workload",
+        ),
+        (
+            format!("/api/orgs/{org}/series?from=1000&to=2000&namespace=-shop"),
+            "namespace",
+        ),
+        (
+            format!(
+                "/api/orgs/{org}/services/checkout/series?from=1000&to=2000&node={}",
+                "n".repeat(254)
+            ),
+            "node",
+        ),
+        (
+            format!("/api/orgs/{org}/placements?from=1000&to=2000&project=nope"),
+            "project",
+        ),
+    ] {
+        let (status, body) =
+            served(Arc::clone(&asked), looking(&route, Some(&session()), true)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{route}: {body}");
+        if field != "project" {
+            assert!(body.contains(field), "{route}: {body}");
+        }
+    }
+    assert!(asked.0.lock().expect("the lock").is_none());
+    assert!(asked.services_asked().is_empty());
+    assert!(asked.2.lock().expect("the lock").is_empty());
+}
+
+#[tokio::test]
+async fn the_placements_seen_in_a_window_feed_the_pickers() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!(
+        "/api/orgs/{}/placements?from=1000&to=2000&project={}",
+        org(MINE),
+        org(7)
+    );
+
+    let (status, body) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let seen: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(
+        seen,
+        serde_json::json!({
+            "clusters": ["prod"],
+            "namespaces": ["shop"],
+            "workloads": [{"kind": "statefulset", "name": "postgres", "namespace": "shop"}],
+            "pods": [{"name": "postgres-0", "namespace": "shop", "node": "node-a"}],
+            "nodes": ["node-a"],
+        })
+    );
+    let (window, project) = asked.2.lock().expect("the lock")[0];
+    assert_eq!(window.from_unix_nanos(), 1_000_000_000);
+    assert_eq!(window.to_unix_nanos(), 2_000_000_000);
+    assert_eq!(project, Some(ProjectId::new(Uuid::from_u128(7))));
+}
+
+#[tokio::test]
+async fn the_placements_of_a_stranger_or_a_backwards_window_are_refused() {
+    let theirs = format!("/api/orgs/{}/placements?from=1000&to=2000", org(THEIRS));
+    let backwards = format!("/api/orgs/{}/placements?from=2000&to=1000", org(MINE));
+
+    let (stranger, _) = served(NoSpans, looking(&theirs, Some(&session()), true)).await;
+    let (window, _) = served(NoSpans, looking(&backwards, Some(&session()), true)).await;
+    let (anonymous, _) = served(NoSpans, looking(&theirs, None, true)).await;
+
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
+    assert_eq!(window, StatusCode::BAD_REQUEST);
+    assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
 }

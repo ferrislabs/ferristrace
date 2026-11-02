@@ -9,6 +9,8 @@ use ferristrace_domain::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::clickhouse::placement::{Held, Placed};
+
 const SERVED: &str = "FROM spans FINAL \
    WHERE tenant_id = ? \
      AND start_time >= fromUnixTimestamp64Nano(?) \
@@ -17,7 +19,7 @@ const SERVED: &str = "FROM spans FINAL \
      AND (? = 0 OR project_id = ?) \
      AND (? = '' OR attributes['deployment.environment'] = ? \
        OR attributes['deployment.environment.name'] = ?) \
-     AND (? = '' OR service_name = ?)";
+     AND (? = '' OR service_name = ?){placed}";
 
 const MEASURED: &str = "count() AS requests, \
      countIf(status = 'error') AS errors, \
@@ -48,7 +50,7 @@ const WHOLE: &str = "SELECT \
    {served}";
 
 const SUMMARIES: &str = "SELECT \
-     lower(hex(trace_id)) AS trace_id, \
+     lower(hex(trace_id)) AS trace_hex, \
      argMin(service_name, (parent_span_id IS NOT NULL, start_time)) AS root_service, \
      argMin(name, (parent_span_id IS NOT NULL, start_time)) AS root_name, \
      toUnixTimestamp64Nano(min(start_time)) AS started_at, \
@@ -59,7 +61,7 @@ const SUMMARIES: &str = "SELECT \
    WHERE tenant_id = ? \
      AND start_time >= fromUnixTimestamp64Nano(?) \
      AND start_time < fromUnixTimestamp64Nano(?) \
-     AND (? = 0 OR project_id = ?) \
+     AND (? = 0 OR project_id = ?){placed} \
    GROUP BY trace_id \
    HAVING (? = '' OR countIf(service_name = ?) > 0) \
      AND (? = '' OR countIf(positionCaseInsensitive(name, ?) > 0) > 0) \
@@ -125,7 +127,7 @@ struct WholeRow {
 
 #[derive(Debug, Row, Deserialize)]
 struct SummaryRow {
-    trace_id: String,
+    trace_hex: String,
     root_service: String,
     root_name: String,
     started_at: i64,
@@ -173,10 +175,13 @@ impl ClickhouseReader {
     ) -> clickhouse::query::Query {
         let environment = filter.environment.as_deref().unwrap_or_default();
         let service = service.unwrap_or_default();
-        self.client
+        let placed = Placed::of(&filter.placement, Held::Attributes);
+        let query = self
+            .client
             .query(
                 &sql.replace("{measured}", MEASURED)
-                    .replace("{served}", SERVED),
+                    .replace("{served}", SERVED)
+                    .replace("{placed}", &placed.and()),
             )
             .bind(tenant.as_uuid())
             .bind(nanos(filter.window.from_unix_nanos()))
@@ -187,7 +192,8 @@ impl ClickhouseReader {
             .bind(environment)
             .bind(environment)
             .bind(service)
-            .bind(service)
+            .bind(service);
+        placed.bind(query)
     }
 
     async fn summaries(
@@ -273,14 +279,28 @@ impl SpanReader for ClickhouseReader {
     ) -> Result<Vec<TraceSummary>, StoreError> {
         let service = filter.service.as_deref().unwrap_or_default();
         let name = filter.name.as_deref().unwrap_or_default();
-        let rows: Vec<SummaryRow> = self
+        let placed = Placed::of(&filter.placement, Held::Attributes);
+        let touched = if placed.is_empty() {
+            String::new()
+        } else {
+            format!(" AND trace_id IN ({})", placed.spans("trace_id"))
+        };
+        let mut query = self
             .client
-            .query(&SUMMARIES.replace("{order}", ordering(filter.order)))
+            .query(
+                &SUMMARIES
+                    .replace("{order}", ordering(filter.order))
+                    .replace("{placed}", &touched),
+            )
             .bind(tenant.as_uuid())
             .bind(nanos(filter.window.from_unix_nanos()))
             .bind(nanos(filter.window.to_unix_nanos()))
             .bind(u8::from(filter.project.is_some()))
-            .bind(uuid_of(filter.project))
+            .bind(uuid_of(filter.project));
+        if !placed.is_empty() {
+            query = placed.bind_spans(query, tenant, filter.window, filter.project);
+        }
+        let rows: Vec<SummaryRow> = query
             .bind(service)
             .bind(service)
             .bind(name)
@@ -375,7 +395,7 @@ fn ordering(order: TraceOrder) -> &'static str {
 
 fn read_summary(row: SummaryRow) -> Result<TraceSummary, StoreError> {
     Ok(TraceSummary {
-        trace_id: a_trace(&row.trace_id)?,
+        trace_id: a_trace(&row.trace_hex)?,
         root_service: row.root_service.into(),
         root_name: row.root_name.into(),
         started_unix_nanos: unsigned(row.started_at),

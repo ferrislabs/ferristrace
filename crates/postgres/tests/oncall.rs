@@ -169,6 +169,7 @@ async fn a_rule(pg: &Postgres<FixedClock>, crew: &Crew, page: Option<ScheduleId>
                         operation: None,
                         environment: None,
                         measure: TraceMeasure::ErrorRate,
+                        placement: ferristrace_domain::Placement::default(),
                     }),
                     condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
                     window_secs: 300,

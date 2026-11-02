@@ -19,6 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried, reading};
+use crate::placement::PlacementBody;
 use crate::state::AppState;
 
 pub fn alert_router<S: Stack>(state: AppState<S>) -> Router
@@ -56,6 +57,8 @@ enum SignalBody {
         #[serde(default)]
         environment: Option<String>,
         measure: String,
+        #[serde(default, skip_serializing_if = "PlacementBody::is_empty")]
+        placement: PlacementBody,
     },
     Logs {
         #[serde(default)]
@@ -68,6 +71,8 @@ enum SignalBody {
         attrs: Vec<String>,
         #[serde(default = "counted")]
         measure: String,
+        #[serde(default, skip_serializing_if = "PlacementBody::is_empty")]
+        placement: PlacementBody,
     },
     Metrics {
         name: String,
@@ -97,6 +102,7 @@ impl SignalBody {
                 operation: traces.operation.as_deref().map(ToOwned::to_owned),
                 environment: traces.environment.as_deref().map(ToOwned::to_owned),
                 measure: traces.measure.as_str().to_owned(),
+                placement: PlacementBody::of(&traces.placement),
             },
             Signal::Logs(logs) => Self::Logs {
                 services: logs.services.iter().map(ToString::to_string).collect(),
@@ -112,6 +118,7 @@ impl SignalBody {
                     .map(|(key, value)| format!("{key}={value}"))
                     .collect(),
                 measure: counted(),
+                placement: PlacementBody::of(&logs.placement),
             },
             Signal::Metrics(metric) => Self::Metrics {
                 name: metric.name.to_string(),
@@ -133,11 +140,15 @@ impl SignalBody {
                 operation,
                 environment,
                 measure,
+                placement,
             } => Ok(Signal::Traces(TraceSignal {
                 service: given(service),
                 operation: given(operation),
                 environment: given(environment),
                 measure: TraceMeasure::parse(&measure).ok_or(AlertRefused::Malformed("measure"))?,
+                placement: placement
+                    .placement()
+                    .map_err(|_| AlertRefused::Malformed("placement"))?,
             })),
             Self::Logs {
                 services,
@@ -145,6 +156,7 @@ impl SignalBody {
                 q,
                 attrs,
                 measure,
+                placement,
             } => {
                 if measure != "count" {
                     return Err(AlertRefused::Malformed("measure"));
@@ -171,6 +183,9 @@ impl SignalBody {
                                 .ok_or(AlertRefused::Malformed("attrs"))
                         })
                         .collect::<Result<_, _>>()?,
+                    placement: placement
+                        .placement()
+                        .map_err(|_| AlertRefused::Malformed("placement"))?,
                 }))
             }
             Self::Metrics {

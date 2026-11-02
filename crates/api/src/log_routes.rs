@@ -16,6 +16,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
+use crate::placement::{Misplaced, PlacementBody};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -136,6 +137,7 @@ fn cursor_of(spelling: &str) -> Result<LogCursor, LogRefused> {
 
 #[derive(Debug, Default)]
 struct Asked {
+    placement: PlacementBody,
     from: Option<u64>,
     to: Option<u64>,
     services: Vec<Box<str>>,
@@ -183,7 +185,9 @@ impl TryFrom<Vec<(String, String)>> for Asked {
                 "limit" => asked.limit = Some(value.to_owned()),
                 "before" => asked.before = Some(value.to_owned()),
                 "buckets" => asked.buckets = Some(number(value, "buckets")?),
-                _ => {}
+                other => {
+                    asked.placement.hold(other, value);
+                }
             }
         }
         Ok(asked)
@@ -201,6 +205,7 @@ impl Asked {
         )
         .map_err(|_| LogRefused::Window)?;
         let mut query = LogQuery::over(window);
+        query.placement = self.placement.placement()?;
         query.services = self.services;
         query.severities = self.severities;
         query.text = self.text;
@@ -287,6 +292,8 @@ pub enum LogRefused {
     #[error("the {0} parameter is not well formed")]
     Malformed(&'static str),
     #[error(transparent)]
+    Placement(#[from] Misplaced),
+    #[error(transparent)]
     OutOfRange(#[from] BadLogQuery),
     #[error("the logs could not be read")]
     Unavailable,
@@ -307,7 +314,7 @@ impl IntoResponse for LogRefused {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
             Self::NoSuchOrg => StatusCode::NOT_FOUND,
-            Self::Window | Self::Malformed(_) => StatusCode::BAD_REQUEST,
+            Self::Window | Self::Malformed(_) | Self::Placement(_) => StatusCode::BAD_REQUEST,
             Self::OutOfRange(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };

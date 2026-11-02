@@ -5,6 +5,7 @@ use super::entities::{Exemplar, Metric};
 use super::errors::{BadAggregation, BadMetricKind, BadMetricQuery};
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
+use crate::placement::Placement;
 use crate::telemetry::DecompressedBytes;
 
 pub const STEPS: u64 = 60;
@@ -160,6 +161,7 @@ pub struct MetricQuery {
     pub group_by: Vec<Box<str>>,
     pub aggregation: Option<Aggregation>,
     pub project: Option<ProjectId>,
+    pub placement: Placement,
 }
 
 impl MetricQuery {
@@ -170,6 +172,7 @@ impl MetricQuery {
             group_by: Vec::new(),
             aggregation: None,
             project: None,
+            placement: Placement::default(),
         }
     }
 

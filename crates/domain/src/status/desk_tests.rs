@@ -78,6 +78,7 @@ impl World {
                         operation: None,
                         environment: None,
                         measure: TraceMeasure::ErrorRate,
+                        placement: crate::placement::Placement::default(),
                     }),
                     condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
                     window_secs: 300,

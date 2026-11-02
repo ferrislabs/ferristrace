@@ -6,6 +6,7 @@ mod metric_read;
 mod metric_rows;
 mod metric_sink;
 mod migrate;
+mod placement;
 mod read;
 mod rows;
 mod sink;
