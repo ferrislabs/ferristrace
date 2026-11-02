@@ -89,7 +89,13 @@ async fn main() -> anyhow::Result<()> {
                 issue_store: grouping,
                 oidc: oidc_of(&config).await?,
             };
-            Some(control_plane(&config, pool, gallery, Arc::clone(&meter), optional).await?)
+            Some(control_plane(
+                &config,
+                pool,
+                gallery,
+                Arc::clone(&meter),
+                optional,
+            )?)
         }
         None => None,
     };
@@ -142,7 +148,7 @@ async fn provision(command: Command, config: &Config) -> anyhow::Result<()> {
     run_command(command, config, &app, INVITE_WINDOW).await
 }
 
-async fn control_plane(
+fn control_plane(
     config: &Config,
     pool: &PgPool,
     gallery: Gallery,

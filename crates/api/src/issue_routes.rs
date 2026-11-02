@@ -56,6 +56,7 @@ pub struct Decided {
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
+    #[allow(clippy::option_option)]
     owner: Option<Option<Uuid>>,
 }
 

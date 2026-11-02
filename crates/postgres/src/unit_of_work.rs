@@ -121,6 +121,7 @@ impl<C> Postgres<C> {
 impl<C: Send + Sync + 'static> UnitOfWork for Postgres<C> {
     type Tx = SharedTx;
 
+    #[allow(clippy::manual_async_fn)]
     fn transaction<T, E, F, Fut>(
         &self,
         unavailable: impl Fn() -> E + Send,

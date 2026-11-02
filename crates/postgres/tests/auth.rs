@@ -1021,9 +1021,9 @@ async fn an_account_cannot_revoke_a_session_it_does_not_keep() {
     let theirs = an_account(&pool, "other@example.com", Some("secret")).await;
     let sessions = backend::sessions(&pg);
     let hers = sessions.issue(theirs, None, None).await.expect("a session");
-    let here = sessions.issue(theirs, None, None).await.expect("another");
+    let current_one = sessions.issue(theirs, None, None).await.expect("another");
     let named = sessions
-        .live(theirs, &here)
+        .live(theirs, &current_one)
         .await
         .expect("a roll")
         .iter()

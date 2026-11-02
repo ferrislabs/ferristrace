@@ -107,14 +107,14 @@ impl<C: Clock + Clone + Send + Sync> ControlPlane for PostgresControlPlane<C> {
         project: Option<ProjectId>,
     ) -> Result<IngestKey, ProvisionError> {
         let mut tx = self.tx.lock().await;
-        issue_on(&mut **tx, org, project.map(ProjectId::as_uuid))
+        issue_on(&mut tx, org, project.map(ProjectId::as_uuid))
             .await
             .map_err(|error| unreachable(&error))
     }
 
     async fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError> {
         let mut tx = self.tx.lock().await;
-        revoke_on(&mut **tx, prefix, self.clock.now())
+        revoke_on(&mut tx, prefix, self.clock.now())
             .await
             .map_err(|error| unreachable(&error))
     }

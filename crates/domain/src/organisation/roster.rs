@@ -75,17 +75,16 @@ where
     ) -> Result<Invitation, RosterError> {
         let who = self.standing(token, org, OrgRole::Admin).await?;
         owners_only(&who, org, [role])?;
-        let (holder, way_in) = match self.roll.standing_of(email).await? {
-            Some(holder) => (holder, None),
-            None => {
-                let account = self.roll.create_locked(email).await?;
-                let holder = Holder {
-                    account,
-                    name: None,
-                    photo: None,
-                };
-                (holder, Some(ResetToken::random()))
-            }
+        let (holder, way_in) = if let Some(holder) = self.roll.standing_of(email).await? {
+            (holder, None)
+        } else {
+            let account = self.roll.create_locked(email).await?;
+            let holder = Holder {
+                account,
+                name: None,
+                photo: None,
+            };
+            (holder, Some(ResetToken::random()))
         };
         let joined = self
             .roll

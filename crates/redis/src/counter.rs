@@ -74,7 +74,7 @@ impl<C: Clock + Send + Sync> HourlyCounters for RedisMeter<C> {
                 .arg(SCAN_BATCH)
                 .query_async(&mut connection)
                 .await
-                .map_err(refused)?;
+                .map_err(|error| refused(&error))?;
 
             for key in keys {
                 let Some(tenant) = tenant_of(&key) else {
@@ -83,7 +83,7 @@ impl<C: Clock + Send + Sync> HourlyCounters for RedisMeter<C> {
                 let Some(total) = connection
                     .get::<_, Option<u64>>(&key)
                     .await
-                    .map_err(refused)?
+                    .map_err(|error| refused(&error))?
                 else {
                     continue;
                 };
@@ -105,7 +105,10 @@ impl<C: Clock + Send + Sync> HourlyCounters for RedisMeter<C> {
     async fn discard(&self, total: HourTotal) -> Result<(), CounterUnreachable> {
         let mut connection = self.connection.clone();
         let key = format!("{}:{}:{}", self.prefix, total.tenant, total.hour.key());
-        let _: u64 = connection.del(&key).await.map_err(refused)?;
+        let _: u64 = connection
+            .del(&key)
+            .await
+            .map_err(|error| refused(&error))?;
         Ok(())
     }
 
@@ -119,18 +122,18 @@ impl<C: Clock + Send + Sync> HourlyCounters for RedisMeter<C> {
         let claimed: bool = connection
             .set_nx(&key, total.get())
             .await
-            .map_err(refused)?;
+            .map_err(|error| refused(&error))?;
         if claimed {
             let _: bool = connection
                 .expire(&key, KEY_TTL_SECONDS)
                 .await
-                .map_err(refused)?;
+                .map_err(|error| refused(&error))?;
         }
         Ok(claimed)
     }
 }
 
-fn refused(error: redis::RedisError) -> CounterUnreachable {
+fn refused(error: &redis::RedisError) -> CounterUnreachable {
     tracing::error!(%error, "the usage counter store refused the command");
     CounterUnreachable
 }

@@ -13,6 +13,7 @@ const HTTP_STATUS_CODE: &str = "http.status_code";
 
 pub(crate) const EXCEPTION_TYPE: &str = "exception.type";
 pub(crate) const EXCEPTION_MESSAGE: &str = "exception.message";
+#[cfg(test)]
 pub(crate) const EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr)]

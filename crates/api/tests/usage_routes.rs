@@ -141,7 +141,7 @@ impl Untransacted for Fakes {}
 impl RepoFor<domain::Sessions> for Fakes {
     type Repo = OneSession;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         OneSession
     }
 }
@@ -149,7 +149,7 @@ impl RepoFor<domain::Sessions> for Fakes {
 impl RepoFor<domain::Memberships> for Fakes {
     type Repo = MemberOfMine;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         MemberOfMine
     }
 }
@@ -157,7 +157,7 @@ impl RepoFor<domain::Memberships> for Fakes {
 impl RepoFor<domain::UsageHistory> for Fakes {
     type Repo = Rolled;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         Rolled {
             included: self.included,
         }

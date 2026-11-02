@@ -4,15 +4,16 @@ use ferristrace_domain::{Bootstrapped, ProvisionError};
 
 use crate::fakes::{Probing, a_name, a_token, the_email, the_org, the_policy};
 use crate::recording::{Handle, Recording};
+use crate::testing::Inert;
 use crate::{Adapters, Ferristrace, Stack, repository, transactional};
 
 fn adapters() -> Adapters<Probing> {
     Adapters {
-        clock: Default::default(),
-        hasher: Default::default(),
-        mailer: Default::default(),
+        clock: Inert::default(),
+        hasher: Inert::default(),
+        mailer: Inert::default(),
         photos: ferristrace_domain::NoPhotos,
-        meter: Default::default(),
+        meter: Inert::default(),
         span_store: None,
         issue_store: None,
         oidc: None,

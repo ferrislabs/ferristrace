@@ -365,7 +365,7 @@ where
 {
     type Repo = Sessioned<S>;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         Sessioned(self.sessions.clone())
     }
 }
@@ -377,7 +377,7 @@ where
 {
     type Repo = M;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         self.memberships.clone()
     }
 }
@@ -389,7 +389,7 @@ where
 {
     type Repo = A;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         self.accounts.clone()
     }
 }
@@ -401,7 +401,7 @@ where
 {
     type Repo = Gated<F>;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         Gated(self.gate.clone())
     }
 }
@@ -413,7 +413,7 @@ where
 {
     type Repo = R;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         self.resets.clone()
     }
 }
@@ -425,7 +425,7 @@ where
 {
     type Repo = W;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         self.flows.clone()
     }
 }
@@ -437,13 +437,15 @@ where
 {
     type Repo = L;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         self.local.clone()
     }
 }
 
+type Unowned<T> = PhantomData<fn() -> T>;
+
 #[derive(Debug)]
-pub struct Wired<R, H, M, P, Z>(PhantomData<fn() -> (R, H, M, P, Z)>);
+pub struct Wired<R, H, M, P, Z>(Unowned<(R, H, M, P, Z)>);
 
 impl<R, H, M, P, Z> Stack for Wired<R, H, M, P, Z>
 where

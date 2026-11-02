@@ -249,7 +249,7 @@ impl Untransacted for Fakes {}
 impl RepoFor<domain::Sessions> for Fakes {
     type Repo = OneSession;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         OneSession
     }
 }
@@ -257,7 +257,7 @@ impl RepoFor<domain::Sessions> for Fakes {
 impl RepoFor<domain::Memberships> for Fakes {
     type Repo = MemberOfMine;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         MemberOfMine(self.role)
     }
 }
@@ -265,7 +265,7 @@ impl RepoFor<domain::Memberships> for Fakes {
 impl RepoFor<domain::Roster> for Fakes {
     type Repo = Arc<Kept>;
 
-    fn build(&self, _: &()) -> Self::Repo {
+    fn build(&self, (): &()) -> Self::Repo {
         Arc::clone(&self.kept)
     }
 }

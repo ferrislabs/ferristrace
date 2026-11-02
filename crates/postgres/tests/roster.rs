@@ -26,21 +26,20 @@ async fn admit(
     way_in: SecretHash,
 ) -> Result<Admitted, ferristrace_domain::StoreError> {
     let backing = roster_backend(pool);
-    let roll = backend::roster(&backing);
-    let standing = roll.standing_of(email).await?;
-    let (holder, created) = match standing {
-        Some(holder) => (holder, false),
-        None => {
-            let account = roll.create_locked(email).await?;
-            let holder = ferristrace_domain::organisation::Holder {
-                account,
-                name: None,
-                photo: None,
-            };
-            (holder, true)
-        }
+    let roster = backend::roster(&backing);
+    let standing = roster.standing_of(email).await?;
+    let (holder, created) = if let Some(holder) = standing {
+        (holder, false)
+    } else {
+        let account = roster.create_locked(email).await?;
+        let holder = ferristrace_domain::organisation::Holder {
+            account,
+            name: None,
+            photo: None,
+        };
+        (holder, true)
     };
-    let Some(joined) = roll.join(org, holder.account, role).await? else {
+    let Some(joined) = roster.join(org, holder.account, role).await? else {
         return Ok(Admitted::AlreadyIn);
     };
     let member = Member {
@@ -54,7 +53,7 @@ async fn admit(
     if !created {
         return Ok(Admitted::Standing(member));
     }
-    roll.open_way_in(holder.account, way_in).await?;
+    roster.open_way_in(holder.account, way_in).await?;
     Ok(Admitted::Awaiting(member))
 }
 

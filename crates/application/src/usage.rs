@@ -36,6 +36,7 @@ where
     S::Repos: RepoFor<domain::UsageHistory, Repo: UsageLedger>,
     S::Meter: HourlyCounters,
 {
+    #[allow(clippy::manual_async_fn)]
     pub fn roll_up_usage(&self) -> impl Future<Output = Result<usize, UsageSyncError>> + Send {
         async move {
             let hour = BillingHour::containing(self.clock.now()).previous();
@@ -48,6 +49,7 @@ where
         }
     }
 
+    #[allow(clippy::manual_async_fn)]
     pub fn rehydrate_usage(&self) -> impl Future<Output = Result<usize, UsageSyncError>> + Send {
         async move {
             let month = BillingMonth::containing(self.clock.now());
