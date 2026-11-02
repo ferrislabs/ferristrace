@@ -4,8 +4,8 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::billing::BillingHour;
-use super::entities::Span;
-use super::errors::{BadRetention, InvalidId};
+use super::entities::{LogRecord, Span};
+use super::errors::{BadRetention, BadSeverity, InvalidId};
 use crate::catalogue::ProjectId;
 use crate::secret::split_key;
 
@@ -73,6 +73,72 @@ pub struct SpanEvent {
 pub struct Payload {
     pub spans: Vec<Span>,
     pub decompressed: DecompressedBytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogPayload {
+    pub records: Vec<LogRecord>,
+    pub decompressed: DecompressedBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Severity {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Fatal,
+}
+
+impl Severity {
+    pub const ALL: [Self; 6] = [
+        Self::Trace,
+        Self::Debug,
+        Self::Info,
+        Self::Warn,
+        Self::Error,
+        Self::Fatal,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+            Self::Fatal => "fatal",
+        }
+    }
+
+    pub fn rank(self) -> usize {
+        match self {
+            Self::Trace => 0,
+            Self::Debug => 1,
+            Self::Info => 2,
+            Self::Warn => 3,
+            Self::Error => 4,
+            Self::Fatal => 5,
+        }
+    }
+}
+
+impl TryFrom<&str> for Severity {
+    type Error = BadSeverity;
+
+    fn try_from(spelling: &str) -> Result<Self, BadSeverity> {
+        Self::ALL
+            .into_iter()
+            .find(|severity| severity.name() == spelling)
+            .ok_or(BadSeverity)
+    }
+}
+
+impl fmt::Display for Severity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]

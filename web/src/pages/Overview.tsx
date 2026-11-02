@@ -4,18 +4,17 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState, Kpi, PageHeader, ServiceDot, SeverityBadge } from '@/components/ft/bits'
 import { LineChart } from '@/components/ft/charts'
-import { useLogs } from '@/data/logs'
 import { DEPLOY_MARKERS, useOverviewSeries } from '@/data/series'
 import { useMock } from '@/data/seam'
 import { useServices } from '@/data/services'
 import { AN_HOUR, ANY, useTraces } from '@/data/traces'
 import { otlpEndpoint } from '@/data/onboarding'
-import { PROJECTS } from '@/mocks/mock'
+import { LOGS, PROJECTS } from '@/mocks/mock'
 import { cn } from '@/lib/utils'
 
 export function Overview() {
   const all = useServices()
-  const logs = useLogs()
+  const logs = useMock(['logs'], () => LOGS)
   const { rows: slow } = useTraces({ ...ANY, rangeMs: AN_HOUR, order: 'duration', limit: 5 })
   const projects = useMock(['organisation', 'projects'], () => PROJECTS)
   const series = useOverviewSeries()

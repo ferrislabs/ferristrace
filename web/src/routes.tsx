@@ -126,7 +126,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/infra/docker', Docker),
     inShell('/traces', Traces, {}),
     inShell('/traces/$id', TraceDetail, {}),
-    inShell('/logs', Logs),
+    inShell('/logs', Logs, {}),
     inShell('/metrics', Metrics),
     inShell('/backend/$view', () => <SignalPage group="backend" />),
     inShell('/frontend/$view', () => <SignalPage group="frontend" />),

@@ -174,6 +174,7 @@ impl Stack for TestStack {
     type Photos = NoPhotos;
     type SpanStore = Inert;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Live;
     type Oidc = Inert;
     type Sink = Inert;
@@ -191,6 +192,7 @@ fn state(live: u64, included: Option<u64>) -> AppState<TestStack> {
         meter: Live(live),
         span_store: None,
         issue_store: None,
+        log_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

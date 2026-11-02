@@ -20,19 +20,20 @@ mod value_objects;
 mod value_objects_tests;
 
 pub use billing::{BillingHour, BillingMonth};
-pub use entities::Span;
+pub use entities::{LogRecord, Span};
 pub use errors::{
-    BadRetention, CounterUnreachable, IngestError, InvalidId, SinkError, UnknownKey, UsageSyncError,
+    BadRetention, BadSeverity, CounterUnreachable, IngestError, InvalidId, SinkError, UnknownKey,
+    UsageSyncError,
 };
 pub use ingest::Ingest;
 pub use metering::Metering;
 pub use ports::{
-    HourlyCounters, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageHistory, UsageLedger,
-    UsageMeter, UsageReader,
+    HourlyCounters, LogSink, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageHistory,
+    UsageLedger, UsageMeter, UsageReader,
 };
 pub use quota::{Allowance, StaticQuota};
 pub use value_objects::{
-    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, MAX_RETENTION_DAYS,
-    MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope, SpanEvent, SpanId, SpanKind,
-    SpanStatus, TenantId, TraceId,
+    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, LogPayload,
+    MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope, Severity,
+    SpanEvent, SpanId, SpanKind, SpanStatus, TenantId, TraceId,
 };

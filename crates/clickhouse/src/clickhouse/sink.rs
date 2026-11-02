@@ -117,18 +117,26 @@ impl<C: Clock + Send + Sync> SpanSink for ClickhouseSink<C> {
     }
 }
 
-fn expiry(now: UnixSeconds, default: Duration, chosen: Option<RetentionDays>) -> UnixSeconds {
+pub(crate) fn expiry(
+    now: UnixSeconds,
+    default: Duration,
+    chosen: Option<RetentionDays>,
+) -> UnixSeconds {
     now.saturating_add_secs(chosen.map_or_else(|| default.as_secs(), RetentionDays::seconds))
 }
 
-fn inserter<R: clickhouse::Row>(client: &Client, table: &str, limits: BatchLimits) -> Inserter<R> {
+pub(crate) fn inserter<R: clickhouse::Row>(
+    client: &Client,
+    table: &str,
+    limits: BatchLimits,
+) -> Inserter<R> {
     client
         .inserter::<R>(table)
         .with_max_rows(limits.max_rows)
         .with_period(Some(limits.period))
 }
 
-fn refused(error: &ClickhouseError) -> SinkError {
+pub(crate) fn refused(error: &ClickhouseError) -> SinkError {
     tracing::error!(%error, "the span store refused a batch");
     SinkError::Unavailable
 }

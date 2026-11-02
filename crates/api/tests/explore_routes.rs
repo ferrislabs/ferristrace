@@ -287,6 +287,7 @@ impl<R: SpanReader + SpanPages + Send + Sync + 'static> Stack for TestStack<R> {
     type Photos = NoPhotos;
     type SpanStore = R;
     type IssueStore = Inert;
+    type LogStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
     type Sink = Inert;
@@ -303,6 +304,7 @@ fn state<R: SpanReader + SpanPages + Send + Sync + 'static>(reader: R) -> AppSta
         meter: Inert::default(),
         span_store: Some(reader),
         issue_store: None,
+        log_store: None,
         oidc: None,
         provision: ProvisionPolicy::default(),
     };

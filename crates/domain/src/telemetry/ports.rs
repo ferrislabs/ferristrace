@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use super::billing::{BillingHour, BillingMonth};
-use super::entities::Span;
+use super::entities::{LogRecord, Span};
 use super::errors::{CounterUnreachable, SinkError, UnknownKey};
 use super::value_objects::{
     Admission, Consumed, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Scope, TenantId,
@@ -34,6 +34,34 @@ impl<T: SpanSink + Send + Sync> SpanSink for std::sync::Arc<T> {
         spans: Vec<Span>,
     ) -> impl Future<Output = Result<(), SinkError>> + Send {
         self.as_ref().accept(scope, spans)
+    }
+}
+
+pub trait LogSink {
+    fn accept_logs(
+        &self,
+        scope: Scope,
+        records: Vec<LogRecord>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send;
+}
+
+impl<T: LogSink + Sync> LogSink for &T {
+    fn accept_logs(
+        &self,
+        scope: Scope,
+        records: Vec<LogRecord>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        (*self).accept_logs(scope, records)
+    }
+}
+
+impl<T: LogSink + Send + Sync> LogSink for std::sync::Arc<T> {
+    fn accept_logs(
+        &self,
+        scope: Scope,
+        records: Vec<LogRecord>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        self.as_ref().accept_logs(scope, records)
     }
 }
 

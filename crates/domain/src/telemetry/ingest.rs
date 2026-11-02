@@ -1,6 +1,8 @@
 use super::errors::IngestError;
-use super::ports::{QuotaPolicy, SpanSink, TenantDirectory, UsageMeter};
-use super::value_objects::{Admission, IngestKey, Payload, TenantId};
+use super::ports::{LogSink, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter};
+use super::value_objects::{
+    Admission, DecompressedBytes, IngestKey, LogPayload, Payload, Scope, TenantId,
+};
 
 #[derive(Debug, Clone)]
 pub struct Ingest<D, Q, S, M> {
@@ -14,7 +16,6 @@ impl<D, Q, S, M> Ingest<D, Q, S, M>
 where
     D: TenantDirectory,
     Q: QuotaPolicy,
-    S: SpanSink,
     M: UsageMeter,
 {
     pub fn new(directory: D, quota: Q, sink: S, meter: M) -> Self {
@@ -26,17 +27,53 @@ where
         }
     }
 
-    pub async fn accept(&self, key: &IngestKey, payload: Payload) -> Result<TenantId, IngestError> {
+    async fn admit(
+        &self,
+        key: &IngestKey,
+        decompressed: DecompressedBytes,
+    ) -> Result<Scope, IngestError> {
         let scope = self.directory.resolve(key).await?;
-        if let Admission::Capped { allowance } =
-            self.quota.admit(scope.tenant, payload.decompressed).await
+        if let Admission::Capped { allowance } = self.quota.admit(scope.tenant, decompressed).await
         {
             return Err(IngestError::Capped { allowance });
         }
+        Ok(scope)
+    }
+
+    async fn metered(&self, scope: Scope, decompressed: DecompressedBytes) -> TenantId {
+        self.meter.record_ingest(scope.tenant, decompressed).await;
+        scope.tenant
+    }
+}
+
+impl<D, Q, S, M> Ingest<D, Q, S, M>
+where
+    D: TenantDirectory,
+    Q: QuotaPolicy,
+    S: SpanSink,
+    M: UsageMeter,
+{
+    pub async fn accept(&self, key: &IngestKey, payload: Payload) -> Result<TenantId, IngestError> {
+        let scope = self.admit(key, payload.decompressed).await?;
         self.sink.accept(scope, payload.spans).await?;
-        self.meter
-            .record_ingest(scope.tenant, payload.decompressed)
-            .await;
-        Ok(scope.tenant)
+        Ok(self.metered(scope, payload.decompressed).await)
+    }
+}
+
+impl<D, Q, S, M> Ingest<D, Q, S, M>
+where
+    D: TenantDirectory,
+    Q: QuotaPolicy,
+    S: LogSink,
+    M: UsageMeter,
+{
+    pub async fn accept_logs(
+        &self,
+        key: &IngestKey,
+        payload: LogPayload,
+    ) -> Result<TenantId, IngestError> {
+        let scope = self.admit(key, payload.decompressed).await?;
+        self.sink.accept_logs(scope, payload.records).await?;
+        Ok(self.metered(scope, payload.decompressed).await)
     }
 }

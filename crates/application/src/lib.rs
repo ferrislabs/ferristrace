@@ -9,6 +9,7 @@ mod export;
 mod identity;
 mod ingestion;
 mod issues;
+mod logs;
 mod organisation;
 mod profile;
 mod provisioning;

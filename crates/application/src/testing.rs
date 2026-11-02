@@ -3,13 +3,14 @@ use core::future::Future;
 pub use ferristrace_domain::testing::Notebook;
 use ferristrace_domain::{
     AccountId, Admission, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditFilter, AuditPage,
-    AuditTrail, AuthError, AuthProvider, Authorizer, Clock, Counted, DecompressedBytes, Email,
-    Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
-    KeyScopes, Mailer, Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher,
-    PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity,
-    Scope, ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader, SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
+    AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock, Counted, DecompressedBytes,
+    Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
+    KeyScopes, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Occurrence,
+    PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId,
+    QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity, Scope, ServiceSummary,
+    SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink,
+    StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -163,6 +164,27 @@ impl AuthProvider for Inert {
 impl SpanSink for Inert {
     async fn accept(&self, _scope: Scope, _spans: Vec<Span>) -> Result<(), SinkError> {
         Ok(())
+    }
+}
+
+impl LogSink for Inert {
+    async fn accept_logs(&self, _scope: Scope, _records: Vec<LogRecord>) -> Result<(), SinkError> {
+        Ok(())
+    }
+}
+
+impl LogReader for Inert {
+    async fn search(&self, _org: TenantId, _query: &LogQuery) -> Result<LogPage, StoreError> {
+        Ok(LogPage::default())
+    }
+
+    async fn histogram(
+        &self,
+        _org: TenantId,
+        _query: &LogQuery,
+        _buckets: Buckets,
+    ) -> Result<Vec<LogBucket>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

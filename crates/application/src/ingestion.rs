@@ -1,4 +1,4 @@
-use ferristrace_domain::{Ingest, IngestError, IngestKey, Payload, TenantId};
+use ferristrace_domain::{Ingest, IngestError, IngestKey, LogPayload, Payload, TenantId};
 
 use crate::Stack;
 
@@ -16,5 +16,13 @@ impl<S: Stack> Ingestion<S> {
 
     pub async fn accept(&self, key: &IngestKey, payload: Payload) -> Result<TenantId, IngestError> {
         self.ingest.accept(key, payload).await
+    }
+
+    pub async fn accept_logs(
+        &self,
+        key: &IngestKey,
+        payload: LogPayload,
+    ) -> Result<TenantId, IngestError> {
+        self.ingest.accept_logs(key, payload).await
     }
 }

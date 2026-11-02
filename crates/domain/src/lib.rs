@@ -9,6 +9,7 @@ pub mod explore;
 pub mod export;
 pub mod identity;
 pub mod issue;
+pub mod logs;
 pub mod organisation;
 pub mod profile;
 pub mod provisioning;
@@ -54,6 +55,10 @@ pub use issue::{
     IssueError, IssueFilter, IssueReader, Issues, Occurrence, PRINT_BYTES, Recorded, Status,
     fingerprint, normalise,
 };
+pub use logs::{
+    BadLogQuery, Buckets, DEFAULT_BUCKETS, DEFAULT_LOG_LIMIT, LogBucket, LogCursor, LogPage,
+    LogQuery, LogReader, LogSearch, MAX_BUCKETS, MAX_LOG_LIMIT,
+};
 pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
     OrgName, OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError,
@@ -70,10 +75,11 @@ pub use provisioning::{
 pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use store::StoreError;
 pub use telemetry::{
-    Admission, Allowance, BadRetention, BillingHour, BillingMonth, Consumed, Consumption,
-    CounterUnreachable, DecompressedBytes, HourTotal, HourlyCounters, Ingest, IngestError,
-    IngestKey, InvalidId, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, Metering, MonthTotal, Payload,
-    QuotaPolicy, RetentionDays, Scope, SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink,
-    SpanStatus, StaticQuota, TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered,
-    UsageHistory, UsageLedger, UsageMeter, UsageReader, UsageSyncError,
+    Admission, Allowance, BadRetention, BadSeverity, BillingHour, BillingMonth, Consumed,
+    Consumption, CounterUnreachable, DecompressedBytes, HourTotal, HourlyCounters, Ingest,
+    IngestError, IngestKey, InvalidId, LogPayload, LogRecord, LogSink, MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS, Metering, MonthTotal, Payload, QuotaPolicy, RetentionDays, Scope, Severity,
+    SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, StaticQuota,
+    TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered, UsageHistory, UsageLedger,
+    UsageMeter, UsageReader, UsageSyncError,
 };

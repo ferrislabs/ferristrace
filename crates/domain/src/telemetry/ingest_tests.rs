@@ -3,13 +3,13 @@ use std::future::Future;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use super::entities::Span;
+use super::entities::{LogRecord, Span};
 use super::errors::{IngestError, SinkError, UnknownKey};
 use super::ingest::Ingest;
-use super::ports::{QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageMeter};
+use super::ports::{LogSink, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageMeter};
 use super::value_objects::{
-    Admission, DecompressedBytes, IngestKey, Payload, RetentionDays, Scope, SpanId, SpanKind,
-    SpanStatus, TenantId, TraceId,
+    Admission, DecompressedBytes, IngestKey, LogPayload, Payload, RetentionDays, Scope, Severity,
+    SpanId, SpanKind, SpanStatus, TenantId, TraceId,
 };
 use crate::testing;
 
@@ -358,4 +358,135 @@ async fn the_retention_the_directory_resolved_reaches_the_sink() {
         .expect("the key resolves");
 
     assert_eq!(sink.batches()[0].0.retention, Some(week));
+}
+
+#[derive(Debug, Default)]
+struct RecordingLogs(Mutex<Vec<(Scope, Vec<LogRecord>)>>);
+
+impl RecordingLogs {
+    fn batches(&self) -> Vec<(Scope, Vec<LogRecord>)> {
+        self.0.lock().expect("sink lock").clone()
+    }
+}
+
+impl LogSink for RecordingLogs {
+    fn accept_logs(
+        &self,
+        scope: Scope,
+        records: Vec<LogRecord>,
+    ) -> impl Future<Output = Result<(), SinkError>> + Send {
+        self.0.lock().expect("sink lock").push((scope, records));
+        async { Ok(()) }
+    }
+}
+
+impl LogSink for UnavailableSink {
+    async fn accept_logs(&self, _scope: Scope, _records: Vec<LogRecord>) -> Result<(), SinkError> {
+        Err(SinkError::Unavailable)
+    }
+}
+
+fn a_log() -> LogRecord {
+    LogRecord {
+        time_unix_nanos: 5,
+        observed_unix_nanos: 6,
+        severity: Severity::Error,
+        severity_number: 17,
+        service_name: "checkout".into(),
+        body: "payment declined".into(),
+        attributes: BTreeMap::new(),
+        resource: BTreeMap::new(),
+        trace_id: None,
+        span_id: None,
+    }
+}
+
+fn some_logs(bytes: u64) -> LogPayload {
+    LogPayload {
+        records: vec![a_log(), a_log()],
+        decompressed: DecompressedBytes::new(bytes),
+    }
+}
+
+#[tokio::test]
+async fn a_known_key_sends_its_logs_under_its_scope_and_meters_them_once() {
+    let tenant = TenantId::new(Uuid::from_u128(42));
+    let week = RetentionDays::try_from(7).expect("a week");
+    let scope = Scope::of(tenant).retained_for(Some(week));
+    let sink = RecordingLogs::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(RetainingDirectory(scope), Unmetered, &sink, &meter);
+
+    let resolved = ingest
+        .accept_logs(&IngestKey::from_plaintext("live"), some_logs(2048))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(resolved, tenant);
+    assert_eq!(sink.batches(), vec![(scope, vec![a_log(), a_log()])]);
+    assert_eq!(
+        meter.readings(),
+        vec![(tenant, DecompressedBytes::new(2048))],
+        "one export is one meter record, however many records it carries"
+    );
+}
+
+#[tokio::test]
+async fn logs_from_an_unknown_key_reach_neither_the_sink_nor_the_meter() {
+    let sink = RecordingLogs::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(FakeDirectory::default(), Unmetered, &sink, &meter);
+
+    let outcome = ingest
+        .accept_logs(&IngestKey::from_plaintext("absent"), some_logs(512))
+        .await;
+
+    assert_eq!(outcome, Err(IngestError::UnknownKey(UnknownKey)));
+    assert!(sink.batches().is_empty());
+    assert!(meter.readings().is_empty());
+}
+
+#[tokio::test]
+async fn logs_over_the_cap_are_refused_like_spans() {
+    let tenant = TenantId::new(Uuid::from_u128(4));
+    let sink = RecordingLogs::default();
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        HardCap(1024),
+        &sink,
+        &meter,
+    );
+
+    let outcome = ingest
+        .accept_logs(&IngestKey::from_plaintext("live"), some_logs(4096))
+        .await;
+
+    assert_eq!(
+        outcome,
+        Err(IngestError::Capped {
+            allowance: DecompressedBytes::new(1024)
+        })
+    );
+    assert!(sink.batches().is_empty());
+    assert!(meter.readings().is_empty());
+}
+
+#[tokio::test]
+async fn a_log_sink_failure_surfaces_and_meters_nothing() {
+    let tenant = TenantId::new(Uuid::from_u128(1));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        UnavailableSink,
+        &meter,
+    );
+
+    let outcome = ingest
+        .accept_logs(&IngestKey::from_plaintext("live"), some_logs(64))
+        .await;
+
+    assert_eq!(outcome, Err(IngestError::Sink(SinkError::Unavailable)));
+    assert!(meter.readings().is_empty());
 }

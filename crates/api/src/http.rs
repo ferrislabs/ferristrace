@@ -8,8 +8,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use bytes::Bytes;
 use ferristrace_application::{Ingestion, Stack};
-use ferristrace_domain::{DecompressedBytes, Payload};
-use ferristrace_otlp::decode_traces;
+use ferristrace_domain::{DecompressedBytes, LogPayload, Payload};
+use ferristrace_otlp::{decode_logs, decode_traces};
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
 use tower_http::decompression::RequestDecompressionLayer;
@@ -24,6 +25,7 @@ const PROTOBUF: &str = "application/x-protobuf";
 pub fn router<S: Stack>(ingest: Arc<Ingestion<S>>) -> Router {
     Router::new()
         .route("/v1/traces", post(traces::<S>))
+        .route("/v1/logs", post(logs::<S>))
         .layer(RequestBodyLimitLayer::new(MAX_DECOMPRESSED_BYTES))
         .layer(RequestDecompressionLayer::new().gzip(true))
         .with_state(ingest)
@@ -47,7 +49,32 @@ async fn traces<S: Stack>(
             },
         )
         .await?;
-    Ok(accepted())
+    Ok(accepted(
+        ExportTraceServiceResponse::default().encode_to_vec(),
+    ))
+}
+
+async fn logs<S: Stack>(
+    State(ingest): State<Arc<Ingestion<S>>>,
+    headers: HeaderMap,
+    Bearer(key): Bearer,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    require_protobuf(&headers)?;
+    let decompressed = DecompressedBytes::new(body.len() as u64);
+    let records = decode_logs(&body)?;
+    ingest
+        .accept_logs(
+            &key,
+            LogPayload {
+                records,
+                decompressed,
+            },
+        )
+        .await?;
+    Ok(accepted(
+        ExportLogsServiceResponse::default().encode_to_vec(),
+    ))
 }
 
 fn require_protobuf(headers: &HeaderMap) -> Result<(), ApiError> {
@@ -63,11 +90,11 @@ fn require_protobuf(headers: &HeaderMap) -> Result<(), ApiError> {
     }
 }
 
-fn accepted() -> Response {
+fn accepted(body: Vec<u8>) -> Response {
     (
         StatusCode::OK,
         [(CONTENT_TYPE, HeaderValue::from_static(PROTOBUF))],
-        ExportTraceServiceResponse::default().encode_to_vec(),
+        body,
     )
         .into_response()
 }

@@ -7,8 +7,10 @@ publish = false
 
 [dependencies]
 ferristrace-domain.workspace = true
+hex.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [lints]
