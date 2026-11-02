@@ -117,10 +117,14 @@ pub enum Action {
     OverrideDeleted,
     PageAcknowledged,
     PageEscalated,
+    PostmortemDrafted,
+    PostmortemEdited,
+    PostmortemPublished,
+    PostmortemUnpublished,
 }
 
 impl Action {
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 49] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -166,6 +170,10 @@ impl Action {
         Self::OverrideDeleted,
         Self::PageAcknowledged,
         Self::PageEscalated,
+        Self::PostmortemDrafted,
+        Self::PostmortemEdited,
+        Self::PostmortemPublished,
+        Self::PostmortemUnpublished,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -215,6 +223,10 @@ impl Action {
             Self::OverrideDeleted => "override.deleted",
             Self::PageAcknowledged => "page.acknowledged",
             Self::PageEscalated => "page.escalated",
+            Self::PostmortemDrafted => "postmortem.drafted",
+            Self::PostmortemEdited => "postmortem.edited",
+            Self::PostmortemPublished => "postmortem.published",
+            Self::PostmortemUnpublished => "postmortem.unpublished",
         }
     }
 
@@ -243,10 +255,11 @@ pub enum TargetKind {
     Incident,
     Schedule,
     Page,
+    Postmortem,
 }
 
 impl TargetKind {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::Org,
         Self::Project,
         Self::Team,
@@ -259,6 +272,7 @@ impl TargetKind {
         Self::Incident,
         Self::Schedule,
         Self::Page,
+        Self::Postmortem,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -275,6 +289,7 @@ impl TargetKind {
             Self::Incident => "incident",
             Self::Schedule => "schedule",
             Self::Page => "page",
+            Self::Postmortem => "postmortem",
         }
     }
 

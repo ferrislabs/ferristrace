@@ -1332,3 +1332,71 @@ impl crate::organisation::Squads for Bench {
         Ok(false)
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct PostmortemLedger {
+    kept: Arc<Mutex<Vec<crate::postmortems::Postmortem>>>,
+}
+
+impl PostmortemLedger {
+    pub fn postmortems(&self) -> Vec<crate::postmortems::Postmortem> {
+        self.kept
+            .lock()
+            .expect("the postmortem ledger lock")
+            .clone()
+    }
+}
+
+impl crate::postmortems::Postmortems for PostmortemLedger {
+    async fn of(
+        &self,
+        org: TenantId,
+        incident: crate::incidents::IncidentId,
+    ) -> Result<Option<crate::postmortems::Postmortem>, StoreError> {
+        Ok(self
+            .kept
+            .lock()
+            .expect("the postmortem ledger lock")
+            .iter()
+            .find(|held| held.org == org && held.incident == incident)
+            .cloned())
+    }
+
+    async fn summaries(
+        &self,
+        org: TenantId,
+    ) -> Result<Vec<crate::postmortems::PostmortemSummary>, StoreError> {
+        Ok(self
+            .kept
+            .lock()
+            .expect("the postmortem ledger lock")
+            .iter()
+            .filter(|held| held.org == org)
+            .map(|held| crate::postmortems::PostmortemSummary {
+                incident: held.incident,
+                status: held.status,
+            })
+            .collect())
+    }
+
+    async fn create(
+        &self,
+        postmortem: &crate::postmortems::Postmortem,
+    ) -> Result<bool, StoreError> {
+        let mut kept = self.kept.lock().expect("the postmortem ledger lock");
+        if kept.iter().any(|held| held.incident == postmortem.incident) {
+            return Ok(false);
+        }
+        kept.push(postmortem.clone());
+        Ok(true)
+    }
+
+    async fn keep(&self, postmortem: &crate::postmortems::Postmortem) -> Result<bool, StoreError> {
+        let mut kept = self.kept.lock().expect("the postmortem ledger lock");
+        Ok(kept
+            .iter_mut()
+            .find(|held| held.org == postmortem.org && held.id == postmortem.id)
+            .map(|held| *held = postmortem.clone())
+            .is_some())
+    }
+}

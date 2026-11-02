@@ -1,7 +1,7 @@
 use core::future::Future;
 
 pub use ferristrace_domain::testing::{
-    AlertLedger, Bench, Couriered, Crew, IncidentLedger, Notebook, OncallLedger,
+    AlertLedger, Bench, Couriered, Crew, IncidentLedger, Notebook, OncallLedger, PostmortemLedger,
 };
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,

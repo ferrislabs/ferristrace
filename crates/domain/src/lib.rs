@@ -15,6 +15,7 @@ pub mod logs;
 pub mod metrics;
 pub mod oncall;
 pub mod organisation;
+pub mod postmortems;
 pub mod profile;
 pub mod provisioning;
 pub mod telemetry;
@@ -100,6 +101,10 @@ pub use organisation::{
     BadName, BadTeamName, Holder, Invitation, Joined, Member, Membership, Memberships, Named,
     OrgName, OrgRole, OrgSettings, Organisation, Orgs, Owned, Roll, Roster, RosterError,
     SettingError, Squad, Squads, Team, TeamError, TeamId, TeamName, Who, Whoami, WhoamiError,
+};
+pub use postmortems::{
+    BadPostmortem, MAX_BODY_BYTES, Postmortem, PostmortemBody, PostmortemDesk, PostmortemError,
+    PostmortemId, PostmortemStatus, PostmortemSummary, Postmortems, Written, draft,
 };
 pub use profile::{
     AccountName, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, NoPhotos, Photo, PhotoError,
