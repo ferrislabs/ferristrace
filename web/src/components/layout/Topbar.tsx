@@ -19,7 +19,7 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
   const [range, setRange] = useState<string>('Last 1 h')
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
-      <Link to="/" className="text-foreground md:hidden" aria-label="Ferristrace home"><Logo className="size-5" /></Link>
+      <Link to="/" className="text-foreground md:hidden" aria-label="FerrisTrace home"><Logo className="size-5" /></Link>
       <span className="hidden text-caption text-muted-foreground sm:inline">Organisation</span>
       <OrganisationSwitcher />
       <span className="hidden text-faint-foreground sm:inline" aria-hidden>/</span>

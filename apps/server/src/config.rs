@@ -385,7 +385,7 @@ mod tests {
                 relay = "mail.example.com"
                 username = "postmaster"
                 password = "secret"
-                from = "Ferristrace <no-reply@example.com>"
+                from = "FerrisTrace <no-reply@example.com>"
                 base_url = "https://app.example.com"
                 "#,
             )?;

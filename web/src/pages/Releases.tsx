@@ -59,7 +59,7 @@ export function ReleaseDetail() {
         <h1 className="font-mono text-title">{r.version}</h1>
         {bad ? <Badge variant="warning"><TriangleAlert />Regressed after deploy</Badge> : <Badge variant="success"><CircleCheck />Healthy</Badge>}
         <span className="flex-1" />
-        {bad ? <Button size="sm" onClick={() => toast('A rollback is triggered from your CI', { description: 'Ferristrace posts the link to the previous release 2.14.0.' })}>Compare with 2.14.0</Button> : null}
+        {bad ? <Button size="sm" onClick={() => toast('A rollback is triggered from your CI', { description: 'FerrisTrace posts the link to the previous release 2.14.0.' })}>Compare with 2.14.0</Button> : null}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-control text-muted-foreground">
         <span>Project <span className="font-semibold text-foreground">{r.project}</span></span><span>Deployed <span className="font-mono text-foreground">{r.deployed}</span></span><span>By <span className="text-foreground">{r.by}</span></span><span className="inline-flex items-center gap-1"><GitCommitHorizontal className="size-3.5" aria-hidden /><span className="font-mono text-foreground">{r.commit}</span></span><span>Adoption <span className="font-mono text-foreground">{r.adoption} %</span></span>

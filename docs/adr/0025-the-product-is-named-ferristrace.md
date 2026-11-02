@@ -1,17 +1,19 @@
-# 0025. The product is named Ferristrace
+# 0025. The product is named FerrisTrace
 
 Status: accepted
 Date: 2026-11-02
 
 ## Context
 The repository, the image (`ghcr.io/ferrislabs/ferristrace`) and every crate
-(ADR 0023) are named Ferristrace, while the binary, the settings, the
+(ADR 0023) are named FerrisTrace, while the binary, the settings, the
 database, the token and cookie prefixes, the front end and the documentation
 still said Comettrace. Two names for one product leak into every command an
 operator types and every key a client holds.
 
 ## Decision
-Everything is named Ferristrace: the binary and CLI `ferristrace`, settings
+Everything is named FerrisTrace, written that way wherever a person reads
+it (the front end, mail, the authenticator label, the docs) and `ferristrace`
+in lowercase wherever a machine does: the binary and CLI `ferristrace`, settings
 under `FERRISTRACE_*`, the compose project and the Postgres and ClickHouse
 database, user and default password `ferristrace`, the `x-requested-with`
 value `ferristrace-web`, and the front end and documentation, ADRs included.

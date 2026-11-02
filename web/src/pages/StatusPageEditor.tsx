@@ -183,7 +183,7 @@ export function StatusPageEditor() {
               <Switch checked={draft.showDesc} onCheckedChange={(v) => set({ showDesc: v })} label="Component descriptions" />
               <Switch checked={draft.showPast} onCheckedChange={(v) => set({ showPast: v })} label="Past incidents" />
               <Switch checked={draft.showSubscribe} onCheckedChange={(v) => set({ showSubscribe: v })} label="Subscribe button" />
-              <Switch checked={draft.poweredBy} onCheckedChange={(v) => set({ poweredBy: v })} label="“Powered by Ferristrace” in the footer" />
+              <Switch checked={draft.poweredBy} onCheckedChange={(v) => set({ poweredBy: v })} label="“Powered by FerrisTrace” in the footer" />
             </fieldset>
           </form>
           <Preview c={draft} />
@@ -233,7 +233,7 @@ function diff(a: StatusConfig, b: StatusConfig) {
   if (a.name !== b.name) out.push(`Page name “${a.name}” → “${b.name}”`)
   if (a.accent !== b.accent) out.push(`Accent colour ${a.accent} → ${b.accent}`)
   if (a.days !== b.days) out.push(`History ${a.days} → ${b.days} days`)
-  ;(['showUptime', 'showDesc', 'showPast', 'showSubscribe', 'poweredBy'] as const).forEach((k) => { if (a[k] !== b[k]) out.push(`${b[k] ? 'Show' : 'Hide'} ${{ showUptime: 'uptime bars', showDesc: 'descriptions', showPast: 'past incidents', showSubscribe: 'subscribe button', poweredBy: '“Powered by Ferristrace”' }[k]}`) })
+  ;(['showUptime', 'showDesc', 'showPast', 'showSubscribe', 'poweredBy'] as const).forEach((k) => { if (a[k] !== b[k]) out.push(`${b[k] ? 'Show' : 'Hide'} ${{ showUptime: 'uptime bars', showDesc: 'descriptions', showPast: 'past incidents', showSubscribe: 'subscribe button', poweredBy: '“Powered by FerrisTrace”' }[k]}`) })
   b.hidden.filter((h) => !a.hidden.includes(h)).forEach((h) => out.push(`Hide component “${h}”`))
   a.hidden.filter((h) => !b.hidden.includes(h)).forEach((h) => out.push(`Show component “${h}”`))
   return out

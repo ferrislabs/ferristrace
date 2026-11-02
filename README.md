@@ -1,4 +1,4 @@
-# Ferristrace
+# FerrisTrace
 
 Distributed tracing you can host yourself. An OTLP endpoint takes spans over
 gRPC or HTTP, ClickHouse keeps them, Postgres keeps the accounts, the

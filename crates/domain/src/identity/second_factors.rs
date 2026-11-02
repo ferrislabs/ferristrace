@@ -6,7 +6,7 @@ use super::value_objects::{
 use crate::clock::Clock;
 use crate::secret::{SecretHash, SessionToken};
 
-const ISSUER: &str = "Ferristrace";
+const ISSUER: &str = "FerrisTrace";
 
 #[derive(Debug)]
 pub struct SecondFactors<P, S, C> {

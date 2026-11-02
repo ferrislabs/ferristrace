@@ -1,4 +1,4 @@
-# Contributing to Ferristrace
+# Contributing to FerrisTrace
 
 Thanks for considering it. This page says how to get the stack running, how
 to run the tests, what the code is held to, and what a pull request needs.
@@ -11,7 +11,7 @@ where a vulnerability goes instead of an issue.
 
 ## Sign off your commits
 
-Ferristrace takes contributions under the [Developer Certificate of
+FerrisTrace takes contributions under the [Developer Certificate of
 Origin](DCO). It is a one-line statement that you wrote the patch or
 otherwise have the right to submit it under the project's licence. There is
 no CLA and no copyright assignment.

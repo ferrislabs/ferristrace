@@ -246,7 +246,7 @@ function Known({
         </Table>
       </Card>
       <p className="m-0 text-caption text-muted-foreground">
-        The stack trace is the string the sdk recorded on the exception. Ferristrace holds no source
+        The stack trace is the string the sdk recorded on the exception. FerrisTrace holds no source
         and no source maps, so there is no code to show around a frame. Resolving an issue keeps its
         owner; an occurrence after that marks it Regressed without reopening it.
       </p>
