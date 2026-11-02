@@ -1,6 +1,7 @@
 use ferristrace_domain::{
-    ExploreError, MetricDescriptor, MetricError, MetricQuery, MetricSearch, ProjectId, Reader,
-    Readers, SeriesSet, TenantId, Whoami,
+    Clock, ClusterFilter, ClusterSnapshot, ClusterView, ExploreError, MetricDescriptor,
+    MetricError, MetricQuery, MetricSearch, ProjectId, Reader, Readers, SeriesSet, TenantId,
+    Whoami,
 };
 
 use crate::registry::ReadRepos;
@@ -44,6 +45,24 @@ where
             reader,
         )
         .series(who, org, query)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn cluster(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ClusterFilter,
+    ) -> Result<ClusterSnapshot, ExploreError> {
+        let Some(reader) = &self.metric_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        ClusterView::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .snapshot(who, org, self.clock.now(), filter)
         .await
     }
 }

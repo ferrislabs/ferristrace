@@ -7,16 +7,16 @@ pub use ferristrace_domain::testing::{
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
     AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,
-    Counted, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, Fingerprint, HashError,
-    IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter, LogBucket,
-    LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind,
-    MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, Password,
-    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant,
-    ResetError, ResetToken, ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries,
-    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
-    SpanSink, StatusMailer, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender,
-    WebhookUrl, Window,
+    ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
+    Dispatch, Email, EmailList, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader,
+    IssuedKey, KeyId, KeyName, KeyScopes, Letter, LogBucket, LogPage, LogQuery, LogReader,
+    LogRecord, LogSink, Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader,
+    MetricSink, Occurrence, PageDispatch, PageSize, Password, PasswordCheck, PasswordHash,
+    PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken,
+    ResolvedIdentity, Scope, SeriesSet, ServiceFilter, ServiceSeries, ServiceSummary, SignInProof,
+    SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader, SpanSink, StatusMailer,
+    StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, WebhookSecret, WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -265,6 +265,17 @@ impl MetricReader for Inert {
             step_nanos: query.step_nanos(),
             ..SeriesSet::default()
         })
+    }
+}
+
+impl ClusterReader for Inert {
+    async fn snapshot(
+        &self,
+        _org: TenantId,
+        _window: Window,
+        _filter: &ClusterFilter,
+    ) -> Result<ClusterSnapshot, StoreError> {
+        Ok(ClusterSnapshot::default())
     }
 }
 

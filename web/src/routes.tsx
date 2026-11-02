@@ -6,7 +6,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { Alerts } from '@/pages/Alerts'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
-import { Docker, Kubernetes } from '@/pages/Infra'
+import { Kubernetes } from '@/pages/Infra'
 import { IssueDetail } from '@/pages/IssueDetail'
 import { Issues } from '@/pages/Issues'
 import { Logs } from '@/pages/Logs'
@@ -135,8 +135,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/alerts', Alerts, real),
     inShell('/incidents', Incidents, real),
     inShell('/incidents/$id', IncidentDetail, real),
-    inShell('/infra/kubernetes', Kubernetes),
-    inShell('/infra/docker', Docker),
+    inShell('/infra/kubernetes', Kubernetes, real),
     inShell('/traces', Traces, {}),
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, {}),

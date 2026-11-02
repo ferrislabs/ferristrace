@@ -127,6 +127,10 @@ impl ClickhouseMetricReader {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
+
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
+    }
 }
 
 #[derive(Debug, Row, Deserialize)]
