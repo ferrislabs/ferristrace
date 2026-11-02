@@ -3,8 +3,8 @@ use core::future::Future;
 use ferristrace_domain::{
     AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
     AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
-    IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll,
-    SessionStore, Squads, UsageHistory,
+    IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships, OidcFlows, Orgs,
+    Projects, ResetStore, Roll, SessionRoll, SessionStore, Squads, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +64,12 @@ pub mod domain {
     pub struct Factors;
     #[derive(Debug)]
     pub struct Flows;
+    #[derive(Debug)]
+    pub struct IncidentAttachments;
+    #[derive(Debug)]
+    pub struct IncidentTimeline;
+    #[derive(Debug)]
+    pub struct Incidents;
     #[derive(Debug)]
     pub struct LocalPasswords;
     #[derive(Debug)]
@@ -229,6 +235,8 @@ pub trait WatchRepos:
     + RepoFor<domain::AlertOutbox, Repo: AlertOutbox>
     + RepoFor<domain::AlertChannels, Repo: AlertChannels>
     + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+    + RepoFor<domain::Incidents, Repo: Incidents>
+    + RepoFor<domain::IncidentTimeline, Repo: IncidentTimeline>
 {
 }
 
@@ -239,6 +247,8 @@ impl<R> WatchRepos for R where
         + RepoFor<domain::AlertOutbox, Repo: AlertOutbox>
         + RepoFor<domain::AlertChannels, Repo: AlertChannels>
         + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+        + RepoFor<domain::Incidents, Repo: Incidents>
+        + RepoFor<domain::IncidentTimeline, Repo: IncidentTimeline>
 {
 }
 
@@ -252,9 +262,24 @@ impl<R> AlertRepos for R where
 {
 }
 
+pub trait IncidentRepos:
+    AlertRepos
+    + RepoFor<domain::IncidentAttachments, Repo: IncidentAttachments>
+    + RepoFor<domain::Roster, Repo: Roll>
+{
+}
+
+impl<R> IncidentRepos for R where
+    R: AlertRepos
+        + RepoFor<domain::IncidentAttachments, Repo: IncidentAttachments>
+        + RepoFor<domain::Roster, Repo: Roll>
+{
+}
+
 pub trait Repositories:
     ReadRepos
     + AlertRepos
+    + IncidentRepos
     + AuditRepos
     + ExportRepos
     + AccessRepos
@@ -272,6 +297,7 @@ pub trait Repositories:
 impl<R> Repositories for R where
     R: ReadRepos
         + AlertRepos
+        + IncidentRepos
         + AuditRepos
         + ExportRepos
         + AccessRepos

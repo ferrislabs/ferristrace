@@ -5,9 +5,9 @@ use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
     AccountId, AlertChannels, AlertError, AlertEvent, AlertEvents, AlertOutbox, AlertRules,
     AlertSeverity, AlertStates, AlertStatus, ChannelKind, ChannelName, Comparison, Condition,
-    Definition, DefinitionParts, DeliveryStatus, Destination, Duty, Evaluator, EventId, Labels,
-    NoDataPolicy, Notification, NotificationId, Observation, ProbeError, ProjectId, RuleDraft,
-    RuleName, RuleState, SeriesState, Settlement, Signal, SignalProbe, TenantId, Tick,
+    Definition, DefinitionParts, DeliveryStatus, Destination, Duty, Evaluator, EventId, Followers,
+    Labels, NoDataPolicy, Notification, NotificationId, Observation, ProbeError, ProjectId,
+    RuleDraft, RuleName, RuleState, SeriesState, Settlement, Signal, SignalProbe, TenantId, Tick,
     TraceMeasure, TraceSignal, UnixSeconds, WebhookSecret, Window,
 };
 use ferristrace_infra::{FixedClock, SecretSeal};
@@ -481,6 +481,10 @@ async fn tick(pg: &Postgres<FixedClock>, at: u64) -> Tick {
                 <Postgres<FixedClock> as RepoFor<domain::AlertOutbox>>::build(pg, &tx),
                 <Postgres<FixedClock> as RepoFor<domain::AlertDuty>>::build(pg, &tx),
                 &Slow,
+                Followers::new(
+                    <Postgres<FixedClock> as RepoFor<domain::Incidents>>::build(pg, &tx),
+                    <Postgres<FixedClock> as RepoFor<domain::IncidentTimeline>>::build(pg, &tx),
+                ),
             )
             .tick(UnixSeconds::new(at))
             .await

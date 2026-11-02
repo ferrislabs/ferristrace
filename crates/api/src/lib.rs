@@ -9,6 +9,7 @@ mod export_routes;
 mod grpc;
 mod health;
 mod http;
+mod incident_routes;
 mod issue_routes;
 mod key_routes;
 mod log_routes;
@@ -41,6 +42,7 @@ pub use grpc::{
 };
 pub use health::health_router;
 pub use http::{MAX_DECOMPRESSED_BYTES, router};
+pub use incident_routes::{IncidentRefused, incident_router};
 pub use issue_routes::{IssueRefused, issue_router};
 pub use key_routes::{KeyRefused, key_router};
 pub use log_routes::{LogRefused, log_router};

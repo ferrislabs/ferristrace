@@ -1,6 +1,6 @@
 use core::future::Future;
 
-pub use ferristrace_domain::testing::{AlertLedger, Couriered, Notebook};
+pub use ferristrace_domain::testing::{AlertLedger, Couriered, Crew, IncidentLedger, Notebook};
 use ferristrace_domain::{
     AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
     AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, Clock,

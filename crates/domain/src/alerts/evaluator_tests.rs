@@ -16,9 +16,13 @@ use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::explore::Window;
 use crate::identity::AccountId;
+use crate::incidents::{
+    Author, Change, Followers, Incident, IncidentId, IncidentSeverity, IncidentStatus,
+    IncidentTitle,
+};
 use crate::metrics::Aggregation;
 use crate::telemetry::TenantId;
-use crate::testing::AlertLedger;
+use crate::testing::{AlertLedger, IncidentLedger};
 
 const START: u64 = 1_700_000_040;
 
@@ -77,10 +81,26 @@ impl SignalProbe for &Scripted {
     }
 }
 
-fn evaluator<'a>(
+type Evaluating<'a> = Evaluator<
+    AlertLedger,
+    AlertLedger,
+    AlertLedger,
+    AlertLedger,
+    AlertLedger,
+    &'a Scripted,
+    IncidentLedger,
+    IncidentLedger,
+>;
+
+fn evaluator<'a>(ledger: &AlertLedger, probe: &'a Scripted) -> Evaluating<'a> {
+    following(ledger, probe, &IncidentLedger::default())
+}
+
+fn following<'a>(
     ledger: &AlertLedger,
     probe: &'a Scripted,
-) -> Evaluator<AlertLedger, AlertLedger, AlertLedger, AlertLedger, AlertLedger, &'a Scripted> {
+    incidents: &IncidentLedger,
+) -> Evaluating<'a> {
     Evaluator::new(
         ledger.clone(),
         ledger.clone(),
@@ -88,6 +108,7 @@ fn evaluator<'a>(
         ledger.clone(),
         ledger.clone(),
         probe,
+        Followers::new(incidents.clone(), incidents.clone()),
     )
 }
 
@@ -369,4 +390,141 @@ async fn a_tick_forgets_events_older_than_thirty_days() {
     assert!(matches!(tick, Tick::Evaluated { pruned: 1, .. }));
     assert_eq!(ledger.events().len(), 1);
     let _ = AlertRules::enabled(&ledger).await;
+}
+
+fn an_incident(
+    rule: super::value_objects::RuleId,
+    of: TenantId,
+    status: IncidentStatus,
+) -> Incident {
+    Incident {
+        id: IncidentId::fresh(),
+        org: of,
+        project: None,
+        title: IncidentTitle::try_from("Checkout is failing").expect("a title"),
+        severity: IncidentSeverity::Sev2,
+        status,
+        owner: None,
+        public: false,
+        opened_ms: 1,
+        resolved_ms: (status == IncidentStatus::Resolved).then_some(2),
+        opened_from_alert: Some(rule),
+    }
+}
+
+#[tokio::test]
+async fn a_transition_of_a_linked_rule_appends_a_system_entry_to_its_open_incidents_only() {
+    let ledger = AlertLedger::default();
+    let mut asked = parts(checkout(), Vec::new());
+    asked.pending_secs = 0;
+    a_rule(&ledger, asked, true).await;
+    let rule = ledger.rules()[0].id;
+    let incidents = IncidentLedger::default();
+    let open = an_incident(rule, org(1), IncidentStatus::Identified);
+    let resolved = an_incident(rule, org(1), IncidentStatus::Resolved);
+    let elsewhere = an_incident(rule, org(2), IncidentStatus::Investigating);
+    for incident in [&open, &resolved, &elsewhere] {
+        incidents.put(incident.clone());
+    }
+    let probe = Scripted::values(&[Some(9.0), Some(9.0), Some(1.0)]);
+    let evaluating = following(&ledger, &probe, &incidents);
+
+    for at in 0..3 {
+        evaluating.tick(minute(at)).await.expect("a tick");
+    }
+
+    let told: Vec<(IncidentId, Author, Change, u64)> = incidents
+        .timeline()
+        .into_iter()
+        .map(|entry| (entry.incident, entry.author, entry.change, entry.at_ms))
+        .collect();
+    assert_eq!(
+        told,
+        vec![
+            (
+                open.id,
+                Author::System,
+                Change::Alert {
+                    rule,
+                    from: AlertStatus::Ok,
+                    to: AlertStatus::Firing,
+                    value: Some(9.0),
+                    labels: Labels::none(),
+                },
+                minute(0).get() * 1_000,
+            ),
+            (
+                open.id,
+                Author::System,
+                Change::Alert {
+                    rule,
+                    from: AlertStatus::Firing,
+                    to: AlertStatus::Ok,
+                    value: Some(1.0),
+                    labels: Labels::none(),
+                },
+                minute(2).get() * 1_000,
+            ),
+        ],
+        "one entry per change, on the open incident of the rule's organisation only"
+    );
+    assert!(incidents.timeline().iter().all(|entry| entry.org == org(1)));
+}
+
+#[tokio::test]
+async fn a_flap_that_never_fires_stays_out_of_the_timeline() {
+    let ledger = AlertLedger::default();
+    let mut asked = parts(checkout(), Vec::new());
+    asked.no_data = NoDataPolicy::NoData;
+    a_rule(&ledger, asked, true).await;
+    let rule = ledger.rules()[0].id;
+    let incidents = IncidentLedger::default();
+    incidents.put(an_incident(rule, org(1), IncidentStatus::Investigating));
+    let probe = Scripted::values(&[
+        Some(9.0),
+        Some(1.0),
+        None,
+        Some(1.0),
+        Some(9.0),
+        Some(9.0),
+        Some(9.0),
+    ]);
+    let evaluating = following(&ledger, &probe, &incidents);
+
+    for at in 0..7 {
+        evaluating.tick(minute(at)).await.expect("a tick");
+    }
+
+    let moved: Vec<(AlertStatus, AlertStatus)> = ledger
+        .events()
+        .iter()
+        .map(|event| (event.from, event.to))
+        .collect();
+    assert_eq!(
+        moved,
+        vec![
+            (AlertStatus::Ok, AlertStatus::Pending),
+            (AlertStatus::Pending, AlertStatus::Ok),
+            (AlertStatus::Ok, AlertStatus::NoData),
+            (AlertStatus::NoData, AlertStatus::Ok),
+            (AlertStatus::Ok, AlertStatus::Pending),
+            (AlertStatus::Pending, AlertStatus::Firing),
+        ]
+    );
+    let told: Vec<Change> = incidents
+        .timeline()
+        .into_iter()
+        .map(|entry| entry.change)
+        .collect();
+    assert_eq!(
+        told,
+        vec![Change::Alert {
+            rule,
+            from: AlertStatus::Pending,
+            to: AlertStatus::Firing,
+            value: Some(9.0),
+            labels: Labels::none(),
+        }],
+        "ok, pending and no data flaps are history, not incident news"
+    );
 }

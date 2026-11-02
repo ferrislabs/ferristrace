@@ -1,8 +1,8 @@
 use axum::Router;
 use ferristrace_api::{
     AppState, SessionCookie, SignInMethods, alert_router, audit_router, auth_router,
-    catalogue_router, explore_router, export_router, issue_router, key_router, log_router,
-    me_router, methods_router, metric_router, oidc_router, org_router, password_router,
+    catalogue_router, explore_router, export_router, incident_router, issue_router, key_router,
+    log_router, me_router, methods_router, metric_router, oidc_router, org_router, password_router,
     reset_router, roster_router, second_factor_router, session_router, team_router, usage_router,
 };
 
@@ -33,6 +33,7 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
         .merge(org_routes(state))
         .merge(audit_routes(state))
         .merge(alert_routes(state))
+        .merge(incident_routes(state))
         .merge(export_routes(state))
         .merge(roster_routes(state))
         .merge(team_routes(state))
@@ -126,6 +127,10 @@ fn audit_routes(state: Option<&State>) -> Router {
 
 fn alert_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| alert_router(state.clone()))
+}
+
+fn incident_routes(state: Option<&State>) -> Router {
+    state.map_or_else(Router::new, |state| incident_router(state.clone()))
 }
 
 fn export_routes(state: Option<&State>) -> Router {
