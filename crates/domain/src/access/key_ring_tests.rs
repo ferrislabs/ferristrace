@@ -6,6 +6,7 @@ use super::errors::KeyError;
 use super::key_ring::KeyRing;
 use super::ports::ApiKeys;
 use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, ReadGrant};
+use crate::agents::registry_tests::Book;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{Assigned, Created, Project, ProjectId, ProjectName, Projects, Renamed};
 use crate::clock::UnixSeconds;
@@ -98,6 +99,7 @@ struct Held {
 pub(crate) struct Ring {
     held: Mutex<Vec<Held>>,
     minted: Mutex<u128>,
+    pub(crate) book: Book,
 }
 
 impl Ring {
@@ -188,6 +190,23 @@ impl ApiKeys for &Ring {
                 org: held.org,
                 project: held.key.project,
             }))
+    }
+
+    async fn agent_standing(
+        &self,
+        org: TenantId,
+        client_id: &str,
+    ) -> Result<Option<crate::agents::Agent>, StoreError> {
+        (&self.book).agent_standing(org, client_id).await
+    }
+
+    async fn agent_used(
+        &self,
+        org: TenantId,
+        agent: crate::agents::AgentId,
+        entry: &crate::audit::AuditEntry,
+    ) -> Result<(), StoreError> {
+        (&self.book).agent_used(org, agent, entry).await
     }
 }
 

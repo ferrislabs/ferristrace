@@ -11,6 +11,8 @@ pub struct AppState<S: Stack> {
     pub app: Arc<Ferristrace<S>>,
     pub cookie: SessionCookie,
     pub default_retention_days: u64,
+    pub agents_off_reason: Option<String>,
+    pub reserved_client_id: Option<String>,
 }
 
 impl<S: Stack> AppState<S> {
@@ -19,7 +21,20 @@ impl<S: Stack> AppState<S> {
             app,
             cookie,
             default_retention_days: FALLBACK_RETENTION_DAYS,
+            agents_off_reason: None,
+            reserved_client_id: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_agent_policy(
+        mut self,
+        off_reason: Option<String>,
+        reserved_client_id: Option<String>,
+    ) -> Self {
+        self.agents_off_reason = off_reason;
+        self.reserved_client_id = reserved_client_id;
+        self
     }
 
     #[must_use]
@@ -35,6 +50,8 @@ impl<S: Stack> Clone for AppState<S> {
             app: Arc::clone(&self.app),
             cookie: self.cookie,
             default_retention_days: self.default_retention_days,
+            agents_off_reason: self.agents_off_reason.clone(),
+            reserved_client_id: self.reserved_client_id.clone(),
         }
     }
 }

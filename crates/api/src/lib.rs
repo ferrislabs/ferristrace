@@ -1,3 +1,4 @@
+mod agent_routes;
 mod alert_routes;
 mod audit_routes;
 mod auth;
@@ -38,9 +39,10 @@ mod usage_routes;
 mod web_routes;
 mod whoami_routes;
 
+pub use agent_routes::{AgentRefused, agent_router};
 pub use alert_routes::{AlertRefused, alert_router};
 pub use audit_routes::{AuditRefused, audit_router};
-pub use carried::NotCarried;
+pub use carried::{NotCarried, mark_routes};
 pub use catalogue_routes::{ProjectRefused, catalogue_router};
 pub use cluster_routes::{ClusterRefused, cluster_router};
 pub use error::ApiError;

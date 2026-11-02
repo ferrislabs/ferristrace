@@ -27,6 +27,8 @@ pub enum MetricError {
     NoSession,
     #[error("this reader holds no grant on that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a store could not be reached")]
     StoreUnreachable,
     #[error("no metric of that name was seen")]
@@ -40,6 +42,7 @@ impl From<ExploreError> for MetricError {
         match error {
             ExploreError::NoSession => Self::NoSession,
             ExploreError::NotYours => Self::NotYours,
+            ExploreError::OutOfScope => Self::OutOfScope,
             ExploreError::StoreUnreachable => Self::StoreUnreachable,
         }
     }

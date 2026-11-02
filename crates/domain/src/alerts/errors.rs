@@ -75,6 +75,8 @@ pub enum AlertError {
     NoSession,
     #[error("this reader holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("alert rules and channels are an administrator's to change")]
     NotYoursToChange,
     #[error("no rule of this organisation carries that id")]
@@ -129,6 +131,7 @@ impl From<ReadRefusal> for AlertError {
         match error {
             ReadRefusal::Unknown => Self::NoSession,
             ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::OutOfScope => Self::OutOfScope,
             ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }

@@ -421,7 +421,7 @@ async fn list<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let scope = match listing.status.as_deref() {
         None => IncidentScope::Open,
         Some(asked) => {
@@ -452,7 +452,7 @@ async fn one<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let dossier = state
         .app
         .incident(&who, TenantId::new(org), IncidentId::new(id))
@@ -468,7 +468,7 @@ async fn timeline<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let chronicle = state
         .app
         .incident_timeline(&who, TenantId::new(org), IncidentId::new(id))
@@ -487,7 +487,7 @@ async fn open<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let draft = body.draft()?;
     let opened = state
         .app
@@ -506,7 +506,7 @@ async fn amend<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let patch = body.patch()?;
     let amended = state
         .app
@@ -524,7 +524,7 @@ async fn comment<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let body = CommentBody::try_from(asked.body.as_str())?;
     let chronicle = state
         .app
@@ -553,7 +553,7 @@ async fn attach<S: Stack>(
 where
     S::Repos: IncidentRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let kind =
         AttachmentKind::parse(asked.kind.trim()).ok_or(IncidentRefused::Malformed("kind"))?;
     let reference = Reference::parse(kind, &asked.reference)?;
@@ -597,7 +597,7 @@ fn status_of(error: IncidentError) -> StatusCode {
     match error {
         IncidentError::NoSession => StatusCode::UNAUTHORIZED,
         IncidentError::NotYours | IncidentError::NoSuchIncident => StatusCode::NOT_FOUND,
-        IncidentError::ReadOnly => StatusCode::FORBIDDEN,
+        IncidentError::ReadOnly | IncidentError::OutOfScope => StatusCode::FORBIDDEN,
         IncidentError::NoSuchProject
         | IncidentError::NoSuchSchedule
         | IncidentError::NoSuchAlert

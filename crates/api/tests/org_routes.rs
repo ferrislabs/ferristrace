@@ -220,6 +220,7 @@ impl<P: Photos + Send + Sync + 'static> Stack for TestStack<P> {
     type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
+    type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;

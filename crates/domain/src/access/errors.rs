@@ -54,10 +54,12 @@ impl From<StoreError> for KeyError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ReadRefusal {
-    #[error("neither a live session nor a live read key carries this credential")]
+    #[error("neither a live session, a live read key nor a live agent carries this credential")]
     Unknown,
     #[error("this reader holds no grant over that organisation or project")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a store could not be reached")]
     StoreUnreachable,
 }

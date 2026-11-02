@@ -8,6 +8,8 @@ pub enum ReleaseError {
     NoSession,
     #[error("this session holds no membership of that organisation")]
     NotYours,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("this organisation never saw that release")]
     Unknown,
     #[error("a store could not be reached")]
@@ -19,6 +21,7 @@ impl From<ReadRefusal> for ReleaseError {
         match ExploreError::from(error) {
             ExploreError::NoSession => Self::NoSession,
             ExploreError::NotYours => Self::NotYours,
+            ExploreError::OutOfScope => Self::OutOfScope,
             ExploreError::StoreUnreachable => Self::StoreUnreachable,
         }
     }

@@ -123,11 +123,13 @@ impl<C: Clock + Clone + Send + Sync> AuditTrail for PostgresAuditTrail<C> {
              e.at AS at, \
              ARRAY(SELECT d.key FROM jsonb_each_text(e.detail) d ORDER BY d.key) AS detail_keys, \
              ARRAY(SELECT d.value FROM jsonb_each_text(e.detail) d ORDER BY d.key) AS detail_values, \
-             COALESCE(a.email, NULLIF(k.name, '')) AS label \
+             COALESCE(a.email, NULLIF(k.name, ''), NULLIF(g.name, '')) AS label \
              FROM audit_entries e \
              LEFT JOIN accounts a ON e.actor_kind = 'account' AND a.id = e.actor_id \
              LEFT JOIN api_keys k ON e.actor_kind = 'api_key' AND k.id = e.actor_id \
              AND k.org_id = e.org_id \
+             LEFT JOIN agents g ON e.actor_kind = 'agent' AND g.id = e.actor_id \
+             AND g.org_id = e.org_id \
              WHERE e.org_id = $1 \
              AND ($2::text IS NULL OR e.actor_kind = $2) \
              AND ($3::uuid IS NULL OR e.actor_id = $3) \

@@ -886,6 +886,7 @@ impl Stack for Clustered {
     type MetricStore = ClickhouseMetricReader;
     type Meter = Inert;
     type Oidc = Inert;
+    type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;

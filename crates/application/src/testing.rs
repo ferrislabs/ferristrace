@@ -5,20 +5,21 @@ pub use ferristrace_domain::testing::{
     PriceLedger, QueuedLetter, StatusLedger,
 };
 use ferristrace_domain::{
-    AccountId, Admission, Aggregation, AlertMailer, ApiKey, ApiKeys, ApiSecret, AuditEntry,
-    AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer, Buckets, CallPage,
-    CallQuery, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes,
-    DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint,
-    HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
-    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Mailer, Metric,
-    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
-    PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId,
-    QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, ResetError,
-    ResetToken, ResolvedIdentity, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
-    ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
-    SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory, TenantId,
-    TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter, UsageReader,
-    WebhookSecret, WebhookSender, WebhookUrl, Window,
+    AccountId, Admission, AgentToken, AgentTokens, Aggregation, AlertMailer, ApiKey, ApiKeys,
+    ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer,
+    Buckets, CallPage, CallQuery, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted,
+    DecompressedBytes, DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList,
+    Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
+    KeyScopes, Letter, LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink,
+    Mailer, Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink,
+    Occurrence, PageDispatch, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher,
+    PendingFlow, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
+    ReleaseReader, ResetError, ResetToken, ResolvedIdentity, Scope, SeenModel, SeriesSet,
+    ServiceFilter, ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor,
+    SpanPage, SpanPages, SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError,
+    TenantDirectory, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl,
+    Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -395,6 +396,12 @@ impl ApiKeys for Inert {
 
     async fn grant_for(&self, _secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError> {
         Ok(None)
+    }
+}
+
+impl AgentTokens for Inert {
+    async fn verify(&self, _token: &AgentToken) -> Result<VerifiedToken, TokenRefusal> {
+        Err(TokenRefusal::Off)
     }
 }
 

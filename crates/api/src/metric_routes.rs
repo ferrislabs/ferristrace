@@ -193,7 +193,7 @@ async fn catalogue<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let asked = Asked::try_from(pairs)?;
     let listed = state
         .app
@@ -218,7 +218,7 @@ async fn series<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let query = Asked::try_from(pairs)?.query(&name)?;
     let charted = state
         .app
@@ -239,6 +239,8 @@ pub enum MetricRefused {
     Reaching(NotCarried),
     #[error("no such organisation")]
     NoSuchOrg,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("no metric of that name was seen")]
     NoSuchMetric,
     #[error("a window must end after it starts")]
@@ -264,6 +266,7 @@ impl From<MetricError> for MetricRefused {
         match error {
             MetricError::NoSession => Self::Reaching(NotCarried::NoSession),
             MetricError::NotYours => Self::NoSuchOrg,
+            MetricError::OutOfScope => Self::OutOfScope,
             MetricError::StoreUnreachable => Self::Unavailable,
             MetricError::Unknown => Self::NoSuchMetric,
             MetricError::Query(bad) => Self::OutOfRange(bad),
@@ -275,6 +278,7 @@ impl IntoResponse for MetricRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
+            Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg | Self::NoSuchMetric => StatusCode::NOT_FOUND,
             Self::Window | Self::Malformed(_) | Self::Placement(_) => StatusCode::BAD_REQUEST,
             Self::OutOfRange(_) => StatusCode::UNPROCESSABLE_ENTITY,

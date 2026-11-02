@@ -30,6 +30,12 @@ data:
   FERRISTRACE_OIDC__CLIENT_ID: {{ required "config.oidc.clientId is required when config.oidc.enabled" $c.oidc.clientId | quote }}
   FERRISTRACE_OIDC__REDIRECT_URI: {{ required "config.oidc.redirectUri is required when config.oidc.enabled" $c.oidc.redirectUri | quote }}
   {{- end }}
+  {{- with $c.agents.issuer }}
+  FERRISTRACE_AGENTS__ISSUER: {{ . | quote }}
+  {{- end }}
+  {{- with $c.agents.audience }}
+  FERRISTRACE_AGENTS__AUDIENCE: {{ . | quote }}
+  {{- end }}
   {{- if $c.mail.enabled }}
   FERRISTRACE_MAIL__RELAY: {{ required "config.mail.relay is required when config.mail.enabled" $c.mail.relay | quote }}
   FERRISTRACE_MAIL__USERNAME: {{ required "config.mail.username is required when config.mail.enabled" $c.mail.username | quote }}

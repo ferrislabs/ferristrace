@@ -105,6 +105,11 @@ config:
     issuer: ""
     clientId: ""
     redirectUri: ""
+  agents:
+    # -- Issuer whose access tokens AI agents present. Empty means the OIDC issuer, or no agents when OIDC is off.
+    issuer: ""
+    # -- Required for agents to be on: an agent token must name this audience. With an issuer but no audience, agents stay off.
+    audience: ""
   mail:
     enabled: false
     relay: ""

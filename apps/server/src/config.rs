@@ -29,6 +29,8 @@ pub struct Config {
     #[serde(default)]
     pub oidc: Option<OidcConfig>,
     #[serde(default)]
+    pub agents: AgentsConfig,
+    #[serde(default)]
     pub mail: Option<MailConfig>,
     #[serde(default)]
     pub objects: Option<ObjectsConfig>,
@@ -129,6 +131,70 @@ pub struct AlertsConfig {
     pub base_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentsConfig {
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub audience: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSetup {
+    NoIssuer,
+    NoAudience { issuer: String },
+    On { issuer: String, audience: String },
+}
+
+impl AgentSetup {
+    pub fn off_reason(&self) -> Option<String> {
+        match self {
+            Self::NoIssuer => Some(
+                "no agent issuer is configured: set FERRISTRACE_AGENTS__ISSUER".to_owned(),
+            ),
+            Self::NoAudience { .. } => Some(
+                "FERRISTRACE_AGENTS__AUDIENCE is not set: agents need an audience so that tokens issued to people cannot be used as agent tokens"
+                    .to_owned(),
+            ),
+            Self::On { .. } => None,
+        }
+    }
+}
+
+impl Config {
+    pub fn agent_issuer(&self) -> Option<&str> {
+        self.agents
+            .issuer
+            .as_deref()
+            .filter(|issuer| !issuer.is_empty())
+            .or_else(|| self.oidc.as_ref().map(|oidc| oidc.issuer.as_str()))
+    }
+
+    pub fn agent_setup(&self) -> AgentSetup {
+        let Some(issuer) = self.agent_issuer() else {
+            return AgentSetup::NoIssuer;
+        };
+        match self
+            .agents
+            .audience
+            .as_deref()
+            .filter(|audience| !audience.is_empty())
+        {
+            Some(audience) => AgentSetup::On {
+                issuer: issuer.to_owned(),
+                audience: audience.to_owned(),
+            },
+            None => AgentSetup::NoAudience {
+                issuer: issuer.to_owned(),
+            },
+        }
+    }
+
+    pub fn reserved_client_id(&self) -> Option<&str> {
+        self.oidc.as_ref().map(|oidc| oidc.client_id.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OidcConfig {
     pub issuer: String,
@@ -174,6 +240,7 @@ impl Default for Config {
             web_root: None,
             tenants: Vec::new(),
             oidc: None,
+            agents: AgentsConfig::default(),
             mail: None,
             objects: None,
             secrets: None,
@@ -198,7 +265,7 @@ pub fn load() -> anyhow::Result<Config> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{Config, FILE, TenantAllowance, figment};
+    use super::{AgentSetup, Config, FILE, TenantAllowance, figment};
 
     #[test]
     fn the_default_ports_are_the_otlp_ones() {
@@ -447,6 +514,145 @@ mod tests {
 
             assert_eq!(mail.relay, "mail.example.com");
             assert_eq!(mail.base_url, "https://app.example.com");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn without_an_oidc_or_agents_issuer_agents_are_off() {
+        figment::Jail::expect_with(|_jail| {
+            let config: Config = figment().extract()?;
+
+            assert_eq!(config.agent_issuer(), None);
+            assert_eq!(config.agents.audience, None);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_agent_issuer_defaults_to_the_oidc_issuer() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                [oidc]
+                issuer = "https://id.example.com/realms/ferris"
+                client_id = "ferristrace"
+                client_secret = "secret"
+                redirect_uri = "https://app.example.com/callback"
+                "#,
+            )?;
+
+            let config: Config = figment().extract()?;
+
+            assert_eq!(
+                config.agent_issuer(),
+                Some("https://id.example.com/realms/ferris")
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_environment_names_the_agent_issuer_and_audience() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                [oidc]
+                issuer = "https://id.example.com/realms/ferris"
+                client_id = "ferristrace"
+                client_secret = "secret"
+                redirect_uri = "https://app.example.com/callback"
+                "#,
+            )?;
+            jail.set_env(
+                "FERRISTRACE_AGENTS__ISSUER",
+                "https://agents.example.com/realms/bots",
+            );
+            jail.set_env("FERRISTRACE_AGENTS__AUDIENCE", "ferristrace");
+
+            let config: Config = figment().extract()?;
+
+            assert_eq!(
+                config.agent_issuer(),
+                Some("https://agents.example.com/realms/bots")
+            );
+            assert_eq!(config.agents.audience.as_deref(), Some("ferristrace"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn a_blank_agent_issuer_falls_back_to_oidc_or_nothing() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("FERRISTRACE_AGENTS__ISSUER", "");
+
+            let config: Config = figment().extract()?;
+
+            assert_eq!(config.agent_issuer(), None);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn an_issuer_without_an_audience_leaves_agents_off() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                [oidc]
+                issuer = "https://id.example.com/realms/ferris"
+                client_id = "ferristrace"
+                client_secret = "secret"
+                redirect_uri = "https://app.example.com/callback"
+                "#,
+            )?;
+
+            let config: Config = figment().extract()?;
+
+            assert_eq!(
+                config.agent_setup(),
+                AgentSetup::NoAudience {
+                    issuer: "https://id.example.com/realms/ferris".to_owned()
+                }
+            );
+            assert!(config.agent_setup().off_reason().is_some());
+            assert_eq!(config.reserved_client_id(), Some("ferristrace"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn an_issuer_with_an_audience_turns_agents_on_and_a_blank_audience_does_not() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env(
+                "FERRISTRACE_AGENTS__ISSUER",
+                "https://id.example.com/realms/bots",
+            );
+            jail.set_env("FERRISTRACE_AGENTS__AUDIENCE", "ferristrace");
+            let on: Config = figment().extract()?;
+            jail.set_env("FERRISTRACE_AGENTS__AUDIENCE", "");
+            let blank: Config = figment().extract()?;
+
+            assert_eq!(
+                on.agent_setup(),
+                AgentSetup::On {
+                    issuer: "https://id.example.com/realms/bots".to_owned(),
+                    audience: "ferristrace".to_owned()
+                }
+            );
+            assert!(matches!(blank.agent_setup(), AgentSetup::NoAudience { .. }));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn without_an_issuer_the_setup_says_so() {
+        figment::Jail::expect_with(|_jail| {
+            let config: Config = figment().extract()?;
+
+            assert_eq!(config.agent_setup(), AgentSetup::NoIssuer);
             Ok(())
         });
     }

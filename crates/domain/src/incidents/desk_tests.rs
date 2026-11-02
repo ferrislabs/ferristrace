@@ -1035,3 +1035,61 @@ async fn opening_and_moving_a_public_incident_is_announced_and_a_private_one_nev
         ]
     );
 }
+
+#[tokio::test]
+async fn an_agent_reads_incidents_but_every_write_is_refused_to_it_for_now() {
+    use crate::agents::{AgentCall, AgentScope, VerifiedToken};
+
+    let world = World::new();
+    let member = world.desk(OrgRole::Member);
+    let id = member
+        .open(&session(), an_org(MINE), &titled("Checkout down"), at(0))
+        .await
+        .expect("opened")
+        .incident
+        .id;
+    world.keys.book.enrol(
+        an_org(MINE),
+        "bot",
+        &[
+            AgentScope::TelemetryRead,
+            AgentScope::IncidentsComment,
+            AgentScope::IncidentsResolve,
+        ],
+        None,
+    );
+    let agent = Reader::Agent(AgentCall {
+        token: VerifiedToken {
+            client_id: "bot".into(),
+            scopes: vec![
+                "telemetry:read".into(),
+                "incidents:comment".into(),
+                "incidents:resolve".into(),
+            ],
+            jti: "jti-1".into(),
+            expires_at_unix_secs: 4_000_000_000,
+        },
+        route: "/api/orgs/{org}/incidents".into(),
+    });
+
+    let read = member.get(&agent, an_org(MINE), id).await;
+    let opened = member
+        .open(&agent, an_org(MINE), &titled("Another"), at(1))
+        .await;
+    let commented = member
+        .comment(
+            &agent,
+            an_org(MINE),
+            id,
+            &CommentBody::try_from("hi").expect("a body"),
+            false,
+            at(1),
+        )
+        .await;
+
+    assert!(read.is_ok());
+    assert_eq!(opened.err(), Some(IncidentError::ReadOnly));
+    assert_eq!(commented.err(), Some(IncidentError::ReadOnly));
+    assert_eq!(world.incidents.incidents().len(), 1);
+    assert_eq!(world.incidents.timeline().len(), 1);
+}

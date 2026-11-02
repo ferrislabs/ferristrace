@@ -1,12 +1,15 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, ApiKey, ApiKeys, ApiSecret, Clock, IssuedKey, KeyId, KeyName, KeyScope, KeyScopes,
-    ProjectId, ReadGrant, StoreError, TenantId,
+    AccountId, AgentId, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditTrail, Clock, IssuedKey,
+    KeyId, KeyName, KeyScope, KeyScopes, ProjectId, ReadGrant, RegisteredAgent, StoreError,
+    TenantId,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
+use crate::agents::{standing_on, touch_on};
+use crate::audit::PostgresAuditTrail;
 use crate::keys::{Minting, digest_matches, mint_on, sighting_is_stale, to_nanos};
 use crate::unit_of_work::{Postgres, SharedTx};
 
@@ -15,6 +18,7 @@ use crate::unit_of_work::{Postgres, SharedTx};
 pub struct PostgresApiKeys<C> {
     tx: SharedTx,
     clock: C,
+    trail: PostgresAuditTrail<C>,
 }
 
 impl<C: Clock + Clone> PostgresApiKeys<C> {
@@ -22,6 +26,7 @@ impl<C: Clock + Clone> PostgresApiKeys<C> {
         Self {
             tx: tx.clone(),
             clock: backend.clock().clone(),
+            trail: PostgresAuditTrail::new(backend, tx),
         }
     }
 }
@@ -163,5 +168,23 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
             org: TenantId::new(row.get("org_id")),
             project: row.get::<Option<Uuid>, _>("project_id").map(ProjectId::new),
         }))
+    }
+
+    async fn agent_standing(
+        &self,
+        org: TenantId,
+        client_id: &str,
+    ) -> Result<Option<RegisteredAgent>, StoreError> {
+        standing_on(&self.tx, org, client_id).await
+    }
+
+    async fn agent_used(
+        &self,
+        org: TenantId,
+        agent: AgentId,
+        entry: &AuditEntry,
+    ) -> Result<(), StoreError> {
+        touch_on(&self.tx, &self.clock, org, agent).await?;
+        self.trail.record(entry).await
     }
 }

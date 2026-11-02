@@ -200,7 +200,7 @@ async fn releases<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = asked.filter()?;
     let found = state
         .app
@@ -220,7 +220,7 @@ async fn release<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let detail = state
         .app
         .release(
@@ -243,7 +243,7 @@ async fn deploys<S: Stack>(
 where
     S::Repos: ReadRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let filter = asked.filter()?;
     let found = state.app.deploys(&who, TenantId::new(org), &filter).await?;
     Ok(Json(Marked {
@@ -263,6 +263,8 @@ pub enum ReleaseRefused {
     Reaching(NotCarried),
     #[error("no such organisation")]
     NoSuchOrg,
+    #[error("this agent holds no scope that allows this")]
+    OutOfScope,
     #[error("a window must end after it starts")]
     Window,
     #[error("no such release")]
@@ -276,6 +278,7 @@ impl From<ReleaseError> for ReleaseRefused {
         match error {
             ReleaseError::NoSession => Self::Reaching(NotCarried::NoSession),
             ReleaseError::NotYours => Self::NoSuchOrg,
+            ReleaseError::OutOfScope => Self::OutOfScope,
             ReleaseError::Unknown => Self::NoSuchRelease,
             ReleaseError::StoreUnreachable => Self::Unavailable,
         }
@@ -286,6 +289,7 @@ impl IntoResponse for ReleaseRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
+            Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg | Self::NoSuchRelease => StatusCode::NOT_FOUND,
             Self::Window => StatusCode::BAD_REQUEST,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,

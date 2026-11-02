@@ -7,7 +7,7 @@ use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
-const SIGHTING_GAP_SECONDS: u64 = 300;
+pub(crate) const SIGHTING_GAP_SECONDS: u64 = 300;
 
 #[derive(Debug, Clone)]
 pub struct PostgresDirectory<C> {

@@ -2,6 +2,8 @@ use core::future::Future;
 
 use super::entities::{ApiKey, IssuedKey};
 use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScopes, ReadGrant};
+use crate::agents::{Agent, AgentId};
+use crate::audit::AuditEntry;
 use crate::catalogue::ProjectId;
 use crate::identity::AccountId;
 use crate::store::StoreError;
@@ -29,6 +31,23 @@ pub trait ApiKeys {
         &self,
         secret: &ApiSecret,
     ) -> impl Future<Output = Result<Option<ReadGrant>, StoreError>> + Send;
+
+    fn agent_standing(
+        &self,
+        _org: TenantId,
+        _client_id: &str,
+    ) -> impl Future<Output = Result<Option<Agent>, StoreError>> + Send {
+        async { Ok(None) }
+    }
+
+    fn agent_used(
+        &self,
+        _org: TenantId,
+        _agent: AgentId,
+        _entry: &AuditEntry,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        async { Ok(()) }
+    }
 }
 
 impl<T: ApiKeys + Sync> ApiKeys for &T {
@@ -61,6 +80,23 @@ impl<T: ApiKeys + Sync> ApiKeys for &T {
     ) -> impl Future<Output = Result<Option<ReadGrant>, StoreError>> + Send {
         (*self).grant_for(secret)
     }
+
+    fn agent_standing(
+        &self,
+        org: TenantId,
+        client_id: &str,
+    ) -> impl Future<Output = Result<Option<Agent>, StoreError>> + Send {
+        (*self).agent_standing(org, client_id)
+    }
+
+    fn agent_used(
+        &self,
+        org: TenantId,
+        agent: AgentId,
+        entry: &AuditEntry,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        (*self).agent_used(org, agent, entry)
+    }
 }
 
 impl<T: ApiKeys + Send + Sync> ApiKeys for std::sync::Arc<T> {
@@ -92,5 +128,22 @@ impl<T: ApiKeys + Send + Sync> ApiKeys for std::sync::Arc<T> {
         secret: &ApiSecret,
     ) -> impl Future<Output = Result<Option<ReadGrant>, StoreError>> + Send {
         self.as_ref().grant_for(secret)
+    }
+
+    fn agent_standing(
+        &self,
+        org: TenantId,
+        client_id: &str,
+    ) -> impl Future<Output = Result<Option<Agent>, StoreError>> + Send {
+        self.as_ref().agent_standing(org, client_id)
+    }
+
+    fn agent_used(
+        &self,
+        org: TenantId,
+        agent: AgentId,
+        entry: &AuditEntry,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.as_ref().agent_used(org, agent, entry)
     }
 }

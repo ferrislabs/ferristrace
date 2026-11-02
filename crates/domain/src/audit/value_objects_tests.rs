@@ -4,6 +4,7 @@ use super::value_objects::{
     Action, Actor, Cursor, DEFAULT_PAGE, Detail, EntryId, MAX_PAGE, PageSize, Target, TargetKind,
 };
 use crate::access::KeyId;
+use crate::agents::AgentId;
 use crate::identity::AccountId;
 use crate::telemetry::TenantId;
 
@@ -78,6 +79,9 @@ fn the_spellings_are_stable_and_dotted() {
             "status_component.deleted",
             "price.created",
             "price.deleted",
+            "agent.registered",
+            "agent.revoked",
+            "agent.read",
         ]
     );
 }
@@ -92,9 +96,17 @@ fn an_actor_reads_back_from_its_kind_and_id() {
     let account = Actor::Account(AccountId::new(Uuid::from_u128(4)));
     let key = Actor::ApiKey(KeyId::new(Uuid::from_u128(5)));
 
-    for actor in [account, key, Actor::Operator, Actor::System] {
+    let agent = Actor::Agent(AgentId::new(Uuid::from_u128(6)));
+
+    for actor in [account, key, agent, Actor::Operator, Actor::System] {
         assert_eq!(Actor::of(actor.kind(), actor.id()), Some(actor));
     }
+    assert_eq!(agent.kind(), "agent");
+}
+
+#[test]
+fn an_agent_always_carries_an_id() {
+    assert_eq!(Actor::of("agent", None), None);
 }
 
 #[test]

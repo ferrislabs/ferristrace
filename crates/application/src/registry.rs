@@ -1,12 +1,12 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
-    AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, DeployMarks, ExportSource,
-    FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions,
-    Memberships, ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages, Postmortems, Projects,
-    ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads, StatusOutbox, StatusPages,
-    StatusSubscribers, UsageHistory,
+    AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
+    AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane,
+    DeployMarks, ExportSource, FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents,
+    IssueDecisions, Memberships, ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages,
+    Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads,
+    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +40,8 @@ pub trait RepoFor<D>: UnitOfWork {
 pub mod domain {
     #[derive(Debug)]
     pub struct Accounts;
+    #[derive(Debug)]
+    pub struct Agents;
     #[derive(Debug)]
     pub struct AlertChannels;
     #[derive(Debug)]
@@ -157,6 +159,22 @@ impl<R> AccessRepos for R where
     R: StandingRepos
         + RecordingRepos
         + RepoFor<domain::ApiKeys, Repo: ApiKeys>
+        + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
+pub trait AgentRepos:
+    StandingRepos
+    + RecordingRepos
+    + RepoFor<domain::Agents, Repo: AgentBook>
+    + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
+impl<R> AgentRepos for R where
+    R: StandingRepos
+        + RecordingRepos
+        + RepoFor<domain::Agents, Repo: AgentBook>
         + RepoFor<domain::Projects, Repo: Projects>
 {
 }
@@ -357,6 +375,7 @@ pub trait Repositories:
     + AuditRepos
     + ExportRepos
     + AccessRepos
+    + AgentRepos
     + OrgRepos
     + CatalogueRepos
     + RosterRepos
@@ -380,6 +399,7 @@ impl<R> Repositories for R where
         + AuditRepos
         + ExportRepos
         + AccessRepos
+        + AgentRepos
         + OrgRepos
         + CatalogueRepos
         + RosterRepos

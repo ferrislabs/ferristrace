@@ -670,7 +670,7 @@ async fn list<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let watched = state.app.list_alerts(&who, TenantId::new(org)).await?;
     Ok(Json(Rules {
         alerts: watched.into_iter().map(RuleView::from).collect(),
@@ -685,7 +685,7 @@ async fn one<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let watched = state
         .app
         .alert(&who, TenantId::new(org), RuleId::new(id))
@@ -756,7 +756,7 @@ async fn history<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let events = state
         .app
         .alert_history(
@@ -781,7 +781,7 @@ async fn preview<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let (_, project, _, definition) = body.definition()?;
     let preview = state
         .app
@@ -816,7 +816,7 @@ async fn channels<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let who = reading(&headers)?;
+    let who = reading(&state, &headers).await?;
     let held = state.app.list_channels(&who, TenantId::new(org)).await?;
     Ok(Json(Channels {
         channels: held.into_iter().map(ChannelBody::from).collect(),
@@ -919,7 +919,7 @@ fn status_of(error: AlertError) -> StatusCode {
         | AlertError::NoSuchRule
         | AlertError::NoSuchChannel
         | AlertError::NoSuchProject => StatusCode::NOT_FOUND,
-        AlertError::NotYoursToChange => StatusCode::FORBIDDEN,
+        AlertError::NotYoursToChange | AlertError::OutOfScope => StatusCode::FORBIDDEN,
         AlertError::UnknownChannel
         | AlertError::UnknownSchedule
         | AlertError::NameTaken
