@@ -60,6 +60,34 @@ impl From<PhotoError> for SettingError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SwitchError {
+    #[error("no live session carries this token")]
+    NoSession,
+    #[error("this session holds no membership of that organisation")]
+    NotYours,
+    #[error("a store could not be reached")]
+    StoreUnreachable,
+}
+
+impl From<WhoamiError> for SwitchError {
+    fn from(error: WhoamiError) -> Self {
+        match error {
+            WhoamiError::NoSession => Self::NoSession,
+            WhoamiError::StoreUnreachable => Self::StoreUnreachable,
+        }
+    }
+}
+
+impl From<SessionError> for SwitchError {
+    fn from(error: SessionError) -> Self {
+        match error {
+            SessionError::Unknown => Self::NoSession,
+            SessionError::StoreUnreachable => Self::StoreUnreachable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum WhoamiError {
     #[error("no live session carries this token")]
     NoSession,

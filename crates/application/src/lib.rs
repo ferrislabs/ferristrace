@@ -29,6 +29,7 @@ mod stack;
 mod status;
 mod teams;
 mod usage;
+mod workspace;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

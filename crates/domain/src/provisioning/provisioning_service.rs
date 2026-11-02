@@ -86,6 +86,31 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
         Ok(org)
     }
 
+    pub async fn found_for(
+        &self,
+        account: AccountId,
+        name: &OrgName,
+        owner: &Email,
+    ) -> Result<Founded, ProvisionError> {
+        let org = self.control_plane.found(name, owner).await?;
+        let project_name = default_project();
+        let project = self.control_plane.claim_project(org, &project_name).await?;
+        self.record(
+            Actor::Account(account),
+            org,
+            Action::OrgFounded,
+            Target::org(org),
+            founding_detail(name, owner),
+        )
+        .await?;
+        Ok(Founded {
+            org,
+            project,
+            project_name,
+            invitation: None,
+        })
+    }
+
     pub async fn grant_role(
         &self,
         org: TenantId,
@@ -171,9 +196,7 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
             org,
             Action::OrgFounded,
             Target::org(org),
-            Detail::default()
-                .with("name", name.as_str())
-                .with("owner", owner.as_str()),
+            founding_detail(name, owner),
         )
         .await
     }
@@ -185,10 +208,22 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
         target: Target,
         detail: Detail,
     ) -> Result<(), ProvisionError> {
+        self.record(Actor::Operator, org, action, target, detail)
+            .await
+    }
+
+    async fn record(
+        &self,
+        actor: Actor,
+        org: TenantId,
+        action: Action,
+        target: Target,
+        detail: Detail,
+    ) -> Result<(), ProvisionError> {
         self.trail
             .record(&AuditEntry {
                 org,
-                actor: Actor::Operator,
+                actor,
                 action,
                 target,
                 detail,
@@ -209,6 +244,12 @@ impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
         self.control_plane.invite(account, token.hash()).await?;
         Ok(token)
     }
+}
+
+fn founding_detail(name: &OrgName, owner: &Email) -> Detail {
+    Detail::default()
+        .with("name", name.as_str())
+        .with("owner", owner.as_str())
 }
 
 fn default_project() -> ProjectName {

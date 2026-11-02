@@ -1,16 +1,20 @@
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-use super::errors::ProvisionError;
+use super::errors::{FoundError, ProvisionError};
+use super::founding::Founding;
 use super::ports::ControlPlane;
 use super::provisioning_service::Provisioning;
 use super::value_objects::{Bootstrapped, Founded, Minted, Revoked};
 use crate::access::KeyId;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{ProjectId, ProjectName};
-use crate::identity::{AccountId, Email};
+use crate::clock::UnixSeconds;
+use crate::identity::{
+    AccountId, Agent, Email, Session, SessionError, SessionStore, SessionSwitch,
+};
 use crate::organisation::{OrgName, OrgRole};
-use crate::secret::SecretHash;
+use crate::secret::{SecretHash, SessionToken};
 use crate::telemetry::{IngestKey, TenantId};
 use crate::testing::Notebook;
 
@@ -642,5 +646,180 @@ async fn a_new_account_belongs_to_no_organisation_so_no_log_records_it() {
         .await
         .expect("an invitation");
 
+    assert!(notebook.entries().is_empty());
+}
+
+const LIVE_TOKEN: &str = "ft_ss_live";
+
+#[derive(Debug, Clone)]
+struct OneSession {
+    account: AccountId,
+    email: Email,
+    switched: Arc<Mutex<Vec<TenantId>>>,
+    unreachable: bool,
+}
+
+impl OneSession {
+    fn of(account: AccountId, email: &Email) -> Self {
+        Self {
+            account,
+            email: email.clone(),
+            switched: Arc::default(),
+            unreachable: false,
+        }
+    }
+}
+
+impl SessionStore for OneSession {
+    async fn issue(
+        &self,
+        _account: AccountId,
+        _org: Option<TenantId>,
+        _from: Option<&Agent>,
+    ) -> Result<SessionToken, SessionError> {
+        Err(SessionError::Unknown)
+    }
+
+    async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
+        if token.exposed() != LIVE_TOKEN {
+            return Err(SessionError::Unknown);
+        }
+        Ok(Session {
+            account: self.account,
+            email: self.email.clone(),
+            name: None,
+            photo: None,
+            org: None,
+            expires_at: UnixSeconds::new(0),
+        })
+    }
+
+    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
+        Ok(())
+    }
+}
+
+impl SessionSwitch for OneSession {
+    async fn switch(&self, _token: &SessionToken, org: TenantId) -> Result<(), SessionError> {
+        if self.unreachable {
+            return Err(SessionError::StoreUnreachable);
+        }
+        self.switched.lock().expect("the lock").push(org);
+        Ok(())
+    }
+}
+
+fn a_live_token() -> SessionToken {
+    SessionToken::from_plaintext(LIVE_TOKEN)
+}
+
+#[tokio::test]
+async fn a_signed_in_account_founds_an_organisation_it_owns_with_a_default_project() {
+    let email = an_address();
+    let account = AccountId::new(Uuid::from_u128(11));
+    let (control_plane, held) = a_control_plane_holding(&email, account);
+    let sessions = OneSession::of(account, &email);
+    let notebook = Notebook::default();
+    let founding = Founding::new(sessions.clone(), control_plane, notebook.clone());
+
+    let founded = founding
+        .found(&a_live_token(), &a_name())
+        .await
+        .expect("a founded organisation");
+
+    let written = written(&held);
+    assert_eq!(written.org, Some(founded.org));
+    assert_eq!(written.org_name, Some(a_name()));
+    assert_eq!(founded.project_name.as_str(), "default");
+    assert_eq!(
+        written.projects,
+        vec![(founded.org, founded.project_name, founded.project)]
+    );
+    assert!(founded.invitation.is_none());
+    assert_eq!(
+        *sessions.switched.lock().expect("the lock"),
+        vec![founded.org]
+    );
+}
+
+#[tokio::test]
+async fn a_web_founding_is_recorded_once_under_the_account_that_made_it() {
+    let email = an_address();
+    let account = AccountId::new(Uuid::from_u128(11));
+    let (control_plane, _held) = a_control_plane_holding(&email, account);
+    let notebook = Notebook::default();
+    let founding = Founding::new(
+        OneSession::of(account, &email),
+        control_plane,
+        notebook.clone(),
+    );
+
+    let founded = founding
+        .found(&a_live_token(), &a_name())
+        .await
+        .expect("a founded organisation");
+
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].org, founded.org);
+    assert_eq!(entries[0].actor, Actor::Account(account));
+    assert_eq!(entries[0].action, Action::OrgFounded);
+    assert_eq!(entries[0].target, Target::org(founded.org));
+    assert_eq!(entries[0].detail.get("owner"), Some(Some(email.as_str())));
+}
+
+#[tokio::test]
+async fn a_token_that_resolves_to_nothing_founds_nothing() {
+    let email = an_address();
+    let account = AccountId::new(Uuid::from_u128(11));
+    let (control_plane, held) = a_control_plane_holding(&email, account);
+    let notebook = Notebook::default();
+    let founding = Founding::new(
+        OneSession::of(account, &email),
+        control_plane,
+        notebook.clone(),
+    );
+
+    let refused = founding
+        .found(&SessionToken::from_plaintext("ft_ss_other"), &a_name())
+        .await;
+
+    assert_eq!(refused, Err(FoundError::NoSession));
+    assert_eq!(written(&held).org, None);
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_that_cannot_be_switched_refuses_the_founding() {
+    let email = an_address();
+    let account = AccountId::new(Uuid::from_u128(11));
+    let (control_plane, _held) = a_control_plane_holding(&email, account);
+    let sessions = OneSession {
+        unreachable: true,
+        ..OneSession::of(account, &email)
+    };
+    let founding = Founding::new(sessions, control_plane, Notebook::default());
+
+    let refused = founding.found(&a_live_token(), &a_name()).await;
+
+    assert_eq!(refused, Err(FoundError::Unreachable));
+}
+
+#[tokio::test]
+async fn an_account_the_control_plane_does_not_know_founds_nothing() {
+    let email = an_address();
+    let account = AccountId::new(Uuid::from_u128(11));
+    let (control_plane, held) = a_control_plane();
+    let notebook = Notebook::default();
+    let founding = Founding::new(
+        OneSession::of(account, &email),
+        control_plane,
+        notebook.clone(),
+    );
+
+    let refused = founding.found(&a_live_token(), &a_name()).await;
+
+    assert_eq!(refused, Err(FoundError::NoSession));
+    assert_eq!(written(&held).org, None);
     assert!(notebook.entries().is_empty());
 }

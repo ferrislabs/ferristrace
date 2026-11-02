@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferristrace_domain::{
     Action, Actor, Bootstrapped, ExportError, Fingerprint, IssueError, KeyError, KeyName,
-    KeyScopes, ProjectId, ProvisionError, SettingError, Status, Target,
+    KeyScopes, ProjectId, ProvisionError, SettingError, Status, SwitchError, Target,
 };
 
 use crate::IssueRuling;
@@ -327,5 +327,69 @@ async fn without_a_span_store_there_is_nothing_to_export_and_nothing_is_audited(
     let refused = app(&repos).begin_export(&a_token(), the_org()).await;
 
     assert_eq!(refused.err(), Some(ExportError::StoreUnreachable));
+    assert!(repos.0.committed().is_empty());
+}
+
+#[tokio::test]
+async fn switching_org_reads_the_standing_and_writes_the_session_in_one_transaction() {
+    let repos = Recording::default();
+
+    app(&repos)
+        .switch_org(&a_token(), the_org())
+        .await
+        .expect("a member switches");
+
+    assert_eq!(count(&repos.0.opened), 1);
+    assert_eq!(repos.0.built_in(), vec![0, 0]);
+    assert_eq!(count(&repos.0.commits), 1);
+    assert_eq!(count(&repos.0.writes), 1);
+}
+
+#[tokio::test]
+async fn switching_to_an_org_the_account_is_not_in_writes_nothing() {
+    let repos = Recording::default();
+
+    let refused = app(&repos)
+        .switch_org(
+            &a_token(),
+            ferristrace_domain::TenantId::new(uuid::Uuid::from_u128(99)),
+        )
+        .await;
+
+    assert_eq!(refused, Err(SwitchError::NotYours));
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert_eq!(count(&repos.0.writes), 0);
+}
+
+#[tokio::test]
+async fn founding_an_org_from_the_web_is_one_transaction_with_one_entry_by_the_account() {
+    let repos = Recording::default();
+
+    let founded = app(&repos)
+        .found_org(&a_token(), &a_name("Acme"))
+        .await
+        .expect("a founded organisation");
+
+    assert_eq!(founded.project_name.as_str(), "default");
+    assert_eq!(count(&repos.0.opened), 1);
+    assert_eq!(count(&repos.0.commits), 1);
+    assert_eq!(count(&repos.0.writes), 3);
+    let committed = repos.0.committed();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].action, Action::OrgFounded);
+    assert_eq!(committed[0].actor, Actor::Account(the_account()));
+}
+
+#[tokio::test]
+async fn founding_interrupted_at_the_default_project_rolls_the_organisation_back() {
+    let repos = Recording::default();
+    repos.0.refuse_claims.store(true, Ordering::SeqCst);
+
+    let refused = app(&repos).found_org(&a_token(), &a_name("Acme")).await;
+
+    assert_eq!(refused, Err(ferristrace_domain::FoundError::Unreachable));
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert_eq!(count(&repos.0.commits), 0);
+    assert_eq!(count(&repos.0.writes), 0);
     assert!(repos.0.committed().is_empty());
 }

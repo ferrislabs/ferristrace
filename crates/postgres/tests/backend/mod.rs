@@ -159,6 +159,10 @@ forward!(Sessions: SessionStore {
     fn revoke(&self, token: &SessionToken) -> Result<(), SessionError>;
 });
 
+forward!(Sessions: SessionSwitch {
+    fn switch(&self, token: &SessionToken, org: TenantId) -> Result<(), SessionError>;
+});
+
 forward!(Sessions: SessionRoll {
     fn live(&self, account: AccountId, current: &SessionToken) -> Result<Vec<LiveSession>, SessionError>;
     fn revoke_one(&self, account: AccountId, id: SessionId) -> Result<bool, SessionError>;

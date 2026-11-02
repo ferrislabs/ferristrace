@@ -5,8 +5,8 @@ use ferristrace_domain::{
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane,
     DeployMarks, ExportSource, FactorStore, Gate, IncidentAttachments, IncidentTimeline, Incidents,
     IssueDecisions, Memberships, ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages,
-    Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads,
-    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
+    Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, SessionSwitch,
+    Squads, StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +254,24 @@ impl<R> IdentityRepos for R where
 {
 }
 
+pub trait SwitchRepos: StandingRepos + RepoFor<domain::Sessions, Repo: SessionSwitch> {}
+
+impl<R> SwitchRepos for R where R: StandingRepos + RepoFor<domain::Sessions, Repo: SessionSwitch> {}
+
+pub trait FoundRepos:
+    RecordingRepos
+    + RepoFor<domain::ControlPlane, Repo: ControlPlane>
+    + RepoFor<domain::Sessions, Repo: SessionStore + SessionSwitch>
+{
+}
+
+impl<R> FoundRepos for R where
+    R: RecordingRepos
+        + RepoFor<domain::ControlPlane, Repo: ControlPlane>
+        + RepoFor<domain::Sessions, Repo: SessionStore + SessionSwitch>
+{
+}
+
 pub trait ProvisioningRepos:
     RecordingRepos + RepoFor<domain::ControlPlane, Repo: ControlPlane>
 {
@@ -384,6 +402,8 @@ pub trait Repositories:
     + IssueRepos
     + IdentityRepos
     + ProvisioningRepos
+    + SwitchRepos
+    + FoundRepos
     + DeployRepos
     + LlmRepos
 {
@@ -408,6 +428,8 @@ impl<R> Repositories for R where
         + IssueRepos
         + IdentityRepos
         + ProvisioningRepos
+        + SwitchRepos
+        + FoundRepos
         + DeployRepos
         + LlmRepos
 {
