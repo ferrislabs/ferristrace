@@ -1,6 +1,7 @@
 extern crate self as ferristrace_application;
 
 mod access;
+mod audit;
 mod borrowed;
 mod catalogue;
 mod explore;

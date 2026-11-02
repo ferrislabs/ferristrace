@@ -1,6 +1,8 @@
 use super::errors::ProvisionError;
 use super::ports::ControlPlane;
 use super::value_objects::{Bootstrapped, DEFAULT_PROJECT, Founded, Issued};
+use crate::access::KeyScope;
+use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::identity::{AccountId, Email};
 use crate::organisation::{OrgName, OrgRole};
@@ -8,13 +10,17 @@ use crate::secret::ResetToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug, Clone)]
-pub struct Provisioning<C> {
+pub struct Provisioning<C, A> {
     control_plane: C,
+    trail: A,
 }
 
-impl<C: ControlPlane> Provisioning<C> {
-    pub fn new(control_plane: C) -> Self {
-        Self { control_plane }
+impl<C: ControlPlane, A: AuditTrail> Provisioning<C, A> {
+    pub fn new(control_plane: C, trail: A) -> Self {
+        Self {
+            control_plane,
+            trail,
+        }
     }
 
     pub async fn bootstrap(
@@ -36,6 +42,7 @@ impl<C: ControlPlane> Provisioning<C> {
         } else {
             None
         };
+        self.note_founding(org, name, owner).await?;
 
         Ok(Bootstrapped::Founded(Founded {
             org,
@@ -56,7 +63,17 @@ impl<C: ControlPlane> Provisioning<C> {
             .account_for(email)
             .await?
             .ok_or(ProvisionError::NoSuchAccount)?;
-        self.invite(account).await
+        let token = self.invite(account).await?;
+        for org in self.control_plane.memberships_of(account).await? {
+            self.note(
+                org,
+                Action::ResetLinkIssuedByOperator,
+                Target::account(account),
+                Detail::default().with("email", email.as_str()),
+            )
+            .await?;
+        }
+        Ok(token)
     }
 
     pub async fn create_org(
@@ -64,7 +81,9 @@ impl<C: ControlPlane> Provisioning<C> {
         name: &OrgName,
         owner: &Email,
     ) -> Result<TenantId, ProvisionError> {
-        self.control_plane.found(name, owner).await
+        let org = self.control_plane.found(name, owner).await?;
+        self.note_founding(org, name, owner).await?;
+        Ok(org)
     }
 
     pub async fn grant_role(
@@ -73,7 +92,18 @@ impl<C: ControlPlane> Provisioning<C> {
         member: &Email,
         role: OrgRole,
     ) -> Result<(), ProvisionError> {
-        self.control_plane.grant(org, member, role).await
+        self.control_plane.grant(org, member, role).await?;
+        let account = self.control_plane.account_for(member).await?;
+        let target = account.map_or_else(|| Target::of(TargetKind::Member, None), Target::member);
+        self.note(
+            org,
+            Action::MemberRoleGranted,
+            target,
+            Detail::default()
+                .with("email", member.as_str())
+                .with("to", role),
+        )
+        .await
     }
 
     pub async fn create_project(
@@ -81,7 +111,15 @@ impl<C: ControlPlane> Provisioning<C> {
         org: TenantId,
         name: &ProjectName,
     ) -> Result<ProjectId, ProvisionError> {
-        self.control_plane.claim_project(org, name).await
+        let project = self.control_plane.claim_project(org, name).await?;
+        self.note(
+            org,
+            Action::ProjectCreated,
+            Target::project(project),
+            Detail::default().with("name", name.as_str()),
+        )
+        .await?;
+        Ok(project)
     }
 
     pub async fn issue_key(
@@ -93,12 +131,70 @@ impl<C: ControlPlane> Provisioning<C> {
             Some(named) => Some(named),
             None => self.control_plane.only_project(org).await?,
         };
-        let key = self.control_plane.issue_key(org, project).await?;
-        Ok(Issued { key, project })
+        let minted = self.control_plane.issue_key(org, project).await?;
+        self.note(
+            org,
+            Action::KeyIssued,
+            Target::key(minted.id),
+            Detail::default()
+                .with("scopes", KeyScope::Ingest)
+                .with_maybe("project", project),
+        )
+        .await?;
+        Ok(Issued {
+            key: minted.key,
+            project,
+        })
     }
 
     pub async fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError> {
-        self.control_plane.revoke_key(prefix).await
+        let Some(revoked) = self.control_plane.revoke_key(prefix).await? else {
+            return Ok(false);
+        };
+        self.note(
+            revoked.org,
+            Action::KeyRevoked,
+            Target::key(revoked.id),
+            Detail::default().with("prefix", prefix),
+        )
+        .await?;
+        Ok(true)
+    }
+
+    async fn note_founding(
+        &self,
+        org: TenantId,
+        name: &OrgName,
+        owner: &Email,
+    ) -> Result<(), ProvisionError> {
+        self.note(
+            org,
+            Action::OrgFounded,
+            Target::org(org),
+            Detail::default()
+                .with("name", name.as_str())
+                .with("owner", owner.as_str()),
+        )
+        .await
+    }
+
+    async fn note(
+        &self,
+        org: TenantId,
+        action: Action,
+        target: Target,
+        detail: Detail,
+    ) -> Result<(), ProvisionError> {
+        self.trail
+            .record(&AuditEntry {
+                org,
+                actor: Actor::Operator,
+                action,
+                target,
+                detail,
+            })
+            .await
+            .map_err(|_| ProvisionError::Unreachable)
     }
 
     async fn account_for_or_create(&self, email: &Email) -> Result<AccountId, ProvisionError> {

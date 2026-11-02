@@ -1,8 +1,12 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ferristrace_domain::{Bootstrapped, KeyError, KeyName, KeyScopes, ProvisionError};
+use ferristrace_domain::{
+    Action, Actor, Bootstrapped, Fingerprint, IssueError, KeyError, KeyName, KeyScopes, ProjectId,
+    ProvisionError, SettingError, Status, Target,
+};
 
-use crate::fakes::{Probing, a_name, a_token, the_email, the_org, the_policy};
+use crate::IssueRuling;
+use crate::fakes::{Probing, a_name, a_token, the_account, the_email, the_org, the_policy};
 use crate::recording::{Handle, Recording};
 use crate::testing::Inert;
 use crate::{Adapters, Ferristrace, Stack, repository, transactional};
@@ -190,4 +194,83 @@ async fn revoking_a_key_nobody_holds_rolls_back() {
     assert_eq!(refused, Err(KeyError::NoSuchKey));
     assert_eq!(count(&repos.0.rollbacks), 1);
     assert_eq!(count(&repos.0.writes), 0);
+}
+
+#[tokio::test]
+async fn renaming_an_org_commits_exactly_one_entry_naming_the_account() {
+    let repos = Recording::default();
+    *repos.0.org_name.lock().expect("the ledger lock") = "Acme".to_owned();
+
+    app(&repos)
+        .rename_org(&a_token(), the_org(), &a_name("Acme Inc"))
+        .await
+        .expect("a renamed organisation");
+
+    let committed = repos.0.committed();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].action, Action::OrgRenamed);
+    assert_eq!(committed[0].actor, Actor::Account(the_account()));
+    assert_eq!(committed[0].target, Target::org(the_org()));
+    assert_eq!(committed[0].detail.get("from"), Some(Some("Acme")));
+    assert_eq!(committed[0].detail.get("to"), Some(Some("Acme Inc")));
+}
+
+#[tokio::test]
+async fn a_refused_rename_rolls_back_and_commits_no_entry() {
+    let repos = Recording::default();
+    repos.0.member_only.store(true, Ordering::SeqCst);
+
+    let refused = app(&repos)
+        .rename_org(&a_token(), the_org(), &a_name("Mine Now"))
+        .await;
+
+    assert_eq!(refused.err(), Some(SettingError::NotYoursToChange));
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert!(repos.0.committed().is_empty());
+}
+
+#[tokio::test]
+async fn a_ruling_refused_after_its_decision_was_noted_commits_no_entry() {
+    let repos = Recording::default();
+    repos.0.refuse_assignments.store(true, Ordering::SeqCst);
+    let ruled = Ferristrace::<Probing>::new(
+        repos.clone(),
+        Adapters {
+            issue_store: Some(Inert::default()),
+            ..adapters()
+        },
+    );
+
+    let refused = ruled
+        .rule_on_issue(
+            &a_token(),
+            the_org(),
+            IssueRuling {
+                project: ProjectId::new(uuid::Uuid::from_u128(3)),
+                print: Fingerprint::new([1; 16]),
+                status: Some(Status::Resolved),
+                owner: Some(None),
+            },
+        )
+        .await;
+
+    assert_eq!(refused, Err(IssueError::Unavailable));
+    assert_eq!(repos.0.noted.load(Ordering::SeqCst), 1);
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert!(repos.0.committed().is_empty());
+}
+
+#[tokio::test]
+async fn a_command_line_bootstrap_commits_one_founding_by_the_operator() {
+    let repos = Recording::default();
+
+    app(&repos)
+        .bootstrap(&a_name("Acme"), &the_email(), false)
+        .await
+        .expect("a founded organisation");
+
+    let committed = repos.0.committed();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].action, Action::OrgFounded);
+    assert_eq!(committed[0].actor, Actor::Operator);
 }

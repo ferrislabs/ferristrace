@@ -3,6 +3,7 @@ mod secret;
 mod store;
 
 pub mod access;
+pub mod audit;
 pub mod catalogue;
 pub mod explore;
 pub mod identity;
@@ -18,6 +19,10 @@ pub mod testing;
 pub use access::{
     ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
     KeyRing, KeyScope, KeyScopes, ReadGrant, ReadRefusal, Reader, Readers,
+};
+pub use audit::{
+    Action, Actor, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPage, AuditTrail, Cursor,
+    Detail, EntryId, Logged, PageSize, Target, TargetKind,
 };
 pub use catalogue::{
     Assigned, BadProjectName, Catalogue, CatalogueError, Created, OwnerTeam, Project, ProjectId,
@@ -54,7 +59,8 @@ pub use profile::{
     PhotoKind, Photos, Pictured, Portrait, Profile, ProfileError,
 };
 pub use provisioning::{
-    Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, ProvisionError, Provisioning,
+    Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, Minted, ProvisionError,
+    Provisioning, Revoked,
 };
 pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use store::StoreError;

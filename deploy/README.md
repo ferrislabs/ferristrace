@@ -50,6 +50,14 @@ under Settings > Project > Api keys, with the `ingest` scope. A key with
 the `read` scope reads services, traces and issues through `/api` with the
 same bearer header, and a key bound to a project reads only that project.
 
+Every change made to an organisation, from the web application or from the
+command line, is recorded once in its audit log: who acted (an account, or
+`operator` for the command line), what was done, to what, and when. Owners
+and administrators read it under Settings > Organisation > Audit log, or
+through `GET /api/orgs/<org>/audit`. No entry carries a key secret, a
+token or a password, and nothing in FerrisTrace edits or deletes an entry;
+deleting the organisation deletes its log.
+
 Then point any OTLP exporter at `http://localhost:4318/v1/traces` or
 `localhost:4317`, with the key as a bearer token:
 

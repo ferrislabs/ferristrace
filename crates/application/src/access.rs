@@ -10,18 +10,23 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: AccessRepos,
 {
-    #[transactional(sessions, memberships, api_keys, projects, unavailable = KeyError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, audit, unavailable = KeyError::StoreUnreachable)]
     pub async fn list_keys(
         &self,
         token: &SessionToken,
         org: TenantId,
     ) -> Result<Vec<ApiKey>, KeyError> {
-        KeyRing::new(Whoami::new(sessions, memberships), api_keys, projects)
-            .list(token, org)
-            .await
+        KeyRing::new(
+            Whoami::new(sessions, memberships),
+            api_keys,
+            projects,
+            audit,
+        )
+        .list(token, org)
+        .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, unavailable = KeyError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, audit, unavailable = KeyError::StoreUnreachable)]
     pub async fn issue_key(
         &self,
         token: &SessionToken,
@@ -30,20 +35,30 @@ where
         name: &KeyName,
         scopes: &KeyScopes,
     ) -> Result<IssuedKey, KeyError> {
-        KeyRing::new(Whoami::new(sessions, memberships), api_keys, projects)
-            .issue(token, org, project, name, scopes)
-            .await
+        KeyRing::new(
+            Whoami::new(sessions, memberships),
+            api_keys,
+            projects,
+            audit,
+        )
+        .issue(token, org, project, name, scopes)
+        .await
     }
 
-    #[transactional(sessions, memberships, api_keys, projects, unavailable = KeyError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, projects, audit, unavailable = KeyError::StoreUnreachable)]
     pub async fn revoke_key(
         &self,
         token: &SessionToken,
         org: TenantId,
         id: KeyId,
     ) -> Result<(), KeyError> {
-        KeyRing::new(Whoami::new(sessions, memberships), api_keys, projects)
-            .revoke(token, org, id)
-            .await
+        KeyRing::new(
+            Whoami::new(sessions, memberships),
+            api_keys,
+            projects,
+            audit,
+        )
+        .revoke(token, org, id)
+        .await
     }
 }

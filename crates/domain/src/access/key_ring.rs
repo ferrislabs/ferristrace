@@ -2,6 +2,7 @@ use super::entities::{ApiKey, IssuedKey};
 use super::errors::KeyError;
 use super::ports::ApiKeys;
 use super::value_objects::{KeyId, KeyName, KeyScopes};
+use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::catalogue::{ProjectId, Projects};
 use crate::identity::{AccountId, SessionStore};
 use crate::organisation::{Memberships, OrgRole, Whoami};
@@ -9,24 +10,27 @@ use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug)]
-pub struct KeyRing<S, G, K, P> {
+pub struct KeyRing<S, G, K, P, A> {
     whoami: Whoami<S, G>,
     keys: K,
     projects: P,
+    trail: A,
 }
 
-impl<S, G, K, P> KeyRing<S, G, K, P>
+impl<S, G, K, P, A> KeyRing<S, G, K, P, A>
 where
     S: SessionStore,
     G: Memberships,
     K: ApiKeys,
     P: Projects,
+    A: AuditTrail,
 {
-    pub fn new(whoami: Whoami<S, G>, keys: K, projects: P) -> Self {
+    pub fn new(whoami: Whoami<S, G>, keys: K, projects: P, trail: A) -> Self {
         Self {
             whoami,
             keys,
             projects,
+            trail,
         }
     }
 
@@ -50,7 +54,19 @@ where
                 return Err(KeyError::NoSuchProject);
             }
         }
-        Ok(self.keys.issue(org, project, name, scopes, by).await?)
+        let issued = self.keys.issue(org, project, name, scopes, by).await?;
+        self.note(
+            org,
+            by,
+            Action::KeyIssued,
+            issued.key.id,
+            Detail::default()
+                .with("name", name.as_str())
+                .with_all("scopes", scopes.as_slice())
+                .with_maybe("project", project),
+        )
+        .await?;
+        Ok(issued)
     }
 
     pub async fn revoke(
@@ -59,12 +75,45 @@ where
         org: TenantId,
         id: KeyId,
     ) -> Result<(), KeyError> {
-        self.standing(token, org, OrgRole::Admin).await?;
-        if self.keys.revoke(org, id).await? {
-            Ok(())
-        } else {
-            Err(KeyError::NoSuchKey)
+        let by = self.standing(token, org, OrgRole::Admin).await?;
+        let name = self
+            .keys
+            .list(org)
+            .await?
+            .into_iter()
+            .find(|key| key.id == id)
+            .map(|key| key.name);
+        if !self.keys.revoke(org, id).await? {
+            return Err(KeyError::NoSuchKey);
         }
+        self.note(
+            org,
+            by,
+            Action::KeyRevoked,
+            id,
+            Detail::default().with_maybe("name", name),
+        )
+        .await
+    }
+
+    async fn note(
+        &self,
+        org: TenantId,
+        by: AccountId,
+        action: Action,
+        key: KeyId,
+        detail: Detail,
+    ) -> Result<(), KeyError> {
+        Ok(self
+            .trail
+            .record(&AuditEntry {
+                org,
+                actor: Actor::Account(by),
+                action,
+                target: Target::key(key),
+                detail,
+            })
+            .await?)
     }
 
     async fn standing(

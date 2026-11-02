@@ -7,11 +7,13 @@ use super::ports::{Memberships, Roll};
 use super::roster::Roster;
 use super::value_objects::{Invitation, OrgRole};
 use super::whoami::Whoami;
+use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::secret::{SecretHash, SessionToken};
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
@@ -224,8 +226,20 @@ impl Roll for &Held {
     }
 }
 
-fn roster(role: OrgRole, held: &Held) -> Roster<OneSession, MemberOfMine, &Held> {
-    Roster::new(Whoami::new(OneSession, MemberOfMine(role)), held)
+fn roster(role: OrgRole, held: &Held) -> Roster<OneSession, MemberOfMine, &Held, Notebook> {
+    noting(role, held, &Notebook::default())
+}
+
+fn noting<'a>(
+    role: OrgRole,
+    held: &'a Held,
+    notebook: &Notebook,
+) -> Roster<OneSession, MemberOfMine, &'a Held, Notebook> {
+    Roster::new(
+        Whoami::new(OneSession, MemberOfMine(role)),
+        held,
+        notebook.clone(),
+    )
 }
 
 fn token() -> SessionToken {
@@ -599,4 +613,82 @@ async fn an_address_already_on_the_roll_opens_no_way_in_and_creates_no_account()
     let written = held.written();
     assert_eq!(written.locked, 0);
     assert_eq!(written.way_ins, 0);
+}
+
+#[tokio::test]
+async fn changing_a_role_records_who_changed_whom_from_what_to_what() {
+    let held = Held::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
+    let notebook = Notebook::default();
+
+    noting(OrgRole::Admin, &held, &notebook)
+        .grant(&token(), an_org(MINE), an_account(SOMEBODY), OrgRole::Admin)
+        .await
+        .expect("an administrator may change a member");
+
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, Action::MemberRoleGranted);
+    assert_eq!(entries[0].actor, Actor::Account(an_account(ME)));
+    assert_eq!(entries[0].target, Target::member(an_account(SOMEBODY)));
+    assert_eq!(entries[0].detail.get("from"), Some(Some("member")));
+    assert_eq!(entries[0].detail.get("to"), Some(Some("admin")));
+}
+
+#[tokio::test]
+async fn a_refused_role_change_records_nothing() {
+    let held = Held::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Admin, &held, &notebook)
+        .grant(&token(), an_org(MINE), an_account(SOMEBODY), OrgRole::Owner)
+        .await;
+
+    assert_eq!(refused, Err(RosterError::OwnersOnly));
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn removing_a_member_records_the_role_it_held() {
+    let held = Held::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
+    let notebook = Notebook::default();
+
+    noting(OrgRole::Admin, &held, &notebook)
+        .remove(&token(), an_org(MINE), an_account(SOMEBODY))
+        .await
+        .expect("an administrator may remove a member");
+
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, Action::MemberRemoved);
+    assert_eq!(entries[0].target, Target::member(an_account(SOMEBODY)));
+    assert_eq!(entries[0].detail.get("role"), Some(Some("member")));
+}
+
+#[tokio::test]
+async fn inviting_records_the_address_and_role_but_never_the_way_in() {
+    let held = Held::awaiting();
+    let notebook = Notebook::default();
+
+    let invitation = noting(OrgRole::Admin, &held, &notebook)
+        .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
+        .await
+        .expect("an administrator may invite");
+
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, Action::MemberInvited);
+    assert_eq!(entries[0].target, Target::member(invitation.member.account));
+    assert_eq!(
+        entries[0].detail.get("email"),
+        Some(Some("new@example.com"))
+    );
+    assert_eq!(entries[0].detail.get("role"), Some(Some("member")));
+    let way_in = invitation.way_in.expect("a way in");
+    assert!(
+        entries[0]
+            .detail
+            .pairs()
+            .iter()
+            .all(|(_, value)| value.as_deref() != Some(way_in.exposed()))
+    );
 }

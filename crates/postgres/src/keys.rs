@@ -121,7 +121,16 @@ pub(crate) async fn issue_on(
     org: TenantId,
     project: Option<Uuid>,
 ) -> Result<IngestKey, KeyError> {
-    let minted = mint_on(
+    let minted = ingest_on(connection, org, project).await?;
+    Ok(IngestKey::from_plaintext(&minted.plaintext))
+}
+
+pub(crate) async fn ingest_on(
+    connection: &mut PgConnection,
+    org: TenantId,
+    project: Option<Uuid>,
+) -> Result<Minted, KeyError> {
+    Ok(mint_on(
         connection,
         Minting {
             org,
@@ -131,8 +140,32 @@ pub(crate) async fn issue_on(
             by: None,
         },
     )
+    .await?)
+}
+
+pub(crate) struct Stopped {
+    pub(crate) org: Uuid,
+    pub(crate) id: Uuid,
+}
+
+pub(crate) async fn stop_on(
+    connection: &mut PgConnection,
+    prefix: &str,
+    now: UnixSeconds,
+) -> Result<Option<Stopped>, KeyError> {
+    let stopped = sqlx::query(
+        "UPDATE api_keys SET revoked_at = $2 \
+         WHERE prefix = $1 AND revoked_at IS NULL \
+         RETURNING org_id AS org_id, id AS id",
+    )
+    .bind(prefix)
+    .bind(to_nanos(now))
+    .fetch_optional(connection)
     .await?;
-    Ok(IngestKey::from_plaintext(&minted.plaintext))
+    Ok(stopped.map(|row| Stopped {
+        org: row.get("org_id"),
+        id: row.get("id"),
+    }))
 }
 
 pub(crate) async fn revoke_on(

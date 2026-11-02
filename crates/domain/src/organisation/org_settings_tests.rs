@@ -7,12 +7,14 @@ use super::org_settings::OrgSettings;
 use super::ports::{Memberships, Orgs};
 use super::value_objects::{MAX_ORG_NAME_BYTES, OrgName, OrgRole};
 use super::whoami::Whoami;
+use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::profile::{NoPhotos, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
@@ -131,8 +133,24 @@ impl Orgs for &Kept {
     }
 }
 
-fn settings(role: OrgRole, kept: &Kept) -> OrgSettings<OneSession, MemberOfMine, &Kept, NoPhotos> {
-    OrgSettings::new(Whoami::new(OneSession, MemberOfMine(role)), kept, NoPhotos)
+fn settings(
+    role: OrgRole,
+    kept: &Kept,
+) -> OrgSettings<OneSession, MemberOfMine, &Kept, NoPhotos, Notebook> {
+    noting(role, kept, &Notebook::default())
+}
+
+fn noting<'a>(
+    role: OrgRole,
+    kept: &'a Kept,
+    notebook: &Notebook,
+) -> OrgSettings<OneSession, MemberOfMine, &'a Kept, NoPhotos, Notebook> {
+    OrgSettings::new(
+        Whoami::new(OneSession, MemberOfMine(role)),
+        kept,
+        NoPhotos,
+        notebook.clone(),
+    )
 }
 
 #[derive(Debug, Default)]
@@ -202,8 +220,22 @@ fn marked<'a>(
     role: OrgRole,
     kept: &'a Kept,
     shelf: &'a Shelf,
-) -> OrgSettings<OneSession, MemberOfMine, &'a Kept, &'a Shelf> {
-    OrgSettings::new(Whoami::new(OneSession, MemberOfMine(role)), kept, shelf)
+) -> OrgSettings<OneSession, MemberOfMine, &'a Kept, &'a Shelf, Notebook> {
+    marked_noting(role, kept, shelf, &Notebook::default())
+}
+
+fn marked_noting<'a>(
+    role: OrgRole,
+    kept: &'a Kept,
+    shelf: &'a Shelf,
+    notebook: &Notebook,
+) -> OrgSettings<OneSession, MemberOfMine, &'a Kept, &'a Shelf, Notebook> {
+    OrgSettings::new(
+        Whoami::new(OneSession, MemberOfMine(role)),
+        kept,
+        shelf,
+        notebook.clone(),
+    )
 }
 
 fn a_png() -> Photo {
@@ -496,4 +528,73 @@ mod proptests {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn renaming_records_one_entry_naming_the_account_and_both_names() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    noting(OrgRole::Admin, &kept, &notebook)
+        .rename(&token(), an_org(MINE), &a_name("Acme Payments"))
+        .await
+        .expect("an administrator may rename");
+
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.org, an_org(MINE));
+    assert_eq!(entry.action, Action::OrgRenamed);
+    assert_eq!(
+        entry.actor,
+        Actor::Account(AccountId::new(Uuid::from_u128(9)))
+    );
+    assert_eq!(entry.target, Target::org(an_org(MINE)));
+    assert_eq!(entry.detail.get("from"), Some(Some("Acme")));
+    assert_eq!(entry.detail.get("to"), Some(Some("Acme Payments")));
+}
+
+#[tokio::test]
+async fn a_refused_rename_records_nothing() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Member, &kept, &notebook)
+        .rename(&token(), an_org(MINE), &a_name("Mine Now"))
+        .await;
+
+    assert_eq!(refused, Err(SettingError::NotYoursToChange));
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn keeping_then_dropping_a_logo_records_each_change_once() {
+    let kept = Kept::holding("Acme");
+    let shelf = Shelf::default();
+    let notebook = Notebook::default();
+    let settings = marked_noting(OrgRole::Admin, &kept, &shelf, &notebook);
+
+    settings
+        .put_logo(&token(), an_org(MINE), &a_png())
+        .await
+        .expect("a kept logo");
+    settings
+        .remove_logo(&token(), an_org(MINE))
+        .await
+        .expect("a dropped logo");
+    settings
+        .remove_logo(&token(), an_org(MINE))
+        .await
+        .expect("nothing left to drop");
+
+    let actions: Vec<Action> = notebook
+        .entries()
+        .iter()
+        .map(|entry| entry.action)
+        .collect();
+    assert_eq!(actions, vec![Action::OrgLogoSet, Action::OrgLogoRemoved]);
+    assert_eq!(
+        notebook.entries()[0].detail.get("kind"),
+        Some(Some("image/png"))
+    );
 }

@@ -2,25 +2,32 @@ use super::entities::Project;
 use super::errors::CatalogueError;
 use super::ports::Projects;
 use super::value_objects::{Assigned, Created, ProjectId, ProjectName, Renamed};
-use crate::identity::SessionStore;
+use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
+use crate::identity::{AccountId, SessionStore};
 use crate::organisation::{Memberships, OrgRole, TeamId, Whoami};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug)]
-pub struct Catalogue<S, G, P> {
+pub struct Catalogue<S, G, P, A> {
     whoami: Whoami<S, G>,
     projects: P,
+    trail: A,
 }
 
-impl<S, G, P> Catalogue<S, G, P>
+impl<S, G, P, A> Catalogue<S, G, P, A>
 where
     S: SessionStore,
     G: Memberships,
     P: Projects,
+    A: AuditTrail,
 {
-    pub fn new(whoami: Whoami<S, G>, projects: P) -> Self {
-        Self { whoami, projects }
+    pub fn new(whoami: Whoami<S, G>, projects: P, trail: A) -> Self {
+        Self {
+            whoami,
+            projects,
+            trail,
+        }
     }
 
     pub async fn projects(
@@ -38,11 +45,27 @@ where
         org: TenantId,
         name: &ProjectName,
     ) -> Result<Vec<Project>, CatalogueError> {
-        self.standing(token, org, OrgRole::Admin).await?;
-        match self.projects.create(org, name).await? {
-            Created::Done => self.listed(org).await,
-            Created::Taken => Err(CatalogueError::NameTaken),
+        let by = self.standing(token, org, OrgRole::Admin).await?;
+        if self.projects.create(org, name).await? == Created::Taken {
+            return Err(CatalogueError::NameTaken);
         }
+        let listed = self.listed(org).await?;
+        let target = listed
+            .iter()
+            .find(|project| &*project.name == name.as_str())
+            .map_or_else(
+                || Target::of(TargetKind::Project, None),
+                |project| Target::project(project.id),
+            );
+        self.note(
+            org,
+            by,
+            Action::ProjectCreated,
+            target,
+            Detail::default().with("name", name.as_str()),
+        )
+        .await?;
+        Ok(listed)
     }
 
     pub async fn rename(
@@ -52,12 +75,24 @@ where
         project: ProjectId,
         name: &ProjectName,
     ) -> Result<Vec<Project>, CatalogueError> {
-        self.standing(token, org, OrgRole::Admin).await?;
+        let by = self.standing(token, org, OrgRole::Admin).await?;
+        let before = self.name_of(org, project).await?;
         match self.projects.rename(org, project, name).await? {
-            Renamed::Done => self.listed(org).await,
-            Renamed::Taken => Err(CatalogueError::NameTaken),
-            Renamed::Gone => Err(CatalogueError::NoSuchProject),
+            Renamed::Done => {}
+            Renamed::Taken => return Err(CatalogueError::NameTaken),
+            Renamed::Gone => return Err(CatalogueError::NoSuchProject),
         }
+        self.note(
+            org,
+            by,
+            Action::ProjectRenamed,
+            Target::project(project),
+            Detail::default()
+                .with_maybe("from", before)
+                .with("to", name.as_str()),
+        )
+        .await?;
+        self.listed(org).await
     }
 
     pub async fn forget(
@@ -66,12 +101,20 @@ where
         org: TenantId,
         project: ProjectId,
     ) -> Result<Vec<Project>, CatalogueError> {
-        self.standing(token, org, OrgRole::Admin).await?;
-        if self.projects.forget(org, project).await? {
-            self.listed(org).await
-        } else {
-            Err(CatalogueError::NoSuchProject)
+        let by = self.standing(token, org, OrgRole::Admin).await?;
+        let before = self.name_of(org, project).await?;
+        if !self.projects.forget(org, project).await? {
+            return Err(CatalogueError::NoSuchProject);
         }
+        self.note(
+            org,
+            by,
+            Action::ProjectDeleted,
+            Target::project(project),
+            Detail::default().with_maybe("name", before),
+        )
+        .await?;
+        self.listed(org).await
     }
 
     pub async fn assign(
@@ -81,12 +124,21 @@ where
         project: ProjectId,
         team: Option<TeamId>,
     ) -> Result<Vec<Project>, CatalogueError> {
-        self.standing(token, org, OrgRole::Admin).await?;
+        let by = self.standing(token, org, OrgRole::Admin).await?;
         match self.projects.assign(org, project, team).await? {
-            Assigned::Done => self.listed(org).await,
-            Assigned::Gone => Err(CatalogueError::NoSuchProject),
-            Assigned::NoSuchTeam => Err(CatalogueError::NoSuchTeam),
+            Assigned::Done => {}
+            Assigned::Gone => return Err(CatalogueError::NoSuchProject),
+            Assigned::NoSuchTeam => return Err(CatalogueError::NoSuchTeam),
         }
+        self.note(
+            org,
+            by,
+            Action::ProjectAssigned,
+            Target::project(project),
+            Detail::default().with_maybe("team", team),
+        )
+        .await?;
+        self.listed(org).await
     }
 
     async fn standing(
@@ -94,13 +146,46 @@ where
         token: &SessionToken,
         org: TenantId,
         floor: OrgRole,
-    ) -> Result<(), CatalogueError> {
+    ) -> Result<AccountId, CatalogueError> {
         let who = self.whoami.of(token).await?;
         match who.role_in(org) {
             None => Err(CatalogueError::NotYours),
             Some(role) if !role.at_least(floor) => Err(CatalogueError::NotYoursToChange),
-            Some(_) => Ok(()),
+            Some(_) => Ok(who.account),
         }
+    }
+
+    async fn name_of(
+        &self,
+        org: TenantId,
+        project: ProjectId,
+    ) -> Result<Option<Box<str>>, CatalogueError> {
+        Ok(self
+            .listed(org)
+            .await?
+            .into_iter()
+            .find(|held| held.id == project)
+            .map(|held| held.name))
+    }
+
+    async fn note(
+        &self,
+        org: TenantId,
+        by: AccountId,
+        action: Action,
+        target: Target,
+        detail: Detail,
+    ) -> Result<(), CatalogueError> {
+        Ok(self
+            .trail
+            .record(&AuditEntry {
+                org,
+                actor: Actor::Account(by),
+                action,
+                target,
+                detail,
+            })
+            .await?)
     }
 
     async fn listed(&self, org: TenantId) -> Result<Vec<Project>, CatalogueError> {

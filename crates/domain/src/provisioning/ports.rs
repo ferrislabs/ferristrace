@@ -1,11 +1,12 @@
 use core::future::Future;
 
 use super::errors::ProvisionError;
+use super::value_objects::{Minted, Revoked};
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::identity::{AccountId, Email};
 use crate::organisation::{OrgName, OrgRole};
 use crate::secret::SecretHash;
-use crate::telemetry::{IngestKey, TenantId};
+use crate::telemetry::TenantId;
 
 pub trait ControlPlane {
     fn founded(&self) -> impl Future<Output = Result<Option<TenantId>, ProvisionError>> + Send;
@@ -54,8 +55,15 @@ pub trait ControlPlane {
         &self,
         org: TenantId,
         project: Option<ProjectId>,
-    ) -> impl Future<Output = Result<IngestKey, ProvisionError>> + Send;
+    ) -> impl Future<Output = Result<Minted, ProvisionError>> + Send;
 
-    fn revoke_key(&self, prefix: &str)
-    -> impl Future<Output = Result<bool, ProvisionError>> + Send;
+    fn revoke_key(
+        &self,
+        prefix: &str,
+    ) -> impl Future<Output = Result<Option<Revoked>, ProvisionError>> + Send;
+
+    fn memberships_of(
+        &self,
+        account: AccountId,
+    ) -> impl Future<Output = Result<Vec<TenantId>, ProvisionError>> + Send;
 }

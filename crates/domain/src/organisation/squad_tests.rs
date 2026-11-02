@@ -7,12 +7,14 @@ use super::ports::{Memberships, Squads};
 use super::squad::Squad;
 use super::value_objects::{MAX_TEAM_NAME_BYTES, Named, OrgRole, Owned, TeamId, TeamName};
 use super::whoami::Whoami;
+use crate::audit::{Action, Actor, Target};
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
@@ -218,8 +220,20 @@ fn backend() -> Team {
     }
 }
 
-fn squad(role: OrgRole, held: &Held) -> Squad<OneSession, MemberOfMine, &Held> {
-    Squad::new(Whoami::new(OneSession, MemberOfMine(role)), held)
+fn squad(role: OrgRole, held: &Held) -> Squad<OneSession, MemberOfMine, &Held, Notebook> {
+    noting(role, held, &Notebook::default())
+}
+
+fn noting<'a>(
+    role: OrgRole,
+    held: &'a Held,
+    notebook: &Notebook,
+) -> Squad<OneSession, MemberOfMine, &'a Held, Notebook> {
+    Squad::new(
+        Whoami::new(OneSession, MemberOfMine(role)),
+        held,
+        notebook.clone(),
+    )
 }
 
 fn token() -> SessionToken {
@@ -447,4 +461,92 @@ mod proptests {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn each_team_change_records_one_entry_naming_the_team() {
+    let held = Held::of(vec![backend()]);
+    let notebook = Notebook::default();
+    let squad = noting(OrgRole::Admin, &held, &notebook);
+    let org = an_org(MINE);
+
+    squad
+        .create(
+            &token(),
+            org,
+            &TeamName::try_from("Platform").expect("a name"),
+        )
+        .await
+        .expect("a created team");
+    squad
+        .rename(
+            &token(),
+            org,
+            a_team(BACKEND),
+            &TeamName::try_from("Core").expect("a name"),
+        )
+        .await
+        .expect("a renamed team");
+    squad
+        .seat(&token(), org, a_team(BACKEND), &[an_account(9)])
+        .await
+        .expect("a seated team");
+    squad
+        .own(&token(), org, a_team(BACKEND), &[a_project(7)])
+        .await
+        .expect("an owning team");
+    squad
+        .disband(&token(), org, a_team(BACKEND))
+        .await
+        .expect("a disbanded team");
+
+    let entries = notebook.entries();
+    let actions: Vec<Action> = entries.iter().map(|entry| entry.action).collect();
+    assert_eq!(
+        actions,
+        vec![
+            Action::TeamCreated,
+            Action::TeamRenamed,
+            Action::TeamSeated,
+            Action::TeamProjectsOwned,
+            Action::TeamDisbanded,
+        ]
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.actor == Actor::Account(an_account(9)))
+    );
+    assert_eq!(entries[0].target, Target::team(a_team(99)));
+    assert_eq!(entries[0].detail.get("name"), Some(Some("Platform")));
+    assert_eq!(entries[1].target, Target::team(a_team(BACKEND)));
+    assert_eq!(entries[1].detail.get("from"), Some(Some("Backend")));
+    assert_eq!(entries[1].detail.get("to"), Some(Some("Core")));
+    let member = an_account(9).to_string();
+    assert_eq!(
+        entries[2].detail.get("members"),
+        Some(Some(member.as_str()))
+    );
+    let project = a_project(7).to_string();
+    assert_eq!(
+        entries[3].detail.get("projects"),
+        Some(Some(project.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn a_refused_team_change_records_nothing() {
+    let held = Held::where_the_name_is_taken();
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Admin, &held, &notebook)
+        .create(
+            &token(),
+            an_org(MINE),
+            &TeamName::try_from("Platform").expect("a name"),
+        )
+        .await;
+
+    assert_eq!(refused, Err(TeamError::NameTaken));
+    assert!(notebook.entries().is_empty());
 }

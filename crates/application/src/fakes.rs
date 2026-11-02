@@ -1,12 +1,13 @@
 use std::sync::atomic::Ordering;
 
 use ferristrace_domain::{
-    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, ControlPlane, Created, Email,
-    IngestKey, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships,
-    NoPhotos, OrgName, OrgRole, Organisation, Orgs, Portrait, Project, ProjectId, ProjectName,
-    Projects, ProvisionError, ProvisionPolicy, ReadGrant, Renamed, SecretHash, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId,
-    UnixSeconds,
+    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditFilter, AuditPage,
+    AuditTrail, ControlPlane, Created, Email, Fingerprint, IssueDecisions, IssuedKey, KeyId,
+    KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
+    Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
+    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, Revoked, SecretHash, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Status, StoreError, TeamId,
+    TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -108,12 +109,14 @@ impl SessionRoll for FakeSessions {
 
 #[repository(domain = Memberships, backend = Recording)]
 #[derive(Debug)]
-pub struct FakeMemberships;
+pub struct FakeMemberships {
+    handle: Handle,
+}
 
 impl FakeMemberships {
     fn new(_backend: &Recording, tx: &Handle) -> Self {
         tx.note_build();
-        Self
+        Self { handle: tx.clone() }
     }
 }
 
@@ -122,11 +125,92 @@ impl Memberships for FakeMemberships {
         &self,
         _account: AccountId,
     ) -> Result<Vec<Membership>, ferristrace_domain::WhoamiError> {
+        let role = if self.handle.ledger.member_only.load(Ordering::SeqCst) {
+            OrgRole::Member
+        } else {
+            OrgRole::Owner
+        };
         Ok(vec![Membership {
             org: the_org(),
             name: "Acme".into(),
-            role: OrgRole::Owner,
+            role,
         }])
+    }
+}
+
+#[repository(domain = Audit, backend = Recording)]
+#[derive(Debug)]
+pub struct FakeAudit {
+    handle: Handle,
+}
+
+impl FakeAudit {
+    fn new(_backend: &Recording, tx: &Handle) -> Self {
+        Self { handle: tx.clone() }
+    }
+}
+
+impl AuditTrail for FakeAudit {
+    async fn record(&self, entry: &AuditEntry) -> Result<(), StoreError> {
+        self.handle.note(entry);
+        Ok(())
+    }
+
+    async fn list(
+        &self,
+        _org: TenantId,
+        _filter: &AuditFilter,
+        _page: PageSize,
+    ) -> Result<AuditPage, StoreError> {
+        Ok(AuditPage::default())
+    }
+}
+
+#[repository(domain = Decisions, backend = Recording)]
+#[derive(Debug)]
+pub struct FakeDecisions {
+    handle: Handle,
+}
+
+impl FakeDecisions {
+    fn new(_backend: &Recording, tx: &Handle) -> Self {
+        Self { handle: tx.clone() }
+    }
+}
+
+impl IssueDecisions for FakeDecisions {
+    async fn read_many(
+        &self,
+        _of: &[(ProjectId, Fingerprint)],
+    ) -> Result<Vec<Recorded>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn decide(
+        &self,
+        _project: ProjectId,
+        _print: Fingerprint,
+        _status: Status,
+        _by: AccountId,
+        _at_unix_nanos: u64,
+    ) -> Result<(), StoreError> {
+        self.handle.write();
+        Ok(())
+    }
+
+    async fn assign(
+        &self,
+        _project: ProjectId,
+        _print: Fingerprint,
+        _owner: Option<AccountId>,
+        _by: AccountId,
+        _at_unix_nanos: u64,
+    ) -> Result<(), StoreError> {
+        if self.handle.ledger.refuse_assignments.load(Ordering::SeqCst) {
+            return Err(StoreError::Unreachable);
+        }
+        self.handle.write();
+        Ok(())
     }
 }
 
@@ -242,12 +326,16 @@ impl ControlPlane for FakeControlPlane {
         &self,
         _org: TenantId,
         _project: Option<ProjectId>,
-    ) -> Result<IngestKey, ProvisionError> {
+    ) -> Result<Minted, ProvisionError> {
         Err(ProvisionError::Unreachable)
     }
 
-    async fn revoke_key(&self, _prefix: &str) -> Result<bool, ProvisionError> {
-        Ok(false)
+    async fn revoke_key(&self, _prefix: &str) -> Result<Option<Revoked>, ProvisionError> {
+        Ok(None)
+    }
+
+    async fn memberships_of(&self, _account: AccountId) -> Result<Vec<TenantId>, ProvisionError> {
+        Ok(Vec::new())
     }
 }
 

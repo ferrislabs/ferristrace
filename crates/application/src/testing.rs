@@ -1,13 +1,15 @@
 use core::future::Future;
 
+pub use ferristrace_domain::testing::Notebook;
 use ferristrace_domain::{
-    AccountId, Admission, ApiKey, ApiKeys, ApiSecret, AuthError, AuthProvider, Authorizer, Clock,
-    Counted, DecompressedBytes, Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader,
-    IssuedKey, KeyId, KeyName, KeyScopes, Mailer, Occurrence, Password, PasswordCheck,
-    PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError,
-    ResetToken, ResolvedIdentity, Scope, ServiceSummary, SignInProof, SinkError, Span, SpanReader,
-    SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
-    UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
+    AccountId, Admission, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditFilter, AuditPage,
+    AuditTrail, AuthError, AuthProvider, Authorizer, Clock, Counted, DecompressedBytes, Email,
+    Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
+    KeyScopes, Mailer, Occurrence, PageSize, Password, PasswordCheck, PasswordHash, PasswordHasher,
+    PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError, ResetToken, ResolvedIdentity,
+    Scope, ServiceSummary, SignInProof, SinkError, Span, SpanReader, SpanSink, StoreError,
+    TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
+    UsageMeter, UsageReader, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -187,5 +189,20 @@ impl ApiKeys for Inert {
 
     async fn grant_for(&self, _secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError> {
         Ok(None)
+    }
+}
+
+impl AuditTrail for Inert {
+    async fn record(&self, _entry: &AuditEntry) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn list(
+        &self,
+        _org: TenantId,
+        _filter: &AuditFilter,
+        _page: PageSize,
+    ) -> Result<AuditPage, StoreError> {
+        Ok(AuditPage::default())
     }
 }

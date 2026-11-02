@@ -3,13 +3,13 @@ use std::time::Duration;
 
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, Clock, ControlPlane, Email, IngestKey, OrgName, OrgRole, ProjectId, ProjectName,
-    ProvisionError, ResetStore, SecretHash, TenantId,
+    AccountId, Clock, ControlPlane, Email, IngestKey, KeyId, Minted, OrgName, OrgRole, ProjectId,
+    ProjectName, ProvisionError, ResetStore, Revoked, SecretHash, TenantId,
 };
 use ferristrace_infra::Argon2Hasher;
 
 use crate::accounts::{AccountError, PostgresAccounts};
-use crate::keys::{issue_on, revoke_on};
+use crate::keys::{ingest_on, stop_on};
 use crate::memberships::{MembershipError, PostgresMemberships};
 use crate::projects::{PostgresProjects, ProjectError};
 use crate::resets::PostgresResets;
@@ -105,18 +105,41 @@ impl<C: Clock + Clone + Send + Sync> ControlPlane for PostgresControlPlane<C> {
         &self,
         org: TenantId,
         project: Option<ProjectId>,
-    ) -> Result<IngestKey, ProvisionError> {
+    ) -> Result<Minted, ProvisionError> {
         let mut tx = self.tx.lock().await;
-        issue_on(&mut tx, org, project.map(ProjectId::as_uuid))
+        let minted = ingest_on(&mut tx, org, project.map(ProjectId::as_uuid))
             .await
-            .map_err(|error| unreachable(&error))
+            .map_err(|error| unreachable(&error))?;
+        Ok(Minted {
+            id: KeyId::new(minted.id),
+            key: IngestKey::from_plaintext(&minted.plaintext),
+        })
     }
 
-    async fn revoke_key(&self, prefix: &str) -> Result<bool, ProvisionError> {
+    async fn revoke_key(&self, prefix: &str) -> Result<Option<Revoked>, ProvisionError> {
         let mut tx = self.tx.lock().await;
-        revoke_on(&mut tx, prefix, self.clock.now())
+        let stopped = stop_on(&mut tx, prefix, self.clock.now())
             .await
-            .map_err(|error| unreachable(&error))
+            .map_err(|error| unreachable(&error))?;
+        Ok(stopped.map(|stopped| Revoked {
+            org: TenantId::new(stopped.org),
+            id: KeyId::new(stopped.id),
+        }))
+    }
+
+    async fn memberships_of(&self, account: AccountId) -> Result<Vec<TenantId>, ProvisionError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query(
+            "SELECT org_id AS org_id FROM org_members WHERE account_id = $1 ORDER BY org_id",
+        )
+        .bind(account.as_uuid())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| unreachable(&error))?;
+        Ok(rows
+            .iter()
+            .map(|row| TenantId::new(sqlx::Row::get(row, "org_id")))
+            .collect())
     }
 }
 

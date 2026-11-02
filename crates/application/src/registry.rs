@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountDirectory, Accounts, ApiKeys, AuthProvider, ControlPlane, FactorStore, Gate,
+    AccountDirectory, Accounts, ApiKeys, AuditTrail, AuthProvider, ControlPlane, FactorStore, Gate,
     IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll,
     SessionStore, Squads, UsageHistory,
 };
@@ -39,6 +39,8 @@ pub mod domain {
     pub struct Accounts;
     #[derive(Debug)]
     pub struct ApiKeys;
+    #[derive(Debug)]
+    pub struct Audit;
     #[derive(Debug)]
     pub struct ControlPlane;
     #[derive(Debug)]
@@ -82,45 +84,78 @@ impl<R> StandingRepos for R where
 {
 }
 
+pub trait RecordingRepos: RepoFor<domain::Audit, Repo: AuditTrail> {}
+
+impl<R> RecordingRepos for R where R: RepoFor<domain::Audit, Repo: AuditTrail> {}
+
+pub trait AuditRepos: StandingRepos + RecordingRepos {}
+
+impl<R> AuditRepos for R where R: StandingRepos + RecordingRepos {}
+
 pub trait ReadRepos: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
 
 impl<R> ReadRepos for R where R: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
 
 pub trait AccessRepos:
-    StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> + RepoFor<domain::Projects, Repo: Projects>
+    StandingRepos
+    + RecordingRepos
+    + RepoFor<domain::ApiKeys, Repo: ApiKeys>
+    + RepoFor<domain::Projects, Repo: Projects>
 {
 }
 
 impl<R> AccessRepos for R where
     R: StandingRepos
+        + RecordingRepos
         + RepoFor<domain::ApiKeys, Repo: ApiKeys>
         + RepoFor<domain::Projects, Repo: Projects>
 {
 }
 
-pub trait OrgRepos: StandingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
+pub trait OrgRepos: StandingRepos + RecordingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
 
-impl<R> OrgRepos for R where R: StandingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
+impl<R> OrgRepos for R where R: StandingRepos + RecordingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
 
-pub trait CatalogueRepos: StandingRepos + RepoFor<domain::Projects, Repo: Projects> {}
+pub trait CatalogueRepos:
+    StandingRepos + RecordingRepos + RepoFor<domain::Projects, Repo: Projects>
+{
+}
 
-impl<R> CatalogueRepos for R where R: StandingRepos + RepoFor<domain::Projects, Repo: Projects> {}
+impl<R> CatalogueRepos for R where
+    R: StandingRepos + RecordingRepos + RepoFor<domain::Projects, Repo: Projects>
+{
+}
 
-pub trait RosterRepos: StandingRepos + RepoFor<domain::Roster, Repo: Roll> {}
+pub trait RosterRepos:
+    StandingRepos + RecordingRepos + RepoFor<domain::Roster, Repo: Roll>
+{
+}
 
-impl<R> RosterRepos for R where R: StandingRepos + RepoFor<domain::Roster, Repo: Roll> {}
+impl<R> RosterRepos for R where
+    R: StandingRepos + RecordingRepos + RepoFor<domain::Roster, Repo: Roll>
+{
+}
 
-pub trait TeamRepos: StandingRepos + RepoFor<domain::Teams, Repo: Squads> {}
+pub trait TeamRepos: StandingRepos + RecordingRepos + RepoFor<domain::Teams, Repo: Squads> {}
 
-impl<R> TeamRepos for R where R: StandingRepos + RepoFor<domain::Teams, Repo: Squads> {}
+impl<R> TeamRepos for R where
+    R: StandingRepos + RecordingRepos + RepoFor<domain::Teams, Repo: Squads>
+{
+}
 
 pub trait UsageRepos: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
 impl<R> UsageRepos for R where R: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
-pub trait IssueRepos: ReadRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
+pub trait IssueRepos:
+    ReadRepos + RecordingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions>
+{
+}
 
-impl<R> IssueRepos for R where R: ReadRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
+impl<R> IssueRepos for R where
+    R: ReadRepos + RecordingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions>
+{
+}
 
 pub trait ProfileRepos:
     StandingRepos + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
@@ -152,12 +187,19 @@ impl<R> IdentityRepos for R where
 {
 }
 
-pub trait ProvisioningRepos: RepoFor<domain::ControlPlane, Repo: ControlPlane> {}
+pub trait ProvisioningRepos:
+    RecordingRepos + RepoFor<domain::ControlPlane, Repo: ControlPlane>
+{
+}
 
-impl<R> ProvisioningRepos for R where R: RepoFor<domain::ControlPlane, Repo: ControlPlane> {}
+impl<R> ProvisioningRepos for R where
+    R: RecordingRepos + RepoFor<domain::ControlPlane, Repo: ControlPlane>
+{
+}
 
 pub trait Repositories:
     ReadRepos
+    + AuditRepos
     + AccessRepos
     + OrgRepos
     + CatalogueRepos
@@ -172,6 +214,7 @@ pub trait Repositories:
 
 impl<R> Repositories for R where
     R: ReadRepos
+        + AuditRepos
         + AccessRepos
         + OrgRepos
         + CatalogueRepos

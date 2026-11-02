@@ -249,6 +249,14 @@ struct Fakes {
 
 impl Untransacted for Fakes {}
 
+impl RepoFor<domain::Audit> for Fakes {
+    type Repo = Inert;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Inert::default()
+    }
+}
+
 impl RepoFor<domain::Sessions> for Fakes {
     type Repo = OneSession;
 

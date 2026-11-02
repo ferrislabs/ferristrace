@@ -1,3 +1,4 @@
+mod audit_routes;
 mod auth;
 mod carried;
 mod catalogue_routes;
@@ -24,6 +25,7 @@ mod usage_routes;
 mod web_routes;
 mod whoami_routes;
 
+pub use audit_routes::{AuditRefused, audit_router};
 pub use carried::NotCarried;
 pub use catalogue_routes::{ProjectRefused, catalogue_router};
 pub use error::ApiError;

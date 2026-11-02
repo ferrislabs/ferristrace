@@ -6,12 +6,14 @@ use super::entities::Project;
 use super::errors::{BadProjectName, CatalogueError};
 use super::ports::Projects;
 use super::value_objects::{Assigned, Created, MAX_NAME_BYTES, ProjectId, ProjectName, Renamed};
+use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, TeamId, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
+use crate::testing::Notebook;
 
 const TOKEN: &str = "ft_ss_live";
 const MINE: u128 = 1;
@@ -176,8 +178,20 @@ impl Projects for &Held {
     }
 }
 
-fn cataloguing(role: OrgRole, held: &Held) -> Catalogue<OneSession, MemberOfMine, &Held> {
-    Catalogue::new(Whoami::new(OneSession, MemberOfMine(role)), held)
+fn cataloguing(role: OrgRole, held: &Held) -> Catalogue<OneSession, MemberOfMine, &Held, Notebook> {
+    noting(role, held, &Notebook::default())
+}
+
+fn noting<'a>(
+    role: OrgRole,
+    held: &'a Held,
+    notebook: &Notebook,
+) -> Catalogue<OneSession, MemberOfMine, &'a Held, Notebook> {
+    Catalogue::new(
+        Whoami::new(OneSession, MemberOfMine(role)),
+        held,
+        notebook.clone(),
+    )
 }
 
 fn token() -> SessionToken {
@@ -451,4 +465,91 @@ mod proptests {
             prop_assert_eq!(name.as_str(), chosen.as_str());
         }
     }
+}
+
+#[tokio::test]
+async fn each_project_change_records_one_entry_naming_the_project() {
+    let held = Held::default();
+    let notebook = Notebook::default();
+    let catalogue = noting(OrgRole::Admin, &held, &notebook);
+    let org = an_org(MINE);
+    let storefront = a_project(STOREFRONT);
+
+    catalogue
+        .create(
+            &token(),
+            org,
+            &ProjectName::try_from("storefront").expect("a slug"),
+        )
+        .await
+        .expect("a created project");
+    catalogue
+        .rename(
+            &token(),
+            org,
+            storefront,
+            &ProjectName::try_from("shop").expect("a slug"),
+        )
+        .await
+        .expect("a renamed project");
+    catalogue
+        .assign(
+            &token(),
+            org,
+            storefront,
+            Some(TeamId::new(Uuid::from_u128(BACKEND))),
+        )
+        .await
+        .expect("an assigned project");
+    catalogue
+        .forget(&token(), org, storefront)
+        .await
+        .expect("a forgotten project");
+
+    let entries = notebook.entries();
+    let actions: Vec<Action> = entries.iter().map(|entry| entry.action).collect();
+    assert_eq!(
+        actions,
+        vec![
+            Action::ProjectCreated,
+            Action::ProjectRenamed,
+            Action::ProjectAssigned,
+            Action::ProjectDeleted,
+        ]
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.target == Target::project(storefront))
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.actor == Actor::Account(AccountId::new(Uuid::from_u128(9))))
+    );
+    assert_eq!(entries[1].detail.get("from"), Some(Some("storefront")));
+    assert_eq!(entries[1].detail.get("to"), Some(Some("shop")));
+    let team = TeamId::new(Uuid::from_u128(BACKEND)).to_string();
+    assert_eq!(entries[2].detail.get("team"), Some(Some(team.as_str())));
+    assert_eq!(entries[3].detail.get("name"), Some(Some("storefront")));
+}
+
+#[tokio::test]
+async fn a_refused_project_change_records_nothing() {
+    let held = Held {
+        created: Created::Taken,
+        ..Held::default()
+    };
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Admin, &held, &notebook)
+        .create(
+            &token(),
+            an_org(MINE),
+            &ProjectName::try_from("storefront").expect("a slug"),
+        )
+        .await;
+
+    assert_eq!(refused, Err(CatalogueError::NameTaken));
+    assert!(notebook.entries().is_empty());
 }
