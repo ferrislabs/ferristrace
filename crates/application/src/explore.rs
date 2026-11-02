@@ -1,19 +1,19 @@
 use ferristrace_domain::{
-    Explore, ExploreError, ProjectId, ServiceSummary, SessionToken, Span, TenantId, TraceFilter,
+    Explore, ExploreError, ProjectId, Reader, Readers, ServiceSummary, Span, TenantId, TraceFilter,
     TraceId, TraceSummary, Whoami, Window,
 };
 
-use crate::registry::StandingRepos;
+use crate::registry::ReadRepos;
 use crate::{Ferristrace, Stack, transactional};
 
 impl<S: Stack> Ferristrace<S>
 where
-    S::Repos: StandingRepos,
+    S::Repos: ReadRepos,
 {
-    #[transactional(sessions, memberships, unavailable = ExploreError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
     pub async fn services(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         window: Window,
         project: Option<ProjectId>,
@@ -21,38 +21,47 @@ where
         let Some(reader) = &self.span_store else {
             return Err(ExploreError::StoreUnreachable);
         };
-        Explore::new(Whoami::new(sessions, memberships), reader)
-            .services(token, org, window, project)
-            .await
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .services(who, org, window, project)
+        .await
     }
 
-    #[transactional(sessions, memberships, unavailable = ExploreError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
     pub async fn traces(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         filter: &TraceFilter,
     ) -> Result<Vec<TraceSummary>, ExploreError> {
         let Some(reader) = &self.span_store else {
             return Err(ExploreError::StoreUnreachable);
         };
-        Explore::new(Whoami::new(sessions, memberships), reader)
-            .traces(token, org, filter)
-            .await
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .traces(who, org, filter)
+        .await
     }
 
-    #[transactional(sessions, memberships, unavailable = ExploreError::StoreUnreachable)]
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
     pub async fn trace(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         id: TraceId,
     ) -> Result<Vec<Span>, ExploreError> {
         let Some(reader) = &self.span_store else {
             return Err(ExploreError::StoreUnreachable);
         };
-        Explore::new(Whoami::new(sessions, memberships), reader)
-            .trace(token, org, id)
-            .await
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .trace(who, org, id)
+        .await
     }
 }

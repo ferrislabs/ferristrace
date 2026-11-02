@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    AccountId, Fingerprint, Issue, IssueError, IssueFilter, Issues, Occurrence, ProjectId,
-    SessionToken, Status, TenantId, Whoami, Window,
+    AccountId, Fingerprint, Issue, IssueError, IssueFilter, Issues, Occurrence, ProjectId, Reader,
+    Readers, SessionToken, Status, TenantId, Whoami, Window,
 };
 
 use crate::registry::IssueRepos;
@@ -10,10 +10,10 @@ impl<S: Stack> Ferristrace<S>
 where
     S::Repos: IssueRepos,
 {
-    #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
     pub async fn list_issues(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         filter: &IssueFilter,
     ) -> Result<Vec<Issue>, IssueError> {
@@ -21,19 +21,19 @@ where
             return Err(IssueError::Unavailable);
         };
         Issues::new(
-            Whoami::new(sessions, memberships),
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
             &self.clock,
         )
-        .list(token, org, filter)
+        .list(who, org, filter)
         .await
     }
 
-    #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
     pub async fn issue(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         project: Option<ProjectId>,
         print: Fingerprint,
@@ -43,19 +43,19 @@ where
             return Err(IssueError::Unavailable);
         };
         Issues::new(
-            Whoami::new(sessions, memberships),
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
             &self.clock,
         )
-        .one(token, org, project, print, window)
+        .one(who, org, project, print, window)
         .await
     }
 
-    #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
     pub async fn issue_occurrences(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         project: ProjectId,
         print: Fingerprint,
@@ -66,16 +66,16 @@ where
             return Err(IssueError::Unavailable);
         };
         Issues::new(
-            Whoami::new(sessions, memberships),
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
             &self.clock,
         )
-        .occurrences(token, org, project, print, window, limit)
+        .occurrences(who, org, project, print, window, limit)
         .await
     }
 
-    #[transactional(sessions, memberships, decisions, unavailable = IssueError::Unavailable)]
+    #[transactional(sessions, memberships, api_keys, decisions, unavailable = IssueError::Unavailable)]
     pub async fn rule_on_issue(
         &self,
         token: &SessionToken,
@@ -86,7 +86,7 @@ where
             return Err(IssueError::Unavailable);
         };
         let issues = Issues::new(
-            Whoami::new(sessions, memberships),
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
             reader,
             decisions,
             &self.clock,

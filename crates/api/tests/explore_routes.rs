@@ -159,7 +159,12 @@ impl SpanReader for TwoSpans {
         }])
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        _tenant: TenantId,
+        _id: TraceId,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         Ok(vec![
             a_span(
                 1,
@@ -200,7 +205,12 @@ impl SpanReader for NoSpans {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        _tenant: TenantId,
+        _id: TraceId,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -233,6 +243,14 @@ impl RepoFor<domain::Memberships> for Fakes {
 
     fn build(&self, (): &()) -> Self::Repo {
         MemberOfMine
+    }
+}
+
+impl RepoFor<domain::ApiKeys> for Fakes {
+    type Repo = Inert;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Inert::default()
     }
 }
 
@@ -507,7 +525,12 @@ impl SpanReader for Remembering {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        _tenant: TenantId,
+        _id: TraceId,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }

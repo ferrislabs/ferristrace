@@ -2,6 +2,7 @@ mod clock;
 mod secret;
 mod store;
 
+pub mod access;
 pub mod catalogue;
 pub mod explore;
 pub mod identity;
@@ -14,6 +15,10 @@ pub mod telemetry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use access::{
+    ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
+    KeyRing, KeyScope, KeyScopes, ReadGrant, ReadRefusal, Reader, Readers,
+};
 pub use catalogue::{
     Assigned, BadProjectName, Catalogue, CatalogueError, Created, OwnerTeam, Project, ProjectId,
     ProjectName, Projects, Renamed,
@@ -51,7 +56,7 @@ pub use profile::{
 pub use provisioning::{
     Bootstrapped, ControlPlane, DEFAULT_PROJECT, Founded, Issued, ProvisionError, Provisioning,
 };
-pub use secret::{RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
+pub use secret::{KEY_PREFIX, RESET_PREFIX, ResetToken, SESSION_PREFIX, SecretHash, SessionToken};
 pub use store::StoreError;
 pub use telemetry::{
     Admission, Allowance, BillingHour, BillingMonth, Consumed, Consumption, CounterUnreachable,

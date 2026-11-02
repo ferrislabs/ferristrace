@@ -102,7 +102,7 @@ const settingsChildren = [
   createRoute({ getParentRoute: () => settingsRoute, path: 'billing', component: Billing, staticData: mock }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'project/general', component: ProjectGeneral, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'project/alerts', component: ProjectAlerts, staticData: mock }),
-  createRoute({ getParentRoute: () => settingsRoute, path: 'project/api-keys', component: ProjectApiKeys, staticData: mock }),
+  createRoute({ getParentRoute: () => settingsRoute, path: 'project/api-keys', component: ProjectApiKeys, staticData: real }),
 ]
 
 const routeTree = rootRoute.addChildren([

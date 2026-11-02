@@ -448,7 +448,10 @@ async fn a_written_trace_is_read_back_whole_and_in_order() {
         .expect("a batch is accepted");
     store.flush().await.expect("the batch commits");
 
-    let found = reader.trace(tenant, trace).await.expect("the trace reads");
+    let found = reader
+        .trace(tenant, trace, None)
+        .await
+        .expect("the trace reads");
 
     assert_eq!(found.len(), 2);
     assert_eq!(found[0].span_id, root.span_id, "the root comes first");
@@ -487,7 +490,7 @@ async fn a_trace_belonging_to_another_tenant_is_not_read() {
 
     assert_eq!(
         reader
-            .trace(mine, span.trace_id)
+            .trace(mine, span.trace_id, None)
             .await
             .expect("a read")
             .len(),
@@ -495,7 +498,7 @@ async fn a_trace_belonging_to_another_tenant_is_not_read() {
     );
     assert!(
         reader
-            .trace(theirs, span.trace_id)
+            .trace(theirs, span.trace_id, None)
             .await
             .expect("a read")
             .is_empty(),
@@ -513,6 +516,7 @@ async fn a_trace_nobody_wrote_reads_as_empty() {
         .trace(
             TenantId::new(Uuid::from_u128(1)),
             TraceId::try_from([9u8; 16].as_slice()).expect("sixteen bytes"),
+            None,
         )
         .await
         .expect("a read");
@@ -1199,7 +1203,10 @@ async fn an_exception_written_with_a_span_reads_back_on_that_span() {
         .expect("a batch is accepted");
     store.flush().await.expect("the batch commits");
 
-    let found = reader.trace(tenant, trace).await.expect("the trace reads");
+    let found = reader
+        .trace(tenant, trace, None)
+        .await
+        .expect("the trace reads");
 
     assert_eq!(found.len(), 2);
     assert!(found[0].events.is_empty(), "the root recorded nothing");
@@ -1249,7 +1256,7 @@ async fn several_events_on_one_span_read_back_in_time_order() {
     store.flush().await.expect("the batch commits");
 
     let found = reader
-        .trace(tenant, base.trace_id)
+        .trace(tenant, base.trace_id, None)
         .await
         .expect("the trace reads");
 
@@ -1292,7 +1299,7 @@ async fn another_organisations_events_are_not_read_with_a_shared_trace_id() {
     store.flush().await.expect("the batch commits");
 
     let found = reader
-        .trace(mine, base.trace_id)
+        .trace(mine, base.trace_id, None)
         .await
         .expect("the trace reads");
 
@@ -1371,4 +1378,67 @@ async fn a_resent_export_is_read_back_once() {
     sink.flush().await.expect("the retry is committed");
 
     assert_eq!(collapsed_rows(&client).await, 2);
+}
+
+#[tokio::test]
+async fn a_trace_read_for_one_project_carries_none_of_another_projects_spans_or_events() {
+    let Some((url, reader)) = a_written_store("read_trace_by_project").await else {
+        return;
+    };
+    let store = open_span_store(
+        &settings_for(&url, "read_trace_by_project"),
+        FixedClock::at(NOW),
+    )
+    .await
+    .expect("a sink")
+    .sink;
+    let tenant = TenantId::new(Uuid::from_u128(1));
+    let storefront = ProjectId::new(Uuid::from_u128(11));
+    let payments = ProjectId::new(Uuid::from_u128(12));
+    let elsewhere = ProjectId::new(Uuid::from_u128(13));
+    let root = a_span(1, "checkout");
+    let theirs = with_events(
+        a_child(
+            2,
+            "billing",
+            &root,
+            root.start_unix_nanos + 1_000,
+            root.end_unix_nanos,
+        ),
+        vec![an_exception(root.start_unix_nanos + 2_000, "TheirSecret")],
+    );
+    store
+        .accept(
+            Scope::of(tenant).in_project(Some(storefront)),
+            vec![root.clone()],
+        )
+        .await
+        .expect("the first project");
+    store
+        .accept(Scope::of(tenant).in_project(Some(payments)), vec![theirs])
+        .await
+        .expect("the second project");
+    store.flush().await.expect("the batch commits");
+
+    let whole = reader
+        .trace(tenant, root.trace_id, None)
+        .await
+        .expect("a read");
+    let ours = reader
+        .trace(tenant, root.trace_id, Some(storefront))
+        .await
+        .expect("a read");
+    let nobodys = reader
+        .trace(tenant, root.trace_id, Some(elsewhere))
+        .await
+        .expect("a read");
+
+    assert_eq!(whole.len(), 2, "no project asked for means the whole trace");
+    assert_eq!(ours.len(), 1);
+    assert_eq!(ours[0].span_id, root.span_id);
+    assert!(ours.iter().all(|span| span.events.is_empty()));
+    assert!(
+        nobodys.is_empty(),
+        "a trace no span of the project holds reads like an unknown one"
+    );
 }

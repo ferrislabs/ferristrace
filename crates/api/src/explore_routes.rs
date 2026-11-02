@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use ferristrace_application::Stack;
-use ferristrace_application::registry::StandingRepos;
+use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
     ExploreError, ProjectId, ServiceSummary, Span, SpanKind, SpanStatus, TenantId, TraceFilter,
     TraceId, TraceOrder, TraceSummary, Window,
@@ -15,7 +15,7 @@ use ferristrace_domain::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carried::{NotCarried, carried};
+use crate::carried::{NotCarried, reading};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -189,7 +189,7 @@ fn named_status(status: SpanStatus) -> &'static str {
 
 pub fn explore_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S::Repos: StandingRepos,
+    S::Repos: ReadRepos,
 {
     Router::new()
         .route("/api/orgs/{org}/services", get(services::<S>))
@@ -205,9 +205,9 @@ async fn traces<S: Stack>(
     headers: HeaderMap,
 ) -> Result<Json<Found>, LookRefused>
 where
-    S::Repos: StandingRepos,
+    S::Repos: ReadRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let window = Window::new(
         asked.from.saturating_mul(NANOS_PER_MILLI),
         asked.to.saturating_mul(NANOS_PER_MILLI),
@@ -231,7 +231,7 @@ where
 
     let found = state
         .app
-        .traces(&token, TenantId::new(org), &filter)
+        .traces(&who, TenantId::new(org), &filter)
         .await?
         .into_iter()
         .map(Into::into)
@@ -245,15 +245,15 @@ async fn one<S: Stack>(
     headers: HeaderMap,
 ) -> Result<Json<Waterfall>, LookRefused>
 where
-    S::Repos: StandingRepos,
+    S::Repos: ReadRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let id = hex::decode(&trace)
         .ok()
         .and_then(|bytes| TraceId::try_from(bytes.as_slice()).ok())
         .ok_or(LookRefused::TraceId)?;
 
-    let spans = state.app.trace(&token, TenantId::new(org), id).await?;
+    let spans = state.app.trace(&who, TenantId::new(org), id).await?;
     if spans.is_empty() {
         return Err(LookRefused::NoSuchTrace);
     }
@@ -349,9 +349,9 @@ async fn services<S: Stack>(
     headers: HeaderMap,
 ) -> Result<Json<Running>, LookRefused>
 where
-    S::Repos: StandingRepos,
+    S::Repos: ReadRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let window = Window::new(
         over.from.saturating_mul(NANOS_PER_MILLI),
         over.to.saturating_mul(NANOS_PER_MILLI),
@@ -363,7 +363,7 @@ where
     let found = state
         .app
         .services(
-            &token,
+            &who,
             TenantId::new(org),
             window,
             over.project.map(ProjectId::new),

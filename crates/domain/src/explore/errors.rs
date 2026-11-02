@@ -1,3 +1,4 @@
+use crate::access::ReadRefusal;
 use crate::organisation::WhoamiError;
 use crate::store::StoreError;
 
@@ -30,6 +31,16 @@ impl From<StoreError> for ExploreError {
     fn from(error: StoreError) -> Self {
         match error {
             StoreError::Unreachable => Self::StoreUnreachable,
+        }
+    }
+}
+
+impl From<ReadRefusal> for ExploreError {
+    fn from(error: ReadRefusal) -> Self {
+        match error {
+            ReadRefusal::Unknown => Self::NoSession,
+            ReadRefusal::NotYours => Self::NotYours,
+            ReadRefusal::StoreUnreachable => Self::StoreUnreachable,
         }
     }
 }

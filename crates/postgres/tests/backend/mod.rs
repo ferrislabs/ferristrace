@@ -117,6 +117,10 @@ pub fn local<C>(backend: &Postgres<C>) -> Each<'_, domain::LocalPasswords, C> {
     Each::over(backend)
 }
 
+pub fn api_keys<C>(backend: &Postgres<C>) -> Each<'_, domain::ApiKeys, C> {
+    Each::over(backend)
+}
+
 pub fn control_plane_of<C>(backend: &Postgres<C>) -> Each<'_, domain::ControlPlane, C> {
     Each::over(backend)
 }
@@ -175,6 +179,13 @@ forward!(Projects: Projects {
     fn rename(&self, org: TenantId, project: ProjectId, name: &ProjectName) -> Result<Renamed, StoreError>;
     fn forget(&self, org: TenantId, project: ProjectId) -> Result<bool, StoreError>;
     fn assign(&self, org: TenantId, project: ProjectId, team: Option<TeamId>) -> Result<Assigned, StoreError>;
+});
+
+forward!(ApiKeys: ApiKeys {
+    fn list(&self, org: TenantId) -> Result<Vec<ApiKey>, StoreError>;
+    fn issue(&self, org: TenantId, project: Option<ProjectId>, name: &KeyName, scopes: &KeyScopes, by: AccountId) -> Result<IssuedKey, StoreError>;
+    fn revoke(&self, org: TenantId, id: KeyId) -> Result<bool, StoreError>;
+    fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError>;
 });
 
 forward!(Roster: Roll {

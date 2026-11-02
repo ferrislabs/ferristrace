@@ -143,15 +143,6 @@ export const MEMBERS = [
   { email: 'li.wei@acme.dev', name: 'Li Wei', role: 'member', joined: '2026-08-14' },
   { email: 'karim@acme.dev', name: 'Karim Benali', role: 'member', joined: '2026-09-01' },
 ]
-export const INGEST_KEYS = [
-  { name: 'k8s-prod collector', prefix: 'ft_ik_7Hq2', created: '2026-03-02', used: 'today 14:32:08', revoked: false },
-  { name: 'browser-rum', prefix: 'ft_ik_Qm4x', created: '2026-05-11', used: 'today 12:28:40', revoked: false },
-  { name: 'old-staging', prefix: 'ft_ik_P0aa', created: '2026-03-02', used: 'never', revoked: true },
-]
-export const QUERY_KEYS = [
-  { name: 'grafana-export', prefix: 'ft_at_Zp81', by: 'ines@acme.dev', created: '2026-04-02', used: 'today 14:00:12' },
-  { name: 'ci-smoke-tests', prefix: 'ft_at_Lr3c', by: 'marc@acme.dev', created: '2026-08-20', used: 'yesterday 22:10:03' },
-]
 export const ALERT_RULES = [
   { name: 'New exception type', cond: 'An exception.type never seen in this project before', notify: 'Backend · Slack #alerts-backend', last: '14:05 today', on: true, fired: true },
   { name: 'Error rate above 2 %', cond: 'Any service, over 5 min, at least 200 spans', notify: 'Backend · Slack, email', last: '14:05 today', on: true, fired: true },

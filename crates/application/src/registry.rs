@@ -1,9 +1,9 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountDirectory, Accounts, AuthProvider, ControlPlane, FactorStore, Gate, IssueDecisions,
-    Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll, SessionStore, Squads,
-    UsageHistory,
+    AccountDirectory, Accounts, ApiKeys, AuthProvider, ControlPlane, FactorStore, Gate,
+    IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll,
+    SessionStore, Squads, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,8 @@ pub trait RepoFor<D>: UnitOfWork {
 pub mod domain {
     #[derive(Debug)]
     pub struct Accounts;
+    #[derive(Debug)]
+    pub struct ApiKeys;
     #[derive(Debug)]
     pub struct ControlPlane;
     #[derive(Debug)]
@@ -80,6 +82,22 @@ impl<R> StandingRepos for R where
 {
 }
 
+pub trait ReadRepos: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
+
+impl<R> ReadRepos for R where R: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
+
+pub trait AccessRepos:
+    StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
+impl<R> AccessRepos for R where
+    R: StandingRepos
+        + RepoFor<domain::ApiKeys, Repo: ApiKeys>
+        + RepoFor<domain::Projects, Repo: Projects>
+{
+}
+
 pub trait OrgRepos: StandingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
 
 impl<R> OrgRepos for R where R: StandingRepos + RepoFor<domain::Orgs, Repo: Orgs> {}
@@ -100,9 +118,9 @@ pub trait UsageRepos: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageH
 
 impl<R> UsageRepos for R where R: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
-pub trait IssueRepos: StandingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
+pub trait IssueRepos: ReadRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
 
-impl<R> IssueRepos for R where R: StandingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
+impl<R> IssueRepos for R where R: ReadRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
 
 pub trait ProfileRepos:
     StandingRepos + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
@@ -139,7 +157,9 @@ pub trait ProvisioningRepos: RepoFor<domain::ControlPlane, Repo: ControlPlane> {
 impl<R> ProvisioningRepos for R where R: RepoFor<domain::ControlPlane, Repo: ControlPlane> {}
 
 pub trait Repositories:
-    OrgRepos
+    ReadRepos
+    + AccessRepos
+    + OrgRepos
     + CatalogueRepos
     + RosterRepos
     + TeamRepos
@@ -151,7 +171,9 @@ pub trait Repositories:
 }
 
 impl<R> Repositories for R where
-    R: OrgRepos
+    R: ReadRepos
+        + AccessRepos
+        + OrgRepos
         + CatalogueRepos
         + RosterRepos
         + TeamRepos

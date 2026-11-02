@@ -23,6 +23,7 @@ pub trait SpanReader {
         &self,
         tenant: TenantId,
         id: TraceId,
+        project: Option<ProjectId>,
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send;
 }
 
@@ -48,8 +49,9 @@ impl<T: SpanReader + Sync> SpanReader for &T {
         &self,
         tenant: TenantId,
         id: TraceId,
+        project: Option<ProjectId>,
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send {
-        (*self).trace(tenant, id)
+        (*self).trace(tenant, id, project)
     }
 }
 
@@ -75,7 +77,8 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         &self,
         tenant: TenantId,
         id: TraceId,
+        project: Option<ProjectId>,
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send {
-        self.as_ref().trace(tenant, id)
+        self.as_ref().trace(tenant, id, project)
     }
 }
