@@ -1,8 +1,10 @@
+use axum::http::header::AUTHORIZATION;
 use axum::http::header::HeaderName;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use ferristrace_domain::SessionToken;
+use ferristrace_domain::{ApiSecret, Reader, SessionToken};
 
+use crate::auth::bearer_token;
 use crate::session_cookie;
 
 const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
@@ -30,4 +32,15 @@ pub(crate) fn carried(headers: &HeaderMap) -> Result<SessionToken, NotCarried> {
         return Err(NotCarried::NotFromOurOrigin);
     }
     session_cookie::carried(headers).ok_or(NotCarried::NoSession)
+}
+
+pub(crate) fn reading(headers: &HeaderMap) -> Result<Reader, NotCarried> {
+    let offered = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(bearer_token);
+    match offered {
+        Some(secret) => Ok(Reader::Key(ApiSecret::from_plaintext(secret))),
+        None => carried(headers).map(Reader::Session),
+    }
 }

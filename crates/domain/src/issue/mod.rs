@@ -4,6 +4,8 @@ mod fingerprint;
 #[cfg(test)]
 mod issue_tests;
 mod issues;
+#[cfg(test)]
+mod issues_tests;
 mod ports;
 mod value_objects;
 

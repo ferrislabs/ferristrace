@@ -7,6 +7,7 @@ use super::billing::BillingHour;
 use super::entities::Span;
 use super::errors::InvalidId;
 use crate::catalogue::ProjectId;
+use crate::secret::split_key;
 
 macro_rules! identifier {
     ($name:ident, $width:literal) => {
@@ -87,11 +88,7 @@ impl IngestKey {
     }
 
     pub fn split(&self) -> Option<(&str, &str)> {
-        let (prefix, secret) = self.0.split_once('.')?;
-        if prefix.is_empty() || secret.is_empty() {
-            return None;
-        }
-        Some((prefix, secret))
+        split_key(&self.0)
     }
 }
 

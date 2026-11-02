@@ -2,35 +2,37 @@ use super::entities::Issue;
 use super::errors::IssueError;
 use super::ports::{IssueDecisions, IssueReader};
 use super::value_objects::{Fingerprint, IssueFilter, MAX_LIMIT, Occurrence, Status};
+use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::clock::Clock;
 use crate::explore::Window;
 use crate::identity::{AccountId, SessionStore};
-use crate::organisation::{Memberships, OrgRole, Whoami};
+use crate::organisation::{Memberships, OrgRole};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 #[derive(Debug)]
-pub struct Issues<S, G, R, P, C> {
-    whoami: Whoami<S, G>,
+pub struct Issues<S, G, K, R, P, C> {
+    readers: Readers<S, G, K>,
     reader: R,
     decisions: P,
     clock: C,
 }
 
-impl<S, G, R, P, C> Issues<S, G, R, P, C>
+impl<S, G, K, R, P, C> Issues<S, G, K, R, P, C>
 where
     S: SessionStore,
     G: Memberships,
+    K: ApiKeys,
     R: IssueReader,
     P: IssueDecisions,
     C: Clock,
 {
-    pub fn new(whoami: Whoami<S, G>, reader: R, decisions: P, clock: C) -> Self {
+    pub fn new(readers: Readers<S, G, K>, reader: R, decisions: P, clock: C) -> Self {
         Self {
-            whoami,
+            readers,
             reader,
             decisions,
             clock,
@@ -42,7 +44,7 @@ where
     }
 
     async fn acting(&self, token: &SessionToken, org: TenantId) -> Result<AccountId, IssueError> {
-        let who = self.whoami.of(token).await?;
+        let who = self.readers.whoami().of(token).await?;
         if who.may_act_in(org, OrgRole::Member) {
             Ok(who.account)
         } else {
@@ -52,12 +54,18 @@ where
 
     pub async fn list(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         filter: &IssueFilter,
     ) -> Result<Vec<Issue>, IssueError> {
-        self.acting(token, org).await?;
-        let counted = self.reader.issues(org, filter).await?;
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        let counted = if project == filter.project {
+            self.reader.issues(org, filter).await?
+        } else {
+            let mut narrowed = filter.clone();
+            narrowed.project = project;
+            self.reader.issues(org, &narrowed).await?
+        };
         let keys: Vec<(ProjectId, Fingerprint)> =
             counted.iter().map(|one| (one.project, one.print)).collect();
         let recorded = self.decisions.read_many(&keys).await?;
@@ -76,7 +84,7 @@ where
 
     pub async fn one(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         project: Option<ProjectId>,
         print: Fingerprint,
@@ -85,7 +93,7 @@ where
         let mut filter = IssueFilter::over(window).at_most(1);
         filter.project = project;
         filter.print = Some(print);
-        self.list(token, org, &filter)
+        self.list(who, org, &filter)
             .await?
             .into_iter()
             .next()
@@ -94,14 +102,14 @@ where
 
     pub async fn occurrences(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         project: ProjectId,
         print: Fingerprint,
         window: Window,
         limit: u32,
     ) -> Result<Vec<Occurrence>, IssueError> {
-        self.acting(token, org).await?;
+        self.readers.grant(who, org).await?.narrow(Some(project))?;
         Ok(self
             .reader
             .occurrences(org, project, print, window, limit.clamp(1, MAX_LIMIT))

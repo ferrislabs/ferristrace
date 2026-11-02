@@ -1,9 +1,10 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    Admission, AuthError, AuthProvider, Authorizer, Clock, Counted, DecompressedBytes, Email,
-    Fingerprint, HashError, IngestKey, IssueFilter, IssueReader, Mailer, Occurrence, Password,
-    PasswordCheck, PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ResetError,
+    AccountId, Admission, ApiKey, ApiKeys, ApiSecret, AuthError, AuthProvider, Authorizer, Clock,
+    Counted, DecompressedBytes, Email, Fingerprint, HashError, IngestKey, IssueFilter, IssueReader,
+    IssuedKey, KeyId, KeyName, KeyScopes, Mailer, Occurrence, Password, PasswordCheck,
+    PasswordHash, PasswordHasher, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, ResetError,
     ResetToken, ResolvedIdentity, Scope, ServiceSummary, SignInProof, SinkError, Span, SpanReader,
     SpanSink, StoreError, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary,
     UnixSeconds, UnknownKey, UsageMeter, UsageReader, Window,
@@ -93,7 +94,12 @@ impl SpanReader for Inert {
         Ok(Vec::new())
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        _tenant: TenantId,
+        _id: TraceId,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -156,5 +162,30 @@ impl QuotaPolicy for Inert {
 impl TenantDirectory for Inert {
     async fn resolve(&self, _key: &IngestKey) -> Result<Scope, UnknownKey> {
         Err(UnknownKey)
+    }
+}
+
+impl ApiKeys for Inert {
+    async fn list(&self, _org: TenantId) -> Result<Vec<ApiKey>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn issue(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _name: &KeyName,
+        _scopes: &KeyScopes,
+        _by: AccountId,
+    ) -> Result<IssuedKey, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn revoke(&self, _org: TenantId, _id: KeyId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn grant_for(&self, _secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError> {
+        Ok(None)
     }
 }

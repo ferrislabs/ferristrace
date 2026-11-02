@@ -1,5 +1,6 @@
 use ferristrace_domain::{
-    Clock, IngestKey, ProjectId, Scope, SecretHash, TenantDirectory, TenantId, UnixSeconds,
+    Clock, IngestKey, KEY_PREFIX, KeyScope, ProjectId, Scope, SecretHash, TenantDirectory,
+    TenantId, UnixSeconds,
 };
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
@@ -20,13 +21,7 @@ impl<C: Clock> PostgresDirectory<C> {
 
     async fn note_sighting(&self, key: Uuid, last_seen: Option<i64>) {
         let now = self.clock.now();
-        let stale = last_seen.is_none_or(|seen| {
-            nanos_to_seconds(seen)
-                .saturating_add_secs(SIGHTING_GAP_SECONDS)
-                .get()
-                <= now.get()
-        });
-        if !stale {
+        if !sighting_is_stale(last_seen, now) {
             return;
         }
         let done = sqlx::query("UPDATE api_keys SET last_used_at = $2 WHERE id = $1")
@@ -40,7 +35,6 @@ impl<C: Clock> PostgresDirectory<C> {
     }
 }
 
-const PREFIX_LABEL: &str = "ft_live_";
 const PREFIX_BYTES: usize = 6;
 const SECRET_BYTES: usize = 32;
 
@@ -73,28 +67,72 @@ impl<C: Clock> PostgresDirectory<C> {
     }
 }
 
+pub(crate) struct Minted {
+    pub(crate) id: Uuid,
+    pub(crate) prefix: String,
+    pub(crate) plaintext: String,
+    pub(crate) created_at: i64,
+}
+
+pub(crate) struct Minting<'a> {
+    pub(crate) org: TenantId,
+    pub(crate) project: Option<Uuid>,
+    pub(crate) name: &'a str,
+    pub(crate) scopes: &'a [&'a str],
+    pub(crate) by: Option<Uuid>,
+}
+
+pub(crate) async fn mint_on(
+    connection: &mut PgConnection,
+    minting: Minting<'_>,
+) -> Result<Minted, sqlx::Error> {
+    let prefix_bytes: [u8; PREFIX_BYTES] = rand::random();
+    let secret_bytes: [u8; SECRET_BYTES] = rand::random();
+    let prefix = format!("{KEY_PREFIX}{}", hex::encode(prefix_bytes));
+    let secret = hex::encode(secret_bytes);
+
+    let row = sqlx::query(
+        "INSERT INTO api_keys \
+         (id, org_id, project_id, prefix, hash, secret_digest, name, scopes, created_by) \
+         VALUES (gen_random_uuid(), $1, $2, $3, '', $4, $5, $6, $7) \
+         RETURNING id AS id, created_at AS created_at",
+    )
+    .bind(minting.org.as_uuid())
+    .bind(minting.project)
+    .bind(&prefix)
+    .bind(SecretHash::of(&secret).as_bytes().as_slice())
+    .bind(minting.name)
+    .bind(minting.scopes)
+    .bind(minting.by)
+    .fetch_one(connection)
+    .await?;
+
+    let plaintext = format!("{prefix}.{secret}");
+    Ok(Minted {
+        id: row.get("id"),
+        prefix,
+        plaintext,
+        created_at: row.get("created_at"),
+    })
+}
+
 pub(crate) async fn issue_on(
     connection: &mut PgConnection,
     org: TenantId,
     project: Option<Uuid>,
 ) -> Result<IngestKey, KeyError> {
-    let prefix_bytes: [u8; PREFIX_BYTES] = rand::random();
-    let secret_bytes: [u8; SECRET_BYTES] = rand::random();
-    let prefix = format!("{PREFIX_LABEL}{}", hex::encode(prefix_bytes));
-    let secret = hex::encode(secret_bytes);
-
-    sqlx::query(
-        "INSERT INTO api_keys (id, org_id, project_id, prefix, hash, secret_digest) \
-         VALUES (gen_random_uuid(), $1, $2, $3, '', $4)",
+    let minted = mint_on(
+        connection,
+        Minting {
+            org,
+            project,
+            name: "",
+            scopes: &[KeyScope::Ingest.as_str()],
+            by: None,
+        },
     )
-    .bind(org.as_uuid())
-    .bind(project)
-    .bind(&prefix)
-    .bind(SecretHash::of(&secret).as_bytes().as_slice())
-    .execute(connection)
     .await?;
-
-    Ok(IngestKey::from_plaintext(&format!("{prefix}.{secret}")))
+    Ok(IngestKey::from_plaintext(&minted.plaintext))
 }
 
 pub(crate) async fn revoke_on(
@@ -122,9 +160,11 @@ impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
         let found = sqlx::query(
             "SELECT id AS id, org_id AS org_id, project_id AS project_id, \
              secret_digest AS secret_digest, last_used_at AS last_used_at \
-             FROM api_keys WHERE prefix = $1 AND revoked_at IS NULL",
+             FROM api_keys \
+             WHERE prefix = $1 AND revoked_at IS NULL AND $2 = ANY(scopes)",
         )
         .bind(prefix)
+        .bind(KeyScope::Ingest.as_str())
         .fetch_optional(&self.pool)
         .await
         .map_err(|error| {
@@ -153,7 +193,22 @@ impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
     }
 }
 
-fn to_nanos(instant: UnixSeconds) -> i64 {
+pub(crate) fn digest_matches(stored: Option<Vec<u8>>, offered: &str) -> bool {
+    stored
+        .and_then(|stored| <[u8; 32]>::try_from(stored.as_slice()).ok())
+        .is_some_and(|stored| SecretHash::from_bytes(stored) == SecretHash::of(offered))
+}
+
+pub(crate) fn sighting_is_stale(last_seen: Option<i64>, now: UnixSeconds) -> bool {
+    last_seen.is_none_or(|seen| {
+        nanos_to_seconds(seen)
+            .saturating_add_secs(SIGHTING_GAP_SECONDS)
+            .get()
+            <= now.get()
+    })
+}
+
+pub(crate) fn to_nanos(instant: UnixSeconds) -> i64 {
     i64::try_from(instant.get())
         .unwrap_or(i64::MAX / NANOS_PER_SECOND)
         .saturating_mul(NANOS_PER_SECOND)

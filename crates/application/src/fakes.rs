@@ -1,10 +1,12 @@
 use std::sync::atomic::Ordering;
 
 use ferristrace_domain::{
-    AccountId, Agent, ControlPlane, Email, IngestKey, LiveSession, Membership, Memberships,
-    NoPhotos, OrgName, OrgRole, Organisation, Orgs, Portrait, ProjectId, ProjectName,
-    ProvisionError, ProvisionPolicy, SecretHash, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
+    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, ControlPlane, Created, Email,
+    IngestKey, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships,
+    NoPhotos, OrgName, OrgRole, Organisation, Orgs, Portrait, Project, ProjectId, ProjectName,
+    Projects, ProvisionError, ProvisionPolicy, ReadGrant, Renamed, SecretHash, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId,
+    UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -259,4 +261,99 @@ pub fn a_token() -> SessionToken {
 
 pub fn a_name(of: &str) -> OrgName {
     OrgName::try_from(of).expect("a name")
+}
+
+#[repository(domain = ApiKeys, backend = Recording)]
+#[derive(Debug)]
+pub struct FakeApiKeys {
+    handle: Handle,
+}
+
+impl FakeApiKeys {
+    fn new(_backend: &Recording, tx: &Handle) -> Self {
+        tx.note_build();
+        Self { handle: tx.clone() }
+    }
+}
+
+impl ApiKeys for FakeApiKeys {
+    async fn list(&self, _org: TenantId) -> Result<Vec<ApiKey>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn issue(
+        &self,
+        _org: TenantId,
+        project: Option<ProjectId>,
+        name: &KeyName,
+        scopes: &KeyScopes,
+        by: AccountId,
+    ) -> Result<IssuedKey, StoreError> {
+        self.handle.write();
+        Ok(IssuedKey {
+            key: ApiKey {
+                id: KeyId::new(Uuid::from_u128(4)),
+                project,
+                name: name.as_str().into(),
+                prefix: "ft_live_000000000004".into(),
+                scopes: scopes.clone(),
+                created_at_unix_nanos: 0,
+                created_by: Some(by),
+                last_used_at_unix_nanos: None,
+            },
+            secret: ApiSecret::from_plaintext("ft_live_000000000004.secret"),
+        })
+    }
+
+    async fn revoke(&self, _org: TenantId, _id: KeyId) -> Result<bool, StoreError> {
+        self.handle.attempt();
+        Ok(false)
+    }
+
+    async fn grant_for(&self, _secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError> {
+        Ok(None)
+    }
+}
+
+#[repository(domain = Projects, backend = Recording)]
+#[derive(Debug)]
+pub struct FakeProjects;
+
+impl FakeProjects {
+    fn new(_backend: &Recording, tx: &Handle) -> Self {
+        tx.note_build();
+        Self
+    }
+}
+
+impl Projects for FakeProjects {
+    async fn of(&self, _tenant: TenantId) -> Result<Vec<Project>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn create(&self, _org: TenantId, _name: &ProjectName) -> Result<Created, StoreError> {
+        Ok(Created::Done)
+    }
+
+    async fn rename(
+        &self,
+        _org: TenantId,
+        _project: ProjectId,
+        _name: &ProjectName,
+    ) -> Result<Renamed, StoreError> {
+        Ok(Renamed::Gone)
+    }
+
+    async fn forget(&self, _org: TenantId, _project: ProjectId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn assign(
+        &self,
+        _org: TenantId,
+        _project: ProjectId,
+        _team: Option<TeamId>,
+    ) -> Result<Assigned, StoreError> {
+        Ok(Assigned::Done)
+    }
 }

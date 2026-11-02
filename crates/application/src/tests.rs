@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ferristrace_domain::{Bootstrapped, ProvisionError};
+use ferristrace_domain::{Bootstrapped, KeyError, KeyName, KeyScopes, ProvisionError};
 
 use crate::fakes::{Probing, a_name, a_token, the_email, the_org, the_policy};
 use crate::recording::{Handle, Recording};
@@ -151,4 +151,43 @@ async fn bootstrapping_interrupted_at_the_project_rolls_the_organisation_back() 
     assert_eq!(count(&repos.0.commits), 0);
     assert_eq!(count(&repos.0.writes), 0);
     assert!(count(&repos.0.attempts) >= 3);
+}
+
+#[tokio::test]
+async fn issuing_a_key_builds_every_repository_from_one_transaction_and_commits_once() {
+    let repos = Recording::default();
+
+    let issued = app(&repos)
+        .issue_key(
+            &a_token(),
+            the_org(),
+            None,
+            &KeyName::try_from("ci").expect("a name"),
+            &KeyScopes::ingest(),
+        )
+        .await
+        .expect("an owner issues a key");
+
+    assert_eq!(&*issued.key.name, "ci");
+    assert_eq!(count(&repos.0.opened), 1);
+    assert_eq!(repos.0.built_in(), vec![0, 0, 0, 0]);
+    assert_eq!(count(&repos.0.commits), 1);
+    assert_eq!(count(&repos.0.writes), 1);
+}
+
+#[tokio::test]
+async fn revoking_a_key_nobody_holds_rolls_back() {
+    let repos = Recording::default();
+
+    let refused = app(&repos)
+        .revoke_key(
+            &a_token(),
+            the_org(),
+            ferristrace_domain::KeyId::new(uuid::Uuid::nil()),
+        )
+        .await;
+
+    assert_eq!(refused, Err(KeyError::NoSuchKey));
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert_eq!(count(&repos.0.writes), 0);
 }

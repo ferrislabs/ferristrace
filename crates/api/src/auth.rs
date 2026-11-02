@@ -35,7 +35,7 @@ pub(crate) fn key_of(metadata: &MetadataMap) -> Result<IngestKey, ApiError> {
         .ok_or(ApiError::MissingBearer)
 }
 
-fn bearer_token(header: &str) -> Option<&str> {
+pub(crate) fn bearer_token(header: &str) -> Option<&str> {
     let (scheme, token) = header.split_once(' ')?;
     let token = token.trim();
     let well_formed = scheme.eq_ignore_ascii_case(BEARER)

@@ -59,6 +59,7 @@ const ONE_TRACE: &str = "SELECT \
      attributes AS attributes \
    FROM spans FINAL \
    WHERE tenant_id = ? AND trace_id = unhex(?) \
+     AND (? = 0 OR project_id = ?) \
    ORDER BY start_time, span_id";
 
 const EVENTS_OF_TRACE: &str = "SELECT \
@@ -68,6 +69,7 @@ const EVENTS_OF_TRACE: &str = "SELECT \
      attributes AS attributes \
    FROM span_events FINAL \
    WHERE tenant_id = ? AND trace_id = unhex(?) \
+     AND (? = 0 OR project_id = ?) \
    ORDER BY time, name \
    LIMIT 10000";
 
@@ -174,12 +176,19 @@ impl SpanReader for ClickhouseReader {
         rows.into_iter().map(read_summary).collect()
     }
 
-    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        tenant: TenantId,
+        id: TraceId,
+        project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         let rows: Vec<SpanRow> = self
             .client
             .query(ONE_TRACE)
             .bind(tenant.as_uuid())
             .bind(hex::encode(id.as_bytes()))
+            .bind(u8::from(project.is_some()))
+            .bind(uuid_of(project))
             .fetch_all()
             .await
             .map_err(|error| refused(&error))?;
@@ -189,6 +198,8 @@ impl SpanReader for ClickhouseReader {
             .query(EVENTS_OF_TRACE)
             .bind(tenant.as_uuid())
             .bind(hex::encode(id.as_bytes()))
+            .bind(u8::from(project.is_some()))
+            .bind(uuid_of(project))
             .fetch_all()
             .await
             .map_err(|error| refused(&error))?;

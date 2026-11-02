@@ -1,6 +1,7 @@
 extern crate self as ferristrace_postgres;
 
 mod accounts;
+mod api_keys;
 mod decisions;
 mod factors;
 mod flows;
@@ -19,6 +20,7 @@ mod teams;
 mod unit_of_work;
 
 pub use accounts::{AccountError, PostgresAccounts};
+pub use api_keys::PostgresApiKeys;
 pub use decisions::PostgresDecisions;
 pub use factors::PostgresFactors;
 pub use flows::PostgresFlows;

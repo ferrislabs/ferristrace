@@ -6,6 +6,8 @@ use super::errors::{BadWindow, ExploreError};
 use super::explore_service::Explore;
 use super::ports::SpanReader;
 use super::value_objects::{ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window};
+use crate::access::key_ring_tests::Ring;
+use crate::access::{KeyScope, KeyScopes, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
@@ -77,6 +79,13 @@ impl Memberships for MemberOfMine {
 #[derive(Default)]
 struct Asked {
     tenants: Mutex<Vec<TenantId>>,
+    projects: Mutex<Vec<Option<ProjectId>>>,
+}
+
+impl Asked {
+    fn projects(&self) -> Vec<Option<ProjectId>> {
+        self.projects.lock().expect("the lock").clone()
+    }
 }
 
 impl SpanReader for &Asked {
@@ -84,18 +93,20 @@ impl SpanReader for &Asked {
         &self,
         tenant: TenantId,
         _window: Window,
-        _project: Option<ProjectId>,
+        project: Option<ProjectId>,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(project);
         Ok(Vec::new())
     }
 
     async fn traces(
         &self,
         tenant: TenantId,
-        _filter: &TraceFilter,
+        filter: &TraceFilter,
     ) -> Result<Vec<TraceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(filter.project);
         Ok(vec![TraceSummary {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
@@ -107,8 +118,17 @@ impl SpanReader for &Asked {
         }])
     }
 
-    async fn trace(&self, tenant: TenantId, id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        tenant: TenantId,
+        id: TraceId,
+        project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(project);
+        if project.is_some_and(|asked| asked != a_project(OURS)) {
+            return Ok(Vec::new());
+        }
         Ok(vec![Span {
             trace_id: id,
             span_id: SpanId::try_from([1u8; 8].as_slice()).expect("eight bytes"),
@@ -145,7 +165,12 @@ impl SpanReader for Unreachable {
         Err(StoreError::Unreachable)
     }
 
-    async fn trace(&self, _tenant: TenantId, _id: TraceId) -> Result<Vec<Span>, StoreError> {
+    async fn trace(
+        &self,
+        _tenant: TenantId,
+        _id: TraceId,
+        _project: Option<ProjectId>,
+    ) -> Result<Vec<Span>, StoreError> {
         Err(StoreError::Unreachable)
     }
 }
@@ -154,8 +179,37 @@ fn a_filter() -> TraceFilter {
     TraceFilter::over(Window::new(0, 1000).expect("a window"))
 }
 
-fn exploring<R: SpanReader>(reader: R) -> Explore<OneSession, MemberOfMine, R> {
-    Explore::new(Whoami::new(OneSession, MemberOfMine), reader)
+fn exploring<R: SpanReader>(reader: R) -> Explore<OneSession, MemberOfMine, NoKeys, R> {
+    Explore::new(
+        Readers::new(Whoami::new(OneSession, MemberOfMine), &*NO_KEYS),
+        reader,
+    )
+}
+
+fn keyed<R: SpanReader>(keys: &Ring, reader: R) -> Explore<OneSession, MemberOfMine, &Ring, R> {
+    Explore::new(
+        Readers::new(Whoami::new(OneSession, MemberOfMine), keys),
+        reader,
+    )
+}
+
+type NoKeys = &'static Ring;
+
+static NO_KEYS: std::sync::LazyLock<Ring> = std::sync::LazyLock::new(Ring::default);
+
+fn session(plaintext: &str) -> Reader {
+    Reader::Session(SessionToken::from_plaintext(plaintext))
+}
+
+const OURS: u128 = 30;
+const OTHER: u128 = 40;
+
+fn a_project(seed: u128) -> ProjectId {
+    ProjectId::new(Uuid::from_u128(seed))
+}
+
+fn reading() -> KeyScopes {
+    KeyScopes::new(&[KeyScope::Read]).expect("scopes")
 }
 
 #[tokio::test]
@@ -164,11 +218,7 @@ async fn a_member_reads_the_traces_of_the_organisation_it_belongs_to() {
     let explore = exploring(&asked);
 
     let found = explore
-        .traces(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(MINE),
-            &a_filter(),
-        )
+        .traces(&session(TOKEN), an_org(MINE), &a_filter())
         .await
         .expect("a member may read");
 
@@ -186,11 +236,7 @@ async fn an_organisation_this_session_does_not_belong_to_is_refused() {
     let explore = exploring(&asked);
 
     let refused = explore
-        .traces(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(THEIRS),
-            &a_filter(),
-        )
+        .traces(&session(TOKEN), an_org(THEIRS), &a_filter())
         .await;
 
     assert_eq!(refused, Err(ExploreError::NotYours));
@@ -206,11 +252,7 @@ async fn a_single_trace_is_refused_to_a_stranger_too() {
     let explore = exploring(&asked);
 
     let refused = explore
-        .trace(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(THEIRS),
-            a_trace_id(),
-        )
+        .trace(&session(TOKEN), an_org(THEIRS), a_trace_id())
         .await;
 
     assert_eq!(refused, Err(ExploreError::NotYours));
@@ -223,11 +265,7 @@ async fn a_token_no_session_carries_is_refused_before_anything_is_read() {
     let explore = exploring(&asked);
 
     let refused = explore
-        .traces(
-            &SessionToken::from_plaintext("ft_ss_nope"),
-            an_org(MINE),
-            &a_filter(),
-        )
+        .traces(&session("ft_ss_nope"), an_org(MINE), &a_filter())
         .await;
 
     assert_eq!(refused, Err(ExploreError::NoSession));
@@ -239,11 +277,7 @@ async fn an_unreachable_span_store_is_not_reported_as_a_refusal() {
     let explore = exploring(Unreachable);
 
     let failed = explore
-        .traces(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(MINE),
-            &a_filter(),
-        )
+        .traces(&session(TOKEN), an_org(MINE), &a_filter())
         .await;
 
     assert_eq!(failed, Err(ExploreError::StoreUnreachable));
@@ -256,12 +290,7 @@ async fn the_services_of_another_organisation_are_refused_before_the_store_is_as
     let window = Window::new(0, 1000).expect("a window");
 
     let refused = explore
-        .services(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(THEIRS),
-            window,
-            None,
-        )
+        .services(&session(TOKEN), an_org(THEIRS), window, None)
         .await;
 
     assert_eq!(refused, Err(ExploreError::NotYours));
@@ -275,12 +304,7 @@ async fn a_member_reads_the_services_of_its_own_organisation() {
     let window = Window::new(0, 1000).expect("a window");
 
     explore
-        .services(
-            &SessionToken::from_plaintext(TOKEN),
-            an_org(MINE),
-            window,
-            None,
-        )
+        .services(&session(TOKEN), an_org(MINE), window, None)
         .await
         .expect("a member may read");
 
@@ -310,4 +334,146 @@ fn a_filter_asks_for_everything_until_it_is_narrowed() {
     assert!(!filter.only_errors);
     assert_eq!(filter.at_least_nanos, None);
     assert_eq!(filter.order, TraceOrder::Started);
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_reads_only_its_project_when_none_is_named() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let window = Window::new(0, 1000).expect("a window");
+
+    explore
+        .traces(&Reader::Key(secret.clone()), an_org(MINE), &a_filter())
+        .await
+        .expect("a read key may read its project");
+    explore
+        .services(&Reader::Key(secret), an_org(MINE), window, None)
+        .await
+        .expect("and its services");
+
+    assert_eq!(
+        asked.projects(),
+        vec![Some(a_project(OURS)), Some(a_project(OURS))]
+    );
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_naming_another_project_is_refused_like_a_stranger() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let mut filter = a_filter();
+    filter.project = Some(a_project(OTHER));
+    let window = Window::new(0, 1000).expect("a window");
+
+    let traces = explore
+        .traces(&Reader::Key(secret.clone()), an_org(MINE), &filter)
+        .await;
+    let services = explore
+        .services(
+            &Reader::Key(secret),
+            an_org(MINE),
+            window,
+            Some(a_project(OTHER)),
+        )
+        .await;
+
+    assert_eq!(traces, Err(ExploreError::NotYours));
+    assert_eq!(services, Err(ExploreError::NotYours));
+    assert!(asked.projects().is_empty(), "the store is never asked");
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_opens_a_trace_of_its_own_project() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+
+    let spans = keyed(&keys, &asked)
+        .trace(&Reader::Key(secret), an_org(MINE), a_trace_id())
+        .await
+        .expect("a trace of its own project");
+
+    assert_eq!(spans.len(), 1);
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS))]);
+}
+
+#[tokio::test]
+async fn a_trace_only_another_project_holds_reads_as_empty_for_a_project_bound_key() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OTHER)), reading());
+    let asked = Asked::default();
+
+    let spans = keyed(&keys, &asked)
+        .trace(&Reader::Key(secret), an_org(MINE), a_trace_id())
+        .await
+        .expect("an unknown trace is no error");
+
+    assert!(spans.is_empty(), "no span of another project, ever");
+    assert_eq!(asked.projects(), vec![Some(a_project(OTHER))]);
+}
+
+#[tokio::test]
+async fn a_session_reads_a_trace_without_a_project_restriction() {
+    let asked = Asked::default();
+
+    exploring(&asked)
+        .trace(&session(TOKEN), an_org(MINE), a_trace_id())
+        .await
+        .expect("a member may read");
+
+    assert_eq!(asked.projects(), vec![None]);
+}
+
+#[tokio::test]
+async fn an_organisation_wide_read_key_reads_a_trace_and_any_project() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), None, reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let mut filter = a_filter();
+    filter.project = Some(a_project(OTHER));
+
+    let spans = explore
+        .trace(&Reader::Key(secret.clone()), an_org(MINE), a_trace_id())
+        .await
+        .expect("a whole organisation key may read a trace");
+    explore
+        .traces(&Reader::Key(secret), an_org(MINE), &filter)
+        .await
+        .expect("and any project of it");
+
+    assert_eq!(spans.len(), 1);
+    assert_eq!(asked.projects(), vec![None, Some(a_project(OTHER))]);
+}
+
+#[tokio::test]
+async fn a_read_key_reads_nothing_of_another_organisation() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), None, reading());
+    let asked = Asked::default();
+
+    let refused = keyed(&keys, &asked)
+        .traces(&Reader::Key(secret), an_org(THEIRS), &a_filter())
+        .await;
+
+    assert_eq!(refused, Err(ExploreError::NotYours));
+    assert!(asked.tenants.lock().expect("the lock").is_empty());
+}
+
+#[tokio::test]
+async fn an_ingest_key_reads_nothing_and_is_refused_as_unauthenticated() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), None, KeyScopes::ingest());
+    let asked = Asked::default();
+
+    let refused = keyed(&keys, &asked)
+        .traces(&Reader::Key(secret), an_org(MINE), &a_filter())
+        .await;
+
+    assert_eq!(refused, Err(ExploreError::NoSession));
+    assert!(asked.tenants.lock().expect("the lock").is_empty());
 }

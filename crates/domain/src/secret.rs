@@ -6,6 +6,16 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const SESSION_PREFIX: &str = "ft_ss_";
 
+pub const KEY_PREFIX: &str = "ft_live_";
+
+pub(crate) fn split_key(plaintext: &str) -> Option<(&str, &str)> {
+    let (prefix, secret) = plaintext.split_once('.')?;
+    if prefix.is_empty() || secret.is_empty() {
+        return None;
+    }
+    Some((prefix, secret))
+}
+
 #[derive(Clone, Copy, Eq)]
 pub struct SecretHash([u8; 32]);
 

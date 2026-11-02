@@ -15,7 +15,8 @@ docker compose exec server ferristrace bootstrap --email you@example.com
 ```
 
 The server then answers OTLP over gRPC on 4317, and OTLP over HTTP, the API
-and the web application on <http://localhost:4318>.
+and the web application on <http://localhost:4318>. Keys that send or read
+telemetry are made under Settings > Project > Api keys.
 
 ## What is in here
 

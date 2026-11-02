@@ -13,7 +13,7 @@ use ferristrace_domain::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carried::{NotCarried, carried};
+use crate::carried::{NotCarried, carried, reading};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -156,7 +156,7 @@ async fn list<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let mut filter = IssueFilter::over(a_window(asked.from, asked.to)?);
     filter.project = asked.project.map(ProjectId::new);
     filter.service = asked
@@ -173,7 +173,7 @@ where
 
     let found = state
         .app
-        .list_issues(&token, TenantId::new(org), &filter)
+        .list_issues(&who, TenantId::new(org), &filter)
         .await?
         .into_iter()
         .map(Listed::from)
@@ -190,11 +190,11 @@ async fn one<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let issue = state
         .app
         .issue(
-            &token,
+            &who,
             TenantId::new(org),
             asked.project.map(ProjectId::new),
             a_print(&print)?,
@@ -213,11 +213,11 @@ async fn occurrences<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let token = carried(&headers)?;
+    let who = reading(&headers)?;
     let seen = state
         .app
         .issue_occurrences(
-            &token,
+            &who,
             TenantId::new(org),
             ProjectId::new(asked.project),
             a_print(&print)?,

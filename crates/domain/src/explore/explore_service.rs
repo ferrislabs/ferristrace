@@ -1,65 +1,62 @@
 use super::errors::ExploreError;
 use super::ports::SpanReader;
 use super::value_objects::{ServiceSummary, TraceFilter, TraceSummary, Window};
+use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::identity::SessionStore;
-use crate::organisation::{Memberships, OrgRole, Whoami};
-use crate::secret::SessionToken;
+use crate::organisation::Memberships;
 use crate::telemetry::{Span, TenantId, TraceId};
 
 #[derive(Debug)]
-pub struct Explore<S, G, R> {
-    whoami: Whoami<S, G>,
+pub struct Explore<S, G, K, R> {
+    readers: Readers<S, G, K>,
     reader: R,
 }
 
-impl<S, G, R> Explore<S, G, R>
+impl<S, G, K, R> Explore<S, G, K, R>
 where
     S: SessionStore,
     G: Memberships,
+    K: ApiKeys,
     R: SpanReader,
 {
-    pub fn new(whoami: Whoami<S, G>, reader: R) -> Self {
-        Self { whoami, reader }
-    }
-
-    async fn allowed(&self, token: &SessionToken, org: TenantId) -> Result<(), ExploreError> {
-        let who = self.whoami.of(token).await?;
-        if who.may_act_in(org, OrgRole::Member) {
-            Ok(())
-        } else {
-            Err(ExploreError::NotYours)
-        }
+    pub fn new(readers: Readers<S, G, K>, reader: R) -> Self {
+        Self { readers, reader }
     }
 
     pub async fn services(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         window: Window,
         project: Option<ProjectId>,
     ) -> Result<Vec<ServiceSummary>, ExploreError> {
-        self.allowed(token, org).await?;
+        let project = self.readers.grant(who, org).await?.narrow(project)?;
         Ok(self.reader.services(org, window, project).await?)
     }
 
     pub async fn traces(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         filter: &TraceFilter,
     ) -> Result<Vec<TraceSummary>, ExploreError> {
-        self.allowed(token, org).await?;
-        Ok(self.reader.traces(org, filter).await?)
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        if project == filter.project {
+            return Ok(self.reader.traces(org, filter).await?);
+        }
+        let mut narrowed = filter.clone();
+        narrowed.project = project;
+        Ok(self.reader.traces(org, &narrowed).await?)
     }
 
     pub async fn trace(
         &self,
-        token: &SessionToken,
+        who: &Reader,
         org: TenantId,
         id: TraceId,
     ) -> Result<Vec<Span>, ExploreError> {
-        self.allowed(token, org).await?;
-        Ok(self.reader.trace(org, id).await?)
+        let grant = self.readers.grant(who, org).await?;
+        Ok(self.reader.trace(org, id, grant.project).await?)
     }
 }

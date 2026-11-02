@@ -45,6 +45,11 @@ Draw an ingest key for the organisation `bootstrap` named:
 docker compose exec server ferristrace issue-key --org <the printed org id>
 ```
 
+An owner or an administrator can also create one in the web application,
+under Settings > Project > Api keys, with the `ingest` scope. A key with
+the `read` scope reads services, traces and issues through `/api` with the
+same bearer header, and a key bound to a project reads only that project.
+
 Then point any OTLP exporter at `http://localhost:4318/v1/traces` or
 `localhost:4317`, with the key as a bearer token:
 
