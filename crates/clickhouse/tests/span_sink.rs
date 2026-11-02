@@ -7,8 +7,8 @@ use ferristrace_clickhouse::{
     open_span_store,
 };
 use ferristrace_domain::{
-    ProjectId, Scope, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanSink, SpanStatus,
-    TenantId, TraceFilter, TraceId, Window,
+    ProjectId, RetentionDays, Scope, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanSink,
+    SpanStatus, TenantId, TraceFilter, TraceId, Window,
 };
 use ferristrace_infra::{FixedClock, MemorySink};
 use uuid::Uuid;
@@ -293,6 +293,54 @@ async fn expire_at_is_the_clock_plus_the_retention() {
 
     let expected = u32::try_from(NOW + 7 * 24 * 3600).expect("the expiry fits");
     assert_eq!(stored_expire_at(&client).await, expected);
+}
+
+async fn expire_at_of(client: &Client, service: &str) -> u32 {
+    client
+        .query("SELECT min(expire_at) AS value FROM spans WHERE service_name = ?")
+        .bind(service)
+        .fetch_one::<Expiry>()
+        .await
+        .expect("reading the expiry of a service")
+        .value
+}
+
+#[tokio::test]
+async fn scopes_with_different_retention_write_different_expire_at() {
+    let Some(client) = prepared("ferristrace_sink_scope_retention").await else {
+        return;
+    };
+    let sink = sink_with(
+        &client,
+        BatchLimits {
+            max_rows: 1,
+            period: Duration::from_secs(60 * 60),
+        },
+    );
+    let week = RetentionDays::try_from(7).expect("a week");
+    let quarter = RetentionDays::try_from(90).expect("a quarter");
+    let tenant = |seed| TenantId::new(Uuid::from_u128(seed));
+
+    sink.accept(
+        Scope::of(tenant(1)).retained_for(Some(week)),
+        vec![a_span(1, "weekly")],
+    )
+    .await
+    .expect("the weekly batch is accepted");
+    sink.accept(
+        Scope::of(tenant(2)).retained_for(Some(quarter)),
+        vec![a_span(2, "quarterly")],
+    )
+    .await
+    .expect("the quarterly batch is accepted");
+    sink.accept(Scope::of(tenant(3)), vec![a_span(3, "default")])
+        .await
+        .expect("the default batch is accepted");
+
+    let after = |days: u64| u32::try_from(NOW + days * 24 * 3600).expect("the expiry fits");
+    assert_eq!(expire_at_of(&client, "weekly").await, after(7));
+    assert_eq!(expire_at_of(&client, "quarterly").await, after(90));
+    assert_eq!(expire_at_of(&client, "default").await, after(7));
 }
 
 #[tokio::test]

@@ -22,7 +22,7 @@ mod value_objects_tests;
 pub use billing::{BillingHour, BillingMonth};
 pub use entities::Span;
 pub use errors::{
-    CounterUnreachable, IngestError, InvalidId, SinkError, UnknownKey, UsageSyncError,
+    BadRetention, CounterUnreachable, IngestError, InvalidId, SinkError, UnknownKey, UsageSyncError,
 };
 pub use ingest::Ingest;
 pub use metering::Metering;
@@ -32,6 +32,7 @@ pub use ports::{
 };
 pub use quota::{Allowance, StaticQuota};
 pub use value_objects::{
-    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Payload,
-    Scope, SpanEvent, SpanId, SpanKind, SpanStatus, TenantId, TraceId,
+    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope, SpanEvent, SpanId, SpanKind,
+    SpanStatus, TenantId, TraceId,
 };

@@ -1,3 +1,4 @@
+use ferristrace_domain::RetentionDays;
 use ferristrace_domain::{
     Clock, IngestKey, KEY_PREFIX, KeyScope, ProjectId, Scope, SecretHash, TenantDirectory,
     TenantId, UnixSeconds,
@@ -12,11 +13,22 @@ const SIGHTING_GAP_SECONDS: u64 = 300;
 pub struct PostgresDirectory<C> {
     pool: PgPool,
     clock: C,
+    default_retention_days: Option<u32>,
 }
 
 impl<C: Clock> PostgresDirectory<C> {
     pub fn new(pool: PgPool, clock: C) -> Self {
-        Self { pool, clock }
+        Self {
+            pool,
+            clock,
+            default_retention_days: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_default_retention_days(mut self, days: u64) -> Self {
+        self.default_retention_days = Some(u32::try_from(days).unwrap_or(u32::MAX));
+        self
     }
 
     async fn note_sighting(&self, key: Uuid, last_seen: Option<i64>) {
@@ -191,10 +203,13 @@ impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
         };
 
         let found = sqlx::query(
-            "SELECT id AS id, org_id AS org_id, project_id AS project_id, \
-             secret_digest AS secret_digest, last_used_at AS last_used_at \
-             FROM api_keys \
-             WHERE prefix = $1 AND revoked_at IS NULL AND $2 = ANY(scopes)",
+            "SELECT k.id AS id, k.org_id AS org_id, k.project_id AS project_id, \
+             k.secret_digest AS secret_digest, k.last_used_at AS last_used_at, \
+             o.retention_days AS org_retention_days, p.retention_days AS plan_retention_days \
+             FROM api_keys k \
+             JOIN orgs o ON o.id = k.org_id \
+             JOIN plans p ON p.id = o.plan_id \
+             WHERE k.prefix = $1 AND k.revoked_at IS NULL AND $2 = ANY(k.scopes)",
         )
         .bind(prefix)
         .bind(KeyScope::Ingest.as_str())
@@ -221,8 +236,30 @@ impl<C: Clock + Send + Sync> TenantDirectory for PostgresDirectory<C> {
 
         self.note_sighting(row.get("id"), row.get("last_used_at"))
             .await;
+        let retention = effective_retention(
+            row.get("org_retention_days"),
+            row.get("plan_retention_days"),
+            self.default_retention_days,
+        );
         Ok(Scope::of(TenantId::new(row.get("org_id")))
-            .in_project(row.get::<Option<Uuid>, _>("project_id").map(ProjectId::new)))
+            .in_project(row.get::<Option<Uuid>, _>("project_id").map(ProjectId::new))
+            .retained_for(retention))
+    }
+}
+
+fn effective_retention(
+    chosen: Option<i32>,
+    cap: Option<i32>,
+    default: Option<u32>,
+) -> Option<RetentionDays> {
+    let days = |value: i32| u32::try_from(value).unwrap_or_default();
+    match (chosen.map(days), cap.map(days)) {
+        (Some(chosen), Some(cap)) => Some(RetentionDays::saturating(chosen.min(cap))),
+        (Some(chosen), None) => Some(RetentionDays::saturating(chosen)),
+        (None, Some(cap)) if default.is_none_or(|default| cap < default) => {
+            Some(RetentionDays::saturating(cap))
+        }
+        (None, _) => None,
     }
 }
 

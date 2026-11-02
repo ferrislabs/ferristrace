@@ -23,6 +23,7 @@ export const AUDIT_ACTIONS = [
   'org.renamed',
   'org.logo_set',
   'org.logo_removed',
+  'org.retention_set',
   'project.created',
   'project.renamed',
   'project.deleted',

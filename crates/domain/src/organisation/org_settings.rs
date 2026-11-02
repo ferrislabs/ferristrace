@@ -7,7 +7,7 @@ use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::identity::{AccountId, SessionStore};
 use crate::profile::{Photo, PhotoKind, Photos, Pictured};
 use crate::secret::SessionToken;
-use crate::telemetry::TenantId;
+use crate::telemetry::{RetentionDays, TenantId};
 
 #[derive(Debug)]
 pub struct OrgSettings<S, G, O, P, A> {
@@ -109,6 +109,36 @@ where
         self.card(org).await
     }
 
+    pub async fn set_retention(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> Result<Organisation, SettingError> {
+        let by = match self.standing(token, org, OrgRole::Owner).await {
+            Err(SettingError::NotYoursToChange) => return Err(SettingError::OwnersOnly),
+            other => other?,
+        };
+        let before = self.card(org).await?;
+        if let (Some(asked), Some(cap)) = (retention, before.retention_cap)
+            && asked > cap
+        {
+            return Err(SettingError::AboveCap { cap });
+        }
+        self.orgs.set_retention(org, retention).await?;
+        let card = self.card(org).await?;
+        self.note(
+            org,
+            by,
+            Action::OrgRetentionSet,
+            Detail::default()
+                .with("from", shown(before.retention))
+                .with("to", shown(retention)),
+        )
+        .await?;
+        Ok(card)
+    }
+
     pub async fn logo(
         &self,
         token: &SessionToken,
@@ -160,4 +190,8 @@ where
     async fn card(&self, org: TenantId) -> Result<Organisation, SettingError> {
         self.orgs.only(org).await?.ok_or(SettingError::Gone)
     }
+}
+
+fn shown(retention: Option<RetentionDays>) -> String {
+    retention.map_or_else(|| "default".to_owned(), |days| days.to_string())
 }

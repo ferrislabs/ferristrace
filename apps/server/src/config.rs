@@ -54,6 +54,10 @@ fn a_month() -> u64 {
     30
 }
 
+pub(crate) fn default_retention_days(spans: Option<&SpansConfig>) -> u64 {
+    spans.map_or_else(a_month, |spans| spans.retention_days)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpansConfig {
     pub url: String,

@@ -25,6 +25,7 @@ fn the_spellings_are_stable_and_dotted() {
             "org.renamed",
             "org.logo_set",
             "org.logo_removed",
+            "org.retention_set",
             "project.created",
             "project.renamed",
             "project.deleted",

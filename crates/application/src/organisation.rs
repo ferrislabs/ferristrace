@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    OrgName, OrgSettings, Organisation, Photo, PhotoKind, SessionToken, SettingError, TenantId,
-    Whoami,
+    OrgName, OrgSettings, Organisation, Photo, PhotoKind, RetentionDays, SessionToken,
+    SettingError, TenantId, Whoami,
 };
 
 use crate::registry::OrgRepos;
@@ -40,6 +40,23 @@ where
             audit,
         )
         .rename(token, org, name)
+        .await
+    }
+
+    #[transactional(sessions, memberships, orgs, audit, unavailable = SettingError::StoreUnreachable)]
+    pub async fn set_org_retention(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> Result<Organisation, SettingError> {
+        OrgSettings::new(
+            Whoami::new(sessions, memberships),
+            orgs,
+            &self.photos,
+            audit,
+        )
+        .set_retention(token, org, retention)
         .await
     }
 

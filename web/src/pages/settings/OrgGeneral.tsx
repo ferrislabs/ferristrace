@@ -7,7 +7,7 @@ import { Field, Input } from '@/components/ui/input'
 import { Avatar } from '@/components/ui/misc'
 import { because } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
-import { logoProblem, orgNameProblem, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, type OrgCard } from '@/data/orgs'
+import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, type OrgCard } from '@/data/orgs'
 import { initialsOf } from '@/data/profile'
 import { stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -73,6 +73,42 @@ function Mark({ card, mayChange }: { card: OrgCard | undefined; mayChange: boole
   )
 }
 
+function Retention({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
+  const set = useSetOrgRetention()
+  const [typed, setTyped] = useState<string | null>(null)
+  const shown = typed ?? String(card.retention_days ?? effectiveRetention(card))
+  const problem = typed === null ? null : retentionProblem(typed, card.retention_cap_days)
+  const unchanged = typed === null || Number(typed) === card.retention_days
+
+  const apply = (days: number | null) =>
+    set.mutate(days, {
+      onSuccess: () => {
+        setTyped(null)
+        toast.success('Saved')
+      },
+      onError: (error) => toast.error(because(error, 'The retention was not changed')),
+    })
+
+  return (
+    <Card className="flex flex-col gap-3.5 p-4">
+      <Field
+        label="Retention"
+        htmlFor="og-r"
+        hint={`Spans are kept ${effectiveRetention(card)} days${card.retention_days === null ? ' (the deployment default)' : ''}. The deployment default is ${card.default_retention_days} days${card.retention_cap_days === null ? '' : `; your plan keeps spans at most ${card.retention_cap_days} days`}. A change applies to spans ingested afterwards.`}
+      >
+        <div className="flex max-w-[420px] items-center gap-2">
+          <Input id="og-r" mono type="number" min={1} max={card.retention_cap_days ?? 3650} value={shown} disabled={!isOwner} aria-invalid={problem ? true : undefined} onChange={(e) => setTyped(e.target.value)} />
+          <span className="text-control text-muted-foreground">days</span>
+          <Button size="sm" className="h-8" variant="primary" disabled={!isOwner || unchanged || Boolean(problem) || set.isPending} onClick={() => apply(Number(typed))}>Save</Button>
+          <Button size="sm" className="h-8" variant="ghost" disabled={!isOwner || card.retention_days === null || set.isPending} onClick={() => apply(null)}>Use the deployment default</Button>
+        </div>
+      </Field>
+      {problem ? <span className="text-caption text-destructive-text">{problem}</span> : null}
+      {isOwner ? null : <span className="text-caption text-muted-foreground">Only an owner can change this.</span>}
+    </Card>
+  )
+}
+
 export function OrgGeneral() {
   const { active } = useOrganisations()
   const { card, nothing } = useOrgCard()
@@ -109,6 +145,7 @@ export function OrgGeneral() {
       {card ? (
         <>
           <Identity card={card} />
+          <Retention card={card} isOwner={active?.role === 'owner'} />
           <Danger title={`Delete ${card.name}`} text="Deletes every project, signal, member and key of the organisation. Export first if you need anything." action="Delete organisation" onClick={() => setDel(true)} />
           <ConfirmDelete open={del} onOpenChange={setDel} name={card.name} what="organisation" body="Every project, signal, member, team, key and alert is deleted. This cannot be undone." />
         </>

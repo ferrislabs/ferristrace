@@ -128,7 +128,11 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
   serves plain HTTP. Put the server behind TLS and set it to `true`, or
   session cookies travel in the clear.
 - **`RETENTION_DAYS`.** Spans carry a TTL of 30 days by default. ClickHouse
-  drops them on its own schedule once past it.
+  drops them on its own schedule once past it. An owner can set a different
+  retention for one organisation in Settings, Organisation, General, between
+  1 day and the plan's own limit when it has one; it applies to spans
+  ingested afterwards, and `RETENTION_DAYS` stays the value for every
+  organisation that sets none.
 
 ## Settings
 
@@ -292,9 +296,10 @@ the same bargain. The api keys go with the project at once, and the spans
 already written stay in the span store until their retention expires —
 unreachable from the application, because nothing names them any more.
 
-How long a signal is kept is a property of the deployment rather than of
-one project: `spans.retention_days`, which ClickHouse applies on its own
-schedule.
+How long a signal is kept is a property of the organisation rather than of
+one project: an owner sets it in Settings, Organisation, General, and
+`spans.retention_days` is the value for an organisation that sets none.
+ClickHouse applies it on its own schedule.
 
 ## Multi-tenancy
 

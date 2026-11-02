@@ -3,7 +3,7 @@ import { accountQuery } from '@/auth/api'
 import { because, del, get, json, offer, patch } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 
-export type OrgCard = { id: string; name: string; plan: string; created_at_ms: number; version: string; logo?: string | null }
+export type OrgCard = { id: string; name: string; plan: string; created_at_ms: number; version: string; logo?: string | null; retention_days: number | null; retention_cap_days: number | null; default_retention_days: number }
 
 const key = (org: string | undefined) => ['org', org]
 
@@ -77,4 +77,29 @@ export function orgNameProblem(name: string): string | null {
   if (new TextEncoder().encode(kept).length > ORG_NAME_MAX_BYTES) return `a name can be at most ${ORG_NAME_MAX_BYTES} bytes`
   if (kept.length === 0) return 'an organisation needs a name'
   return null
+}
+
+export const RETENTION_MIN_DAYS = 1
+export const RETENTION_MAX_DAYS = 3650
+
+export function effectiveRetention(card: Pick<OrgCard, 'retention_days' | 'retention_cap_days' | 'default_retention_days'>): number {
+  const chosen = card.retention_days ?? card.default_retention_days
+  return card.retention_cap_days === null ? chosen : Math.min(chosen, card.retention_cap_days)
+}
+
+export function retentionProblem(typed: string, cap: number | null): string | null {
+  const days = Number(typed)
+  if (typed.trim() === '' || !Number.isInteger(days)) return 'a retention is a whole number of days'
+  if (days < RETENTION_MIN_DAYS || days > RETENTION_MAX_DAYS) return `a retention is between ${RETENTION_MIN_DAYS} and ${RETENTION_MAX_DAYS} days`
+  if (cap !== null && days > cap) return `the plan keeps spans at most ${cap} days`
+  return null
+}
+
+export function useSetOrgRetention() {
+  const { active } = useOrganisations()
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (days: number | null) => json<OrgCard>(await patch(`/api/orgs/${active?.org}/retention`, { days })),
+    onSuccess: (card) => client.setQueryData(key(card.id), card),
+  })
 }

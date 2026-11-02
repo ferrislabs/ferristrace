@@ -5,9 +5,9 @@ use ferristrace_domain::{
     AuditTrail, ControlPlane, Created, Email, Fingerprint, IssueDecisions, IssuedKey, KeyId,
     KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
     Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
-    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, Revoked, SecretHash, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Status, StoreError, TeamId,
-    TenantId, UnixSeconds,
+    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked,
+    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Status,
+    StoreError, TeamId, TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -242,6 +242,8 @@ impl Orgs for FakeOrgs {
             plan: "free".into(),
             created_at_unix_nanos: 0,
             logo: None,
+            retention: None,
+            retention_cap: None,
         }))
     }
 
@@ -252,6 +254,15 @@ impl Orgs for FakeOrgs {
     }
 
     async fn set_logo(&self, _org: TenantId, _logo: Option<&Portrait>) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn set_retention(
+        &self,
+        _org: TenantId,
+        _retention: Option<RetentionDays>,
+    ) -> Result<(), StoreError> {
+        self.handle.write();
         Ok(())
     }
 }

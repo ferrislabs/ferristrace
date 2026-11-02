@@ -13,7 +13,7 @@ use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionSto
 use crate::profile::{NoPhotos, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
-use crate::telemetry::TenantId;
+use crate::telemetry::{RetentionDays, TenantId};
 use crate::testing::Notebook;
 
 const TOKEN: &str = "ft_ss_live";
@@ -78,6 +78,8 @@ struct Kept {
     name: Mutex<Option<String>>,
     renames: Mutex<Vec<String>>,
     logo: Mutex<Option<Portrait>>,
+    retention: Mutex<Option<RetentionDays>>,
+    cap: Option<RetentionDays>,
 }
 
 impl Kept {
@@ -86,6 +88,8 @@ impl Kept {
             name: Mutex::new(Some(name.to_owned())),
             renames: Mutex::default(),
             logo: Mutex::default(),
+            retention: Mutex::default(),
+            cap: None,
         }
     }
 
@@ -94,7 +98,18 @@ impl Kept {
             name: Mutex::new(None),
             renames: Mutex::default(),
             logo: Mutex::default(),
+            retention: Mutex::default(),
+            cap: None,
         }
+    }
+
+    fn capped_at(mut self, days: u32) -> Self {
+        self.cap = Some(days_of(days));
+        self
+    }
+
+    fn retention(&self) -> Option<RetentionDays> {
+        *self.retention.lock().expect("the lock")
     }
 
     fn renames(&self) -> Vec<String> {
@@ -115,6 +130,8 @@ impl Orgs for &Kept {
                 plan: "Self-hosted".into(),
                 created_at_unix_nanos: FOUNDED,
                 logo: self.logo.lock().expect("the lock").clone(),
+                retention: self.retention(),
+                retention_cap: self.cap,
             }))
     }
 
@@ -131,6 +148,19 @@ impl Orgs for &Kept {
         *self.logo.lock().expect("the lock") = logo.cloned();
         Ok(())
     }
+
+    async fn set_retention(
+        &self,
+        _org: TenantId,
+        retention: Option<RetentionDays>,
+    ) -> Result<(), StoreError> {
+        *self.retention.lock().expect("the lock") = retention;
+        Ok(())
+    }
+}
+
+fn days_of(days: u32) -> RetentionDays {
+    RetentionDays::try_from(days).expect("an admitted retention")
 }
 
 fn settings(
@@ -265,6 +295,8 @@ async fn a_member_reads_the_card_of_its_own_organisation() {
             plan: "Self-hosted".into(),
             created_at_unix_nanos: FOUNDED,
             logo: None,
+            retention: None,
+            retention_cap: None,
         }
     );
 }
@@ -597,4 +629,112 @@ async fn keeping_then_dropping_a_logo_records_each_change_once() {
         notebook.entries()[0].detail.get("kind"),
         Some(Some("image/png"))
     );
+}
+
+#[tokio::test]
+async fn an_owner_sets_seven_days_and_one_entry_says_so() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    let card = noting(OrgRole::Owner, &kept, &notebook)
+        .set_retention(&token(), an_org(MINE), Some(days_of(7)))
+        .await
+        .expect("an owner may set it");
+
+    assert_eq!(card.retention, Some(days_of(7)));
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, Action::OrgRetentionSet);
+    assert_eq!(entries[0].target, Target::org(an_org(MINE)));
+    assert_eq!(entries[0].detail.get("from"), Some(Some("default")));
+    assert_eq!(entries[0].detail.get("to"), Some(Some("7")));
+}
+
+#[tokio::test]
+async fn an_administrator_may_not_set_it_and_nothing_is_recorded() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    for role in [OrgRole::Admin, OrgRole::Member] {
+        let refused = noting(role, &kept, &notebook)
+            .set_retention(&token(), an_org(MINE), Some(days_of(7)))
+            .await;
+
+        assert_eq!(refused, Err(SettingError::OwnersOnly));
+    }
+
+    assert_eq!(kept.retention(), None);
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn setting_it_on_an_organisation_this_session_is_no_part_of_says_no_such_thing() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Owner, &kept, &notebook)
+        .set_retention(&token(), an_org(THEIRS), Some(days_of(7)))
+        .await;
+
+    assert_eq!(refused, Err(SettingError::NotYours));
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_value_above_the_plan_cap_is_refused_and_nothing_is_recorded() {
+    let kept = Kept::holding("Acme").capped_at(30);
+    let notebook = Notebook::default();
+
+    let refused = noting(OrgRole::Owner, &kept, &notebook)
+        .set_retention(&token(), an_org(MINE), Some(days_of(31)))
+        .await;
+
+    assert_eq!(refused, Err(SettingError::AboveCap { cap: days_of(30) }));
+    assert_eq!(kept.retention(), None);
+    assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_value_at_the_plan_cap_is_kept() {
+    let kept = Kept::holding("Acme").capped_at(30);
+
+    let card = settings(OrgRole::Owner, &kept)
+        .set_retention(&token(), an_org(MINE), Some(days_of(30)))
+        .await
+        .expect("the cap itself is allowed");
+
+    assert_eq!(card.retention, Some(days_of(30)));
+    assert_eq!(card.retention_cap, Some(days_of(30)));
+}
+
+#[tokio::test]
+async fn none_resets_it_to_the_default_and_the_entry_names_both_ends() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+    noting(OrgRole::Owner, &kept, &notebook)
+        .set_retention(&token(), an_org(MINE), Some(days_of(7)))
+        .await
+        .expect("set");
+
+    let card = noting(OrgRole::Owner, &kept, &notebook)
+        .set_retention(&token(), an_org(MINE), None)
+        .await
+        .expect("reset");
+
+    assert_eq!(card.retention, None);
+    let entries = notebook.entries();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].detail.get("from"), Some(Some("7")));
+    assert_eq!(entries[1].detail.get("to"), Some(Some("default")));
+}
+
+#[test]
+fn a_retention_is_between_one_day_and_ten_years() {
+    assert!(RetentionDays::try_from(0).is_err());
+    assert!(RetentionDays::try_from(1).is_ok());
+    assert!(RetentionDays::try_from(3650).is_ok());
+    assert!(RetentionDays::try_from(3651).is_err());
+    assert_eq!(days_of(7).seconds(), 7 * 24 * 60 * 60);
+    assert_eq!(RetentionDays::saturating(0).get(), 1);
+    assert_eq!(RetentionDays::saturating(u32::MAX).get(), 3650);
 }

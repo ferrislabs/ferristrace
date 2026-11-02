@@ -5,7 +5,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::billing::BillingHour;
 use super::entities::Span;
-use super::errors::InvalidId;
+use super::errors::{BadRetention, InvalidId};
 use crate::catalogue::ProjectId;
 use crate::secret::split_key;
 
@@ -117,10 +117,54 @@ impl fmt::Display for TenantId {
     }
 }
 
+pub const MIN_RETENTION_DAYS: u32 = 1;
+pub const MAX_RETENTION_DAYS: u32 = 3650;
+const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RetentionDays(u32);
+
+impl RetentionDays {
+    pub fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn seconds(self) -> u64 {
+        u64::from(self.0) * SECONDS_PER_DAY
+    }
+
+    #[must_use]
+    pub fn saturating(days: u32) -> Self {
+        Self(days.clamp(MIN_RETENTION_DAYS, MAX_RETENTION_DAYS))
+    }
+}
+
+impl TryFrom<u32> for RetentionDays {
+    type Error = BadRetention;
+
+    fn try_from(days: u32) -> Result<Self, Self::Error> {
+        if (MIN_RETENTION_DAYS..=MAX_RETENTION_DAYS).contains(&days) {
+            Ok(Self(days))
+        } else {
+            Err(BadRetention {
+                min: MIN_RETENTION_DAYS,
+                max: MAX_RETENTION_DAYS,
+            })
+        }
+    }
+}
+
+impl fmt::Display for RetentionDays {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scope {
     pub tenant: TenantId,
     pub project: Option<ProjectId>,
+    pub retention: Option<RetentionDays>,
 }
 
 impl Scope {
@@ -128,7 +172,14 @@ impl Scope {
         Self {
             tenant,
             project: None,
+            retention: None,
         }
+    }
+
+    #[must_use]
+    pub fn retained_for(mut self, retention: Option<RetentionDays>) -> Self {
+        self.retention = retention;
+        self
     }
 
     #[must_use]
