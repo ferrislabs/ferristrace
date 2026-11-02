@@ -16,12 +16,6 @@ export const MEMBERS = [
   { email: 'li.wei@acme.dev', name: 'Li Wei', role: 'member', joined: '2026-08-14' },
   { email: 'karim@acme.dev', name: 'Karim Benali', role: 'member', joined: '2026-09-01' },
 ]
-export const ALERT_RULES = [
-  { name: 'New exception type', cond: 'An exception.type never seen in this project before', notify: 'Backend · Slack #alerts-backend', last: '14:05 today', on: true, fired: true },
-  { name: 'Error rate above 2 %', cond: 'Any service, over 5 min, at least 200 spans', notify: 'Backend · Slack, email', last: '14:05 today', on: true, fired: true },
-  { name: 'Exception spike', cond: '10× the usual count of one type in 10 min', notify: 'Backend · email', last: 'Oct 17', on: true, fired: false },
-  { name: 'Service stops sending', cond: 'No spans for 10 min from a service seen in the last day', notify: 'Data · Slack #data-oncall', last: 'never', on: false, fired: false },
-]
 
 export const STATUS_GROUPS = [
   { name: 'Storefront', items: [{ name: 'Website', desc: 'acme.dev and the product pages', bad: { 17: 'deg' } }, { name: 'Checkout', desc: 'Cart, payment form and order confirmation', bad: { 0: 'deg', 33: 'out' }, live: true }] },

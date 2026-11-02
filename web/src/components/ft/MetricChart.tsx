@@ -38,7 +38,7 @@ function segments(points: [number, number | null][], x: (t: number) => number, y
   return out
 }
 
-export function MetricChart({ series, exemplars, unit, aria }: { series: MetricLine[]; exemplars: Exemplar[]; unit: string; aria: string }) {
+export function MetricChart({ series, exemplars, unit, aria, threshold }: { series: MetricLine[]; exemplars: Exemplar[]; unit: string; aria: string; threshold?: number }) {
   const [pinned, setPinned] = useState<string[]>([])
   const [hover, setHover] = useState<number | null>(null)
   const keys = series.map((s) => labelOf(s.labels))
@@ -49,10 +49,11 @@ export function MetricChart({ series, exemplars, unit, aria }: { series: MetricL
     const values = series.flatMap((s, i) => (visible[i] ? s.points.flatMap((p) => (p[1] === null ? [] : [p[1]])) : []))
     const t0 = times.length ? Math.min(...times) : 0
     const t1 = times.length ? Math.max(...times) : 1
-    const lo = Math.min(0, ...values)
-    const hi = Math.max(...values, lo + 1e-9)
+    const marked = threshold === undefined ? [] : [threshold]
+    const lo = Math.min(0, ...values, ...marked)
+    const hi = Math.max(...values, ...marked, lo + 1e-9)
     return { t0, t1, lo, hi, sorted: [...new Set(times)].sort((a, b) => a - b) }
-  }, [series, pinned])
+  }, [series, pinned, threshold])
 
   const x = (t: number) => ((t - frame.t0) / (frame.t1 - frame.t0 || 1)) * WIDTH
   const y = (v: number) => HEIGHT - ((v - frame.lo) / (frame.hi - frame.lo || 1)) * HEIGHT
@@ -91,6 +92,7 @@ export function MetricChart({ series, exemplars, unit, aria }: { series: MetricL
                     : <circle key={`${keys[i]}-${n}`} cx={points.split(',')[0]} cy={points.split(',')[1]} r="1.5" fill={PALETTE[i % PALETTE.length]} />
                 ))
               : null)}
+            {threshold !== undefined ? <line x1="0" x2={WIDTH} y1={y(threshold)} y2={y(threshold)} stroke="var(--destructive-text)" strokeDasharray="6 4" strokeWidth="1.5" vectorEffect="non-scaling-stroke"><title>{`Threshold ${formatValue(threshold, unit)}`}</title></line> : null}
             {at !== null ? <line x1={x(at)} x2={x(at)} y1="0" y2={HEIGHT} stroke="var(--muted-foreground)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" /> : null}
           </svg>
           {shown.map((e) => (

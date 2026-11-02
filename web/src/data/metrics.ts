@@ -56,9 +56,10 @@ const FRESH_MS = 15_000
 
 export const isPinned = (query: Pick<MetricQuery, 'fromMs' | 'toMs'>) => query.fromMs !== null && query.toMs !== null
 
-export function useMetricCatalogue(q: string) {
+export function useMetricCatalogue(q: string, projectOverride?: string) {
   const { active } = useOrganisations()
-  const { project } = useScope()
+  const { project: scoped } = useScope()
+  const project = projectOverride || scoped
   const found = useQuery({
     queryKey: ['metrics', active?.org, project, q.trim()],
     enabled: Boolean(active),
