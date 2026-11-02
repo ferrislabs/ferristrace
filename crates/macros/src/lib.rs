@@ -57,6 +57,11 @@ pub fn transactional(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     });
     let unavailable = &listed.unavailable;
+    let settle = if listed.always {
+        quote! { ::ferristrace_application::registry::Settle::Always }
+    } else {
+        quote! { ::ferristrace_application::registry::Settle::OnSuccess }
+    };
     let statements = &block.stmts;
 
     quote! {
@@ -65,6 +70,7 @@ pub fn transactional(args: TokenStream, input: TokenStream) -> TokenStream {
             ::ferristrace_application::registry::UnitOfWork::transaction(
                 &self.repos,
                 || #unavailable,
+                #settle,
                 move |tx| async move {
                     #(#bindings)*
                     #(#statements)*
@@ -123,23 +129,34 @@ impl Parse for Registration {
 struct Listed {
     domains: Vec<Ident>,
     unavailable: Expr,
+    always: bool,
 }
 
 impl Parse for Listed {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut domains = Vec::new();
         let mut unavailable = None;
+        let mut always = false;
 
         for entry in Punctuated::<Entry, Token![,]>::parse_terminated(input)? {
             match entry {
                 Entry::Domain(name) => domains.push(name),
                 Entry::Unavailable(error) => unavailable = Some(error),
+                Entry::Settle(policy) if policy == "always" => always = true,
+                Entry::Settle(policy) if policy == "on_success" => always = false,
+                Entry::Settle(policy) => {
+                    return Err(syn::Error::new(
+                        policy.span(),
+                        "expected `settle = always` or `settle = on_success`",
+                    ));
+                }
             }
         }
 
         Ok(Self {
             domains,
             unavailable: unavailable.ok_or_else(|| missing("unavailable"))?,
+            always,
         })
     }
 }
@@ -147,6 +164,7 @@ impl Parse for Listed {
 enum Entry {
     Domain(Ident),
     Unavailable(Expr),
+    Settle(Ident),
 }
 
 impl Parse for Entry {
@@ -155,6 +173,10 @@ impl Parse for Entry {
         if name == "unavailable" && input.peek(Token![=]) {
             input.parse::<Token![=]>()?;
             return Ok(Self::Unavailable(input.parse()?));
+        }
+        if name == "settle" && input.peek(Token![=]) {
+            input.parse::<Token![=]>()?;
+            return Ok(Self::Settle(input.parse()?));
         }
         Ok(Self::Domain(name))
     }

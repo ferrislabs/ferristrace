@@ -6,12 +6,19 @@ use ferristrace_domain::{
     UsageHistory,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settle {
+    OnSuccess,
+    Always,
+}
+
 pub trait UnitOfWork: Send + Sync + 'static {
     type Tx: Clone + Send + Sync + 'static;
 
     fn transaction<T, E, F, Fut>(
         &self,
         unavailable: impl Fn() -> E + Send,
+        settle: Settle,
         work: F,
     ) -> impl Future<Output = Result<T, E>> + Send
     where
@@ -91,17 +98,11 @@ impl<R> TeamRepos for R where R: StandingRepos + RepoFor<domain::Teams, Repo: Sq
 
 pub trait UsageRepos: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
-impl<R> UsageRepos for R where
-    R: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory>
-{
-}
+impl<R> UsageRepos for R where R: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
 pub trait IssueRepos: StandingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
 
-impl<R> IssueRepos for R where
-    R: StandingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions>
-{
-}
+impl<R> IssueRepos for R where R: StandingRepos + RepoFor<domain::Decisions, Repo: IssueDecisions> {}
 
 pub trait ProfileRepos:
     StandingRepos + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
