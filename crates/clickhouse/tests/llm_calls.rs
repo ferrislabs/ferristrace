@@ -4,8 +4,8 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseIssues, ClickhouseMigrator, ClickhouseSink};
 use ferristrace_domain::{
-    CallQuery, LlmReader, ProjectId, Scope, Span, SpanId, SpanSink, SpanStatus, TenantId, TraceId,
-    Window,
+    CallQuery, GroupBy, LlmReader, ProjectId, Scope, Span, SpanId, SpanSink, SpanStatus,
+    SpendQuery, SpendRead, TenantId, TraceId, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -85,6 +85,7 @@ struct Sent {
     service: &'static str,
     at: u64,
     failed: bool,
+    lasting: u64,
     attributes: BTreeMap<Box<str>, Box<str>>,
 }
 
@@ -95,6 +96,7 @@ impl Sent {
             service: "assistant",
             at,
             failed: false,
+            lasting: 2 * SECOND + 500_000_000,
             attributes: BTreeMap::new(),
         }
     }
@@ -110,6 +112,11 @@ impl Sent {
 
     fn with(mut self, key: &str, value: &str) -> Self {
         self.attributes.insert(key.into(), value.into());
+        self
+    }
+
+    fn lasting(mut self, nanos: u64) -> Self {
+        self.lasting = nanos;
         self
     }
 
@@ -132,7 +139,7 @@ impl Sent {
                 SpanStatus::Ok
             },
             start_unix_nanos: BASE + self.at,
-            end_unix_nanos: BASE + self.at + 2 * SECOND + 500_000_000,
+            end_unix_nanos: BASE + self.at + self.lasting,
             attributes: self.attributes,
             events: Vec::new(),
         }
@@ -648,4 +655,349 @@ async fn spec_l4_1_spans_stored_before_the_migration_are_backfilled() {
         .collect();
     features.sort_unstable();
     assert_eq!(features, vec!["new", "old"]);
+}
+
+fn sums_of(read: &SpendRead, key: &str) -> (u64, u64, u64, u64) {
+    read.buckets
+        .iter()
+        .filter(|bucket| &*bucket.key == key)
+        .fold((0, 0, 0, 0), |held, bucket| {
+            (
+                held.0 + bucket.calls,
+                held.1 + bucket.errors,
+                held.2 + bucket.input_tokens,
+                held.3 + bucket.output_tokens,
+            )
+        })
+}
+
+fn spend_over(group_by: GroupBy) -> SpendQuery {
+    let mut query = SpendQuery::over(everything());
+    query.group_by = group_by;
+    query
+}
+
+async fn mixed(name: &str) -> Option<ClickhouseIssues> {
+    let client = prepared(name).await?;
+    written(
+        &client,
+        scope_of(1, Some(10)),
+        vec![
+            Sent::llm(1, MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.customer", "acme")
+                .with("deployment.environment.name", "prod")
+                .with("gen_ai.usage.cache_read.input_tokens", "10"),
+            Sent::llm(2, 2 * MINUTE, "gpt-4o")
+                .with("gen_ai.response.model", "gpt-4o-2024-08-06")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.customer", "globex")
+                .with("deployment.environment.name", "prod")
+                .failing(),
+            Sent::llm(3, 3 * MINUTE, "claude-3")
+                .with("gen_ai.provider.name", "anthropic")
+                .with("gen_ai.usage.input_tokens", "300")
+                .with("gen_ai.usage.output_tokens", "50")
+                .with("ferristrace.feature", "search")
+                .with("ferristrace.customer", "acme")
+                .with("deployment.environment.name", "staging"),
+        ],
+    )
+    .await;
+    written(
+        &client,
+        scope_of(1, Some(20)),
+        vec![
+            Sent::llm(4, 4 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "search")
+                .with("ferristrace.customer", "acme"),
+        ],
+    )
+    .await;
+    written(
+        &client,
+        scope_of(2, None),
+        vec![Sent::llm(5, MINUTE, "gpt-4o").with("ferristrace.feature", "summary")],
+    )
+    .await;
+    Some(ClickhouseIssues::new(client))
+}
+
+#[tokio::test]
+async fn spec_l4_3_spend_sums_tokens_per_group_for_every_dimension() {
+    let Some(store) = mixed("spend_dimensions").await else {
+        return;
+    };
+
+    let by_feature = store
+        .spend(org(1), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+    let by_model = store
+        .spend(org(1), &spend_over(GroupBy::Model))
+        .await
+        .expect("spend");
+    let by_customer = store
+        .spend(org(1), &spend_over(GroupBy::Customer))
+        .await
+        .expect("spend");
+    let by_environment = store
+        .spend(org(1), &spend_over(GroupBy::Environment))
+        .await
+        .expect("spend");
+    let by_provider = store
+        .spend(org(1), &spend_over(GroupBy::Provider))
+        .await
+        .expect("spend");
+
+    assert_eq!(sums_of(&by_feature, "summary"), (2, 1, 200, 40));
+    assert_eq!(sums_of(&by_feature, "search"), (2, 0, 400, 70));
+    assert_eq!(sums_of(&by_model, "gpt-4o"), (2, 0, 200, 40));
+    assert_eq!(sums_of(&by_model, "gpt-4o-2024-08-06"), (1, 1, 100, 20));
+    assert_eq!(sums_of(&by_model, "claude-3"), (1, 0, 300, 50));
+    assert_eq!(sums_of(&by_customer, "acme"), (3, 0, 500, 90));
+    assert_eq!(sums_of(&by_customer, "globex"), (1, 1, 100, 20));
+    assert_eq!(sums_of(&by_environment, "prod"), (2, 1, 200, 40));
+    assert_eq!(sums_of(&by_environment, "staging"), (1, 0, 300, 50));
+    assert_eq!(sums_of(&by_environment, ""), (1, 0, 100, 20));
+    assert_eq!(sums_of(&by_provider, "openai"), (3, 1, 300, 60));
+    assert_eq!(sums_of(&by_provider, "anthropic"), (1, 0, 300, 50));
+}
+
+#[tokio::test]
+async fn spec_l4_3_buckets_carry_the_models_and_the_cached_tokens_apart() {
+    let Some(store) = mixed("spend_buckets").await else {
+        return;
+    };
+
+    let read = store
+        .spend(org(1), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+
+    let cached: u64 = read
+        .buckets
+        .iter()
+        .map(|bucket| bucket.cached_input_tokens)
+        .sum();
+    let step = spend_over(GroupBy::Feature).step_nanos();
+    let first = read
+        .buckets
+        .iter()
+        .find(|bucket| &*bucket.key == "summary" && bucket.response_model.is_empty())
+        .expect("a bucket");
+    assert_eq!(cached, 10);
+    assert_eq!(&*first.provider, "openai");
+    assert_eq!(&*first.request_model, "gpt-4o");
+    assert_eq!(first.slot, (10 * DAY + MINUTE) / step);
+}
+
+#[tokio::test]
+async fn spec_l4_3_latency_quantiles_are_per_group() {
+    let Some(client) = prepared("spend_quantiles").await else {
+        return;
+    };
+    let mut sent = Vec::new();
+    for (seed, seconds) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)] {
+        sent.push(
+            Sent::llm(seed, u64::from(seed) * SECOND, "gpt-4o")
+                .with("ferristrace.feature", "slow")
+                .lasting(seconds * SECOND),
+        );
+    }
+    sent.push(
+        Sent::llm(6, 6 * SECOND, "gpt-4o")
+            .with("ferristrace.feature", "fast")
+            .lasting(SECOND / 10),
+    );
+    written(&client, scope_of(1, None), sent).await;
+
+    let read = ClickhouseIssues::new(client)
+        .spend(org(1), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+
+    let slow = read
+        .latencies
+        .iter()
+        .find(|row| &*row.key == "slow")
+        .expect("slow");
+    let fast = read
+        .latencies
+        .iter()
+        .find(|row| &*row.key == "fast")
+        .expect("fast");
+    assert_eq!(slow.p50_nanos, 3 * SECOND);
+    assert!((4 * SECOND..=5 * SECOND).contains(&slow.p95_nanos));
+    assert_eq!((fast.p50_nanos, fast.p95_nanos), (SECOND / 10, SECOND / 10));
+}
+
+#[tokio::test]
+async fn spec_l4_3_spend_never_crosses_organisations_and_a_project_narrows_it() {
+    let Some(store) = mixed("spend_isolation").await else {
+        return;
+    };
+
+    let ours = store
+        .spend(org(1), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+    let theirs = store
+        .spend(org(2), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+    let nobody = store
+        .spend(org(3), &spend_over(GroupBy::Feature))
+        .await
+        .expect("spend");
+    let mut narrowed = spend_over(GroupBy::Feature);
+    narrowed.filter.project = Some(project(20));
+    let only = store.spend(org(1), &narrowed).await.expect("spend");
+
+    assert_eq!(sums_of(&ours, "summary").0, 2);
+    assert_eq!(sums_of(&theirs, "summary").0, 1);
+    assert_eq!(sums_of(&theirs, "search").0, 0);
+    assert_eq!(nobody, SpendRead::default());
+    assert_eq!(sums_of(&only, "search"), (1, 0, 100, 20));
+    assert_eq!(sums_of(&only, "summary").0, 0);
+}
+
+#[tokio::test]
+async fn spec_l4_3_the_filters_narrow_the_spend() {
+    let Some(store) = mixed("spend_filters").await else {
+        return;
+    };
+    let ask = |apply: fn(&mut CallQuery)| {
+        let mut query = spend_over(GroupBy::Feature);
+        apply(&mut query.filter);
+        query
+    };
+
+    let feature = store
+        .spend(org(1), &ask(|q| q.feature = Some("search".into())))
+        .await
+        .expect("spend");
+    let model = store
+        .spend(org(1), &ask(|q| q.model = Some("claude-3".into())))
+        .await
+        .expect("spend");
+    let response = store
+        .spend(org(1), &ask(|q| q.model = Some("gpt-4o-2024-08-06".into())))
+        .await
+        .expect("spend");
+    let customer = store
+        .spend(org(1), &ask(|q| q.customer = Some("globex".into())))
+        .await
+        .expect("spend");
+    let user = store
+        .spend(org(1), &ask(|q| q.user = Some("nobody".into())))
+        .await
+        .expect("spend");
+
+    assert_eq!(sums_of(&feature, "summary").0, 0);
+    assert_eq!(sums_of(&feature, "search").0, 2);
+    assert_eq!(sums_of(&model, "search").0, 1);
+    assert_eq!(sums_of(&model, "summary").0, 0);
+    assert_eq!(sums_of(&response, "summary").0, 1);
+    assert_eq!(sums_of(&customer, "summary").0, 1);
+    assert_eq!(user.buckets, Vec::new());
+}
+
+#[tokio::test]
+async fn spec_l4_3_the_window_bounds_the_spend() {
+    let Some(store) = mixed("spend_window").await else {
+        return;
+    };
+    let mut query =
+        SpendQuery::over(Window::new(BASE + 90 * SECOND, BASE + 3 * MINUTE + 1).expect("a window"));
+    query.group_by = GroupBy::Feature;
+
+    let read = store.spend(org(1), &query).await.expect("spend");
+
+    assert_eq!(sums_of(&read, "summary").0, 1);
+    assert_eq!(sums_of(&read, "search").0, 1);
+}
+
+#[tokio::test]
+async fn spec_l4_3_a_prompt_version_is_a_marker_only_when_first_seen_inside_the_window() {
+    let Some(client) = prepared("spend_markers").await else {
+        return;
+    };
+    written(
+        &client,
+        scope_of(1, Some(10)),
+        vec![
+            Sent::llm(1, 0, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "v1"),
+            Sent::llm(2, 10 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "v1"),
+            Sent::llm(3, 12 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "v2"),
+            Sent::llm(4, 14 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "v2"),
+            Sent::llm(5, 13 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "search")
+                .with("ferristrace.prompt.version", "v2"),
+            Sent::llm(6, 15 * MINUTE, "gpt-4o").with("ferristrace.feature", "summary"),
+            Sent::llm(7, 40 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "v9"),
+        ],
+    )
+    .await;
+    written(
+        &client,
+        scope_of(2, None),
+        vec![
+            Sent::llm(8, 11 * MINUTE, "gpt-4o")
+                .with("ferristrace.feature", "summary")
+                .with("ferristrace.prompt.version", "other-org"),
+        ],
+    )
+    .await;
+    let store = ClickhouseIssues::new(client);
+    let mut query =
+        SpendQuery::over(Window::new(BASE + 5 * MINUTE, BASE + 30 * MINUTE).expect("a window"));
+
+    let read = store.spend(org(1), &query).await.expect("spend");
+    query.filter.project = Some(project(99));
+    let elsewhere = store.spend(org(1), &query).await.expect("spend");
+
+    let seen: Vec<(u64, &str, &str)> = read
+        .markers
+        .iter()
+        .map(|marker| {
+            (
+                marker.time_unix_nanos,
+                &*marker.feature,
+                &*marker.prompt_version,
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            (BASE + 12 * MINUTE, "summary", "v2"),
+            (BASE + 13 * MINUTE, "search", "v2"),
+        ]
+    );
+    assert!(elsewhere.markers.is_empty());
+}
+
+#[tokio::test]
+async fn spec_l4_3_the_environment_finds_calls() {
+    let Some(store) = mixed("spend_environment_calls").await else {
+        return;
+    };
+    let mut query = all();
+    query.environment = Some("staging".into());
+
+    let page = store.calls(org(1), &query).await.expect("calls");
+
+    assert_eq!(page.calls.len(), 1);
+    assert_eq!(&*page.calls[0].call.environment, "staging");
 }

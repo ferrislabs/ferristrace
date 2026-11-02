@@ -1,6 +1,6 @@
 use ferristrace_domain::{
     CallPage, CallQuery, Llm, LlmError, Price, PriceDraft, PriceId, Reader, Readers, SessionToken,
-    TenantId, Unpriced, Whoami, Window,
+    Spend, SpendQuery, TenantId, Unpriced, Whoami, Window,
 };
 
 use crate::registry::LlmRepos;
@@ -26,6 +26,25 @@ where
             audit,
         )
         .calls(who, org, query, reader)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, model_prices, audit, unavailable = LlmError::StoreUnreachable)]
+    pub async fn llm_spend(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        query: &SpendQuery,
+    ) -> Result<Spend, LlmError> {
+        let Some(reader) = &self.issue_store else {
+            return Err(LlmError::StoreUnreachable);
+        };
+        Llm::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            model_prices,
+            audit,
+        )
+        .spend(who, org, query, reader)
         .await
     }
 

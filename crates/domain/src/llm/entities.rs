@@ -74,3 +74,59 @@ pub struct Unpriced {
     pub calls: u64,
     pub last_unix_nanos: u64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BucketTotals {
+    pub key: Box<str>,
+    pub provider: Box<str>,
+    pub request_model: Box<str>,
+    pub response_model: Box<str>,
+    pub slot: u64,
+    pub calls: u64,
+    pub errors: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupLatency {
+    pub key: Box<str>,
+    pub p50_nanos: u64,
+    pub p95_nanos: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptMarker {
+    pub time_unix_nanos: u64,
+    pub feature: Box<str>,
+    pub prompt_version: Box<str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SpendRead {
+    pub buckets: Vec<BucketTotals>,
+    pub latencies: Vec<GroupLatency>,
+    pub markers: Vec<PromptMarker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendGroup {
+    pub key: Box<str>,
+    pub cost: Cost,
+    pub unpriced: u64,
+    pub calls: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub p50_nanos: u64,
+    pub p95_nanos: u64,
+    pub errors: u64,
+    pub points: Vec<(u64, Cost)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Spend {
+    pub step_nanos: u64,
+    pub groups: Vec<SpendGroup>,
+    pub markers: Vec<PromptMarker>,
+}

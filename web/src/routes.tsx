@@ -3,6 +3,7 @@ import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect
 import { accountQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
 import { AppShell } from '@/components/layout/AppShell'
+import { Ai } from '@/pages/Ai'
 import { Alerts } from '@/pages/Alerts'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
@@ -134,6 +135,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/issues/$id', IssueDetail),
     inShell('/releases', Releases, real),
     inShell('/releases/$service/$version', ReleaseDetail, real),
+    inShell('/ai', Ai, real),
     inShell('/alerts', Alerts, real),
     inShell('/incidents', Incidents, real),
     inShell('/incidents/$id', IncidentDetail, real),

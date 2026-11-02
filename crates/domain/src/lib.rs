@@ -90,10 +90,11 @@ pub use issue::{
     fingerprint, normalise,
 };
 pub use llm::{
-    BadCallQuery, BadPrice, Call, CallCursor, CallPage, CallQuery, Cost, DEFAULT_CALL_LIMIT, Llm,
-    LlmError, LlmReader, MAX_CALL_LIMIT, MAX_MODEL_BYTES, MAX_PROVIDER_BYTES, MAX_RATE,
-    MODEL_LIMIT, ModelPattern, ModelPrices, Price, PriceBook, PriceDraft, PriceId, PricedCall,
-    Provider, Rates, SeenModel, Unpriced,
+    BadCallQuery, BadPrice, BadSpendQuery, BucketTotals, Call, CallCursor, CallPage, CallQuery,
+    Cost, DEFAULT_CALL_LIMIT, GroupBy, GroupLatency, Llm, LlmError, LlmReader, MAX_CALL_LIMIT,
+    MAX_MODEL_BYTES, MAX_PROVIDER_BYTES, MAX_RATE, MODEL_LIMIT, ModelPattern, ModelPrices, Price,
+    PriceBook, PriceDraft, PriceId, PricedCall, PromptMarker, Provider, Rates, SPEND_GROUP_LIMIT,
+    SPEND_POINTS, SeenModel, Spend, SpendGroup, SpendQuery, SpendRead, Unpriced,
 };
 pub use logs::{
     BadLogQuery, Buckets, DEFAULT_BUCKETS, DEFAULT_LOG_LIMIT, LogBucket, LogCursor, LogPage,

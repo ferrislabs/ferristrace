@@ -1,12 +1,12 @@
 import {
-  Activity, ArrowLeftRight, BellRing, Boxes, Bug, CircleAlert, Rocket, Cpu, Database, Globe, House, Layers, LayoutGrid, LineChart, Mail, MonitorSmartphone, Package, PanelTop, ScrollText, Siren, Users, Waypoints, Zap, type LucideIcon,
+  Activity, ArrowLeftRight, BellRing, Boxes, Bug, CircleAlert, Sparkles, Rocket, Cpu, Database, Globe, House, Layers, LayoutGrid, LineChart, Mail, MonitorSmartphone, Package, PanelTop, ScrollText, Siren, Users, Waypoints, Zap, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = { label: string; to: string; icon: LucideIcon; keys?: string; badge?: boolean }
 export type NavGroup = { label: string | null; collapsible?: boolean; items: NavItem[] }
 
 export const NAV: NavGroup[] = [
-  { label: null, items: [{ label: 'Overview', to: '/', icon: House, keys: 'O' }, { label: 'Services', to: '/services', icon: LayoutGrid, keys: 'V' }, { label: 'Issues', to: '/issues', icon: CircleAlert, keys: 'I', badge: true }, { label: 'Releases', to: '/releases', icon: Rocket, keys: 'R' }] },
+  { label: null, items: [{ label: 'Overview', to: '/', icon: House, keys: 'O' }, { label: 'Services', to: '/services', icon: LayoutGrid, keys: 'V' }, { label: 'Issues', to: '/issues', icon: CircleAlert, keys: 'I', badge: true }, { label: 'Releases', to: '/releases', icon: Rocket, keys: 'R' }, { label: 'AI', to: '/ai', icon: Sparkles, keys: 'C' }] },
   { label: 'Observability', items: [{ label: 'Traces', to: '/traces', icon: Waypoints, keys: 'T' }, { label: 'Logs', to: '/logs', icon: ScrollText, keys: 'L' }, { label: 'Metrics', to: '/metrics', icon: LineChart, keys: 'M' }] },
   {
     label: 'Backend', collapsible: true,

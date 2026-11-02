@@ -7,9 +7,9 @@ use axum::routing::{delete, get};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::LlmRepos;
 use ferristrace_domain::{
-    BadCallQuery, BadPrice, CallCursor, CallPage, CallQuery, LlmError, ModelPattern, Price,
-    PriceDraft, PriceId, PricedCall, ProjectId, Provider, Rates, TenantId, TraceId, Unpriced,
-    Window,
+    BadCallQuery, BadPrice, BadSpendQuery, CallCursor, CallPage, CallQuery, GroupBy, LlmError,
+    ModelPattern, Price, PriceDraft, PriceId, PricedCall, ProjectId, PromptMarker, Provider, Rates,
+    Spend, SpendGroup, SpendQuery, TenantId, TraceId, Unpriced, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,6 +25,7 @@ where
 {
     Router::new()
         .route("/api/orgs/{org}/llm/calls", get(calls::<S>))
+        .route("/api/orgs/{org}/llm/spend", get(spend::<S>))
         .route("/api/orgs/{org}/llm/unpriced", get(unpriced::<S>))
         .route(
             "/api/orgs/{org}/llm/prices",
@@ -50,6 +51,8 @@ pub struct AskedCalls {
     prompt: Option<String>,
     #[serde(default)]
     provider: Option<String>,
+    #[serde(default)]
+    environment: Option<String>,
     #[serde(default)]
     trace: Option<String>,
     #[serde(default)]
@@ -102,6 +105,7 @@ impl AskedCalls {
         query.user = present(self.user);
         query.prompt_version = present(self.prompt);
         query.provider = present(self.provider);
+        query.environment = present(self.environment);
         query.project = self.project.map(ProjectId::new);
         query.trace = present(self.trace)
             .map(|spelling| {
@@ -115,6 +119,111 @@ impl AskedCalls {
             .map(|spelling| cursor_of(&spelling))
             .transpose()?;
         Ok(query)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AskedSpend {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    group_by: Option<String>,
+    #[serde(default)]
+    feature: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    customer: Option<String>,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    project: Option<Uuid>,
+}
+
+impl AskedSpend {
+    fn query(self) -> Result<SpendQuery, LlmRefused> {
+        let mut query = SpendQuery::over(window_of(self.from, self.to)?);
+        if let Some(group_by) = present(self.group_by) {
+            query.group_by = GroupBy::try_from(&*group_by)?;
+        }
+        query.filter.feature = present(self.feature);
+        query.filter.model = present(self.model);
+        query.filter.customer = present(self.customer);
+        query.filter.user = present(self.user);
+        query.filter.prompt_version = present(self.prompt);
+        query.filter.project = self.project.map(ProjectId::new);
+        Ok(query)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Spent {
+    step_ms: u64,
+    groups: Vec<SpentGroup>,
+    markers: Vec<Marked>,
+}
+
+#[derive(Debug, Serialize)]
+struct SpentGroup {
+    key: String,
+    cost: f64,
+    unpriced: u64,
+    calls: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    p50_ms: f64,
+    p95_ms: f64,
+    errors: u64,
+    points: Vec<(u64, f64)>,
+}
+
+#[derive(Debug, Serialize)]
+struct Marked {
+    time_ms: u64,
+    feature: String,
+    prompt_version: String,
+}
+
+impl From<SpendGroup> for SpentGroup {
+    fn from(group: SpendGroup) -> Self {
+        Self {
+            key: group.key.into_string(),
+            cost: group.cost.dollars(),
+            unpriced: group.unpriced,
+            calls: group.calls,
+            input_tokens: group.input_tokens,
+            output_tokens: group.output_tokens,
+            p50_ms: group.p50_nanos as f64 / NANOS_PER_MILLI as f64,
+            p95_ms: group.p95_nanos as f64 / NANOS_PER_MILLI as f64,
+            errors: group.errors,
+            points: group
+                .points
+                .into_iter()
+                .map(|(start, cost)| (start / NANOS_PER_MILLI, cost.dollars()))
+                .collect(),
+        }
+    }
+}
+
+impl From<PromptMarker> for Marked {
+    fn from(marker: PromptMarker) -> Self {
+        Self {
+            time_ms: marker.time_unix_nanos / NANOS_PER_MILLI,
+            feature: marker.feature.into_string(),
+            prompt_version: marker.prompt_version.into_string(),
+        }
+    }
+}
+
+impl From<Spend> for Spent {
+    fn from(spend: Spend) -> Self {
+        Self {
+            step_ms: (spend.step_nanos / NANOS_PER_MILLI).max(1),
+            groups: spend.groups.into_iter().map(Into::into).collect(),
+            markers: spend.markers.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -283,6 +392,24 @@ where
     Ok(Json(page.into()))
 }
 
+async fn spend<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(asked): Query<AskedSpend>,
+    headers: HeaderMap,
+) -> Result<Json<Spent>, LlmRefused>
+where
+    S::Repos: LlmRepos,
+{
+    let who = reading(&headers)?;
+    let query = asked.query()?;
+    let spent = state
+        .app
+        .llm_spend(&who, TenantId::new(org), &query)
+        .await?;
+    Ok(Json(spent.into()))
+}
+
 async fn unpriced<S: Stack>(
     State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
@@ -367,6 +494,8 @@ pub enum LlmRefused {
     #[error(transparent)]
     Query(#[from] BadCallQuery),
     #[error(transparent)]
+    Spend(#[from] BadSpendQuery),
+    #[error(transparent)]
     Refused(LlmError),
 }
 
@@ -383,7 +512,9 @@ impl IntoResponse for LlmRefused {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             Self::Reaching(refused) => return refused.into_response(),
-            Self::Window | Self::Query(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            Self::Window | Self::Query(_) | Self::Spend(_) => {
+                (StatusCode::BAD_REQUEST, self.to_string())
+            }
             Self::Malformed(_) | Self::Price(_) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, self.to_string())
             }

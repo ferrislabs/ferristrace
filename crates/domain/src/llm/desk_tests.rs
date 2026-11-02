@@ -1,10 +1,12 @@
 use std::sync::Mutex;
 
 use super::desk::Llm;
-use super::entities::{Call, CallPage, PricedCall, SeenModel};
+use super::entities::{BucketTotals, Call, CallPage, PricedCall, SeenModel, SpendRead};
 use super::errors::LlmError;
 use super::ports::LlmReader;
-use super::value_objects::{CallQuery, Cost, ModelPattern, PriceDraft, PriceId, Provider, Rates};
+use super::value_objects::{
+    CallQuery, Cost, ModelPattern, PriceDraft, PriceId, Provider, Rates, SpendQuery,
+};
 use crate::access::key_ring_tests::{
     MINE, MemberOfMine, OTHER, OURS, OneSession, Ring, THEIRS, a_project, an_org, scopes, token,
 };
@@ -71,6 +73,28 @@ impl LlmReader for &Shelf {
                 },
             ],
             next: None,
+        })
+    }
+
+    async fn spend(&self, org: TenantId, query: &SpendQuery) -> Result<SpendRead, StoreError> {
+        self.asked
+            .lock()
+            .expect("the lock")
+            .push((org, query.filter.project));
+        Ok(SpendRead {
+            buckets: vec![BucketTotals {
+                key: "f".into(),
+                provider: "openai".into(),
+                request_model: "gpt-4o".into(),
+                response_model: String::new().into(),
+                slot: 0,
+                calls: 1,
+                errors: 0,
+                input_tokens: 1_000_000,
+                output_tokens: 0,
+                cached_input_tokens: 0,
+            }],
+            ..SpendRead::default()
         })
     }
 
@@ -284,15 +308,25 @@ async fn a_project_bound_key_narrows_the_reads_and_cannot_widen_them() {
     let mut elsewhere = CallQuery::over(window());
     elsewhere.project = Some(a_project(OTHER));
     let refused = desk.calls(&bound, an_org(MINE), &elsewhere, &&shelf).await;
+    desk.spend(&bound, an_org(MINE), &SpendQuery::over(window()), &&shelf)
+        .await
+        .expect("a spend");
+    let mut spend_elsewhere = SpendQuery::over(window());
+    spend_elsewhere.filter.project = Some(a_project(OTHER));
+    let spend_refused = desk
+        .spend(&bound, an_org(MINE), &spend_elsewhere, &&shelf)
+        .await;
 
     assert_eq!(
         shelf.asked(),
         vec![
             (an_org(MINE), Some(a_project(OURS))),
+            (an_org(MINE), Some(a_project(OURS))),
             (an_org(MINE), Some(a_project(OURS)))
         ]
     );
     assert_eq!(refused, Err(LlmError::NotYours));
+    assert_eq!(spend_refused, Err(LlmError::NotYours));
 }
 
 #[tokio::test]
@@ -307,4 +341,23 @@ async fn a_key_of_another_organisation_reads_nothing() {
 
     assert_eq!(refused, Err(LlmError::NotYours));
     assert!(shelf.asked().is_empty());
+}
+
+#[tokio::test]
+async fn spend_is_priced_with_the_organisations_prices() {
+    let (ledger, notebook, keys) = (PriceLedger::default(), Notebook::default(), Ring::default());
+    let admin = desk(OrgRole::Admin, &ledger, &notebook, &keys);
+    admin
+        .add(&token(), an_org(MINE), &draft("gpt-4o", 0))
+        .await
+        .expect("a price");
+    let shelf = Shelf::default();
+
+    let spend = admin
+        .spend(&who(), an_org(MINE), &SpendQuery::over(window()), &&shelf)
+        .await
+        .expect("a spend");
+
+    assert_eq!(spend.groups[0].cost.picodollars(), 2_000_000_000_000);
+    assert_eq!(spend.groups[0].unpriced, 0);
 }
