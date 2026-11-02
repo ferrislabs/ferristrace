@@ -14,6 +14,8 @@ import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
 import { useProjects } from '@/data/projects'
 import { otlpEndpoint } from '@/data/onboarding'
 import { useScope } from '@/lib/scope'
+import { isPlaced, placementSearch, usePlacement } from '@/data/placement'
+import { PlacementPicker } from '@/components/ft/Placement'
 import { dur, num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -48,15 +50,16 @@ export function Overview() {
   const windowMs = WINDOWS.find((w) => w.value === range)?.ms ?? WINDOWS[0].ms
   const { project, chooseProject } = useScope()
   const projects = useProjects()
-  const { services: all, pending } = useServiceTable('', windowMs)
-  const { series } = useServiceSeries(null, '', windowMs)
+  const { placement, place } = usePlacement()
+  const { services: all, pending } = useServiceTable('', windowMs, placement)
+  const { series } = useServiceSeries(null, '', windowMs, placement)
   const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: windowMs, limit: 200 })
-  const { records: errorLogs } = useLogs({ ...ANY_LOG, rangeMs: windowMs, severities: ['error', 'fatal'], limit: 10 })
-  const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 })
+  const { records: errorLogs } = useLogs({ ...ANY_LOG, rangeMs: windowMs, severities: ['error', 'fatal'], limit: 10 }, false, placement)
+  const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 }, placement)
   const markers = useDeployMarkers()
   const label = WINDOWS.find((w) => w.value === range)?.label ?? ''
   const scope = projects.find((p) => p.id === project)?.name ?? 'all projects'
-  if (!pending && !all.length && !series?.requests) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
+  if (!pending && !all.length && !series?.requests && !isPlaced(placement)) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
   const lines = charted(series)
   const requests = series?.requests ?? 0
   const errorRate = requests ? ((series?.errors ?? 0) / requests) * 100 : null
@@ -75,6 +78,7 @@ export function Overview() {
       <PageHeader title="Overview" meta={`${scope} · last ${label}`}>
         <Segmented label="Window" value={range} onChange={setRange} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
       </PageHeader>
+      <PlacementPicker placement={placement} onChange={place} windowMs={windowMs} />
       {troubled ? (
         <section className="flex flex-wrap items-center gap-3 rounded-lg border border-warning-border bg-card px-4 py-3" aria-label="Needs attention">
           <TriangleAlert className="size-5 text-warning-text" aria-hidden />
@@ -124,7 +128,7 @@ export function Overview() {
           <div className="flex justify-end gap-10 px-4 py-2 text-caption text-muted-foreground"><span>req/s</span><span>p95</span><span>errors</span></div>
         </Card>
         <Card className="overflow-hidden">
-          <CardHeader><CardTitle className="flex-1">Recent error logs</CardTitle><Link to="/logs" search={{ f: 'severity=error&severity=fatal' }} className="text-control">Open in Logs</Link></CardHeader>
+          <CardHeader><CardTitle className="flex-1">Recent error logs</CardTitle><Link to="/logs" search={{ ...placementSearch(placement), f: 'severity=error&severity=fatal' }} className="text-control">Open in Logs</Link></CardHeader>
           {errorLogs.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">No error or fatal record in the last {label}.</p> : null}
           {errorLogs.map((l, at) => {
             const row = (
@@ -141,7 +145,7 @@ export function Overview() {
           })}
         </Card>
         <Card className="overflow-hidden">
-          <CardHeader><CardTitle className="flex-1">Slowest traces</CardTitle><Link to="/traces" className="text-control">All traces</Link></CardHeader>
+          <CardHeader><CardTitle className="flex-1">Slowest traces</CardTitle><Link to="/traces" search={placementSearch(placement)} className="text-control">All traces</Link></CardHeader>
           {slow.map((t) => (
             <Link key={t.id} to={`/traces/${t.id}`} className="flex items-center gap-2.5 border-b border-border-subtle px-4 py-2 text-control text-foreground no-underline hover:bg-row-hover">
               {t.errors ? <CircleX className="size-3.5 text-destructive-text" aria-label="Has errors" /> : null}

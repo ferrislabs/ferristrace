@@ -3,6 +3,7 @@ import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
+import { NOWHERE, placed, type Placement } from '@/data/placement'
 
 export type Service = {
   name: string
@@ -123,27 +124,27 @@ const stepped = (steps: Steps): Stepped => ({
   })),
 })
 
-function spanning(windowMs: number, project: string | undefined, environment: string): URLSearchParams {
+function spanning(windowMs: number, project: string | undefined, environment: string, placement: Placement): URLSearchParams {
   const to = Date.now()
   const params = new URLSearchParams({ from: String(to - windowMs), to: String(to) })
   if (project) params.set('project', project)
   if (environment.trim()) params.set('environment', environment.trim())
-  return params
+  return placed(params, placement)
 }
 
 export function useServices(environment = '', windowMs = WINDOW_MS): Service[] {
   return useServiceTable(environment, windowMs).services
 }
 
-export function useServiceTable(environment = '', windowMs = WINDOW_MS) {
+export function useServiceTable(environment = '', windowMs = WINDOW_MS, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isPending, error } = useQuery({
-    queryKey: ['services', active?.org, project, environment.trim(), windowMs],
+    queryKey: ['services', active?.org, project, environment.trim(), windowMs, placement],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const params = spanning(windowMs, project, environment)
+      const params = spanning(windowMs, project, environment, placement)
       const found = await json<{ services: Serving[] }>(
         await get(`/api/orgs/${active?.org}/services?${params.toString()}`),
       )
@@ -153,15 +154,15 @@ export function useServiceTable(environment = '', windowMs = WINDOW_MS) {
   return { services: data ?? [], pending: isPending, failed: error }
 }
 
-export function useOperations(service: string, environment = '', windowMs = WINDOW_MS) {
+export function useOperations(service: string, environment = '', windowMs = WINDOW_MS, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isPending, error } = useQuery({
-    queryKey: ['services', active?.org, project, 'operations', service, environment.trim(), windowMs],
+    queryKey: ['services', active?.org, project, 'operations', service, environment.trim(), windowMs, placement],
     enabled: Boolean(active && service),
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const params = spanning(windowMs, project, environment)
+      const params = spanning(windowMs, project, environment, placement)
       const found = await json<{ operations: Operated[] }>(
         await get(`/api/orgs/${active?.org}/services/${encodeURIComponent(service)}/operations?${params.toString()}`),
       )
@@ -171,15 +172,15 @@ export function useOperations(service: string, environment = '', windowMs = WIND
   return { operations: data ?? [], pending: isPending, failed: error }
 }
 
-export function useServiceSeries(service: string | null, environment = '', windowMs = WINDOW_MS) {
+export function useServiceSeries(service: string | null, environment = '', windowMs = WINDOW_MS, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isPending, error } = useQuery({
-    queryKey: ['services', active?.org, project, 'series', service, environment.trim(), windowMs],
+    queryKey: ['services', active?.org, project, 'series', service, environment.trim(), windowMs, placement],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const params = spanning(windowMs, project, environment)
+      const params = spanning(windowMs, project, environment, placement)
       const path = service === null ? 'series' : `services/${encodeURIComponent(service)}/series`
       return stepped(await json<Steps>(await get(`/api/orgs/${active?.org}/${path}?${params.toString()}`)))
     },

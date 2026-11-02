@@ -20,6 +20,8 @@ import {
   type LogRecord,
 } from '@/data/logs'
 import { useServiceNames } from '@/data/services'
+import { isPlaced, usePlacement, type Placement } from '@/data/placement'
+import { PlacementChips, PlacementPicker } from '@/components/ft/Placement'
 import { ApiError, because } from '@/auth/client'
 import { shortId, stamp } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
@@ -124,7 +126,7 @@ function Histogram({ buckets, windowMs, onPick }: { buckets: Bucket[]; windowMs:
   )
 }
 
-function Row({ record, open, onToggle, dated }: { record: LogRecord; open: boolean; onToggle: () => void; dated: boolean }) {
+function Row({ record, open, onToggle, dated, onPlace }: { record: LogRecord; open: boolean; onToggle: () => void; dated: boolean; onPlace: (part: Partial<Placement>) => void }) {
   const hot = record.severity === 'error' || record.severity === 'fatal'
   const attributes = Object.entries(record.attributes)
   const resource = Object.entries(record.resource)
@@ -140,6 +142,7 @@ function Row({ record, open, onToggle, dated }: { record: LogRecord; open: boole
       {open ? (
         <div className="flex flex-col gap-2 bg-sidebar px-5 py-3 pl-[52px]">
           <pre className="m-0 whitespace-pre-wrap break-all font-mono text-[12.5px]">{record.body}</pre>
+          <PlacementChips attributes={record.resource} onPick={onPlace} />
           <Pairs title="Attributes" pairs={attributes} />
           <Pairs title="Resource" pairs={resource} />
           {record.trace_id ? (
@@ -182,10 +185,13 @@ export function Logs() {
   const [open, setOpen] = useState<string | null>(null)
   const settled = useSettled(typed)
 
-  const apply = (part: Partial<LogQuery>) => {
-    void navigate({ to: '/logs' as never, search: { f: encode({ ...query, ...part }) } as never, replace: true })
+  const { placement, place } = usePlacement()
+  const apply = (part: Partial<LogQuery>, keepPlacement = true) => {
+    const f = encode({ ...query, ...part })
+    void navigate({ to: '/logs' as never, search: (keepPlacement ? (was: Record<string, unknown>) => ({ ...was, f }) : { f }) as never, replace: true })
     setOpen(null)
   }
+  const placeHere = (part: Partial<Placement>) => { place(part); setOpen(null) }
 
   useEffect(() => {
     if (settled === typed && settled !== query.q) apply({ q: settled })
@@ -195,14 +201,14 @@ export function Logs() {
     setTyped(query.q)
   }, [query.q])
 
-  const { records, loading, pending, failed, more, older, loadingOlder } = useLogs(query, live)
-  const histogram = useLogHistogram(query, live)
+  const { records, loading, pending, failed, more, older, loadingOlder } = useLogs(query, live, placement)
+  const histogram = useLogHistogram(query, live, placement)
   const { names } = useServiceNames(query.rangeMs)
 
   const windowMs = isPinned(query) ? (query.toMs as number) - (query.fromMs as number) : query.rangeMs
   const dated = windowMs > 24 * 60 * 60 * 1000
-  const sifting = Boolean(query.services.length || query.severities.length || query.q || query.attrs.length || query.trace)
-  const clear = () => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '' }) }
+  const sifting = Boolean(query.services.length || query.severities.length || query.q || query.attrs.length || query.trace || isPlaced(placement))
+  const clear = () => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '' }, false) }
   const toggle = <T,>(list: T[], one: T) => (list.includes(one) ? list.filter((x) => x !== one) : [...list, one])
   const addAttr = () => {
     const value = attr.trim()
@@ -240,8 +246,9 @@ export function Logs() {
           <InputGroup className="w-[240px] max-w-full"><input aria-label="Attribute filter" placeholder="attribute key=value" className="font-mono" value={attr} onChange={(e) => setAttr(e.target.value)} /></InputGroup>
           <Button type="submit" variant="outline" size="icon" aria-label="Add attribute filter" disabled={!attr.includes('=')}><Plus aria-hidden /></Button>
         </form>
-        <Button variant="ghost" size="sm" disabled={!sifting && !isPinned(query)} onClick={() => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '', fromMs: null, toMs: null }) }}>Clear</Button>
+        <Button variant="ghost" size="sm" disabled={!sifting && !isPinned(query)} onClick={() => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '', fromMs: null, toMs: null }, false) }}>Clear</Button>
       </div>
+      <PlacementPicker placement={placement} onChange={placeHere} windowMs={windowMs} />
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Severities">
           {SEVERITIES.map((level) => {
@@ -275,7 +282,7 @@ export function Logs() {
           <div role="list" aria-label="Log records">
             {records.map((record, i) => {
               const id = `${record.time_ns}-${i}`
-              return <Row key={id} record={record} dated={dated} open={open === id} onToggle={() => setOpen(open === id ? null : id)} />
+              return <Row key={id} record={record} dated={dated} open={open === id} onToggle={() => setOpen(open === id ? null : id)} onPlace={placeHere} />
             })}
           </div>
           <div className="flex flex-wrap items-center gap-3 px-5 py-3">

@@ -3,6 +3,7 @@ import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import type { Sev } from '@/lib/otel'
+import { NOWHERE, placed, type Placement } from '@/data/placement'
 
 export const SEVERITIES: Sev[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal']
 
@@ -66,7 +67,7 @@ export const isPinned = (query: LogQuery) => query.fromMs !== null && query.toMs
 
 export const msOf = (ns: number) => Math.floor(ns / 1_000_000)
 
-function filters(query: LogQuery, project: string | undefined): URLSearchParams {
+function filters(query: LogQuery, project: string | undefined, placement: Placement): URLSearchParams {
   const to = query.toMs ?? Date.now()
   const from = query.fromMs ?? to - query.rangeMs
   const params = new URLSearchParams({ from: String(from), to: String(to) })
@@ -76,14 +77,14 @@ function filters(query: LogQuery, project: string | undefined): URLSearchParams 
   if (query.q.trim()) params.set('q', query.q.trim())
   for (const attr of query.attrs) params.append('attr', attr)
   if (query.trace.trim()) params.set('trace', query.trace.trim())
-  return params
+  return placed(params, placement)
 }
 
-export function useLogs(query: LogQuery, live = false) {
+export function useLogs(query: LogQuery, live = false, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const found = useInfiniteQuery({
-    queryKey: ['logs', active?.org, project, query, live],
+    queryKey: ['logs', active?.org, project, query, live, placement],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     refetchInterval: live ? LIVE_MS : false,
@@ -91,7 +92,7 @@ export function useLogs(query: LogQuery, live = false) {
     initialPageParam: null as string | null,
     getNextPageParam: (last: LogPage) => last.next,
     queryFn: async ({ pageParam }) => {
-      const params = filters(query, project)
+      const params = filters(query, project, placement)
       params.set('limit', String(query.limit))
       if (pageParam) params.set('before', pageParam)
       return json<LogPage>(await get(`/api/orgs/${active?.org}/logs?${params.toString()}`))
@@ -109,17 +110,17 @@ export function useLogs(query: LogQuery, live = false) {
   }
 }
 
-export function useLogHistogram(query: LogQuery, live = false) {
+export function useLogHistogram(query: LogQuery, live = false, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const found = useQuery({
-    queryKey: ['logs-histogram', active?.org, project, { ...query, limit: 0 }, live],
+    queryKey: ['logs-histogram', active?.org, project, { ...query, limit: 0 }, live, placement],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     refetchInterval: live ? LIVE_MS : false,
     refetchIntervalInBackground: false,
     queryFn: async () => {
-      const params = filters(query, project)
+      const params = filters(query, project, placement)
       params.set('buckets', String(BUCKETS))
       return json<LogHistogram>(await get(`/api/orgs/${active?.org}/logs/histogram?${params.toString()}`))
     },

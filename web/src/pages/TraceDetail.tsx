@@ -1,6 +1,9 @@
 import { CircleX, Copy, ScrollText, X } from 'lucide-react'
 import { useState } from 'react'
+import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
 import { Link, useParams } from '@/lib/router'
+import { PlacementChips } from '@/components/ft/Placement'
+import { placementSearch, type Placement } from '@/data/placement'
 import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +20,8 @@ import { NotFound } from './NotFound'
 export function TraceDetail() {
   const { id } = useParams()
   const { row: t, spans, pending, failed } = useTrace(id)
+  const route = useRouterNavigate()
+  const filterTraces = (part: Partial<Placement>) => void route({ to: '/traces' as never, search: placementSearch(part) as never })
   const [picked, setPicked] = useState<string | null>(null)
   const [panel, setPanel] = useState(true)
   const [onlySpan, setOnlySpan] = useState(false)
@@ -92,6 +97,7 @@ export function TraceDetail() {
               {s.err && !s.events.some((e) => e.exception) ? (
                 <span className="text-caption text-muted-foreground">This span failed and recorded no exception.</span>
               ) : null}
+              <PlacementChips attributes={Object.fromEntries(s.attrs)} onPick={filterTraces} />
               <h3 className="m-0 text-caption font-semibold uppercase tracking-[.05em] text-muted-foreground">Attributes</h3>
               <dl className="m-0 grid grid-cols-[minmax(120px,42%)_1fr] gap-x-3 text-caption">
                 {s.attrs.map(([k, v]) => (

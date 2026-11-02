@@ -3,6 +3,7 @@ import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
+import { NOWHERE, placed, type Placement } from '@/data/placement'
 
 export type TraceRow = { id: string; root: string; svc: string; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
@@ -145,7 +146,7 @@ export const ANY: Sift = {
   limit: 50,
 }
 
-function asked(sift: Sift, project: string | undefined): string {
+function asked(sift: Sift, project: string | undefined, placement: Placement): string {
   const to = Date.now()
   const query = new URLSearchParams({ from: String(to - sift.rangeMs), to: String(to) })
   if (project) query.set('project', project)
@@ -155,19 +156,19 @@ function asked(sift: Sift, project: string | undefined): string {
   if (sift.atLeastMs > 0) query.set('at_least_us', String(sift.atLeastMs * 1000))
   if (sift.order !== 'started') query.set('order', sift.order)
   if (sift.limit !== ANY.limit) query.set('limit', String(sift.limit))
-  return query.toString()
+  return placed(query, placement).toString()
 }
 
-export function useTraces(sift: Sift = ANY): { rows: TraceRow[]; loading: boolean; failed: unknown } {
+export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE): { rows: TraceRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['traces', active?.org, project, sift],
+    queryKey: ['traces', active?.org, project, sift, placement],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     queryFn: async () => {
       const found = await json<{ traces: Listed[] }>(
-        await get(`/api/orgs/${active?.org}/traces?${asked(sift, project)}`),
+        await get(`/api/orgs/${active?.org}/traces?${asked(sift, project, placement)}`),
       )
       return found.traces.map(listed)
     },
