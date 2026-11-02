@@ -172,6 +172,7 @@ function Entry({ entry }: { entry: TimelineEntry }) {
         <span className="font-mono">{stamp(entry.at_ms)}</span>
         <span>·</span>
         <span className={entry.author.kind === 'system' ? 'font-semibold' : 'font-semibold text-foreground'}>{entry.author.label}</span>
+        {entry.author.kind === 'agent' ? <Badge variant="outline" size="xs">agent</Badge> : null}
       </span>
       <div className="text-control"><Told entry={entry} /></div>
     </li>

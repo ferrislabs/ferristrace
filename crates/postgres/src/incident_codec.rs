@@ -1,7 +1,7 @@
 use ferristrace_domain::{
-    AccountId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
-    Change, CommentBody, EntryKind, IncidentId, IncidentSeverity, IncidentStatus, IncidentTitle,
-    KeyId, PageId, Reference, RuleId,
+    AccountId, AgentId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel,
+    Author, Change, CommentBody, EntryKind, IncidentId, IncidentSeverity, IncidentStatus,
+    IncidentTitle, KeyId, PageId, Reference, RuleId,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -176,7 +176,7 @@ pub(crate) fn author_parts(author: &Author) -> (&'static str, Option<Uuid>, Opti
     match author {
         Author::Account(account) => ("account", Some(account.as_uuid()), None),
         Author::ApiKey(key) => ("api_key", Some(key.as_uuid()), None),
-        Author::Agent(name) => ("agent", None, Some(name)),
+        Author::Agent { id, name } => ("agent", id.map(AgentId::as_uuid), Some(name)),
         Author::System => ("system", None, None),
     }
 }
@@ -185,7 +185,10 @@ pub(crate) fn author_of(kind: &str, id: Option<Uuid>, label: Option<&str>) -> Op
     match (kind, id, label) {
         ("account", Some(id), _) => Some(Author::Account(AccountId::new(id))),
         ("api_key", Some(id), _) => Some(Author::ApiKey(KeyId::new(id))),
-        ("agent", None, Some(name)) => Some(Author::Agent(name.into())),
+        ("agent", id, Some(name)) => Some(Author::Agent {
+            id: id.map(AgentId::new),
+            name: name.into(),
+        }),
         ("system", None, _) => Some(Author::System),
         _ => None,
     }
@@ -196,9 +199,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ferristrace_domain::{
-        AccountId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
-        Change, CommentBody, CulpritPod, Culprits, IncidentId, IncidentSeverity, IncidentStatus,
-        IncidentTitle, KeyId, Labels, PageId, Reference, RuleId,
+        AccountId, AgentId, AlertStatus, Attachment, AttachmentId, AttachmentKind, AttachmentLabel,
+        Author, Change, CommentBody, CulpritPod, Culprits, IncidentId, IncidentSeverity,
+        IncidentStatus, IncidentTitle, KeyId, Labels, PageId, Reference, RuleId,
     };
     use uuid::Uuid;
 
@@ -324,7 +327,14 @@ mod tests {
         for author in [
             Author::Account(AccountId::new(Uuid::from_u128(1))),
             Author::ApiKey(KeyId::new(Uuid::from_u128(2))),
-            Author::Agent("triage".into()),
+            Author::Agent {
+                id: Some(AgentId::new(Uuid::from_u128(3))),
+                name: "triage".into(),
+            },
+            Author::Agent {
+                id: None,
+                name: "legacy".into(),
+            },
             Author::System,
         ] {
             let (kind, id, label) = author_parts(&author);

@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, incident_router};
+use ferristrace_api::{AppState, SessionCookie, incident_router, mark_routes};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
     AlertLedger, Crew, IncidentLedger, Inert, Notebook, OncallLedger, PriceLedger, StatusLedger,
@@ -12,13 +13,15 @@ use ferristrace_application::testing::{
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Action, Agent, AlertRules, AlertSeverity, AlertStates, AlertStatus, ApiKey, ApiKeys,
-    ApiSecret, Assigned, Comparison, Condition, Created, Definition, DefinitionParts, IssuedKey,
+    AccountId, Action, Actor, Agent, AgentId, AgentScope, AgentScopes, AgentToken, AgentTokens,
+    AlertRules, AlertSeverity, AlertStates, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned,
+    AuditEntry, AuditTrail, Comparison, Condition, Created, Definition, DefinitionParts, IssuedKey,
     KeyId, KeyName, KeyScopes, Labels, LiveSession, Membership, Memberships, NoDataPolicy,
     NoPhotos, OrgRole, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant,
-    Renamed, RuleDraft, RuleId, RuleName, RuleState, SeriesState, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, Signal, StoreError, TargetKind, TeamId, TenantId,
-    TraceMeasure, TraceSignal, UnixSeconds, WhoamiError,
+    RegisteredAgent, Renamed, RuleDraft, RuleId, RuleName, RuleState, SeriesState, Session,
+    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Signal, StoreError,
+    TargetKind, TeamId, TenantId, TokenRefusal, TraceMeasure, TraceSignal, UnixSeconds,
+    VerifiedToken, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -116,7 +119,11 @@ impl Memberships for MemberOfMine {
     }
 }
 
-struct TwoKeys;
+#[derive(Clone, Default)]
+struct TwoKeys {
+    agents: Arc<Mutex<Vec<RegisteredAgent>>>,
+    notebook: Notebook,
+}
 
 impl ApiKeys for TwoKeys {
     async fn list(&self, _org: TenantId) -> Result<Vec<ApiKey>, StoreError> {
@@ -147,6 +154,61 @@ impl ApiKeys for TwoKeys {
             WHOLE_KEY => Some(ReadGrant::whole(org(MINE))),
             _ => None,
         })
+    }
+
+    async fn agent_standing(
+        &self,
+        org: TenantId,
+        client_id: &str,
+    ) -> Result<Option<RegisteredAgent>, StoreError> {
+        Ok(self
+            .agents
+            .lock()
+            .expect("the lock")
+            .iter()
+            .find(|agent| agent.org == org && &*agent.client_id == client_id)
+            .cloned())
+    }
+
+    async fn agent_used(
+        &self,
+        _org: TenantId,
+        _agent: AgentId,
+        entry: &AuditEntry,
+    ) -> Result<(), StoreError> {
+        self.notebook.record(entry).await
+    }
+}
+
+#[derive(Default)]
+struct Tokens {
+    known: Mutex<HashMap<String, VerifiedToken>>,
+}
+
+impl Tokens {
+    fn mint(&self, name: &str, client_id: &str, scopes: &[&str], jti: &str) -> String {
+        let token = format!("head.{name}.sig");
+        self.known.lock().expect("the lock").insert(
+            token.clone(),
+            VerifiedToken {
+                client_id: client_id.into(),
+                scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
+                jti: jti.into(),
+                expires_at_unix_secs: 4_000_000_000,
+            },
+        );
+        token
+    }
+}
+
+impl AgentTokens for Tokens {
+    async fn verify(&self, token: &AgentToken) -> Result<VerifiedToken, TokenRefusal> {
+        self.known
+            .lock()
+            .expect("the lock")
+            .get(token.exposed())
+            .cloned()
+            .ok_or(TokenRefusal::Invalid)
     }
 }
 
@@ -198,6 +260,7 @@ struct Fakes {
     crew: Crew,
     notebook: Notebook,
     oncall: OncallLedger,
+    keys: TwoKeys,
 }
 
 impl Untransacted for Fakes {}
@@ -220,10 +283,7 @@ repo!(Sessions, OneSession, |fakes| {
     OneSession
 });
 repo!(Memberships, MemberOfMine, |fakes| MemberOfMine(fakes.role));
-repo!(ApiKeys, TwoKeys, |fakes| {
-    let _ = fakes;
-    TwoKeys
-});
+repo!(ApiKeys, TwoKeys, |fakes| fakes.keys.clone());
 repo!(Projects, OneProject, |fakes| {
     let _ = fakes;
     OneProject
@@ -268,7 +328,7 @@ impl Stack for TestStack {
     type MetricStore = Inert;
     type Meter = Inert;
     type Oidc = Inert;
-    type Agents = Inert;
+    type Agents = Arc<Tokens>;
     type Sink = Inert;
     type Quota = Inert;
     type Directory = Inert;
@@ -281,6 +341,8 @@ struct Harness {
     crew: Crew,
     notebook: Notebook,
     oncall: OncallLedger,
+    keys: TwoKeys,
+    tokens: Arc<Tokens>,
 }
 
 impl Harness {
@@ -289,12 +351,18 @@ impl Harness {
         crew.seat(org(MINE), account(ME), "person@example.com");
         crew.seat(org(MINE), account(COLLEAGUE), "colleague@example.com");
         crew.seat(org(THEIRS), account(STRANGER), "stranger@example.com");
+        let notebook = Notebook::default();
         Self {
             alerts: AlertLedger::default(),
             incidents: IncidentLedger::default(),
             crew,
-            notebook: Notebook::default(),
+            keys: TwoKeys {
+                agents: Arc::default(),
+                notebook: notebook.clone(),
+            },
+            notebook,
             oncall: OncallLedger::default(),
+            tokens: Arc::default(),
         }
     }
 
@@ -313,20 +381,23 @@ impl Harness {
             oidc: None,
             provision: ProvisionPolicy::default(),
         };
-        incident_router(AppState::new(
-            Arc::new(Ferristrace::<TestStack>::new(
-                Fakes {
-                    role,
-                    alerts: self.alerts.clone(),
-                    incidents: self.incidents.clone(),
-                    crew: self.crew.clone(),
-                    notebook: self.notebook.clone(),
-                    oncall: self.oncall.clone(),
-                },
-                adapters,
-            )),
+        let app = Ferristrace::<TestStack>::new(
+            Fakes {
+                role,
+                alerts: self.alerts.clone(),
+                incidents: self.incidents.clone(),
+                crew: self.crew.clone(),
+                notebook: self.notebook.clone(),
+                oncall: self.oncall.clone(),
+                keys: self.keys.clone(),
+            },
+            adapters,
+        )
+        .with_agent_tokens(Some(Arc::clone(&self.tokens)));
+        mark_routes(incident_router(AppState::new(
+            Arc::new(app),
             SessionCookie::default(),
-        ))
+        )))
     }
 
     async fn served(&self, role: OrgRole, request: Request<Body>) -> (StatusCode, Value) {
@@ -351,6 +422,43 @@ impl Harness {
             .await;
         assert_eq!(status, StatusCode::CREATED, "{incident}");
         incident
+    }
+
+    fn enrol(&self, client_id: &str, scopes: &[AgentScope], project: Option<ProjectId>) -> AgentId {
+        let mut agents = self.keys.agents.lock().expect("the lock");
+        let agent = AgentId::new(Uuid::from_u128(500 + agents.len() as u128));
+        agents.push(RegisteredAgent {
+            id: agent,
+            org: org(MINE),
+            name: "triage bot".into(),
+            client_id: client_id.into(),
+            scopes: AgentScopes::new(scopes).expect("scopes"),
+            project,
+            created_by: None,
+            created_at_unix_nanos: 1,
+            last_used_at_unix_nanos: None,
+            revoked_at_unix_nanos: None,
+        });
+        agent
+    }
+
+    fn revoke(&self, agent: AgentId) {
+        for held in self.keys.agents.lock().expect("the lock").iter_mut() {
+            if held.id == agent {
+                held.revoked_at_unix_nanos = Some(2);
+            }
+        }
+    }
+
+    async fn agent_call(
+        &self,
+        token: &str,
+        method: Method,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.served(OrgRole::Member, as_key(token, method, uri, body))
+            .await
     }
 
     async fn a_rule(&self, status: AlertStatus) -> RuleId {
@@ -995,4 +1103,315 @@ async fn spec_l2_5_declaring_with_paging_pages_the_on_call_and_says_so() {
         entries[1]["detail"]["target"]["id"],
         json!(pages[0].target.as_uuid().to_string())
     );
+}
+
+fn actions_of(harness: &Harness) -> Vec<Action> {
+    harness
+        .notebook
+        .entries()
+        .into_iter()
+        .map(|entry| entry.action)
+        .collect()
+}
+
+#[tokio::test]
+async fn spec_l5_4_an_agent_with_the_comment_scope_comments_and_the_timeline_names_it() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    let path = one(MINE, &incident);
+    let agent = harness.enrol(
+        "bot",
+        &[AgentScope::TelemetryRead, AgentScope::IncidentsComment],
+        None,
+    );
+    let token = harness.tokens.mint(
+        "commenting",
+        "bot",
+        &["telemetry:read", "incidents:comment"],
+        "jti-42",
+    );
+
+    let (status, entry) = harness
+        .agent_call(
+            &token,
+            Method::POST,
+            &format!("{path}/comments"),
+            Some(json!({"body": "rolled back the release"})),
+        )
+        .await;
+    let (_, timeline) = harness
+        .agent_call(&token, Method::GET, &format!("{path}/timeline"), None)
+        .await;
+
+    assert_eq!(status, StatusCode::CREATED, "{entry}");
+    assert_eq!(entry["author"]["kind"], "agent");
+    assert_eq!(entry["author"]["label"], "triage bot");
+    assert_eq!(entry["author"]["id"], agent.as_uuid().to_string());
+    assert_eq!(entry["detail"]["public"], false);
+    let last = timeline["timeline"]
+        .as_array()
+        .expect("a list")
+        .last()
+        .expect("an entry");
+    assert_eq!(last["kind"], "comment");
+    assert_eq!(last["author"]["kind"], "agent");
+    assert_eq!(last["author"]["label"], "triage bot");
+    let audited = harness
+        .notebook
+        .entries()
+        .into_iter()
+        .find(|entry| entry.action == Action::IncidentCommented)
+        .expect("the comment is audited");
+    assert_eq!(audited.actor, Actor::Agent(agent));
+    assert_eq!(audited.detail.get("jti"), Some(Some("jti-42")));
+}
+
+#[tokio::test]
+async fn spec_l5_4_resolving_needs_the_resolve_scope() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    let path = one(MINE, &incident);
+    let agent = harness.enrol(
+        "bot",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+    let commenting = harness
+        .tokens
+        .mint("commenting", "bot", &["incidents:comment"], "jti-1");
+    let resolving = harness
+        .tokens
+        .mint("resolving", "bot", &["incidents:resolve"], "jti-2");
+
+    let (refused, _) = harness
+        .agent_call(
+            &commenting,
+            Method::PATCH,
+            &path,
+            Some(json!({"status": "resolved"})),
+        )
+        .await;
+    let audits_after_refusal = harness.notebook.entries().len();
+    let (allowed, resolved) = harness
+        .agent_call(
+            &resolving,
+            Method::PATCH,
+            &path,
+            Some(json!({"status": "resolved"})),
+        )
+        .await;
+
+    assert_eq!(refused, StatusCode::FORBIDDEN);
+    assert_eq!(audits_after_refusal, 1, "only the person's declaration");
+    assert_eq!(allowed, StatusCode::OK, "{resolved}");
+    assert_eq!(resolved["status"], "resolved");
+    let audited = harness
+        .notebook
+        .entries()
+        .into_iter()
+        .find(|entry| entry.action == Action::IncidentResolved)
+        .expect("audited");
+    assert_eq!(audited.actor, Actor::Agent(agent));
+    assert_eq!(audited.detail.get("jti"), Some(Some("jti-2")));
+}
+
+#[tokio::test]
+async fn an_agent_cannot_change_anything_else_in_the_same_patch_or_on_its_own() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    let path = one(MINE, &incident);
+    harness.enrol(
+        "bot",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+    let token = harness.tokens.mint(
+        "all",
+        "bot",
+        &["telemetry:read", "incidents:comment", "incidents:resolve"],
+        "jti-1",
+    );
+    let before = (
+        harness.notebook.entries().len(),
+        harness.incidents.timeline().len(),
+    );
+
+    let mut refused = Vec::new();
+    for patch in [
+        json!({"status": "resolved", "severity": "sev1"}),
+        json!({"status": "resolved", "owner": id(ME)}),
+        json!({"status": "resolved", "owner": null}),
+        json!({"status": "resolved", "title": "Renamed"}),
+        json!({"status": "resolved", "public": true}),
+        json!({"status": "monitoring"}),
+        json!({"status": "investigating"}),
+        json!({"severity": "sev1"}),
+        json!({"public": true}),
+        json!({}),
+    ] {
+        refused.push(
+            harness
+                .agent_call(&token, Method::PATCH, &path, Some(patch))
+                .await
+                .0,
+        );
+    }
+    let (public_comment, _) = harness
+        .agent_call(
+            &token,
+            Method::POST,
+            &format!("{path}/comments"),
+            Some(json!({"body": "to the world", "public": true})),
+        )
+        .await;
+    let (opened, _) = harness
+        .agent_call(
+            &token,
+            Method::POST,
+            &incidents(MINE),
+            Some(json!({"title": "Another"})),
+        )
+        .await;
+    let (attached, _) = harness
+        .agent_call(
+            &token,
+            Method::POST,
+            &format!("{path}/attachments"),
+            Some(json!({"kind": "trace", "reference": TRACE, "label": "slow"})),
+        )
+        .await;
+    let (_, after) = harness.member(Method::GET, &path, None).await;
+
+    assert!(
+        refused
+            .iter()
+            .all(|status| *status == StatusCode::FORBIDDEN),
+        "{refused:?}"
+    );
+    assert_eq!(public_comment, StatusCode::FORBIDDEN);
+    assert_eq!(opened, StatusCode::FORBIDDEN);
+    assert_eq!(attached, StatusCode::FORBIDDEN);
+    assert_eq!(after["status"], "investigating");
+    assert_eq!(after["severity"], incident["severity"]);
+    assert_eq!(after["public"], false);
+    assert_eq!(
+        (
+            harness.notebook.entries().len(),
+            harness.incidents.timeline().len()
+        ),
+        before,
+        "no refusal leaves an audit or a timeline entry"
+    );
+    assert_eq!(harness.incidents.incidents().len(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_out_of_its_scopes_project_or_standing_is_refused() {
+    let harness = Harness::new();
+    let ours = harness
+        .declared(json!({"title": "Ours", "project": id(OURS)}))
+        .await;
+    let whole = harness.declared(json!({"title": "Whole"})).await;
+    let both = [AgentScope::IncidentsComment, AgentScope::IncidentsResolve];
+    harness.enrol("bound", &both, Some(ProjectId::new(Uuid::from_u128(OURS))));
+    harness.enrol("reader", &[AgentScope::TelemetryRead], None);
+    let revoked = harness.enrol("gone", &both, None);
+    harness.revoke(revoked);
+    let claims = ["incidents:comment", "incidents:resolve"];
+    let bound = harness.tokens.mint("bound", "bound", &claims, "jti-1");
+    let reader = harness.tokens.mint("reader", "reader", &claims, "jti-2");
+    let gone = harness.tokens.mint("gone", "gone", &claims, "jti-3");
+    let nobody = harness.tokens.mint("nobody", "nobody", &claims, "jti-4");
+    let before = (
+        harness.notebook.entries().len(),
+        harness.incidents.timeline().len(),
+    );
+
+    let comment = |incident: &Value| {
+        (
+            format!("{}/comments", one(MINE, incident)),
+            json!({"body": "hi"}),
+        )
+    };
+    let mut statuses = Vec::new();
+    for (token, incident) in [
+        (&bound, &whole),
+        (&reader, &ours),
+        (&gone, &ours),
+        (&nobody, &ours),
+    ] {
+        let (path, body) = comment(incident);
+        statuses.push(
+            harness
+                .agent_call(token, Method::POST, &path, Some(body))
+                .await
+                .0,
+        );
+    }
+    let (bound_resolve_other, _) = harness
+        .agent_call(
+            &bound,
+            Method::PATCH,
+            &one(MINE, &whole),
+            Some(json!({"status": "resolved"})),
+        )
+        .await;
+    let (own, _) = harness
+        .agent_call(
+            &bound,
+            Method::POST,
+            &format!("{}/comments", one(MINE, &ours)),
+            Some(json!({"body": "hi"})),
+        )
+        .await;
+    let (stranger, _) = harness
+        .agent_call(
+            &bound,
+            Method::POST,
+            &format!(
+                "{}/{}/comments",
+                incidents(THEIRS),
+                whole["id"].as_str().expect("an id")
+            ),
+            Some(json!({"body": "hi"})),
+        )
+        .await;
+
+    assert_eq!(
+        statuses,
+        vec![
+            StatusCode::NOT_FOUND,
+            StatusCode::FORBIDDEN,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::UNAUTHORIZED
+        ]
+    );
+    assert_eq!(bound_resolve_other, StatusCode::NOT_FOUND);
+    assert_eq!(own, StatusCode::CREATED);
+    assert_eq!(stranger, StatusCode::UNAUTHORIZED);
+    assert_eq!(harness.incidents.timeline().len(), before.1 + 1);
+    assert_eq!(harness.notebook.entries().len(), before.0 + 1);
+    assert_eq!(
+        actions_of(&harness).last(),
+        Some(&Action::IncidentCommented)
+    );
+}
+
+#[tokio::test]
+async fn a_token_the_issuer_would_not_vouch_for_never_reaches_an_incident() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    harness.enrol("bot", &[AgentScope::IncidentsComment], None);
+
+    let (status, _) = harness
+        .agent_call(
+            "head.forged.sig",
+            Method::POST,
+            &format!("{}/comments", one(MINE, &incident)),
+            Some(json!({"body": "hi"})),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(harness.incidents.timeline().len(), 1);
 }

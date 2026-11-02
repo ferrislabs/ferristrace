@@ -1036,18 +1036,72 @@ async fn opening_and_moving_a_public_incident_is_announced_and_a_private_one_nev
     );
 }
 
-#[tokio::test]
-async fn an_agent_reads_incidents_but_every_write_is_refused_to_it_for_now() {
-    use crate::agents::{AgentCall, AgentScope, VerifiedToken};
+fn called_by(client: &str, claimed: &[&str], jti: &str) -> Reader {
+    use crate::agents::{AgentCall, VerifiedToken};
 
-    let world = World::new();
-    let member = world.desk(OrgRole::Member);
-    let id = member
-        .open(&session(), an_org(MINE), &titled("Checkout down"), at(0))
+    Reader::Agent(AgentCall {
+        token: VerifiedToken {
+            client_id: client.into(),
+            scopes: claimed.iter().map(|scope| (*scope).into()).collect(),
+            jti: jti.into(),
+            expires_at_unix_secs: 4_000_000_000,
+        },
+        route: "/api/orgs/{org}/incidents/{id}".into(),
+    })
+}
+
+fn everything(client: &str, jti: &str) -> Reader {
+    called_by(
+        client,
+        &["telemetry:read", "incidents:comment", "incidents:resolve"],
+        jti,
+    )
+}
+
+fn hi() -> CommentBody {
+    CommentBody::try_from("hi").expect("a body")
+}
+
+fn resolving() -> IncidentPatch {
+    IncidentPatch {
+        status: Some(IncidentStatus::Resolved),
+        ..IncidentPatch::default()
+    }
+}
+
+async fn an_open_incident(
+    world: &World,
+    project: Option<crate::catalogue::ProjectId>,
+) -> crate::incidents::IncidentId {
+    world
+        .desk(OrgRole::Member)
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                project,
+                ..titled("Checkout down")
+            },
+            at(0),
+        )
         .await
         .expect("opened")
         .incident
-        .id;
+        .id
+}
+
+fn frozen(world: &World, entries: usize) {
+    assert_eq!(world.incidents.timeline().len(), entries);
+    assert!(world.keys.book.uses().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_reads_incidents_but_open_and_attach_stay_refused_to_it() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
     world.keys.book.enrol(
         an_org(MINE),
         "bot",
@@ -1058,38 +1112,404 @@ async fn an_agent_reads_incidents_but_every_write_is_refused_to_it_for_now() {
         ],
         None,
     );
-    let agent = Reader::Agent(AgentCall {
-        token: VerifiedToken {
-            client_id: "bot".into(),
-            scopes: vec![
-                "telemetry:read".into(),
-                "incidents:comment".into(),
-                "incidents:resolve".into(),
-            ],
-            jti: "jti-1".into(),
-            expires_at_unix_secs: 4_000_000_000,
-        },
-        route: "/api/orgs/{org}/incidents".into(),
-    });
+    let agent = everything("bot", "jti-1");
 
-    let read = member.get(&agent, an_org(MINE), id).await;
-    let opened = member
+    let opened = desk
         .open(&agent, an_org(MINE), &titled("Another"), at(1))
         .await;
-    let commented = member
-        .comment(
+    let attached = desk
+        .attach(
             &agent,
             an_org(MINE),
             id,
-            &CommentBody::try_from("hi").expect("a body"),
+            Reference::parse(AttachmentKind::Trace, "0af7651916cd43dd8448eb211c80319c")
+                .expect("a reference"),
+            AttachmentLabel::try_from("slow").expect("a label"),
+            at(1),
+        )
+        .await;
+
+    assert_eq!(opened.err(), Some(IncidentError::ReadOnly));
+    assert_eq!(attached.err(), Some(IncidentError::ReadOnly));
+    assert_eq!(world.incidents.incidents().len(), 1);
+    frozen(&world, 1);
+}
+
+#[tokio::test]
+async fn spec_l5_4_an_agent_with_the_comment_scope_comments_as_itself_and_it_is_audited_with_the_jti()
+ {
+    use crate::agents::AgentScope;
+    use crate::audit::Actor;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    let agent_id = world.keys.book.enrol(
+        an_org(MINE),
+        "bot",
+        &[AgentScope::TelemetryRead, AgentScope::IncidentsComment],
+        None,
+    );
+
+    let chronicle = desk
+        .comment(
+            &called_by("bot", &["incidents:comment"], "jti-7"),
+            an_org(MINE),
+            id,
+            &hi(),
+            false,
+            at(1),
+        )
+        .await
+        .expect("commented");
+
+    let entries = world.incidents.timeline();
+    assert_eq!(
+        entries[1].author,
+        Author::Agent {
+            id: Some(agent_id),
+            name: "triage".into()
+        }
+    );
+    assert_eq!(
+        entries[1].change,
+        Change::Comment {
+            body: hi(),
+            public: false
+        }
+    );
+    assert_eq!(chronicle.author_label(&entries[1].author), "triage");
+    let uses = world.keys.book.uses();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0].1.actor, Actor::Agent(agent_id));
+    assert_eq!(uses[0].1.action, Action::IncidentCommented);
+    assert_eq!(uses[0].1.detail.get("jti"), Some(Some("jti-7")));
+    assert_eq!(
+        world.notebook.entries().len(),
+        1,
+        "only the person's opening"
+    );
+}
+
+#[tokio::test]
+async fn a_comment_without_the_scope_in_the_grant_or_in_the_token_is_refused_and_leaves_nothing() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "reader", &[AgentScope::TelemetryRead], None);
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "bot", &[AgentScope::IncidentsComment], None);
+
+    let not_granted = desk
+        .comment(
+            &everything("reader", "jti-1"),
+            an_org(MINE),
+            id,
+            &hi(),
+            false,
+            at(1),
+        )
+        .await;
+    let not_claimed = desk
+        .comment(
+            &called_by("bot", &["telemetry:read"], "jti-2"),
+            an_org(MINE),
+            id,
+            &hi(),
+            false,
+            at(1),
+        )
+        .await;
+    let resolve_scope_is_not_comment = desk
+        .comment(
+            &called_by("bot", &["incidents:resolve"], "jti-3"),
+            an_org(MINE),
+            id,
+            &hi(),
             false,
             at(1),
         )
         .await;
 
-    assert!(read.is_ok());
-    assert_eq!(opened.err(), Some(IncidentError::ReadOnly));
-    assert_eq!(commented.err(), Some(IncidentError::ReadOnly));
-    assert_eq!(world.incidents.incidents().len(), 1);
-    assert_eq!(world.incidents.timeline().len(), 1);
+    assert_eq!(not_granted.err(), Some(IncidentError::OutOfScope));
+    assert_eq!(not_claimed.err(), Some(IncidentError::OutOfScope));
+    assert_eq!(
+        resolve_scope_is_not_comment.err(),
+        Some(IncidentError::OutOfScope)
+    );
+    frozen(&world, 1);
+}
+
+#[tokio::test]
+async fn an_agent_never_publishes_a_comment() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "bot", &[AgentScope::IncidentsComment], None);
+
+    let refused = desk
+        .comment(
+            &called_by("bot", &["incidents:comment"], "jti-1"),
+            an_org(MINE),
+            id,
+            &hi(),
+            true,
+            at(1),
+        )
+        .await;
+
+    assert_eq!(refused.err(), Some(IncidentError::OutOfScope));
+    frozen(&world, 1);
+}
+
+#[tokio::test]
+async fn resolving_takes_the_resolve_scope_and_is_audited_once_with_the_jti() {
+    use crate::agents::AgentScope;
+    use crate::audit::Actor;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    let agent_id = world.keys.book.enrol(
+        an_org(MINE),
+        "bot",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+
+    let without = desk
+        .amend(
+            &called_by("bot", &["incidents:comment"], "jti-1"),
+            an_org(MINE),
+            id,
+            resolving(),
+            at(1),
+        )
+        .await;
+    frozen(&world, 1);
+    let resolved = desk
+        .amend(
+            &called_by("bot", &["incidents:resolve"], "jti-2"),
+            an_org(MINE),
+            id,
+            resolving(),
+            at(2),
+        )
+        .await
+        .expect("resolved");
+
+    assert_eq!(without.err(), Some(IncidentError::OutOfScope));
+    assert_eq!(resolved.incident.status, IncidentStatus::Resolved);
+    let entries = world.incidents.timeline();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries[1].author,
+        Author::Agent {
+            id: Some(agent_id),
+            name: "triage".into()
+        }
+    );
+    let uses = world.keys.book.uses();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0].1.actor, Actor::Agent(agent_id));
+    assert_eq!(uses[0].1.action, Action::IncidentResolved);
+    assert_eq!(uses[0].1.detail.get("jti"), Some(Some("jti-2")));
+}
+
+#[tokio::test]
+async fn an_agent_may_change_nothing_but_the_status_to_resolved() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    world.keys.book.enrol(
+        an_org(MINE),
+        "bot",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+    let agent = everything("bot", "jti-1");
+    let patches = [
+        IncidentPatch {
+            severity: Some(IncidentSeverity::Sev1),
+            ..resolving()
+        },
+        IncidentPatch {
+            owner: Some(Some(account(ME))),
+            ..resolving()
+        },
+        IncidentPatch {
+            owner: Some(None),
+            ..resolving()
+        },
+        IncidentPatch {
+            title: Some(IncidentTitle::try_from("Renamed").expect("a title")),
+            ..resolving()
+        },
+        IncidentPatch {
+            public: Some(true),
+            ..resolving()
+        },
+        IncidentPatch {
+            status: Some(IncidentStatus::Monitoring),
+            ..IncidentPatch::default()
+        },
+        IncidentPatch {
+            status: Some(IncidentStatus::Investigating),
+            ..IncidentPatch::default()
+        },
+        IncidentPatch {
+            severity: Some(IncidentSeverity::Sev1),
+            ..IncidentPatch::default()
+        },
+        IncidentPatch::default(),
+    ];
+
+    for patch in patches {
+        let refused = desk.amend(&agent, an_org(MINE), id, patch, at(1)).await;
+        assert_eq!(refused.err(), Some(IncidentError::OutOfScope));
+    }
+
+    frozen(&world, 1);
+    assert_eq!(
+        world.incidents.incidents()[0].status,
+        IncidentStatus::Investigating
+    );
+    assert_eq!(
+        world.incidents.incidents()[0].severity,
+        IncidentSeverity::Sev3
+    );
+}
+
+#[tokio::test]
+async fn a_project_bound_agent_acts_only_on_its_projects_incidents() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let ours = an_open_incident(&world, Some(a_project(OURS))).await;
+    let unbound_incident = an_open_incident(&world, None).await;
+    let both = [AgentScope::IncidentsComment, AgentScope::IncidentsResolve];
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "bound", &both, Some(a_project(OURS)));
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "other", &both, Some(a_project(77)));
+    world.keys.book.enrol(an_org(MINE), "whole", &both, None);
+    let bound = everything("bound", "jti-1");
+
+    let other = everything("other", "jti-9");
+    let elsewhere = desk
+        .comment(&other, an_org(MINE), ours, &hi(), false, at(1))
+        .await;
+    let projectless = desk
+        .comment(&bound, an_org(MINE), unbound_incident, &hi(), false, at(1))
+        .await;
+    let resolve_elsewhere = desk
+        .amend(&other, an_org(MINE), ours, resolving(), at(1))
+        .await;
+    let resolve_projectless = desk
+        .amend(&bound, an_org(MINE), unbound_incident, resolving(), at(1))
+        .await;
+    frozen(&world, 2);
+    let own = desk
+        .comment(&bound, an_org(MINE), ours, &hi(), false, at(2))
+        .await;
+    let whole_agent = desk
+        .comment(
+            &everything("whole", "jti-2"),
+            an_org(MINE),
+            unbound_incident,
+            &hi(),
+            false,
+            at(2),
+        )
+        .await;
+
+    assert_eq!(elsewhere.err(), Some(IncidentError::NoSuchIncident));
+    assert_eq!(projectless.err(), Some(IncidentError::NoSuchIncident));
+    assert_eq!(resolve_elsewhere.err(), Some(IncidentError::NoSuchIncident));
+    assert_eq!(
+        resolve_projectless.err(),
+        Some(IncidentError::NoSuchIncident)
+    );
+    assert!(own.is_ok());
+    assert!(whole_agent.is_ok());
+    assert_eq!(world.keys.book.uses().len(), 2);
+}
+
+#[tokio::test]
+async fn a_revoked_unknown_or_foreign_agent_is_refused_without_a_trace() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    let revoked = world.keys.book.enrol(
+        an_org(MINE),
+        "gone",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+    world.keys.book.revoke_now(revoked);
+    world.keys.book.enrol(
+        an_org(THEIRS),
+        "foreign",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+
+    for client in ["gone", "nobody", "foreign"] {
+        let agent = everything(client, "jti-1");
+        let commented = desk
+            .comment(&agent, an_org(MINE), id, &hi(), false, at(1))
+            .await;
+        let resolved = desk
+            .amend(&agent, an_org(MINE), id, resolving(), at(1))
+            .await;
+        assert_eq!(commented.err(), Some(IncidentError::NoSession), "{client}");
+        assert_eq!(resolved.err(), Some(IncidentError::NoSession), "{client}");
+    }
+
+    frozen(&world, 1);
+}
+
+#[tokio::test]
+async fn resolving_an_already_resolved_incident_is_still_audited_once() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "bot", &[AgentScope::IncidentsResolve], None);
+    let agent = called_by("bot", &["incidents:resolve"], "jti-1");
+    desk.amend(&agent, an_org(MINE), id, resolving(), at(1))
+        .await
+        .expect("resolved");
+
+    desk.amend(&agent, an_org(MINE), id, resolving(), at(2))
+        .await
+        .expect("a no-op");
+
+    assert_eq!(world.incidents.timeline().len(), 2);
+    assert_eq!(world.keys.book.uses().len(), 2);
 }

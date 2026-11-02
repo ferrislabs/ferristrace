@@ -9,6 +9,7 @@ use super::value_objects::{
     IncidentTitle, Reference, TimelineId,
 };
 use crate::access::{ApiKeys, ReadGrant, Reader, Readers};
+use crate::agents::{AgentGrant, AgentScope};
 use crate::alerts::{AlertRules, AlertStates, AlertStatus, Rule};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::catalogue::{ProjectId, Projects};
@@ -146,7 +147,7 @@ where
         draft: &IncidentDraft,
         now: UnixSeconds,
     ) -> Result<Briefed, IncidentError> {
-        let by = self.writer(who, org).await?;
+        let by = self.writer(who, org, None).await?;
         let rule = match draft.alert {
             None => None,
             Some(alert) => Some(self.firing_rule(org, alert).await?),
@@ -193,7 +194,7 @@ where
         self.incidents.open(&incident).await?;
         self.append(
             &incident,
-            by,
+            &by,
             Change::Opened {
                 title: incident.title.clone(),
                 severity,
@@ -204,7 +205,7 @@ where
         .await?;
         self.note(
             &incident,
-            by,
+            &by,
             Action::IncidentOpened,
             Detail::default()
                 .with("title", &incident.title)
@@ -240,12 +241,13 @@ where
         patch: IncidentPatch,
         now: UnixSeconds,
     ) -> Result<Briefed, IncidentError> {
-        let by = self.writer(who, org).await?;
-        let held = self
-            .incidents
-            .get(org, id)
-            .await?
-            .ok_or(IncidentError::NoSuchIncident)?;
+        let by = self
+            .writer(who, org, Some(AgentScope::IncidentsResolve))
+            .await?;
+        let held = self.writable(org, id, &by).await?;
+        if by.is_agent() && !resolves_only(&patch) {
+            return Err(IncidentError::OutOfScope);
+        }
         let people = self.people(org).await?;
         if let Some(Some(owner)) = patch.owner
             && !people.iter().any(|person| person.account == owner)
@@ -255,6 +257,7 @@ where
         let now_ms = millis(now);
         let (changed, steps) = amended(&held, patch, now_ms);
         if steps.is_empty() {
+            self.touch(&by, &held).await?;
             let alerts = self.alerts(org).await?;
             return Ok(brief(held, &people, &alerts));
         }
@@ -269,7 +272,7 @@ where
             }
             match &change {
                 Change::Status { from, to } if from.is_open() && !to.is_open() => {
-                    self.note(&changed, by, Action::IncidentResolved, Detail::default())
+                    self.note(&changed, &by, Action::IncidentResolved, Detail::default())
                         .await?;
                     self.paging
                         .resolve(org, Origin::Incident(id), now_ms)
@@ -278,7 +281,7 @@ where
                 Change::Status { from, to } if !from.is_open() && to.is_open() => {
                     self.note(
                         &changed,
-                        by,
+                        &by,
                         Action::IncidentReopened,
                         Detail::default().with("status", to),
                     )
@@ -286,12 +289,12 @@ where
                 }
                 other => updated.push(other.kind().as_str()),
             }
-            self.append(&changed, by, change, now_ms).await?;
+            self.append(&changed, &by, change, now_ms).await?;
         }
         if !updated.is_empty() {
             self.note(
                 &changed,
-                by,
+                &by,
                 Action::IncidentUpdated,
                 Detail::default().with_all("fields", &updated),
             )
@@ -310,13 +313,18 @@ where
         public: bool,
         now: UnixSeconds,
     ) -> Result<Chronicle, IncidentError> {
-        let by = self.writer(who, org).await?;
-        let incident = self.writable(org, id).await?;
+        let by = self
+            .writer(who, org, Some(AgentScope::IncidentsComment))
+            .await?;
+        if public && by.is_agent() {
+            return Err(IncidentError::OutOfScope);
+        }
+        let incident = self.writable(org, id, &by).await?;
         let now_ms = millis(now);
         let entry = self
             .append(
                 &incident,
-                by,
+                &by,
                 Change::Comment {
                     body: body.clone(),
                     public,
@@ -326,7 +334,7 @@ where
             .await?;
         self.note(
             &incident,
-            by,
+            &by,
             Action::IncidentCommented,
             Detail::default()
                 .with("bytes", body.as_str().len())
@@ -353,8 +361,8 @@ where
         label: AttachmentLabel,
         now: UnixSeconds,
     ) -> Result<Attachment, IncidentError> {
-        let by = self.writer(who, org).await?;
-        let incident = self.writable(org, id).await?;
+        let by = self.writer(who, org, None).await?;
+        let incident = self.writable(org, id, &by).await?;
         let now_ms = millis(now);
         let attachment = Attachment {
             id: AttachmentId::fresh(),
@@ -366,14 +374,14 @@ where
         self.attachments.attach(org, &attachment).await?;
         self.append(
             &incident,
-            by,
+            &by,
             Change::Attachment(attachment.clone()),
             now_ms,
         )
         .await?;
         self.note(
             &incident,
-            by,
+            &by,
             Action::IncidentAttached,
             Detail::default()
                 .with("kind", attachment.kind())
@@ -441,25 +449,44 @@ where
         Ok(())
     }
 
-    async fn writer(&self, who: &Reader, org: TenantId) -> Result<AccountId, IncidentError> {
+    async fn writer(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        agent_scope: Option<AgentScope>,
+    ) -> Result<Hand, IncidentError> {
         match who {
-            Reader::Key(_) | Reader::Agent(_) => {
+            Reader::Key(_) => {
                 self.readers.grant(who, org).await?;
                 Err(IncidentError::ReadOnly)
+            }
+            Reader::Agent(call) => {
+                let grant = self.readers.standing(call, org, agent_scope).await;
+                match (grant, agent_scope) {
+                    (Ok(grant), Some(_)) => Ok(Hand::Agent(grant)),
+                    (Ok(_), None) => Err(IncidentError::ReadOnly),
+                    (Err(refusal), _) => Err(refusal.into()),
+                }
             }
             Reader::Session(token) => {
                 let who = self.readers.whoami().of(token).await?;
                 who.role_in(org)
-                    .map(|_| who.account)
+                    .map(|_| Hand::Account(who.account))
                     .ok_or(IncidentError::NotYours)
             }
         }
     }
 
-    async fn writable(&self, org: TenantId, id: IncidentId) -> Result<Incident, IncidentError> {
+    async fn writable(
+        &self,
+        org: TenantId,
+        id: IncidentId,
+        by: &Hand,
+    ) -> Result<Incident, IncidentError> {
         self.incidents
             .get(org, id)
             .await?
+            .filter(|incident| by.reaches(incident))
             .ok_or(IncidentError::NoSuchIncident)
     }
 
@@ -558,7 +585,7 @@ where
     async fn append(
         &self,
         incident: &Incident,
-        by: AccountId,
+        by: &Hand,
         change: Change,
         at_ms: u64,
     ) -> Result<TimelineEntry, IncidentError> {
@@ -566,7 +593,7 @@ where
             id: TimelineId::fresh(),
             incident: incident.id,
             org: incident.org,
-            author: Author::Account(by),
+            author: by.author(),
             change,
             at_ms,
         };
@@ -577,21 +604,81 @@ where
     async fn note(
         &self,
         incident: &Incident,
-        by: AccountId,
+        by: &Hand,
         action: Action,
         detail: Detail,
     ) -> Result<(), IncidentError> {
-        Ok(self
-            .trail
-            .record(&AuditEntry {
-                org: incident.org,
-                actor: Actor::Account(by),
-                action,
-                target: Target::of(TargetKind::Incident, Some(incident.id.to_string().into())),
-                detail,
-            })
-            .await?)
+        let target = Target::of(TargetKind::Incident, Some(incident.id.to_string().into()));
+        match by {
+            Hand::Account(account) => Ok(self
+                .trail
+                .record(&AuditEntry {
+                    org: incident.org,
+                    actor: Actor::Account(*account),
+                    action,
+                    target,
+                    detail,
+                })
+                .await?),
+            Hand::Agent(grant) => Ok(self
+                .readers
+                .record(
+                    grant,
+                    &AuditEntry {
+                        org: incident.org,
+                        actor: Actor::Agent(grant.agent),
+                        action,
+                        target,
+                        detail: detail.with("jti", &grant.jti),
+                    },
+                )
+                .await?),
+        }
     }
+
+    async fn touch(&self, by: &Hand, incident: &Incident) -> Result<(), IncidentError> {
+        if by.is_agent() {
+            self.note(incident, by, Action::AgentRead, Detail::default())
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+enum Hand {
+    Account(AccountId),
+    Agent(AgentGrant),
+}
+
+impl Hand {
+    fn is_agent(&self) -> bool {
+        matches!(self, Self::Agent(_))
+    }
+
+    fn author(&self) -> Author {
+        match self {
+            Self::Account(account) => Author::Account(*account),
+            Self::Agent(grant) => Author::Agent {
+                id: Some(grant.agent),
+                name: grant.name.clone(),
+            },
+        }
+    }
+
+    fn reaches(&self, incident: &Incident) -> bool {
+        match self {
+            Self::Account(_) => true,
+            Self::Agent(grant) => grant.project.is_none() || incident.project == grant.project,
+        }
+    }
+}
+
+fn resolves_only(patch: &IncidentPatch) -> bool {
+    *patch
+        == IncidentPatch {
+            status: Some(IncidentStatus::Resolved),
+            ..IncidentPatch::default()
+        }
 }
 
 fn millis(now: UnixSeconds) -> u64 {

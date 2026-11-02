@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
-    AccountId, AlertError, AlertRules, AlertSeverity, AlertStatus, Attachment, AttachmentId,
-    AttachmentKind, AttachmentLabel, Author, Change, CommentBody, Comparison, Condition,
-    CulpritPod, Culprits, Definition, DefinitionParts, Evaluator, Followers, Incident,
+    AccountId, AgentId, AlertError, AlertRules, AlertSeverity, AlertStatus, Attachment,
+    AttachmentId, AttachmentKind, AttachmentLabel, Author, Change, CommentBody, Comparison,
+    Condition, CulpritPod, Culprits, Definition, DefinitionParts, Evaluator, Followers, Incident,
     IncidentAttachments, IncidentFilter, IncidentId, IncidentScope, IncidentSeverity,
     IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy,
     Observation, Paging, ProbeError, ProjectId, ProjectName, Reference, RuleDraft, RuleId,
@@ -205,12 +205,27 @@ async fn incidents_timelines_and_attachments_read_back_whole() {
         ),
         entry(
             &linked,
-            Author::Agent("triage".into()),
+            Author::Agent {
+                id: Some(AgentId::new(Uuid::from_u128(8))),
+                name: "triage".into(),
+            },
             Change::Comment {
                 body: CommentBody::try_from("rolled back").expect("a body"),
                 public: false,
             },
             1_050,
+        ),
+        entry(
+            &linked,
+            Author::Agent {
+                id: None,
+                name: "before ids".into(),
+            },
+            Change::Comment {
+                body: CommentBody::try_from("an old row").expect("a body"),
+                public: false,
+            },
+            1_060,
         ),
         entry(
             &linked,

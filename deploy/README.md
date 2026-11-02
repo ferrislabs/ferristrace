@@ -340,8 +340,19 @@ spend, issues, incidents and their timelines. It never reaches a
 session-only or administration route (keys, agents, members, settings,
 audit). Each read leaves an `agent.read` entry naming the route template and
 the `jti`; registering and revoking an agent are audited as `agent.registered`
-and `agent.revoked`. Incident comments and resolution by an agent come with
-the next part of this milestone.
+and `agent.revoked`.
+
+Two write scopes work on incidents. With `incidents:comment` an agent posts
+`POST /api/orgs/$ORG/incidents/$ID/comments`; the timeline shows the entry
+under the agent's name with an "agent" badge, and the comment is never public
+(asking for `"public": true` is refused with `403`). With `incidents:resolve`
+it sends `PATCH /api/orgs/$ORG/incidents/$ID` with exactly
+`{"status": "resolved"}`; any other field or status in that body is refused
+with `403`. Opening incidents, attachments, on-call, postmortems and status
+pages stay refused to agents. A project-bound agent finds only the incidents of
+its project (`404` for the others, incidents without a project included). Each
+accepted write leaves one audit entry (`incident.commented`, `incident.resolved`)
+naming the agent and the `jti`; a refused one leaves nothing.
 
 ## A second factor
 

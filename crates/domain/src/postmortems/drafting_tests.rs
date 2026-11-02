@@ -267,6 +267,28 @@ fn an_open_incident_says_it_is_still_open() {
 }
 
 #[test]
+fn a_comment_by_an_agent_is_told_under_the_agents_name() {
+    let entries = vec![entry(
+        Author::Agent {
+            id: Some(crate::agents::AgentId::new(Uuid::from_u128(4))),
+            name: "triage bot".into(),
+        },
+        Change::Comment {
+            body: CommentBody::try_from("rolled back the release").expect("a body"),
+            public: false,
+        },
+        BASE_MS,
+    )];
+
+    let body = draft(&incident(None), &chronicle(entries), &[]);
+
+    assert!(
+        body.contains("| triage bot | commented: \"rolled back the release\" |"),
+        "{body}"
+    );
+}
+
+#[test]
 fn an_unanswered_and_escalated_page_is_told_as_such() {
     let second = PageId::new(Uuid::from_u128(601));
     let entries = vec![
