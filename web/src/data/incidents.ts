@@ -23,6 +23,7 @@ export type Incident = {
   opened_ms: number
   resolved_ms: number | null
   alert: { id: string; name: string } | null
+  paged_schedule: string | null
 }
 
 export type AttachmentKind = 'trace' | 'logs' | 'metric'
@@ -43,11 +44,20 @@ export type TimelineEntry = { at_ms: number; author: Author } & (
   | { kind: 'comment'; detail: { body: string } }
   | { kind: 'alert'; detail: { alert: { id: string; name: string | null }; from: AlertStatus; to: AlertStatus; value: number | null; labels: Record<string, string> } }
   | { kind: 'attachment'; detail: Attachment }
+  | { kind: 'paged'; detail: { page: string; step: number; target: Person | null } }
+  | { kind: 'acknowledged'; detail: { page: string } }
 )
 
 export type Dossier = Incident & { attachments: Attachment[]; timeline: TimelineEntry[] }
 
-export type Declaration = { title?: string; severity?: IncidentSeverity; project?: string | null; alert?: string; public?: boolean }
+export type Declaration = {
+  title?: string
+  severity?: IncidentSeverity
+  project?: string | null
+  alert?: string
+  public?: boolean
+  page?: { schedule: string }
+}
 
 export type IncidentChange = Partial<{ title: string; severity: IncidentSeverity; status: IncidentStatus; owner: string | null; public: boolean }>
 

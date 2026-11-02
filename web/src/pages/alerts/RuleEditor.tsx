@@ -26,6 +26,7 @@ import {
   type SignalKind,
 } from '@/data/alerts'
 import { useMetricCatalogue } from '@/data/metrics'
+import { useSchedules } from '@/data/oncall'
 import { useProjects } from '@/data/projects'
 import { useServiceNames } from '@/data/services'
 import { useSettled } from '@/lib/settle'
@@ -42,6 +43,7 @@ const HOUR_MS = 3_600_000
 export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: boolean; onClose: () => void }) {
   const projects = useProjects()
   const { channels } = useChannels()
+  const { schedules } = useSchedules()
   const { names } = useServiceNames(HOUR_MS * 24)
   const create = useCreateRule()
   const update = useUpdateRule()
@@ -201,6 +203,14 @@ export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: b
               </div>
             ) : <span className="text-control text-muted-foreground">No channel yet. Add one in Settings, Project, Alerts.</span>}
           </fieldset>
+
+          <Field label="Page the on-call of" htmlFor="ar-pg" hint={schedules.length > 0 ? 'When the rule starts firing, the person on call is paged by email and escalated until someone acknowledges.' : 'No schedule yet. Add one in Settings, Teams, On-call.'}>
+            <NativeSelect id="ar-pg" value={form.page} onChange={(e) => set({ page: e.target.value })} className="max-w-[360px]">
+              <option value="">Nobody</option>
+              {schedules.map((one) => <option key={one.id} value={one.id}>{one.teamName} · {one.name}</option>)}
+              {form.page && !schedules.some((one) => one.id === form.page) ? <option value={form.page}>A schedule out of reach</option> : null}
+            </NativeSelect>
+          </Field>
 
           <div className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex flex-wrap items-center gap-2">

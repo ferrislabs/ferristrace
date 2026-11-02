@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/misc'
 import { OrganisationSwitcher } from './OrganisationSwitcher'
+import { PagesButton } from './Pages'
 import { useProjects } from '@/data/projects'
 import { Link } from '@/lib/router'
 import { useScope } from '@/lib/scope'
@@ -37,6 +38,7 @@ export function Topbar({ onPalette, mock }: { onPalette: () => void; mock: boole
       </Popover>
       {mock ? <MockData className="max-sm:hidden" /> : null}
       <span className="flex-1" />
+      <PagesButton />
       <button type="button" onClick={onPalette} aria-label="Search" className="hidden h-8 w-[260px] cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-2.5 text-control text-faint-foreground shadow-sm hover:bg-muted lg:flex">
         <Search className="size-3.5" aria-hidden /><span className="flex-1 text-left">Search or paste an id</span><Kbd>/</Kbd><Kbd>⌘</Kbd><Kbd>K</Kbd>
       </button>

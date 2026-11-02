@@ -188,5 +188,17 @@ function Told({ entry }: { entry: TimelineEntry }) {
       )
     case 'attachment':
       return <span className="inline-flex flex-wrap items-center gap-1.5"><Paperclip className="size-3.5" aria-hidden />Attached <AttachmentLink attachment={entry.detail} /></span>
+    case 'paged':
+      return (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <BellRing className="size-3.5" aria-hidden />
+          {entry.detail.target
+            ? <>{entry.detail.step === 0 ? 'Paged' : 'Escalated the page to'} <span className="font-semibold">{personOf(entry.detail.target)}</span></>
+            : <>Escalated the page to every administrator</>}
+          {entry.detail.step > 0 ? <span className="font-mono text-caption text-muted-foreground">step {entry.detail.step}</span> : null}
+        </span>
+      )
+    case 'acknowledged':
+      return <span>Acknowledged the page, which stops its escalation</span>
   }
 }

@@ -21,6 +21,7 @@ import {
   useTeams,
   type Team,
 } from '@/data/teams'
+import { OnCall } from './OnCall'
 import { H } from './parts'
 
 export function Teams() {
@@ -28,25 +29,27 @@ export function Teams() {
   const { teams, nothing } = useTeams()
   const [adding, setAdding] = useState(false)
   const [managing, setManaging] = useState<Team | null>(null)
+  const [paging, setPaging] = useState<Team | null>(null)
   const mayArrange = active?.role === 'owner' || active?.role === 'admin'
   const roll = teams ?? []
 
   const open = managing && roll.find((team) => team.id === managing.id)
+  const onCall = paging && roll.find((team) => team.id === paging.id)
 
   return (
     <>
-      <H title="Teams" sub="A team groups members and owns projects.">
+      <H title="Teams" sub="A team groups members, owns projects and keeps its on-call schedules.">
         {mayArrange ? <Button variant="primary" size="sm" onClick={() => setAdding(true)}><Plus />New team</Button> : null}
       </H>
       <Card className="overflow-x-auto">
         <Table aria-label="Teams">
-          <thead><tr><Th>Team</Th><Th numeric className="w-[100px]">Members</Th><Th className="w-[260px]">Projects</Th><Th className="w-[100px]"><span className="sr-only">Actions</span></Th></tr></thead>
+          <thead><tr><Th>Team</Th><Th numeric className="w-[100px]">Members</Th><Th className="w-[260px]">Projects</Th><Th className="w-[180px]"><span className="sr-only">Actions</span></Th></tr></thead>
           <tbody>{roll.map((t) => (
             <Tr key={t.id}>
               <Td className="h-11"><span className="inline-flex items-center gap-2.5"><span className="inline-flex size-7 items-center justify-center rounded-md bg-muted text-[11px] font-bold text-muted-foreground" aria-hidden>{initialsOf(t.name)}</span><span className="font-semibold">{t.name}</span></span></Td>
               <Td numeric>{t.members.length}</Td>
               <Td className="text-control">{t.projects.length > 0 ? t.projects.map((p) => p.name).join(', ') : <span className="text-muted-foreground">No project yet</span>}</Td>
-              <Td numeric>{mayArrange ? <Button variant="ghost" size="sm" onClick={() => setManaging(t)}>Manage</Button> : null}</Td>
+              <Td numeric><Button variant="ghost" size="sm" onClick={() => setPaging(t)}>On-call</Button>{mayArrange ? <Button variant="ghost" size="sm" onClick={() => setManaging(t)}>Manage</Button> : null}</Td>
             </Tr>
           ))}</tbody>
         </Table>
@@ -55,6 +58,7 @@ export function Teams() {
       <p className="m-0 text-caption text-muted-foreground">A project has one owner team or none, so handing it to a team takes it off the team that held it. Leaving the organisation takes you off its teams.</p>
       <NewTeam open={adding} onOpenChange={setAdding} />
       <ManageTeam team={open ?? null} onOpenChange={(o) => !o && setManaging(null)} />
+      <OnCall team={onCall ?? null} mayArrange={mayArrange} onOpenChange={(o) => !o && setPaging(null)} />
     </>
   )
 }
