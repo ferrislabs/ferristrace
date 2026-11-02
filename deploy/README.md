@@ -1,7 +1,8 @@
 # Self-hosting FerrisTrace
 
-One command brings up the server, its control plane, the span store and the
-usage counter:
+One command brings up the server, its control plane, the span store, the
+usage counter, and FerrisKey, the identity provider everybody signs in
+through:
 
 ```sh
 cd deploy
@@ -11,7 +12,38 @@ docker compose up --build --detach
 The server waits for all three stores to report healthy, applies the
 Postgres and ClickHouse migrations itself, and then listens on 4317 for
 OTLP over gRPC and 4318 for everything else: OTLP over HTTP, the API, and
-the web application at <http://localhost:4318>.
+the web application at <http://localhost:4318>. Beside it, FerrisKey comes
+up with its own database, runs its own migration, and is provisioned by
+`ferriskey-init`: a realm named `ferristrace`, a confidential client named
+the same, its redirect uri, and the client secret FerrisKey generated, read
+back and handed to the server — nothing of that is created by hand.
+
+## Before the first sign-in
+
+FerrisKey builds every url in its discovery document — the issuer
+included — from the `Host` header of the request that asked for it, and
+there is no setting that overrides that. So the browser signing somebody
+in and this server checking the result afterwards have to ask for
+FerrisKey under the same name, or the issuer the server discovered will
+never match the issuer the token carries, and every sign-in fails. That
+name is `ferriskey`, and the one thing this stack cannot do for you is add
+it to this machine's own name resolution. Add this line to the hosts file
+once, before the first sign-in:
+
+```
+127.0.0.1 ferriskey
+```
+
+`C:\Windows\System32\drivers\etc\hosts` on Windows, `/etc/hosts`
+everywhere else, both edited as an administrator. This is the laptop's
+own price, and the laptop's alone: in production FerrisKey answers on a
+real hostname that the browser and the server already both resolve, so
+nothing like this line is needed there.
+
+FerrisKey's own console, if you want to look at what `ferriskey-init`
+provisioned rather than trust this file, is at <http://localhost:5555>,
+signed into as `admin` / `admin` unless `FERRISKEY_ADMIN_USERNAME` and
+`FERRISKEY_ADMIN_PASSWORD` were set before its first start.
 
 ## Make it usable
 
@@ -191,14 +223,24 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
 
 ## What to change before this faces anything real
 
-- **The passwords.** Postgres, ClickHouse and the server all default to
-  `ferristrace` so that `docker compose up` works on a clean machine with
-  no preparation. ClickHouse and Redis are reachable only from inside the
-  compose network; Postgres answers this machine too, on the loopback, so
-  a database client can reach it. Set `POSTGRES_PASSWORD` and
-  `CLICKHOUSE_PASSWORD` in a `.env` file beside the compose file for
-  anything that is not a laptop — and before widening `POSTGRES_BIND`,
-  which is what would put that database on the network.
+- **The passwords.** Postgres, ClickHouse, FerrisKey's own database and the
+  server all default to `ferristrace` or `ferriskey` so that
+  `docker compose up` works on a clean machine with no preparation.
+  ClickHouse, Redis and FerrisKey's database are reachable only from inside
+  the compose network; Postgres answers this machine too, on the loopback,
+  so a database client can reach it. Set `POSTGRES_PASSWORD`,
+  `CLICKHOUSE_PASSWORD` and `FERRISKEY_DB_PASSWORD` in a `.env` file beside
+  the compose file for anything that is not a laptop — and before widening
+  `POSTGRES_BIND`, which is what would put that database on the network.
+- **`FERRISKEY_ADMIN_USERNAME` and `FERRISKEY_ADMIN_PASSWORD`.** Read once,
+  before FerrisKey's own database holds anything, to create its first
+  admin. Left unset, that account is `admin` / `admin`, reachable at
+  <http://localhost:5555>. FerrisKey's api and console are bound to the
+  loopback for exactly that reason, like Postgres above: an administrator
+  of this realm can mark any address verified and sign into FerrisTrace as
+  whoever holds it, so that default must not face a network. Change
+  `FERRISKEY_ADMIN_PASSWORD` before widening `FERRISKEY_API_BIND` or
+  `FERRISKEY_WEBAPP_BIND`, which is what would put either on the network.
 - **`COOKIE_SECURE`.** It defaults to `false` because this compose file
   serves plain HTTP. Put the server behind TLS and set it to `true`, or
   session cookies travel in the clear.
@@ -248,10 +290,31 @@ stores inside its own network rather than something to choose.
 | `FERRISTRACE_AGENTS__AUDIENCE` | unset | Required for agents to be on: an agent token must carry this audience. An issuer without it leaves agents off (a warning is logged at startup, sign-in is unaffected) |
 | `FERRISTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
 | `FERRISTRACE_IMAGE` | built locally | A published image to run instead |
+| `FERRISKEY_DB_PASSWORD` | `ferriskey` | FerrisKey's own database password |
+| `FERRISKEY_ADMIN_USERNAME` | `admin` | FerrisKey's first admin, read once before its first start |
+| `FERRISKEY_ADMIN_PASSWORD` | `admin` | FerrisKey's first admin's password, read once before its first start |
+| `FERRISKEY_ADMIN_EMAIL` | `admin@ferristrace.local` | FerrisKey's first admin's address, read once before its first start |
+| `FERRISKEY_API_BIND` | `127.0.0.1` | Which address FerrisKey's api answers on |
+| `FERRISKEY_WEBAPP_BIND` | `127.0.0.1` | Which address FerrisKey's console answers on |
+
+The four `FERRISTRACE_OIDC__*` settings are not in that table because this
+compose file writes them for you: `ferriskey-init` provisions the bundled
+FerrisKey and drops them into `deploy/ferriskey/ferriskey.env`, which
+`server` reads before `.env`, so a line you write there for a different
+identity provider — see the next section — still wins. `docker compose
+config` and `docker inspect` print that generated client secret in
+plaintext, the same way they already print `POSTGRES_PASSWORD`, so do not
+paste either into a support ticket.
 
 ## Signing in with an identity provider instead
 
-Set the OIDC block in `.env` and local passwords become unnecessary:
+The previous section is what the bundled FerrisKey already does for you.
+Set the OIDC block in `.env` instead to point at a different provider, or
+at a FerrisKey running somewhere else, and it wins over what
+`ferriskey-init` wrote. Before you do, check that realm's client does not
+assert `email_verified` for an address it has not actually verified:
+FerrisTrace trusts that claim to decide whether an unlinked identity may
+adopt an existing account by address, and has no way to check it itself.
 
 ```sh
 FERRISTRACE_OIDC__ISSUER=https://id.example.com

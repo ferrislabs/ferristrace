@@ -246,7 +246,10 @@ fn adapters_of(
         log_store: optional.log_store,
         metric_store: optional.metric_store,
         oidc: optional.oidc,
-        provision: ProvisionPolicy::default(),
+        provision: ProvisionPolicy {
+            auto_provision: true,
+            link_by_email: true,
+        },
     }
 }
 

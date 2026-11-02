@@ -65,11 +65,28 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ferriskey-init:
+        condition: service_completed_successfully
+    # ferriskey answers as itself, not as localhost, in every url its discovery
+    # document carries, so the browser that signs somebody in and this
+    # container that verifies the result have to ask for the same name or the
+    # issuer the server discovered will never match the issuer the token
+    # carries. See the "Signing in" section of the README for the one line
+    # this costs the operator on their own machine.
+    extra_hosts:
+      - "ferriskey:host-gateway"
     # Anything else the server reads — the identity provider, the mail relay,
     # a project management token — is set here rather than named above, so
     # that adding a setting does not mean editing this file. A missing .env is
     # the ordinary case: the stack comes up on a clean machine without one.
+    # The first entry is ferriskey-init's own doing: the realm, client and
+    # redirect uri it provisioned, and the client secret it read back, so
+    # that nobody has to copy anything into .env. The second entry, read
+    # after it, is `.env` itself, so a setting an operator actually writes
+    # there — to point at a FerrisKey running somewhere else — wins.
     env_file:
+      - path: ferriskey/ferriskey.env
+        required: false
       - path: .env
         required: false
     # These win over the file, because they are how the server reaches the
@@ -93,7 +110,112 @@ services:
       timeout: 5s
       retries: 20
 
+  # FerrisKey is the only way in: it holds every account's identity and
+  # issues the token the server trusts. Its own database, below, is
+  # separate from ferristrace's so that FerrisKey can be pointed at a
+  # different one, or left running, independently of this stack.
+  ferriskey-db:
+    image: postgres:18.2
+    environment:
+      POSTGRES_USER: ferriskey
+      POSTGRES_PASSWORD: ${FERRISKEY_DB_PASSWORD:-ferriskey}
+      POSTGRES_DB: ferriskey
+    volumes:
+      - ferriskey-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ferriskey"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Runs FerrisKey's own migrations once and exits; `ferriskey-api` needs
+  # them to already be applied, so it waits on this rather than racing it.
+  # This is FerrisKey's own published compose file's way of doing it, not
+  # ours: the api image doubles as the migration runner, entered through
+  # `sqlx` instead of its own binary.
+  ferriskey-migrations:
+    image: ghcr.io/ferriskey/ferriskey-api:0.10.1
+    entrypoint: ["sqlx"]
+    command: ["migrate", "run", "--source", "/usr/local/src/ferriskey/migrations"]
+    environment:
+      DATABASE_URL: postgresql://ferriskey:${FERRISKEY_DB_PASSWORD:-ferriskey}@ferriskey-db/ferriskey
+    restart: "no"
+    depends_on:
+      ferriskey-db:
+        condition: service_healthy
+
+  ferriskey-api:
+    image: ghcr.io/ferriskey/ferriskey-api:0.10.1
+    environment:
+      DATABASE_HOST: ferriskey-db
+      DATABASE_NAME: ferriskey
+      DATABASE_USER: ferriskey
+      DATABASE_PASSWORD: ${FERRISKEY_DB_PASSWORD:-ferriskey}
+      # Read once, before FerrisKey's first start, to seed its first admin.
+      # Changing them afterwards changes nothing until the database is
+      # dropped: FerrisKey only ever creates that account, never updates it.
+      ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${FERRISKEY_ADMIN_PASSWORD:-admin}
+      ADMIN_EMAIL: ${FERRISKEY_ADMIN_EMAIL:-admin@ferristrace.local}
+      ALLOWED_ORIGINS: ${FERRISKEY_ALLOWED_ORIGINS:-http://localhost:5555}
+      WEBAPP_URL: ${FERRISKEY_WEBAPP_URL:-http://localhost:5555}
+    # Published on the host under its own name, 3333, because that is also
+    # the port `ferriskey-init` and `server` reach it on through the shared
+    # hostname described above `server`. Bound to the loopback, like
+    # `postgres` above, because FerrisKey's first admin defaults to
+    # `admin`/`admin`: an administrator of this realm can mark any address
+    # verified and sign into FerrisTrace as whoever holds it, so that
+    # default must not face a network. Widening FERRISKEY_API_BIND puts it
+    # on the network: set FERRISKEY_ADMIN_PASSWORD first.
+    ports:
+      - "${FERRISKEY_API_BIND:-127.0.0.1}:3333:3333"
+    depends_on:
+      ferriskey-migrations:
+        condition: service_completed_successfully
+
+  # The FerrisKey console, for the operator who wants to look at a realm or
+  # a client rather than trust this file. Nothing in the sign-in path this
+  # stack automates needs it.
+  ferriskey-webapp:
+    image: ghcr.io/ferriskey/ferriskey-webapp:0.10.1
+    environment:
+      API_URL: ${FERRISKEY_WEBAPP_API_URL:-http://localhost:3333}
+    # Bound to the loopback for the same reason as ferriskey-api, above:
+    # this is where that admin password is typed in.
+    ports:
+      - "${FERRISKEY_WEBAPP_BIND:-127.0.0.1}:5555:80"
+    depends_on:
+      - ferriskey-api
+
+  # Creates the realm, the confidential client and its redirect uri through
+  # FerrisKey's admin api, reads back the client secret FerrisKey generated,
+  # and writes the four FERRISTRACE_OIDC__* settings `server` reads into
+  # ferriskey/ferriskey.env — the second env_file entry on `server`, above.
+  # Runs once per `up` and exits; see ferriskey-init.sh for what makes a
+  # second run safe.
+  ferriskey-init:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sh", "/ferriskey-init.sh"]
+    volumes:
+      - ./ferriskey-init.sh:/ferriskey-init.sh:ro
+      - ./ferriskey:/out
+    environment:
+      FERRISKEY_API_URL: http://ferriskey-api:3333
+      ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${FERRISKEY_ADMIN_PASSWORD:-admin}
+      FERRISKEY_REALM: ferristrace
+      FERRISKEY_CLIENT_ID: ferristrace
+      FERRISKEY_REDIRECT_URI: http://localhost:${OTLP_HTTP_PORT:-4318}/auth/oidc/callback
+      # The name the server and the browser both have to resolve to the
+      # published port above; see the extra_hosts comment on `server`.
+      FERRISKEY_ISSUER_BASE_URL: http://ferriskey:3333
+      OUT_FILE: /out/ferriskey.env
+    depends_on:
+      ferriskey-api:
+        condition: service_started
+
 volumes:
   postgres:
   clickhouse:
   redis:
+  ferriskey-db:

@@ -1,9 +1,9 @@
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::Allowance;
 use ferristrace_domain::{
-    ControlPlane, DecompressedBytes, Email, IngestKey, Issuer, OrgName, ProjectName, Projects,
-    ProvisionPolicy, ResolvedIdentity, Scope, SecretHash, Subject, TenantDirectory, TenantId,
-    UnknownKey, testing,
+    AccountDirectory, AuthError, ControlPlane, DecompressedBytes, Email, IngestKey, Issuer,
+    OrgName, ProjectName, Projects, ProvisionPolicy, ResolvedIdentity, Scope, SecretHash, Subject,
+    TenantDirectory, TenantId, UnknownKey, testing,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{
@@ -486,6 +486,194 @@ async fn linking_by_email_joins_an_existing_account() {
 
     assert_eq!(first, second);
     assert_eq!(account_count(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn a_verified_email_adopts_the_account_that_already_holds_it() {
+    let Some(pool) = migrated("identity_email_verified").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
+    let holder = a_federated_identity("https://one.example", "sub-1", "person@example.com");
+
+    let first = accounts
+        .provision(&holder, ProvisionPolicy::default())
+        .await
+        .expect("the first provider");
+
+    let verified = a_federated_identity("https://other.example", "sub-2", "person@example.com");
+    let second = accounts
+        .provision(
+            &verified,
+            ProvisionPolicy {
+                auto_provision: false,
+                link_by_email: true,
+            },
+        )
+        .await
+        .expect("a verified address joins the existing account");
+
+    assert_eq!(first, second);
+    assert_eq!(account_count(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn an_unverified_email_that_somebody_else_holds_is_refused() {
+    let Some(pool) = migrated("identity_email_unverified_taken").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
+    let holder = a_federated_identity("https://one.example", "sub-1", "person@example.com");
+
+    let first = accounts
+        .provision(&holder, ProvisionPolicy::default())
+        .await
+        .expect("the first provider");
+
+    let unverified = ResolvedIdentity {
+        issuer: Issuer::federated("https://other.example").expect("a url"),
+        subject: Subject::try_from("sub-2").expect("a subject"),
+        email: Email::try_from("person@example.com").expect("an address"),
+        email_verified: false,
+    };
+    let refused = accounts
+        .provision(
+            &unverified,
+            ProvisionPolicy {
+                auto_provision: true,
+                link_by_email: true,
+            },
+        )
+        .await;
+
+    assert!(matches!(refused, Err(AccountError::Taken)));
+    assert_eq!(account_count(&pool).await, 1, "no second account appears");
+    assert_eq!(
+        link_count(&pool).await,
+        1,
+        "the refused subject gets no link row"
+    );
+
+    let kept_email: String = sqlx::query("SELECT email AS email FROM accounts WHERE id = $1")
+        .bind(first.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .expect("the first account still exists")
+        .get("email");
+    assert_eq!(
+        kept_email, "person@example.com",
+        "the original holder's row is untouched"
+    );
+}
+
+#[tokio::test]
+async fn an_unverified_email_nobody_holds_still_provisions_its_own_account() {
+    let Some(pool) = migrated("identity_email_unverified_free").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
+    let unverified = ResolvedIdentity {
+        issuer: Issuer::federated("https://id.example").expect("a url"),
+        subject: Subject::try_from("sub-1").expect("a subject"),
+        email: Email::try_from("nobody@example.com").expect("an address"),
+        email_verified: false,
+    };
+
+    let provisioned = accounts
+        .provision(
+            &unverified,
+            ProvisionPolicy {
+                auto_provision: true,
+                link_by_email: true,
+            },
+        )
+        .await
+        .expect("an unverified address with no collision still provisions");
+
+    assert_eq!(account_count(&pool).await, 1);
+    assert_eq!(link_count(&pool).await, 1);
+
+    let kept_email: String = sqlx::query("SELECT email AS email FROM accounts WHERE id = $1")
+        .bind(provisioned.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .expect("the account exists")
+        .get("email");
+    assert_eq!(kept_email, "nobody@example.com");
+}
+
+#[tokio::test]
+async fn a_linked_subject_resolves_even_when_its_address_is_unverified() {
+    let Some(pool) = migrated("identity_linked_unverified").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
+    let identity = a_federated_identity("https://id.example", "sub-1", "person@example.com");
+
+    let first = accounts
+        .provision(&identity, ProvisionPolicy::default())
+        .await
+        .expect("the first sign-in links the subject");
+
+    let unverified = ResolvedIdentity {
+        issuer: identity.issuer.clone(),
+        subject: identity.subject.clone(),
+        email: identity.email.clone(),
+        email_verified: false,
+    };
+    let second = accounts
+        .provision(
+            &unverified,
+            ProvisionPolicy {
+                auto_provision: false,
+                link_by_email: true,
+            },
+        )
+        .await
+        .expect("the linked subject resolves without a fresh email lookup");
+
+    assert_eq!(first, second);
+    assert_eq!(account_count(&pool).await, 1);
+    assert_eq!(link_count(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn a_takeover_attempt_reaches_the_account_directory_as_rejected_not_unavailable() {
+    let Some(pool) = migrated("identity_directory_taken").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let accounts = backend::accounts(&pg);
+    let holder = a_federated_identity("https://one.example", "sub-1", "person@example.com");
+
+    accounts
+        .provision(&holder, ProvisionPolicy::default())
+        .await
+        .expect("the first provider");
+
+    let unverified = ResolvedIdentity {
+        issuer: Issuer::federated("https://other.example").expect("a url"),
+        subject: Subject::try_from("sub-2").expect("a subject"),
+        email: Email::try_from("person@example.com").expect("an address"),
+        email_verified: false,
+    };
+
+    let outcome = AccountDirectory::provision(
+        &accounts,
+        &unverified,
+        ProvisionPolicy {
+            auto_provision: true,
+            link_by_email: true,
+        },
+    )
+    .await;
+
+    assert_eq!(outcome, Err(AuthError::Rejected));
+    assert_eq!(account_count(&pool).await, 1, "no second account appears");
 }
 
 #[tokio::test]

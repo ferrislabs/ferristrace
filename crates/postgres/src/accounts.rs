@@ -99,7 +99,7 @@ impl PostgresAccounts {
         let mut tx = self.tx.lock().await;
         let mut kept = sqlx::Connection::begin(&mut **tx).await?;
 
-        let existing: Option<Uuid> = if policy.link_by_email {
+        let existing: Option<Uuid> = if policy.link_by_email && identity.email_verified {
             sqlx::query("SELECT id AS id FROM accounts WHERE email = $1")
                 .bind(identity.email.as_str())
                 .fetch_optional(&mut *kept)
@@ -117,7 +117,13 @@ impl PostgresAccounts {
                     .bind(account)
                     .bind(identity.email.as_str())
                     .execute(&mut *kept)
-                    .await?;
+                    .await
+                    .map_err(|error| match &error {
+                        sqlx::Error::Database(refusal) if refusal.is_unique_violation() => {
+                            AccountError::Taken
+                        }
+                        _ => AccountError::ControlPlane(error),
+                    })?;
                 account
             }
             None => return Err(AccountError::NotProvisioned),
@@ -145,6 +151,13 @@ impl AccountDirectory for PostgresAccounts {
         match PostgresAccounts::provision(self, identity, policy).await {
             Ok(account) => Ok(account),
             Err(AccountError::NotProvisioned) => Err(AuthError::Rejected),
+            Err(AccountError::Taken) => {
+                tracing::warn!(
+                    email = identity.email.as_str(),
+                    "an unverified identity tried to claim an address someone else already holds"
+                );
+                Err(AuthError::Rejected)
+            }
             Err(error) => {
                 tracing::error!(%error, "the control plane refused to provision an account");
                 Err(AuthError::ProviderUnreachable)
