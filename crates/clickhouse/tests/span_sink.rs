@@ -7,8 +7,8 @@ use ferristrace_clickhouse::{
     open_span_store,
 };
 use ferristrace_domain::{
-    ProjectId, RetentionDays, Scope, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanSink,
-    SpanStatus, TenantId, TraceFilter, TraceId, Window,
+    ProjectId, RetentionDays, Scope, ServiceFilter, Span, SpanEvent, SpanId, SpanKind, SpanReader,
+    SpanSink, SpanStatus, TenantId, TraceFilter, TraceId, Window,
 };
 use ferristrace_infra::{FixedClock, MemorySink};
 use uuid::Uuid;
@@ -960,7 +960,7 @@ async fn the_services_table_measures_only_the_spans_a_service_was_called_on() {
     store.flush().await.expect("the batch commits");
 
     let found = reader
-        .services(tenant, a_wide_window(), None)
+        .services(tenant, &services_in(None))
         .await
         .expect("the services read");
 
@@ -1009,12 +1009,18 @@ async fn the_services_table_never_crosses_tenants() {
     store.flush().await.expect("the batch commits");
 
     let found = reader
-        .services(mine, a_wide_window(), None)
+        .services(mine, &services_in(None))
         .await
         .expect("the services read");
 
     assert_eq!(found.len(), 1);
     assert_eq!(&*found[0].name, "checkout");
+}
+
+fn services_in(project: Option<ProjectId>) -> ServiceFilter {
+    let mut filter = ServiceFilter::over(a_wide_window());
+    filter.project = project;
+    filter
 }
 
 fn a_wide_window() -> Window {
@@ -1114,11 +1120,11 @@ async fn a_project_narrows_what_the_services_table_and_the_trace_list_answer() {
     store.flush().await.expect("the batch commits");
 
     let everything = reader
-        .services(tenant, a_wide_window(), None)
+        .services(tenant, &services_in(None))
         .await
         .expect("a read");
     let only_storefront = reader
-        .services(tenant, a_wide_window(), Some(storefront))
+        .services(tenant, &services_in(Some(storefront)))
         .await
         .expect("a read");
     let mut narrowed = a_wide_filter();
@@ -1161,7 +1167,7 @@ async fn a_project_nobody_wrote_under_answers_nothing_rather_than_everything() {
 
     assert!(
         reader
-            .services(tenant, a_wide_window(), stranger)
+            .services(tenant, &services_in(stranger))
             .await
             .expect("a read")
             .is_empty()

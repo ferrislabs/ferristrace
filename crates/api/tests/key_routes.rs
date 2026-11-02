@@ -13,9 +13,10 @@ use ferristrace_domain::{
     IngestKey, IssueDecisions, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScope,
     KeyScopes, LiveSession, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project,
     ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant, Recorded, Renamed, Scope,
-    ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
-    Span, SpanCursor, SpanPage, SpanPages, SpanReader, Status, StoreError, TeamId, TenantDirectory,
-    TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionId, SessionRoll,
+    SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, Status,
+    StoreError, TeamId, TenantDirectory, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, WhoamiError, Window,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -270,11 +271,30 @@ impl SpanReader for Looked {
     async fn services(
         &self,
         _tenant: TenantId,
-        _window: Window,
-        project: Option<ProjectId>,
+        filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
-        self.note(project);
+        self.note(filter.project);
         Ok(Vec::new())
+    }
+
+    async fn operations(
+        &self,
+        _tenant: TenantId,
+        _service: &str,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceSummary>, StoreError> {
+        self.note(filter.project);
+        Ok(Vec::new())
+    }
+
+    async fn series(
+        &self,
+        _tenant: TenantId,
+        _service: Option<&str>,
+        filter: &ServiceFilter,
+    ) -> Result<ServiceSeries, StoreError> {
+        self.note(filter.project);
+        Ok(ServiceSeries::default())
     }
 
     async fn traces(
@@ -597,7 +617,7 @@ async fn a_read_key_is_refused_by_ingest_and_an_ingest_key_by_the_api() {
 }
 
 #[tokio::test]
-async fn a_read_key_reads_the_six_read_routes() {
+async fn a_read_key_reads_the_nine_read_routes() {
     let harness = Harness::new();
     let secret = secret_of(
         &harness
@@ -613,6 +633,9 @@ async fn a_read_key_reads_the_six_read_routes() {
         format!("/api/orgs/{org}/issues?from=1&to=2"),
         format!("/api/orgs/{org}/issues/{PRINT}?from=1&to=2"),
         format!("/api/orgs/{org}/issues/{PRINT}/occurrences?from=1&to=2&project={project}"),
+        format!("/api/orgs/{org}/services/checkout/operations?from=1&to=2"),
+        format!("/api/orgs/{org}/services/checkout/series?from=1&to=2"),
+        format!("/api/orgs/{org}/series?from=1&to=2"),
     ];
 
     for route in routes {
@@ -623,7 +646,7 @@ async fn a_read_key_reads_the_six_read_routes() {
         assert_ne!(status, StatusCode::UNAUTHORIZED, "{route}: {body}");
         assert_ne!(status, StatusCode::FORBIDDEN, "{route}: {body}");
     }
-    assert_eq!(harness.looked.asked().len(), 6);
+    assert_eq!(harness.looked.asked().len(), 9);
 }
 
 #[tokio::test]
@@ -905,5 +928,46 @@ async fn a_bad_name_bad_scopes_or_a_foreign_project_are_refused() {
             .list(TenantId::new(Uuid::from_u128(MINE)))
             .await,
         Ok(Vec::new())
+    );
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_reads_operations_and_series_of_its_project_only() {
+    let harness = Harness::new();
+    let secret = secret_of(
+        &harness
+            .issued(&format!(
+                r#"{{"name":"storefront","scopes":["read"],"project":"{}"}}"#,
+                id(STOREFRONT)
+            ))
+            .await,
+    );
+    let org = id(MINE);
+    let elsewhere = id(ELSEWHERE);
+    let mut statuses = Vec::new();
+    for route in [
+        format!("/api/orgs/{org}/services/checkout/operations?from=1&to=2"),
+        format!("/api/orgs/{org}/series?from=1&to=2"),
+        format!("/api/orgs/{org}/services/checkout/operations?from=1&to=2&project={elsewhere}"),
+        format!("/api/orgs/{org}/services/checkout/series?from=1&to=2&project={elsewhere}"),
+    ] {
+        let (status, _) = harness
+            .served(OrgRole::Member, as_key(Method::GET, &route, &secret, None))
+            .await;
+        statuses.push(status);
+    }
+
+    assert_eq!(
+        statuses,
+        vec![
+            StatusCode::OK,
+            StatusCode::OK,
+            StatusCode::NOT_FOUND,
+            StatusCode::NOT_FOUND
+        ]
+    );
+    assert_eq!(
+        harness.looked.asked(),
+        vec![Some(a_project(STOREFRONT)), Some(a_project(STOREFRONT))]
     );
 }

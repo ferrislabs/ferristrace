@@ -1110,17 +1110,22 @@ dependencies = [
 name = "ferristrace-clickhouse"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clickhouse",
+ "ferristrace-api",
+ "ferristrace-application",
  "ferristrace-domain",
  "ferristrace-infra",
  "ferristrace-otlp",
  "hex",
  "opentelemetry-proto",
  "serde",
+ "serde_json",
  "serde_repr",
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]

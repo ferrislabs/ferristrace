@@ -8,4 +8,7 @@ mod value_objects;
 pub use errors::{BadWindow, ExploreError};
 pub use explore_service::Explore;
 pub use ports::SpanReader;
-pub use value_objects::{ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window};
+pub use value_objects::{
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, TraceFilter, TraceOrder,
+    TraceSummary, Window,
+};

@@ -19,11 +19,16 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 clickhouse = { workspace = true, features = ["test-util"] }
+ferristrace-api.workspace = true
+ferristrace-application = { workspace = true, features = ["testing"] }
 ferristrace-domain = { workspace = true, features = ["testing"] }
 ferristrace-otlp.workspace = true
 opentelemetry-proto.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tower = { workspace = true, features = ["util"] }
 
 [lints]
 workspace = true

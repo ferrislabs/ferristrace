@@ -4,7 +4,6 @@ use ferristrace_domain::{
     Exemplar, HistogramPoint, Metric, MetricData, MetricPoint, SpanId, Temporality, TraceId,
 };
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::common::v1::KeyValue;
 use opentelemetry_proto::tonic::metrics::v1::exemplar::Value as ExemplarValue;
 use opentelemetry_proto::tonic::metrics::v1::metric::Data;
 use opentelemetry_proto::tonic::metrics::v1::number_data_point::Value as NumberValue;
@@ -132,7 +131,7 @@ fn numbers(
         kept.push(MetricPoint {
             time_unix_nanos: point.time_unix_nano,
             value: number_of(value),
-            attributes: merged(resource, point.attributes),
+            attributes: attributes::merged(resource, point.attributes),
             exemplars: exemplars(point.exemplars)?,
         });
     }
@@ -159,15 +158,9 @@ fn histogram_point(
         max: point.max,
         bounds: point.explicit_bounds,
         counts: point.bucket_counts,
-        attributes: merged(resource, point.attributes),
+        attributes: attributes::merged(resource, point.attributes),
         exemplars: exemplars(point.exemplars)?,
     })
-}
-
-fn merged(resource: &Attributes, pairs: Vec<KeyValue>) -> Attributes {
-    let mut attributes = resource.clone();
-    attributes.extend(attributes::collect(pairs));
-    attributes
 }
 
 #[allow(clippy::cast_precision_loss)]
