@@ -19,6 +19,7 @@ import { useMembers } from '@/data/members'
 import { stamp } from '@/lib/format'
 import { Link, useParams } from '@/lib/router'
 import { labelOf } from '@/components/ft/MetricChart'
+import { PostmortemSection } from './PostmortemSection'
 
 const KIND_ICON: Record<AttachmentKind, typeof Waypoints> = { trace: Waypoints, logs: ScrollText, metric: LineChart }
 
@@ -119,6 +120,7 @@ function Opened({ incident }: { incident: Dossier }) {
           )}
         </section>
       </div>
+      <PostmortemSection incident={incident} />
     </>
   )
 }

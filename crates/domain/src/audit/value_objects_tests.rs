@@ -66,6 +66,10 @@ fn the_spellings_are_stable_and_dotted() {
             "override.deleted",
             "page.acknowledged",
             "page.escalated",
+            "postmortem.drafted",
+            "postmortem.edited",
+            "postmortem.published",
+            "postmortem.unpublished",
         ]
     );
 }

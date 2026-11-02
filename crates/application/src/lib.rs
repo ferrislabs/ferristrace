@@ -15,6 +15,7 @@ mod logs;
 mod metrics;
 mod oncall;
 mod organisation;
+mod postmortems;
 mod profile;
 mod provisioning;
 pub mod registry;

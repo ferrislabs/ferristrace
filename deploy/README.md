@@ -360,6 +360,24 @@ are audited as `schedule.created`, `schedule.updated`, `schedule.deleted`,
 `override.created`, `override.deleted`, `page.acknowledged`, and
 `page.escalated` by the system.
 
+## Postmortems
+
+An incident carries at most one postmortem, a markdown document of at most
+200 KB. `POST /api/orgs/{org}/incidents/{id}/postmortem` drafts it from the
+incident, deterministically: a summary placeholder, the impact window (opened
+to resolved, in minutes, or "still open"), severity and owner, one timeline
+row per entry in UTC, the alerts that fired, who was paged and who
+acknowledged, the attachments as links into the app, and an empty action items
+list. Members draft, edit (`PATCH` with `{"body": "..."}`) and re-draft an
+untouched draft; once the body was edited, re-drafting answers `409` unless an
+administrator passes `?force=true`. Owners and administrators publish
+(`POST .../postmortem/publish`) and unpublish (`.../unpublish`); a published
+postmortem is read-only (`409` on edits and re-drafts) until unpublished. Read
+keys read (`GET .../postmortem`, `GET /api/orgs/{org}/postmortems`) and never
+write. Writes are audited as `postmortem.drafted`, `postmortem.edited`,
+`postmortem.published` and `postmortem.unpublished`. The incident page of the
+app shows the editor, with a preview that renders markdown without raw HTML.
+
 ## Profile photos
 
 Without a bucket, everybody is shown under their initials, taken from the

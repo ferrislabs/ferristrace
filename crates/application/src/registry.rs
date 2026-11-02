@@ -4,7 +4,8 @@ use ferristrace_domain::{
     AccountDirectory, Accounts, AlertChannels, AlertDuty, AlertEvents, AlertOutbox, AlertRules,
     AlertStates, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource, FactorStore, Gate,
     IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships, OidcFlows, Orgs,
-    Pages, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads, UsageHistory,
+    Pages, Postmortems, Projects, ResetStore, Roll, Schedules, SessionRoll, SessionStore, Squads,
+    UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +79,8 @@ pub mod domain {
     pub struct Orgs;
     #[derive(Debug)]
     pub struct Pages;
+    #[derive(Debug)]
+    pub struct Postmortems;
     #[derive(Debug)]
     pub struct Projects;
     #[derive(Debug)]
@@ -288,11 +291,19 @@ pub trait OncallRepos: IncidentRepos + RepoFor<domain::Teams, Repo: Squads> {}
 
 impl<R> OncallRepos for R where R: IncidentRepos + RepoFor<domain::Teams, Repo: Squads> {}
 
+pub trait PostmortemRepos: IncidentRepos + RepoFor<domain::Postmortems, Repo: Postmortems> {}
+
+impl<R> PostmortemRepos for R where
+    R: IncidentRepos + RepoFor<domain::Postmortems, Repo: Postmortems>
+{
+}
+
 pub trait Repositories:
     ReadRepos
     + AlertRepos
     + IncidentRepos
     + OncallRepos
+    + PostmortemRepos
     + AuditRepos
     + ExportRepos
     + AccessRepos
@@ -312,6 +323,7 @@ impl<R> Repositories for R where
         + AlertRepos
         + IncidentRepos
         + OncallRepos
+        + PostmortemRepos
         + AuditRepos
         + ExportRepos
         + AccessRepos

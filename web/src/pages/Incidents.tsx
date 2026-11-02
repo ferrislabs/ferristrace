@@ -18,6 +18,7 @@ import {
   type Incident, type IncidentScope, type IncidentSeverity, type IncidentStatus,
 } from '@/data/incidents'
 import { useSchedules } from '@/data/oncall'
+import { usePostmortemStates, type PostmortemStatus } from '@/data/postmortems'
 import { useProjects } from '@/data/projects'
 import { stamp } from '@/lib/format'
 import { Link, useNavigate } from '@/lib/router'
@@ -35,6 +36,7 @@ export function Incidents() {
   const [declaring, setDeclaring] = useState(false)
   const { incidents, failed, nothing } = useIncidents(scope)
   const projects = useProjects()
+  const postmortems = usePostmortemStates()
   const mayDeclare = Boolean(active)
   const projectName = (id: string | null) => (id === null ? 'All projects' : projects.find((one) => one.id === id)?.name ?? id)
   const shown = (incidents ?? []).filter((one) => (severity === '' || one.severity === severity) && (statuses.length === 0 || statuses.includes(one.status)))
@@ -75,7 +77,7 @@ export function Incidents() {
             <thead><tr><Th>Incident</Th><Th className="w-[80px]">Severity</Th><Th className="w-[130px]">Status</Th><Th className="w-[180px]">Owner</Th><Th className="w-[140px]">Project</Th><Th className="w-[170px]">Opened</Th></tr></thead>
             <tbody>
               {shown.length === 0 ? <Tr><Td colSpan={6} className="text-muted-foreground">No incident matches these filters.</Td></Tr> : null}
-              {shown.map((incident) => <IncidentRow key={incident.id} incident={incident} project={projectName(incident.project)} />)}
+              {shown.map((incident) => <IncidentRow key={incident.id} incident={incident} project={projectName(incident.project)} postmortem={postmortems.get(incident.id)} />)}
             </tbody>
           </Table>
         </Card>
@@ -86,7 +88,7 @@ export function Incidents() {
   )
 }
 
-function IncidentRow({ incident, project }: { incident: Incident; project: string }) {
+function IncidentRow({ incident, project, postmortem }: { incident: Incident; project: string; postmortem?: PostmortemStatus }) {
   return (
     <Tr>
       <Td className="whitespace-normal py-2">
@@ -95,6 +97,7 @@ function IncidentRow({ incident, project }: { incident: Incident; project: strin
           <span className="text-caption text-muted-foreground">
             {incident.alert ? <>From the alert <span className="font-semibold">{incident.alert.name}</span></> : 'Declared by hand'}
             {incident.public ? ' · public' : ''}
+            {postmortem ? <> · <Link to={`/incidents/${incident.id}`} className="font-semibold">Postmortem ({postmortem})</Link></> : null}
           </span>
         </div>
       </Td>
