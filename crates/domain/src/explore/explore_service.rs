@@ -2,12 +2,15 @@ use super::errors::ExploreError;
 use super::ports::SpanReader;
 use std::borrow::Cow;
 
+use super::value_objects::Window;
 use super::value_objects::{
     ServiceFilter, ServiceSeries, ServiceSummary, TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
+use crate::catalogue::ProjectId;
 use crate::identity::SessionStore;
 use crate::organisation::Memberships;
+use crate::placement::{PlacementReader, Placements};
 use crate::telemetry::{Span, TenantId, TraceId};
 
 #[derive(Debug)]
@@ -101,5 +104,24 @@ where
     ) -> Result<Vec<Span>, ExploreError> {
         let grant = self.readers.grant(who, org).await?;
         Ok(self.reader.trace(org, id, grant.project).await?)
+    }
+}
+
+impl<S, G, K, R> Explore<S, G, K, R>
+where
+    S: SessionStore,
+    G: Memberships,
+    K: ApiKeys,
+    R: PlacementReader,
+{
+    pub async fn placements(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Placements, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(project)?;
+        Ok(self.reader.placements(org, window, project).await?.capped())
     }
 }

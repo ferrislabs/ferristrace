@@ -90,6 +90,7 @@ fn checkout(channels: Vec<ferristrace_domain::ChannelId>) -> Definition {
             operation: None,
             environment: Some("prod".into()),
             measure: TraceMeasure::ErrorRate,
+            placement: ferristrace_domain::Placement::default(),
         }),
         condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
         window_secs: 300,

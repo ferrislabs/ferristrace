@@ -20,6 +20,8 @@ import {
   type MetricQuery,
 } from '@/data/metrics'
 import { ApiError, because } from '@/auth/client'
+import { usePlacement } from '@/data/placement'
+import { PlacementPicker } from '@/components/ft/Placement'
 import { stamp } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
@@ -93,8 +95,10 @@ export function Metrics() {
   const [key, setKey] = useState('')
   const settled = useSettled(typed)
 
+  const { placement, place } = usePlacement()
   const apply = (part: Partial<Picked>) => {
-    void navigate({ to: '/metrics' as never, search: { f: encode({ ...picked, ...part }) } as never, replace: true })
+    const f = encode({ ...picked, ...part })
+    void navigate({ to: '/metrics' as never, search: ((was: Record<string, unknown>) => ({ ...was, f })) as never, replace: true })
   }
 
   useEffect(() => {
@@ -114,7 +118,7 @@ export function Metrics() {
   const query: MetricQuery | null = picked.name && agg
     ? { name: picked.name, agg, groupBy: picked.groupBy, rangeMs: picked.rangeMs, fromMs: picked.fromMs, toMs: picked.toMs }
     : null
-  const series = useMetricSeries(query)
+  const series = useMetricSeries(query, placement)
 
   const addKey = () => {
     const value = key.trim()
@@ -186,6 +190,7 @@ export function Metrics() {
               </form>
               {picked.groupBy.map((k) => <Chip key={k} label={`Remove group by ${k}`} onRemove={() => apply({ groupBy: picked.groupBy.filter((x) => x !== k) })}>by {k}</Chip>)}
             </div>
+            <PlacementPicker placement={placement} onChange={place} windowMs={isPinned(picked) ? (picked.toMs as number) - (picked.fromMs as number) : picked.rangeMs} />
             {series.failed ? (
               status === 404 ? (
                 <EmptyState title="Unknown metric">No metric named <span className="font-mono">{picked.name}</span> is known to this project.</EmptyState>

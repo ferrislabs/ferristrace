@@ -88,11 +88,10 @@ async fn traced<R: SpanReader>(
     traces: &TraceSignal,
     window: Window,
 ) -> Result<Option<f64>, ProbeError> {
-    let filter = ServiceFilter {
-        window,
-        project,
-        environment: traces.environment.clone(),
-    };
+    let mut filter = ServiceFilter::over(window);
+    filter.project = project;
+    filter.environment.clone_from(&traces.environment);
+    filter.placement.clone_from(&traces.placement);
     let measured = match (&traces.service, &traces.operation) {
         (Some(service), Some(operation)) => reader
             .operations(org, service, &filter)
@@ -147,6 +146,7 @@ async fn logged<L: LogReader>(
     query.severities.clone_from(&logs.severities);
     query.text.clone_from(&logs.text);
     query.attributes.clone_from(&logs.attributes);
+    query.placement.clone_from(&logs.placement);
     query.project = project;
     let one = Buckets::try_from(1).map_err(|_| ProbeError::Unreachable)?;
     let count: u64 = reader

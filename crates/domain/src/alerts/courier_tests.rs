@@ -53,6 +53,7 @@ async fn a_firing(ledger: &AlertLedger, channels: &[ChannelId]) {
                     operation: None,
                     environment: None,
                     measure: TraceMeasure::Count,
+                    placement: crate::placement::Placement::default(),
                 }),
                 condition: Condition::new(Comparison::Above, 5.0).expect("a threshold"),
                 window_secs: 60,

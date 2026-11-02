@@ -316,3 +316,86 @@ async fn the_metric_tables_lead_with_the_tenant_and_expire_each_row() {
     assert_eq!(kinds, "Enum8(\'gauge\' = 1, \'sum\' = 2)");
     assert_eq!(counts, "Array(UInt64)");
 }
+
+const PLACED: [&str; 4] = ["spans", "logs", "metric_points", "metric_histograms"];
+
+async fn placement_columns(client: &Client, table: &str) -> String {
+    one_text(
+        client,
+        &format!(
+            "SELECT arrayStringConcat(groupArray(concat(name, ':', default_kind)), ',') AS value \
+             FROM (SELECT name, default_kind FROM system.columns \
+                   WHERE database = currentDatabase() AND table = '{table}' \
+                     AND name LIKE 'k8s\\_%' ORDER BY name)"
+        ),
+    )
+    .await
+}
+
+async fn placement_indexes(client: &Client, table: &str) -> String {
+    one_text(
+        client,
+        &format!(
+            "SELECT arrayStringConcat(groupArray(concat(expr, ':', type)), ',') AS value \
+             FROM (SELECT expr, type FROM system.data_skipping_indices \
+                   WHERE database = currentDatabase() AND table = '{table}' \
+                     AND expr LIKE 'k8s\\_%' ORDER BY expr)"
+        ),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn every_signal_table_materializes_the_placement_and_indexes_pod_node_and_workload() {
+    let Some(client) = fresh_database("ferristrace_migrate_placement").await else {
+        return;
+    };
+    ClickhouseMigrator::new(client.clone())
+        .up()
+        .await
+        .expect("the migrations apply");
+
+    for table in PLACED {
+        assert_eq!(
+            placement_columns(&client, table).await,
+            "k8s_cluster:MATERIALIZED,k8s_namespace:MATERIALIZED,k8s_node:MATERIALIZED,\
+             k8s_pod:MATERIALIZED,k8s_workload:MATERIALIZED",
+            "{table}"
+        );
+        assert_eq!(
+            placement_indexes(&client, table).await,
+            "k8s_node:bloom_filter,k8s_pod:bloom_filter,k8s_workload:bloom_filter",
+            "{table}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_placement_migration_reverts_alone_and_applies_again() {
+    let Some(client) = fresh_database("ferristrace_migrate_placement_cycle").await else {
+        return;
+    };
+    let migrator = ClickhouseMigrator::new(client.clone());
+    let placement = MIGRATIONS
+        .iter()
+        .find(|migration| migration.name == "placement")
+        .expect("a placement migration")
+        .version;
+
+    migrator.up().await.expect("the first up");
+    let reverted = migrator
+        .down_to(placement - 1)
+        .await
+        .expect("the placement down");
+    let mut left = Vec::new();
+    for table in PLACED {
+        left.push(placement_columns(&client, table).await);
+        left.push(placement_indexes(&client, table).await);
+    }
+    let again = migrator.up().await.expect("the second up");
+
+    assert_eq!(reverted, vec![placement]);
+    assert!(left.iter().all(String::is_empty), "{left:?}");
+    assert_eq!(again, vec![placement]);
+    assert!(!placement_columns(&client, "logs").await.is_empty());
+}

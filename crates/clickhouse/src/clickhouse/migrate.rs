@@ -60,6 +60,12 @@ pub const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../migrations/clickhouse/0008_metrics.up.sql"),
         down: include_str!("../../migrations/clickhouse/0008_metrics.down.sql"),
     },
+    Migration {
+        version: 9,
+        name: "placement",
+        up: include_str!("../../migrations/clickhouse/0009_placement.up.sql"),
+        down: include_str!("../../migrations/clickhouse/0009_placement.down.sql"),
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -248,6 +254,41 @@ mod tests {
             assert!(table.contains("TTL expire_at DELETE"), "{table}");
         }
         assert!(tables[3].contains("ReplacingMergeTree(last_seen)"), "{up}");
+    }
+
+    #[test]
+    fn the_placement_reads_the_resource_of_a_log_and_the_attributes_of_everything_else() {
+        let up = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == "placement")
+            .expect("a placement migration")
+            .up;
+        let altered: Vec<&str> = statements(up).collect();
+
+        assert_eq!(altered.len(), 4, "{up}");
+        for statement in &altered {
+            let map = if statement.starts_with("ALTER TABLE logs") {
+                "resource"
+            } else {
+                "attributes"
+            };
+            for key in [
+                "k8s.cluster.name",
+                "k8s.namespace.name",
+                "k8s.pod.name",
+                "k8s.node.name",
+                "k8s.deployment.name",
+                "k8s.statefulset.name",
+                "k8s.daemonset.name",
+                "k8s.cronjob.name",
+                "k8s.job.name",
+            ] {
+                assert!(
+                    statement.contains(&format!("{map}['{key}']")),
+                    "{statement}"
+                );
+            }
+        }
     }
 
     #[test]

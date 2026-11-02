@@ -9,6 +9,7 @@ use super::errors::{BadChannel, BadRule};
 use crate::identity::Email;
 use crate::metrics::{Aggregation, MAX_GROUP_BY};
 use crate::oncall::ScheduleId;
+use crate::placement::Placement;
 use crate::telemetry::Severity;
 
 pub const MIN_WINDOW_SECS: u64 = 60;
@@ -252,6 +253,7 @@ pub struct TraceSignal {
     pub operation: Option<Box<str>>,
     pub environment: Option<Box<str>>,
     pub measure: TraceMeasure,
+    pub placement: Placement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,6 +262,7 @@ pub struct LogSignal {
     pub severities: Vec<Severity>,
     pub text: Option<Box<str>>,
     pub attributes: Vec<(Box<str>, Box<str>)>,
+    pub placement: Placement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -135,6 +135,7 @@ fn checkout() -> Signal {
         operation: None,
         environment: None,
         measure: TraceMeasure::ErrorRate,
+        placement: crate::placement::Placement::default(),
     })
 }
 

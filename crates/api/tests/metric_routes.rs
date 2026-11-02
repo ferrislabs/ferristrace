@@ -622,6 +622,14 @@ async fn malformed_parameters_are_refused_before_the_store_is_asked() {
             StatusCode::BAD_REQUEST,
         ),
         (catalogue_of(MINE, "&project=nope"), StatusCode::BAD_REQUEST),
+        (
+            series_of(MINE, ENCODED, "&pod=a%20b"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            series_of(MINE, ENCODED, "&workload=replicaset:api"),
+            StatusCode::BAD_REQUEST,
+        ),
     ];
 
     for (uri, expected) in cases {
@@ -655,4 +663,44 @@ async fn the_metric_routes_only_read() {
 
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert!(shelf.listed().is_empty());
+}
+
+#[tokio::test]
+async fn a_placement_reaches_the_metric_store() {
+    let shelf = Arc::new(Shelf::default());
+    let uri = series_of(
+        MINE,
+        ENCODED,
+        "&namespace=shop&workload=deployment:checkout&pod=checkout-1",
+    );
+
+    let (status, body) = served(Some(Arc::clone(&shelf)), looking(&uri, &Who::Session)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let charted = shelf.charted();
+    let placement = &charted[0].3.placement;
+    assert_eq!(
+        placement
+            .namespace
+            .as_ref()
+            .map(ferristrace_domain::PlacementName::as_str),
+        Some("shop")
+    );
+    assert_eq!(
+        placement
+            .workload
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("deployment:checkout")
+    );
+    assert_eq!(
+        placement
+            .pod
+            .as_ref()
+            .map(ferristrace_domain::PlacementName::as_str),
+        Some("checkout-1")
+    );
+    assert_eq!(placement.cluster, None);
+    assert_eq!(placement.node, None);
 }

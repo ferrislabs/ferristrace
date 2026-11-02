@@ -10,6 +10,8 @@ import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, RANGES, useTraces, type Order, type Sift } from '@/data/traces'
 import { useServiceNames } from '@/data/services'
+import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
+import { PlacementPicker } from '@/components/ft/Placement'
 import { because } from '@/auth/client'
 import { shortId } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
@@ -23,11 +25,12 @@ export function Traces() {
   const [cursor, setCursor] = useState(0)
   const name = useSettled(typed)
   const asked = useMemo(() => ({ ...sift, name }), [sift, name])
-  const { rows, loading, failed } = useTraces(asked)
+  const { placement, place } = usePlacement()
+  const { rows, loading, failed } = useTraces(asked, placement)
   const { names, unreachable } = useServiceNames(sift.rangeMs)
   const change = (part: Partial<Sift>) => { setSift((was) => ({ ...was, ...part })); setCursor(0) }
-  const clear = () => { setTyped(''); setSift((was) => ({ ...ANY, rangeMs: was.rangeMs, order: was.order, limit: was.limit })) }
-  const sifting = Boolean(sift.service || typed || sift.errorsOnly || sift.atLeastMs)
+  const clear = () => { setTyped(''); setSift((was) => ({ ...ANY, rangeMs: was.rangeMs, order: was.order, limit: was.limit })); place(NOWHERE) }
+  const sifting = Boolean(sift.service || typed || sift.errorsOnly || sift.atLeastMs || isPlaced(placement))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -71,12 +74,13 @@ export function Traces() {
         <Switch checked={sift.errorsOnly} onCheckedChange={(on) => change({ errorsOnly: on })} label="Errors only" />
         <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
       </div>
+      <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
       {unreachable ? <p className="m-0 text-caption text-muted-foreground">{because(unreachable, 'The services could not be listed, so that filter is empty')}</p> : null}
       {failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
       ) : rows.length === 0 ? (
         <EmptyState title={loading ? 'Reading the traces…' : sifting ? 'No traces match' : 'No traces in this window'} actions={sifting ? <Button size="sm" onClick={clear}>Clear filters</Button> : null}>
-          {loading ? 'Asking the span store.' : sifting ? 'Try a shorter span name, a wider window, or no service.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
+          {loading ? 'Asking the span store.' : sifting ? 'Try a shorter span name, a wider window, no service or no placement.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
         </EmptyState>
       ) : (
         <div className="-mx-4 overflow-x-auto border-t md:-mx-5">

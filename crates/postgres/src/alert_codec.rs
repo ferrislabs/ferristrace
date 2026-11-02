@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-    Labels, LogSignal, MetricSignal, NoDataPolicy, ScheduleId, Severity, Signal, TraceMeasure,
-    TraceSignal,
+    Labels, LogSignal, MetricSignal, NoDataPolicy, Placement, PlacementName, ScheduleId, Severity,
+    Signal, TraceMeasure, TraceSignal, Workload,
 };
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -24,6 +24,55 @@ fn object<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Value {
     )
 }
 
+fn placement_of(placement: &Placement) -> Value {
+    let mut held = Map::new();
+    let named = [
+        (
+            "cluster",
+            placement.cluster.as_ref().map(ToString::to_string),
+        ),
+        (
+            "namespace",
+            placement.namespace.as_ref().map(ToString::to_string),
+        ),
+        (
+            "workload",
+            placement.workload.as_ref().map(ToString::to_string),
+        ),
+        ("pod", placement.pod.as_ref().map(ToString::to_string)),
+        ("node", placement.node.as_ref().map(ToString::to_string)),
+    ];
+    for (key, value) in named {
+        if let Some(value) = value {
+            held.insert(key.to_owned(), Value::String(value));
+        }
+    }
+    Value::Object(held)
+}
+
+fn decode_placement(value: &Value) -> Option<Placement> {
+    let Some(held) = value.get("placement").filter(|held| !held.is_null()) else {
+        return Some(Placement::default());
+    };
+    let name = |key: &str| -> Option<Option<PlacementName>> {
+        match held.get(key) {
+            None | Some(Value::Null) => Some(None),
+            Some(text) => PlacementName::try_from(text.as_str()?).ok().map(Some),
+        }
+    };
+    let workload = match held.get("workload") {
+        None | Some(Value::Null) => None,
+        Some(text) => Some(Workload::try_from(text.as_str()?).ok()?),
+    };
+    Some(Placement {
+        cluster: name("cluster")?,
+        namespace: name("namespace")?,
+        workload,
+        pod: name("pod")?,
+        node: name("node")?,
+    })
+}
+
 fn signal_of(signal: &Signal) -> Value {
     match signal {
         Signal::Traces(traces) => json!({
@@ -32,6 +81,7 @@ fn signal_of(signal: &Signal) -> Value {
             "operation": text(traces.operation.as_deref()),
             "environment": text(traces.environment.as_deref()),
             "measure": traces.measure.as_str(),
+            "placement": placement_of(&traces.placement),
         }),
         Signal::Logs(logs) => json!({
             "kind": "logs",
@@ -45,6 +95,7 @@ fn signal_of(signal: &Signal) -> Value {
                     .collect()
             ),
             "measure": "count",
+            "placement": placement_of(&logs.placement),
         }),
         Signal::Metrics(metric) => json!({
             "kind": "metrics",
@@ -115,6 +166,7 @@ fn decode_signal(value: &Value) -> Option<Signal> {
             operation: string(value, "operation"),
             environment: string(value, "environment"),
             measure: TraceMeasure::parse(value.get("measure")?.as_str()?)?,
+            placement: decode_placement(value)?,
         })),
         "logs" => Some(Signal::Logs(LogSignal {
             services: strings(value, "services")?,
@@ -130,6 +182,7 @@ fn decode_signal(value: &Value) -> Option<Signal> {
                         .map(|(key, held)| (key.into(), held.into()))
                 })
                 .collect::<Option<Vec<_>>>()?,
+            placement: decode_placement(value)?,
         })),
         "metrics" => Some(Signal::Metrics(MetricSignal {
             name: string(value, "name")?,
@@ -193,7 +246,46 @@ mod tests {
     };
     use uuid::Uuid;
 
+    use ferristrace_domain::{Placement, PlacementName, Workload};
+
     use super::{decode, encode, encode_labels, labels_of};
+
+    fn placed() -> Placement {
+        Placement {
+            cluster: Some(PlacementName::try_from("prod").expect("a cluster")),
+            namespace: Some(PlacementName::try_from("shop").expect("a namespace")),
+            workload: Some(Workload::try_from("deployment:checkout").expect("a workload")),
+            pod: Some(PlacementName::try_from("checkout-1").expect("a pod")),
+            node: None,
+        }
+    }
+
+    #[test]
+    fn a_signal_kept_before_placements_existed_reads_every_placement() {
+        for signal in [
+            r#"{"kind":"traces","service":"checkout","operation":null,"environment":null,"measure":"count"}"#,
+            r#"{"kind":"logs","services":[],"severities":["error"],"q":null,"attrs":[],"measure":"count"}"#,
+        ] {
+            let stored = format!(
+                r#"{{"signal":{signal},"condition":{{"op":">","threshold":1.0}},"window_s":300,"pending_s":0,"severity":"warning","no_data":"ok","channels":[]}}"#
+            );
+
+            let read = decode(&stored).expect("an old definition reads");
+
+            match read.signal() {
+                Signal::Traces(traces) => assert!(traces.placement.is_empty()),
+                Signal::Logs(logs) => assert!(logs.placement.is_empty()),
+                Signal::Metrics(_) => panic!("a metric signal from a trace or log one"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_placement_kept_in_a_form_no_longer_valid_leaves_the_definition_unreadable() {
+        let stored = r#"{"signal":{"kind":"traces","measure":"count","placement":{"pod":"a b"}},"condition":{"op":">","threshold":1.0},"window_s":300,"pending_s":0,"severity":"warning","no_data":"ok","channels":[]}"#;
+
+        assert_eq!(decode(stored), None);
+    }
 
     fn kept(signal: Signal) -> Definition {
         Definition::new(DefinitionParts {
@@ -217,6 +309,7 @@ mod tests {
                 operation: None,
                 environment: None,
                 measure: TraceMeasure::Count,
+                placement: Placement::default(),
             }))))
             .expect("json");
         stored.as_object_mut().expect("an object").remove("page");
@@ -235,12 +328,17 @@ mod tests {
                 operation: Some("POST /pay".into()),
                 environment: None,
                 measure: TraceMeasure::P99,
+                placement: placed(),
             }),
             Signal::Logs(LogSignal {
                 services: vec!["api".into()],
                 severities: vec![Severity::Error, Severity::Fatal],
                 text: Some("timeout".into()),
                 attributes: vec![("region".into(), "eu=west".into())],
+                placement: Placement {
+                    node: Some(PlacementName::try_from("node-a").expect("a node")),
+                    ..Placement::default()
+                },
             }),
             Signal::Metrics(MetricSignal {
                 name: "queue.depth".into(),

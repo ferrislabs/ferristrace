@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
+import { NOWHERE, placed, type Placement } from '@/data/placement'
 
 export type MetricKind = 'gauge' | 'sum' | 'histogram'
 
@@ -74,11 +75,11 @@ export function useMetricCatalogue(q: string, projectOverride?: string) {
   return { metrics: found.data?.metrics ?? [], loading: found.isFetching, pending: found.isPending, failed: found.error }
 }
 
-export function useMetricSeries(query: MetricQuery | null) {
+export function useMetricSeries(query: MetricQuery | null, placement: Placement = NOWHERE) {
   const { active } = useOrganisations()
   const { project } = useScope()
   const found = useQuery({
-    queryKey: ['metric-series', active?.org, project, query],
+    queryKey: ['metric-series', active?.org, project, query, placement],
     enabled: Boolean(active) && query !== null,
     staleTime: FRESH_MS,
     retry: false,
@@ -89,6 +90,7 @@ export function useMetricSeries(query: MetricQuery | null) {
       const params = new URLSearchParams({ from: String(from), to: String(to), agg: q.agg })
       for (const key of q.groupBy) params.append('group_by', key)
       if (project) params.set('project', project)
+      placed(params, placement)
       return json<MetricSeriesResult>(
         await get(`/api/orgs/${active?.org}/metrics/${encodeURIComponent(q.name)}/series?${params.toString()}`),
       )

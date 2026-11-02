@@ -278,6 +278,17 @@ impl SpanPages for Shelf {
     }
 }
 
+impl ferristrace_domain::PlacementReader for Shelf {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: ferristrace_domain::Window,
+        _project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Placements, StoreError> {
+        Ok(ferristrace_domain::Placements::default())
+    }
+}
+
 impl SpanReader for Shelf {
     async fn services(
         &self,

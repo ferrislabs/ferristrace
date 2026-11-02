@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
+use crate::placement::{Misplaced, Placed, PlacementBody};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -39,6 +40,16 @@ pub struct Asked {
     order: Order,
     #[serde(default)]
     limit: Option<u32>,
+    #[serde(default)]
+    cluster: Option<String>,
+    #[serde(default)]
+    namespace: Option<String>,
+    #[serde(default)]
+    workload: Option<String>,
+    #[serde(default)]
+    pod: Option<String>,
+    #[serde(default)]
+    node: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -204,6 +215,7 @@ where
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/{trace}", get(one::<S>))
+        .route("/api/orgs/{org}/placements", get(placements::<S>))
         .with_state(state)
 }
 
@@ -223,6 +235,14 @@ where
     )
     .map_err(|_| LookRefused::Window)?;
     let mut filter = TraceFilter::over(window);
+    filter.placement = PlacementBody {
+        cluster: asked.cluster,
+        namespace: asked.namespace,
+        workload: asked.workload,
+        pod: asked.pod,
+        node: asked.node,
+    }
+    .placement()?;
     filter.project = asked.project.map(ProjectId::new);
     filter.service = asked.service.map(Into::into);
     filter.name = asked
@@ -269,6 +289,41 @@ where
     Ok(Json(laid_out(id, spans)))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Seen {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+}
+
+async fn placements<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(seen): Query<Seen>,
+    headers: HeaderMap,
+) -> Result<Json<Placed>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&headers)?;
+    let window = Window::new(
+        seen.from.saturating_mul(NANOS_PER_MILLI),
+        seen.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LookRefused::Window)?;
+    let found = state
+        .app
+        .placements(
+            &who,
+            TenantId::new(org),
+            window,
+            seen.project.map(ProjectId::new),
+        )
+        .await?;
+    Ok(Json(found.into()))
+}
+
 impl From<NotCarried> for LookRefused {
     fn from(error: NotCarried) -> Self {
         Self::Reaching(error)
@@ -283,6 +338,8 @@ pub enum LookRefused {
     NoSuchOrg,
     #[error("a window must end after it starts")]
     Window,
+    #[error(transparent)]
+    Placement(#[from] Misplaced),
     #[error("that is not a trace identifier")]
     TraceId,
     #[error("no trace carries that identifier")]
@@ -306,7 +363,7 @@ impl IntoResponse for LookRefused {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
             Self::NoSuchOrg | Self::NoSuchTrace => StatusCode::NOT_FOUND,
-            Self::Window | Self::TraceId => StatusCode::BAD_REQUEST,
+            Self::Window | Self::TraceId | Self::Placement(_) => StatusCode::BAD_REQUEST,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
         if status.is_server_error() {
@@ -432,16 +489,35 @@ pub struct Spanning {
     project: Option<Uuid>,
     #[serde(default)]
     environment: Option<String>,
+    #[serde(default)]
+    cluster: Option<String>,
+    #[serde(default)]
+    namespace: Option<String>,
+    #[serde(default)]
+    workload: Option<String>,
+    #[serde(default)]
+    pod: Option<String>,
+    #[serde(default)]
+    node: Option<String>,
 }
 
 impl Spanning {
     fn filter(self) -> Result<ServiceFilter, LookRefused> {
+        let placement = PlacementBody {
+            cluster: self.cluster,
+            namespace: self.namespace,
+            workload: self.workload,
+            pod: self.pod,
+            node: self.node,
+        }
+        .placement()?;
         let window = Window::new(
             self.from.saturating_mul(NANOS_PER_MILLI),
             self.to.saturating_mul(NANOS_PER_MILLI),
         )
         .map_err(|_| LookRefused::Window)?;
         let mut filter = ServiceFilter::over(window);
+        filter.placement = placement;
         filter.project = self.project.map(ProjectId::new);
         filter.environment = self
             .environment

@@ -1,6 +1,7 @@
 use super::errors::BadLogQuery;
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
+use crate::placement::Placement;
 use crate::telemetry::{LogRecord, Severity, TraceId};
 
 pub const DEFAULT_LOG_LIMIT: u32 = 100;
@@ -24,6 +25,7 @@ pub struct LogQuery {
     pub trace: Option<TraceId>,
     pub project: Option<ProjectId>,
     pub before: Option<LogCursor>,
+    pub placement: Placement,
     limit: u32,
 }
 
@@ -38,6 +40,7 @@ impl LogQuery {
             trace: None,
             project: None,
             before: None,
+            placement: Placement::default(),
             limit: DEFAULT_LOG_LIMIT,
         }
     }

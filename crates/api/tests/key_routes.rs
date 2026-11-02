@@ -267,6 +267,18 @@ impl SpanPages for Looked {
     }
 }
 
+impl ferristrace_domain::PlacementReader for Looked {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: ferristrace_domain::Window,
+        project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Placements, StoreError> {
+        self.note(project);
+        Ok(ferristrace_domain::Placements::default())
+    }
+}
+
 impl SpanReader for Looked {
     async fn services(
         &self,
@@ -972,4 +984,36 @@ async fn a_project_bound_read_key_reads_operations_and_series_of_its_project_onl
         harness.looked.asked(),
         vec![Some(a_project(STOREFRONT)), Some(a_project(STOREFRONT))]
     );
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_lists_the_placements_of_its_project_only() {
+    let harness = Harness::new();
+    let secret = secret_of(
+        &harness
+            .issued(&format!(
+                r#"{{"name":"storefront","scopes":["read"],"project":"{}"}}"#,
+                id(STOREFRONT)
+            ))
+            .await,
+    );
+    let org = id(MINE);
+    let elsewhere = id(ELSEWHERE);
+    let mut statuses = Vec::new();
+    for route in [
+        format!("/api/orgs/{org}/placements?from=1&to=2"),
+        format!("/api/orgs/{org}/placements?from=1&to=2&project={elsewhere}"),
+        format!("/api/orgs/{}/placements?from=1&to=2", id(THEIRS)),
+    ] {
+        let (status, _) = harness
+            .served(OrgRole::Member, as_key(Method::GET, &route, &secret, None))
+            .await;
+        statuses.push(status);
+    }
+
+    assert_eq!(
+        statuses,
+        vec![StatusCode::OK, StatusCode::NOT_FOUND, StatusCode::NOT_FOUND]
+    );
+    assert_eq!(harness.looked.asked(), vec![Some(a_project(STOREFRONT))]);
 }

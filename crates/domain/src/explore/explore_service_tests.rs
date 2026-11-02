@@ -15,6 +15,9 @@ use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
+use crate::placement::{
+    MAX_PLACEMENTS, Placement, PlacementName, PlacementReader, Placements, Workload,
+};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::{Span, SpanId, SpanKind, SpanStatus, TenantId, TraceId};
@@ -83,11 +86,41 @@ impl Memberships for MemberOfMine {
 struct Asked {
     tenants: Mutex<Vec<TenantId>>,
     projects: Mutex<Vec<Option<ProjectId>>>,
+    placements: Mutex<Vec<Placement>>,
 }
 
 impl Asked {
     fn projects(&self) -> Vec<Option<ProjectId>> {
         self.projects.lock().expect("the lock").clone()
+    }
+
+    fn placements(&self) -> Vec<Placement> {
+        self.placements.lock().expect("the lock").clone()
+    }
+
+    fn placed(&self, placement: &Placement) {
+        self.placements
+            .lock()
+            .expect("the lock")
+            .push(placement.clone());
+    }
+}
+
+impl PlacementReader for &Asked {
+    async fn placements(
+        &self,
+        tenant: TenantId,
+        _window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Placements, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(project);
+        Ok(Placements {
+            nodes: (0..=MAX_PLACEMENTS)
+                .map(|n| format!("node-{n}").into())
+                .collect(),
+            ..Placements::default()
+        })
     }
 }
 
@@ -99,6 +132,7 @@ impl SpanReader for &Asked {
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
         Ok(Vec::new())
     }
 
@@ -110,6 +144,7 @@ impl SpanReader for &Asked {
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
         Ok(vec![ServiceSummary {
             name: format!("{service} op").into(),
             requests: 4,
@@ -129,6 +164,7 @@ impl SpanReader for &Asked {
     ) -> Result<ServiceSeries, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
         let start = filter.window.from_unix_nanos() + 2 * filter.step_nanos();
         Ok(ServiceSeries {
             step_nanos: filter.step_nanos(),
@@ -153,6 +189,7 @@ impl SpanReader for &Asked {
     ) -> Result<Vec<TraceSummary>, StoreError> {
         self.tenants.lock().expect("the lock").push(tenant);
         self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
         Ok(vec![TraceSummary {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
@@ -691,4 +728,82 @@ fn a_service_filter_steps_a_sixtieth_of_its_window_and_never_under_a_second() {
     assert_eq!(short.step_nanos(), 1_000_000_000);
     assert_eq!(short.slot_starts().count(), 1);
     assert_eq!(an_hour().environment, None);
+}
+
+fn in_pod() -> Placement {
+    Placement {
+        pod: Some(PlacementName::try_from("checkout-1").expect("a pod")),
+        workload: Some(Workload::try_from("deployment:checkout").expect("a workload")),
+        ..Placement::default()
+    }
+}
+
+#[test]
+fn a_filter_reads_every_placement_until_one_is_named() {
+    assert!(a_filter().placement.is_empty());
+    assert!(an_hour().placement.is_empty());
+}
+
+#[tokio::test]
+async fn a_placement_reaches_the_store_with_every_read_even_when_a_key_narrows_the_project() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let mut traces = a_filter();
+    traces.placement = in_pod();
+    let mut services = an_hour();
+    services.placement = in_pod();
+    let who = Reader::Key(secret);
+
+    explore
+        .traces(&who, an_org(MINE), &traces)
+        .await
+        .expect("its traces");
+    explore
+        .services(&who, an_org(MINE), &services)
+        .await
+        .expect("its services");
+    explore
+        .operations(&who, an_org(MINE), "checkout", &services)
+        .await
+        .expect("its operations");
+    explore
+        .series(&who, an_org(MINE), None, &services)
+        .await
+        .expect("its series");
+
+    assert_eq!(asked.placements(), vec![in_pod(); 4]);
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS)); 4]);
+}
+
+#[tokio::test]
+async fn the_placements_seen_are_read_for_the_project_of_the_key_and_capped() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let window = Window::new(0, 1000).expect("a window");
+
+    let seen = explore
+        .placements(&Reader::Key(secret.clone()), an_org(MINE), window, None)
+        .await
+        .expect("its placements");
+    let elsewhere = explore
+        .placements(
+            &Reader::Key(secret),
+            an_org(MINE),
+            window,
+            Some(a_project(OTHER)),
+        )
+        .await;
+    let stranger = explore
+        .placements(&session(TOKEN), an_org(THEIRS), window, None)
+        .await;
+
+    assert_eq!(seen.nodes.len(), MAX_PLACEMENTS);
+    assert_eq!(elsewhere, Err(ExploreError::NotYours));
+    assert_eq!(stranger, Err(ExploreError::NotYours));
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS))]);
+    assert_eq!(*asked.tenants.lock().expect("the lock"), vec![an_org(MINE)]);
 }

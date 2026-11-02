@@ -19,6 +19,7 @@ mod oidc_routes;
 mod oncall_routes;
 mod org_routes;
 mod password_routes;
+mod placement;
 mod postmortem_routes;
 mod reset_routes;
 mod roster_routes;

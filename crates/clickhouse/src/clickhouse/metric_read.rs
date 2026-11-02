@@ -8,6 +8,7 @@ use ferristrace_domain::{
 };
 use serde::Deserialize;
 
+use crate::clickhouse::placement::{Held, Placed};
 use crate::clickhouse::read::{held, map_of, nanos, refused, unsigned};
 
 const MAX_CATALOGUE: u32 = 1000;
@@ -193,7 +194,13 @@ fn charted(query: &MetricQuery) -> String {
     )
 }
 
-fn laid(sql: &str, query: &MetricQuery, per_series: &str, outer: &str) -> String {
+fn laid(
+    sql: &str,
+    query: &MetricQuery,
+    placed: &Placed<'_>,
+    per_series: &str,
+    outer: &str,
+) -> String {
     #[allow(clippy::cast_precision_loss)]
     let seconds = query.step_nanos() as f64 / NANOS_PER_SECOND;
     sql.replace("{per_series}", per_series)
@@ -201,7 +208,7 @@ fn laid(sql: &str, query: &MetricQuery, per_series: &str, outer: &str) -> String
         .replace("{seconds}", &format!("{seconds:?}"))
         .replace("{from}", &nanos(query.window.from_unix_nanos()).to_string())
         .replace("{step}", &nanos(query.step_nanos()).to_string())
-        .replace("{filters}", &charted(query))
+        .replace("{filters}", &format!("{}{}", charted(query), placed.and()))
 }
 
 fn point_plan(kind: MetricKind, aggregation: Aggregation) -> (String, &'static str) {
@@ -237,16 +244,20 @@ impl ClickhouseMetricReader {
         query: &MetricQuery,
     ) -> Result<BTreeMap<Vec<String>, Vec<Option<f64>>>, StoreError> {
         let (per_series, outer) = point_plan(kind, aggregation);
-        let sql = laid(POINTS, query, &per_series, outer);
-        let rows: Vec<PointRow> = bind_scope(
-            self.client.query(&sql).bind(keys_of(query)),
-            org,
-            query.project,
-        )
-        .bind(&*query.name)
-        .fetch_all()
-        .await
-        .map_err(|error| refused(&error))?;
+        let placed = Placed::of(&query.placement, Held::Attributes);
+        let sql = laid(POINTS, query, &placed, &per_series, outer);
+        let rows: Vec<PointRow> = placed
+            .bind(
+                bind_scope(
+                    self.client.query(&sql).bind(keys_of(query)),
+                    org,
+                    query.project,
+                )
+                .bind(&*query.name),
+            )
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
 
         let mut laid_out = BTreeMap::new();
         for row in rows {
@@ -261,16 +272,20 @@ impl ClickhouseMetricReader {
         aggregation: Aggregation,
         query: &MetricQuery,
     ) -> Result<BTreeMap<Vec<String>, Vec<Option<f64>>>, StoreError> {
-        let sql = laid(HISTOGRAMS, query, "", "");
-        let rows: Vec<HistogramRow> = bind_scope(
-            self.client.query(&sql).bind(keys_of(query)),
-            org,
-            query.project,
-        )
-        .bind(&*query.name)
-        .fetch_all()
-        .await
-        .map_err(|error| refused(&error))?;
+        let placed = Placed::of(&query.placement, Held::Attributes);
+        let sql = laid(HISTOGRAMS, query, &placed, "", "");
+        let rows: Vec<HistogramRow> = placed
+            .bind(
+                bind_scope(
+                    self.client.query(&sql).bind(keys_of(query)),
+                    org,
+                    query.project,
+                )
+                .bind(&*query.name),
+            )
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
 
         let mut fullest: BTreeMap<(Vec<String>, i64), HistogramRow> = BTreeMap::new();
         for row in rows {
@@ -295,14 +310,23 @@ impl ClickhouseMetricReader {
         org: TenantId,
         query: &MetricQuery,
     ) -> Result<Vec<Exemplar>, StoreError> {
+        let placed = Placed::of(&query.placement, Held::Attributes);
+        let touched = if placed.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " AND (trace_id, span_id) IN ({})",
+                placed.spans("trace_id, span_id")
+            )
+        };
         let sql = EXEMPLARS
-            .replace("{filters}", &charted(query))
+            .replace("{filters}", &format!("{}{touched}", charted(query)))
             .replace("{limit}", &MAX_EXEMPLARS.to_string());
-        let rows: Vec<ExemplarRow> = bind_scope(self.client.query(&sql), org, query.project)
-            .bind(&*query.name)
-            .fetch_all()
-            .await
-            .map_err(|error| refused(&error))?;
+        let mut asked = bind_scope(self.client.query(&sql), org, query.project).bind(&*query.name);
+        if !placed.is_empty() {
+            asked = placed.bind_spans(asked, org, query.window, query.project);
+        }
+        let rows: Vec<ExemplarRow> = asked.fetch_all().await.map_err(|error| refused(&error))?;
         rows.into_iter()
             .map(|row| {
                 Ok(Exemplar {

@@ -11,6 +11,7 @@ use crate::clock::UnixSeconds;
 use crate::explore::{ExploreError, Window};
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
+use crate::placement::{Placement, PlacementName};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
@@ -77,6 +78,7 @@ impl Memberships for MemberOfMine {
 struct Asked {
     tenants: Mutex<Vec<TenantId>>,
     projects: Mutex<Vec<Option<ProjectId>>>,
+    placements: Mutex<Vec<Placement>>,
 }
 
 impl Asked {
@@ -91,6 +93,10 @@ impl Asked {
     fn note(&self, org: TenantId, query: &LogQuery) {
         self.tenants.lock().expect("the lock").push(org);
         self.projects.lock().expect("the lock").push(query.project);
+        self.placements
+            .lock()
+            .expect("the lock")
+            .push(query.placement.clone());
     }
 }
 
@@ -286,4 +292,42 @@ async fn an_unreachable_log_store_is_not_reported_as_a_refusal() {
         .await;
 
     assert_eq!(refused, Err(ExploreError::StoreUnreachable));
+}
+
+#[tokio::test]
+async fn a_placement_reaches_the_store_when_a_key_narrows_the_project() {
+    let keys = Ring::default();
+    let secret = keys.holding(
+        an_org(MINE),
+        Some(a_project(OURS)),
+        KeyScopes::new(&[KeyScope::Read]).expect("scopes"),
+    );
+    let asked = Asked::default();
+    let mut query = LogQuery::over(Window::new(0, 1000).expect("a window"));
+    query.placement = Placement {
+        node: Some(PlacementName::try_from("node-a").expect("a node")),
+        ..Placement::default()
+    };
+    let search = searching(&keys, &asked);
+
+    search
+        .search(&Reader::Key(secret.clone()), an_org(MINE), &query)
+        .await
+        .expect("its logs");
+    search
+        .histogram(
+            &Reader::Key(secret),
+            an_org(MINE),
+            &query,
+            Buckets::default(),
+        )
+        .await
+        .expect("its histogram");
+
+    assert_eq!(
+        *asked.placements.lock().expect("the lock"),
+        vec![query.placement.clone(), query.placement.clone()]
+    );
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS)); 2]);
+    assert!(LogQuery::over(query.window).placement.is_empty());
 }

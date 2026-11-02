@@ -563,6 +563,12 @@ async fn malformed_parameters_are_refused_before_the_store_is_asked() {
         (logs_of(MINE, "&severity=loud"), StatusCode::BAD_REQUEST),
         (logs_of(MINE, "&trace=xyz"), StatusCode::BAD_REQUEST),
         (logs_of(MINE, "&attr=novalue"), StatusCode::BAD_REQUEST),
+        (logs_of(MINE, "&pod=a%20b"), StatusCode::BAD_REQUEST),
+        (
+            logs_of(MINE, "&workload=replicaset:api"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (histogram_of(MINE, "&node=-n"), StatusCode::BAD_REQUEST),
         (logs_of(MINE, "&project=nope"), StatusCode::BAD_REQUEST),
         (logs_of(MINE, "&before=nope"), StatusCode::BAD_REQUEST),
         (logs_of(MINE, "&limit=many"), StatusCode::BAD_REQUEST),
@@ -612,4 +618,57 @@ async fn the_log_routes_only_read() {
 
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert!(shelf.asked().is_empty());
+}
+
+#[tokio::test]
+async fn a_placement_reaches_the_log_store_from_both_routes() {
+    let shelf = Arc::new(Shelf::default());
+    let placed = "&cluster=prod&namespace=shop&workload=checkout&pod=checkout-1&node=node-a";
+
+    for uri in [logs_of(MINE, placed), histogram_of(MINE, placed)] {
+        let (status, body) = served(Some(Arc::clone(&shelf)), looking(&uri, &Who::Session)).await;
+        assert_eq!(status, StatusCode::OK, "{uri}: {body}");
+    }
+
+    let asked = shelf.asked();
+    assert_eq!(asked.len(), 2);
+    for (_, query, _) in asked {
+        let placement = &query.placement;
+        assert_eq!(
+            placement
+                .cluster
+                .as_ref()
+                .map(ferristrace_domain::PlacementName::as_str),
+            Some("prod")
+        );
+        assert_eq!(
+            placement
+                .namespace
+                .as_ref()
+                .map(ferristrace_domain::PlacementName::as_str),
+            Some("shop")
+        );
+        assert_eq!(
+            placement
+                .workload
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("checkout")
+        );
+        assert_eq!(
+            placement
+                .pod
+                .as_ref()
+                .map(ferristrace_domain::PlacementName::as_str),
+            Some("checkout-1")
+        );
+        assert_eq!(
+            placement
+                .node
+                .as_ref()
+                .map(ferristrace_domain::PlacementName::as_str),
+            Some("node-a")
+        );
+    }
 }

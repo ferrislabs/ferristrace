@@ -7,6 +7,7 @@ use ferristrace_domain::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::clickhouse::placement::{Held, Placed};
 use crate::clickhouse::read::{held, map_of, nanos, refused, unsigned};
 
 const TIEBREAK: &str = "cityHash64(observed_time, body, trace_id, span_id, attributes)";
@@ -122,6 +123,10 @@ impl<'a> Filters<'a> {
         }
         for (key, value) in &query.attributes {
             filters.push("attributes[?] = ?", [Bound::Text(key), Bound::Text(value)]);
+        }
+        let placed = Placed::of(&query.placement, Held::Resource);
+        for (clause, value) in placed.clauses().iter().zip(placed.values()) {
+            filters.push(clause, [Bound::Text(value)]);
         }
         if let Some(trace) = query.trace {
             filters.push(

@@ -183,6 +183,17 @@ impl Projects for OneProject {
 
 struct Steady;
 
+impl ferristrace_domain::PlacementReader for Steady {
+    async fn placements(
+        &self,
+        _tenant: TenantId,
+        _window: ferristrace_domain::Window,
+        _project: Option<ProjectId>,
+    ) -> Result<ferristrace_domain::Placements, StoreError> {
+        Ok(ferristrace_domain::Placements::default())
+    }
+}
+
 impl SpanReader for Steady {
     async fn services(
         &self,
@@ -947,4 +958,43 @@ async fn a_rule_pages_the_on_call_of_a_schedule_in_the_frozen_shape() {
         "a patch keeps the page"
     );
     assert_eq!(cleared["page"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_trace_or_log_rule_keeps_the_placement_it_watches() {
+    let harness = Harness::new();
+    let mut traced = checkout("Checkout pod errors", None, &[]);
+    traced["signal"]["placement"] =
+        json!({"namespace": "shop", "workload": "deployment:checkout", "pod": " checkout-1 "});
+    let mut logged = checkout("Node errors", None, &[]);
+    logged["signal"] = json!({"kind": "logs", "severities": ["error"],
+                              "placement": {"node": "node-a", "cluster": "prod"}});
+
+    let traced = created(&harness, traced).await;
+    let logged = created(&harness, logged).await;
+
+    assert_eq!(
+        traced["signal"]["placement"],
+        json!({"namespace": "shop", "workload": "deployment:checkout", "pod": "checkout-1"})
+    );
+    assert_eq!(
+        logged["signal"]["placement"],
+        json!({"cluster": "prod", "node": "node-a"})
+    );
+}
+
+#[tokio::test]
+async fn a_rule_watching_a_placement_that_is_no_kubernetes_name_is_refused_with_422() {
+    let harness = Harness::new();
+    let mut pod = checkout("Bad pod", None, &[]);
+    pod["signal"]["placement"] = json!({"pod": "a b"});
+    let mut kind = checkout("Bad kind", None, &[]);
+    kind["signal"]["placement"] = json!({"workload": "replicaset:api"});
+
+    for body in [pod, kind] {
+        let (status, refused) = harness.admin(Method::POST, &alerts(MINE), Some(body)).await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert!(refused.to_string().contains("placement"), "{refused}");
+    }
 }

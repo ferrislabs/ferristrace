@@ -13,6 +13,7 @@ use crate::clock::UnixSeconds;
 use crate::explore::{ExploreError, Window};
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
+use crate::placement::{Placement, PlacementName};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
@@ -82,6 +83,7 @@ type Listed = (TenantId, Option<Box<str>>, Option<ProjectId>);
 struct Asked {
     listed: Mutex<Vec<Listed>>,
     charted: Mutex<Vec<Charted>>,
+    placements: Mutex<Vec<Placement>>,
 }
 
 impl Asked {
@@ -136,6 +138,10 @@ impl MetricReader for &Asked {
             .lock()
             .expect("the lock")
             .push((org, kind, aggregation, query.project));
+        self.placements
+            .lock()
+            .expect("the lock")
+            .push(query.placement.clone());
         Ok(SeriesSet {
             step_nanos: query.step_nanos(),
             series: Vec::new(),
@@ -370,4 +376,28 @@ async fn an_unreachable_metric_store_is_not_reported_as_a_refusal() {
 
     assert_eq!(listed, Err(ExploreError::StoreUnreachable));
     assert_eq!(charted, Err(MetricError::StoreUnreachable));
+}
+
+#[tokio::test]
+async fn a_placement_reaches_the_store_when_a_key_narrows_the_project() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let mut query = a_query("queue.depth");
+    query.placement = Placement {
+        namespace: Some(PlacementName::try_from("shop").expect("a namespace")),
+        ..Placement::default()
+    };
+
+    searching(&keys, &asked)
+        .series(&Reader::Key(secret), an_org(MINE), &query)
+        .await
+        .expect("its series");
+
+    assert_eq!(
+        *asked.placements.lock().expect("the lock"),
+        vec![query.placement.clone()]
+    );
+    assert_eq!(asked.charted()[0].3, Some(a_project(OURS)));
+    assert!(a_query("queue.depth").placement.is_empty());
 }

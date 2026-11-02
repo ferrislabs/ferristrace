@@ -9,6 +9,8 @@ import { LineChart } from '@/components/ft/charts'
 import { ceiling, timeLabels, useDeployMarkers } from '@/data/series'
 import { ERROR_THRESHOLD, WINDOW_MS, charted, perSecond, useOperations, useServiceSeries, useServiceTable } from '@/data/services'
 import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
+import { placementSearch, usePlacement } from '@/data/placement'
+import { PlacementPicker } from '@/components/ft/Placement'
 import { because } from '@/auth/client'
 import { dur, num } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -18,9 +20,10 @@ const axis = (hi: number, shown: (v: number) => string): [string, string, string
 export function ServiceDetail() {
   const { name = '' } = useParams()
   const environment = useSearchParam('env') ?? ''
-  const { services, pending } = useServiceTable(environment)
-  const { operations, failed: opsFailed } = useOperations(name, environment)
-  const { series } = useServiceSeries(name, environment)
+  const { placement, place } = usePlacement()
+  const { services, pending } = useServiceTable(environment, WINDOW_MS, placement)
+  const { operations, failed: opsFailed } = useOperations(name, environment, WINDOW_MS, placement)
+  const { series } = useServiceSeries(name, environment, WINDOW_MS, placement)
   const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: WINDOW_MS, service: name, limit: 50 })
   const markers = useDeployMarkers()
   const s = services.find((x) => x.name === name)
@@ -32,7 +35,8 @@ export function ServiceDetail() {
   const errHi = Math.max(ceiling(lines.errorRate), ERROR_THRESHOLD * 2)
   const p95Hi = ceiling(lines.p95)
   const open = issues.filter((issue) => issue.status === 'unresolved').slice(0, 5)
-  const kept = environment ? { env: environment } : undefined
+  const where = placementSearch(placement)
+  const kept = { ...(environment ? { env: environment } : {}), ...where }
   return (
     <>
       <nav aria-label="Breadcrumb" className="text-control"><Link to="/services" search={kept}>Services</Link><span className="text-faint-foreground"> / </span><span className="font-mono">{name}</span></nav>
@@ -41,15 +45,16 @@ export function ServiceDetail() {
         <h1 className="font-mono text-title">{name}</h1>
         {pending ? null : !s ? <Badge variant="outline">No spans in the last hour</Badge> : bad ? <Badge variant="warning"><TriangleAlert />Error rate above {ERROR_THRESHOLD} %</Badge> : <Badge variant="success">Healthy</Badge>}
         <span className="flex-1" />
-        <Button asChild size="sm"><Link to="/traces"><Waypoints />Traces</Link></Button>
-        <Button asChild size="sm"><Link to="/logs" search={{ f: new URLSearchParams({ service: name }).toString() }}><ScrollText />Logs</Link></Button>
-        <Button asChild size="sm" variant="ghost"><Link to="/metrics">Metrics</Link></Button>
+        <Button asChild size="sm"><Link to="/traces" search={where}><Waypoints />Traces</Link></Button>
+        <Button asChild size="sm"><Link to="/logs" search={{ ...where, f: new URLSearchParams({ service: name }).toString() }}><ScrollText />Logs</Link></Button>
+        <Button asChild size="sm" variant="ghost"><Link to="/metrics" search={where}>Metrics</Link></Button>
       </div>
       <div className="flex flex-wrap gap-x-3.5 gap-y-1.5 text-caption text-muted-foreground">
         <span>Window <span className="font-mono text-foreground">last hour</span></span>
         {environment ? <span>Environment <span className="font-mono text-foreground">{environment}</span></span> : null}
         {s ? <span>Last span <span className="font-mono text-foreground">{s.seen}</span></span> : null}
       </div>
+      <PlacementPicker placement={placement} onChange={place} windowMs={WINDOW_MS} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
         <Kpi label="Requests" value={s?.rps ?? '—'} sub="server and consumer spans" />
         <Kpi label="Error rate" value={s?.err == null ? '—' : `${s.err.toFixed(1)} %`} sub={`amber from ${ERROR_THRESHOLD} %`} tone={bad ? 'warn' : undefined} />
