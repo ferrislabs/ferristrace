@@ -2,12 +2,12 @@ use std::sync::atomic::Ordering;
 
 use ferristrace_domain::{
     AccountId, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditFilter, AuditPage,
-    AuditTrail, ControlPlane, Created, Email, Fingerprint, IssueDecisions, IssuedKey, KeyId,
-    KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
-    Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
+    AuditTrail, ControlPlane, Created, Email, ExportSource, Fingerprint, IssueDecisions, IssuedKey,
+    KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName,
+    OrgRole, Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
     ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked,
-    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Status,
-    StoreError, TeamId, TenantId, UnixSeconds,
+    SecretHash, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
+    Snapshot, Status, StoreError, TeamId, TenantId, UnixSeconds,
 };
 use uuid::Uuid;
 
@@ -163,6 +163,38 @@ impl AuditTrail for FakeAudit {
         _page: PageSize,
     ) -> Result<AuditPage, StoreError> {
         Ok(AuditPage::default())
+    }
+}
+
+#[repository(domain = Export, backend = Recording)]
+#[derive(Debug)]
+pub struct FakeExport;
+
+impl FakeExport {
+    fn new(_backend: &Recording, _tx: &Handle) -> Self {
+        Self
+    }
+}
+
+impl ExportSource for FakeExport {
+    async fn snapshot(&self, org: TenantId) -> Result<Snapshot, StoreError> {
+        Ok(Snapshot {
+            org: Organisation {
+                id: org,
+                name: "Acme".into(),
+                plan: "free".into(),
+                created_at_unix_nanos: 0,
+                logo: None,
+                retention: None,
+                retention_cap: None,
+            },
+            projects: Vec::new(),
+            teams: Vec::new(),
+            members: Vec::new(),
+            keys: Vec::new(),
+            decisions: Vec::new(),
+            audit: Vec::new(),
+        })
     }
 }
 

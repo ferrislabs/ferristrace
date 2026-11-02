@@ -301,6 +301,52 @@ one project: an owner sets it in Settings, Organisation, General, and
 `spans.retention_days` is the value for an organisation that sets none.
 ClickHouse applies it on its own schedule.
 
+## Export
+
+An owner downloads everything the organisation holds from Settings,
+Organisation, General, Export organisation data, or with
+`GET /api/orgs/{org}/export` and the session cookie (an API key does not
+open it). The answer is a streamed `application/gzip` named
+`ferristrace-<org-id>-<YYYYMMDD>.tar.gz`: nothing is written to disk on the
+server and no more than one page of spans is held in memory at a time. Each
+export is recorded in the audit log as `org.exported`.
+
+The archive holds, in this order:
+
+- `control-plane.json`: `format` (`ferristrace-export`), `version` (`1`),
+  `exported_at_ms`, then `org` (`id`, `name`, `plan`, `created_at_ms`,
+  `retention_days`, null when the deployment default applies), `projects`,
+  `teams` (with their `members` and `projects`), `members` (`account_id`,
+  `email`, `name`, `role`, `joined_at_ms`), `keys` (`id`, `name`, `prefix`,
+  `project`, `scopes`, `created_at_ms`, `created_by`, `last_used_at_ms`; never
+  a secret or a digest, and revoked keys are left out), `issue_decisions`
+  (`project_id`, `fingerprint`, `status`, `owner_id`, `decided_at_ms`,
+  `decided_by`) and `audit_entries`, newest first.
+- `spans/000001.ndjson`, `spans/000002.ndjson`, and so on: one file per page
+  of up to 10000 spans, because a tar entry needs its size before its
+  content and a page is the most the server buffers. There are none when the
+  organisation holds no spans. Spans run in order of service name, start
+  hour, trace id and span id, and each appears exactly once.
+
+A line of a spans file is one JSON object:
+
+```json
+{"trace_id":"0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a","span_id":"0b0b0b0b0b0b0b0b",
+ "parent_span_id":null,"project_id":"6f0f5b4e-0000-0000-0000-000000000000",
+ "service_name":"checkout","name":"POST /pay","kind":"server","status":"error",
+ "start_unix_nanos":1700000000000000000,"end_unix_nanos":1700000001000000000,
+ "attributes":{"http.route":"/pay"},
+ "events":[{"time_unix_nanos":1700000000000000500,"name":"exception",
+            "attributes":{"exception.type":"Timeout"}}]}
+```
+
+Ids are lowercase hex; `parent_span_id` and `project_id` are null for a root
+span and for a span written before it had a project. `kind` is one of
+`unspecified`, `internal`, `server`, `client`, `producer` or `consumer`;
+`status` is `unset`, `ok` or `error`. Times are integers in nanoseconds since
+the epoch, which exceed 2^53, so read them with a parser that keeps 64 bits.
+Export needs the span store: without ClickHouse the route answers 503.
+
 ## Multi-tenancy
 
 Organisations exist and every span carries one, but a self-hosted

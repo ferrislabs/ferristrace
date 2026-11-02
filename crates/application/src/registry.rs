@@ -1,9 +1,9 @@
 use core::future::Future;
 
 use ferristrace_domain::{
-    AccountDirectory, Accounts, ApiKeys, AuditTrail, AuthProvider, ControlPlane, FactorStore, Gate,
-    IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll, SessionRoll,
-    SessionStore, Squads, UsageHistory,
+    AccountDirectory, Accounts, ApiKeys, AuditTrail, AuthProvider, ControlPlane, ExportSource,
+    FactorStore, Gate, IssueDecisions, Memberships, OidcFlows, Orgs, Projects, ResetStore, Roll,
+    SessionRoll, SessionStore, Squads, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +45,8 @@ pub mod domain {
     pub struct ControlPlane;
     #[derive(Debug)]
     pub struct Decisions;
+    #[derive(Debug)]
+    pub struct Export;
     #[derive(Debug)]
     pub struct Factors;
     #[derive(Debug)]
@@ -91,6 +93,16 @@ impl<R> RecordingRepos for R where R: RepoFor<domain::Audit, Repo: AuditTrail> {
 pub trait AuditRepos: StandingRepos + RecordingRepos {}
 
 impl<R> AuditRepos for R where R: StandingRepos + RecordingRepos {}
+
+pub trait ExportRepos:
+    StandingRepos + RecordingRepos + RepoFor<domain::Export, Repo: ExportSource>
+{
+}
+
+impl<R> ExportRepos for R where
+    R: StandingRepos + RecordingRepos + RepoFor<domain::Export, Repo: ExportSource>
+{
+}
 
 pub trait ReadRepos: StandingRepos + RepoFor<domain::ApiKeys, Repo: ApiKeys> {}
 
@@ -200,6 +212,7 @@ impl<R> ProvisioningRepos for R where
 pub trait Repositories:
     ReadRepos
     + AuditRepos
+    + ExportRepos
     + AccessRepos
     + OrgRepos
     + CatalogueRepos
@@ -215,6 +228,7 @@ pub trait Repositories:
 impl<R> Repositories for R where
     R: ReadRepos
         + AuditRepos
+        + ExportRepos
         + AccessRepos
         + OrgRepos
         + CatalogueRepos

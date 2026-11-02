@@ -6,6 +6,7 @@ pub mod access;
 pub mod audit;
 pub mod catalogue;
 pub mod explore;
+pub mod export;
 pub mod identity;
 pub mod issue;
 pub mod organisation;
@@ -32,6 +33,10 @@ pub use clock::{Clock, UnixSeconds};
 pub use explore::{
     BadWindow, Explore, ExploreError, ServiceSummary, SpanReader, TraceFilter, TraceOrder,
     TraceSummary, Window,
+};
+pub use export::{
+    EXPORT_PAGE, ExportError, ExportGrant, ExportSource, ExportedSpan, Exporter, Prepared,
+    Snapshot, SpanCursor, SpanPage, SpanPages,
 };
 pub use identity::{
     AccountDirectory, AccountId, Agent, Answer, AuthError, AuthProvider, AuthSources, Authorizer,

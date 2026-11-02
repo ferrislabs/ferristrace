@@ -125,6 +125,10 @@ pub fn audit<C>(backend: &Postgres<C>) -> Each<'_, domain::Audit, C> {
     Each::over(backend)
 }
 
+pub fn export<C>(backend: &Postgres<C>) -> Each<'_, domain::Export, C> {
+    Each::over(backend)
+}
+
 pub fn control_plane_of<C>(backend: &Postgres<C>) -> Each<'_, domain::ControlPlane, C> {
     Each::over(backend)
 }
@@ -196,6 +200,10 @@ forward!(ApiKeys: ApiKeys {
 forward!(Audit: AuditTrail {
     fn record(&self, entry: &AuditEntry) -> Result<(), StoreError>;
     fn list(&self, org: TenantId, filter: &AuditFilter, page: PageSize) -> Result<AuditPage, StoreError>;
+});
+
+forward!(Export: ExportSource {
+    fn snapshot(&self, org: TenantId) -> Result<Snapshot, StoreError>;
 });
 
 forward!(Roster: Roll {

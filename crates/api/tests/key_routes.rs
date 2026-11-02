@@ -14,8 +14,8 @@ use ferristrace_domain::{
     KeyScopes, LiveSession, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project,
     ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant, Recorded, Renamed, Scope,
     ServiceSummary, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
-    Span, SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
+    Span, SpanCursor, SpanPage, SpanPages, SpanReader, Status, StoreError, TeamId, TenantDirectory,
+    TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -252,6 +252,17 @@ impl Looked {
 
     fn note(&self, project: Option<ProjectId>) {
         self.0.lock().expect("the lock").push(project);
+    }
+}
+
+impl SpanPages for Looked {
+    async fn page(
+        &self,
+        _org: TenantId,
+        _after: Option<&SpanCursor>,
+        _limit: u32,
+    ) -> Result<SpanPage, StoreError> {
+        Ok(SpanPage::default())
     }
 }
 

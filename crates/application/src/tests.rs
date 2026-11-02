@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferristrace_domain::{
-    Action, Actor, Bootstrapped, Fingerprint, IssueError, KeyError, KeyName, KeyScopes, ProjectId,
-    ProvisionError, SettingError, Status, Target,
+    Action, Actor, Bootstrapped, ExportError, Fingerprint, IssueError, KeyError, KeyName,
+    KeyScopes, ProjectId, ProvisionError, SettingError, Status, Target,
 };
 
 use crate::IssueRuling;
@@ -273,4 +273,56 @@ async fn a_command_line_bootstrap_commits_one_founding_by_the_operator() {
     assert_eq!(committed.len(), 1);
     assert_eq!(committed[0].action, Action::OrgFounded);
     assert_eq!(committed[0].actor, Actor::Operator);
+}
+
+fn exporting_app(repos: &Recording) -> Ferristrace<Probing> {
+    Ferristrace::new(
+        repos.clone(),
+        Adapters {
+            span_store: Some(Inert::default()),
+            ..adapters()
+        },
+    )
+}
+
+#[tokio::test]
+async fn an_export_audits_the_owner_in_the_transaction_that_reads_the_snapshot() {
+    let repos = Recording::default();
+
+    let prepared = exporting_app(&repos)
+        .begin_export(&a_token(), the_org())
+        .await
+        .expect("an owner exports");
+
+    assert_eq!(prepared.snapshot.org.id, the_org());
+    assert_eq!(count(&repos.0.opened), 1);
+    assert_eq!(count(&repos.0.commits), 1);
+    let committed = repos.0.committed();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].action, Action::OrgExported);
+    assert_eq!(committed[0].actor, Actor::Account(the_account()));
+}
+
+#[tokio::test]
+async fn a_refused_export_commits_no_audit_entry() {
+    let repos = Recording::default();
+    repos.0.member_only.store(true, Ordering::SeqCst);
+
+    let refused = exporting_app(&repos)
+        .begin_export(&a_token(), the_org())
+        .await;
+
+    assert_eq!(refused.err(), Some(ExportError::OwnersOnly));
+    assert_eq!(count(&repos.0.rollbacks), 1);
+    assert!(repos.0.committed().is_empty());
+}
+
+#[tokio::test]
+async fn without_a_span_store_there_is_nothing_to_export_and_nothing_is_audited() {
+    let repos = Recording::default();
+
+    let refused = app(&repos).begin_export(&a_token(), the_org()).await;
+
+    assert_eq!(refused.err(), Some(ExportError::StoreUnreachable));
+    assert!(repos.0.committed().is_empty());
 }

@@ -11,12 +11,17 @@ ferristrace-otlp.workspace = true
 ferristrace-application.workspace = true
 axum.workspace = true
 bytes.workspace = true
+flate2.workspace = true
 hex.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tar.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+time.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+tokio-stream.workspace = true
 tonic.workspace = true
 uuid.workspace = true
 tower-http.workspace = true
@@ -29,11 +34,8 @@ ferristrace-infra.workspace = true
 opentelemetry-proto.workspace = true
 prost.workspace = true
 serde = { workspace = true, features = ["derive"] }
-flate2.workspace = true
-serde_json.workspace = true
 hex.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 tower = { workspace = true, features = ["util"] }
 
 [lints]
