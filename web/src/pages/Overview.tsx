@@ -1,9 +1,7 @@
 import { CircleCheck, CircleX, Rocket, TriangleAlert } from 'lucide-react'
-import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
-import { Segmented } from '@/components/ui/segmented'
 import { EmptyState, PageHeader, ServiceDot, SeverityBadge } from '@/components/ft/bits'
 import { LineChart, Sparkline } from '@/components/ft/charts'
 import { ceiling, timeLabels, useDeployMarkers } from '@/data/series'
@@ -14,16 +12,11 @@ import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
 import { useProjects } from '@/data/projects'
 import { otlpEndpoint } from '@/data/onboarding'
 import { useScope } from '@/lib/scope'
+import { useWindow } from '@/lib/window'
 import { isPlaced, placementSearch, usePlacement } from '@/data/placement'
 import { PlacementPicker } from '@/components/ft/Placement'
 import { dur, num } from '@/lib/format'
 import { cn } from '@/lib/utils'
-
-const WINDOWS: { value: string; label: string; ms: number }[] = [
-  { value: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
-  { value: '6h', label: '6 hours', ms: 6 * 60 * 60 * 1000 },
-  { value: '24h', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
-]
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0')
 
@@ -46,8 +39,7 @@ function Tile({ label, value, sub, spark, warn, to }: { label: string; value: st
 }
 
 export function Overview() {
-  const [range, setRange] = useState('1h')
-  const windowMs = WINDOWS.find((w) => w.value === range)?.ms ?? WINDOWS[0].ms
+  const { ms: windowMs, label } = useWindow()
   const { project, chooseProject } = useScope()
   const projects = useProjects()
   const { placement, place } = usePlacement()
@@ -57,7 +49,6 @@ export function Overview() {
   const { records: errorLogs } = useLogs({ ...ANY_LOG, rangeMs: windowMs, severities: ['error', 'fatal'], limit: 10 }, false, placement)
   const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 }, placement)
   const markers = useDeployMarkers(series)
-  const label = WINDOWS.find((w) => w.value === range)?.label ?? ''
   const scope = projects.find((p) => p.id === project)?.name ?? 'all projects'
   if (!pending && !all.length && !series?.requests && !isPlaced(placement)) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
   const lines = charted(series)
@@ -75,9 +66,7 @@ export function Overview() {
   const p95Hi = ceiling(lines.p95)
   return (
     <>
-      <PageHeader title="Overview" meta={`${scope} · last ${label}`}>
-        <Segmented label="Window" value={range} onChange={setRange} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
-      </PageHeader>
+      <PageHeader title="Overview" meta={`${scope} · last ${label}`} />
       <PlacementPicker collapsible placement={placement} onChange={place} windowMs={windowMs} />
       {troubled ? (
         <section className="flex flex-wrap items-center gap-3 rounded-lg border border-warning-border bg-card px-4 py-3" aria-label="Needs attention">

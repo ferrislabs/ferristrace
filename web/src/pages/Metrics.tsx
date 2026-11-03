@@ -12,7 +12,6 @@ import {
   AGGREGATIONS,
   DEFAULT_AGG,
   DEFAULT_RANGE_MS,
-  RANGES,
   isPinned,
   useMetricCatalogue,
   useMetricSeries,
@@ -26,6 +25,7 @@ import { PlacementPicker } from '@/components/ft/Placement'
 import { stamp } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
+import { useWindow } from '@/lib/window'
 
 type Picked = { name: string; agg: Aggregation | null; groupBy: string[]; rangeMs: number; fromMs: number | null; toMs: number | null; q: string }
 
@@ -45,7 +45,7 @@ function decode(raw: string | undefined): Picked {
     name: p.get('metric') ?? '',
     agg: (EVERY as string[]).includes(agg ?? '') ? (agg as Aggregation) : null,
     groupBy: p.getAll('by'),
-    rangeMs: number('range') ?? DEFAULT_RANGE_MS,
+    rangeMs: DEFAULT_RANGE_MS,
     fromMs: pinned ? from : null,
     toMs: pinned ? to : null,
     q: p.get('q') ?? '',
@@ -60,8 +60,6 @@ function encode(picked: Picked): string | undefined {
   if (isPinned(picked)) {
     p.set('from', String(picked.fromMs))
     p.set('to', String(picked.toMs))
-  } else if (picked.rangeMs !== DEFAULT_RANGE_MS) {
-    p.set('range', String(picked.rangeMs))
   }
   if (picked.q) p.set('q', picked.q)
   const out = p.toString()
@@ -91,7 +89,8 @@ function Meta({ metric }: { metric: MetricInfo }) {
 export function Metrics() {
   const navigate = useRouterNavigate()
   const raw = useSearchParam('f')
-  const picked = useMemo(() => decode(raw), [raw])
+  const span = useWindow()
+  const picked = useMemo(() => ({ ...decode(raw), rangeMs: span.ms }), [raw, span.ms])
   const [typed, setTyped] = useState(picked.q)
   const [key, setKey] = useState('')
   const settled = useSettled(typed)
@@ -181,10 +180,7 @@ export function Metrics() {
               <Meta metric={metric} />
             </div>
             <div className="flex flex-wrap items-center gap-2" role="search">
-              <NativeSelect aria-label="Time range" value={isPinned(picked) ? 'pinned' : picked.rangeMs} onChange={(e) => apply({ rangeMs: Number(e.target.value), fromMs: null, toMs: null })} className="w-[190px]">
-                {isPinned(picked) ? <option value="pinned" disabled>Selected window</option> : null}
-                {RANGES.map(([label, ms]) => <option key={ms} value={ms}>Last {label}</option>)}
-              </NativeSelect>
+              {isPinned(picked) ? <Button size="sm" onClick={() => apply({ fromMs: null, toMs: null })}><X aria-hidden />Back to the last {span.label}</Button> : null}
               <NativeSelect aria-label="Aggregation" value={agg} onChange={(e) => apply({ agg: e.target.value as Aggregation })} className="w-[130px]">
                 {valid.map((a) => <option key={a} value={a}>{a}</option>)}
               </NativeSelect>

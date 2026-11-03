@@ -9,7 +9,6 @@ import { EmptyState, PageHeader, SeverityBadge } from '@/components/ft/bits'
 import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import {
   ANY,
-  RANGES,
   SEVERITIES,
   isPinned,
   msOf,
@@ -28,6 +27,7 @@ import { shortId, stamp } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
 import type { Sev } from '@/lib/otel'
 import { cn } from '@/lib/utils'
+import { useWindow } from '@/lib/window'
 
 const BAR: Record<Sev, string> = {
   trace: 'bg-sev-trace-bd',
@@ -59,7 +59,6 @@ function decode(raw: string | undefined): LogQuery {
   const pinned = from !== null && to !== null && from < to
   return {
     ...ANY,
-    rangeMs: number('range') ?? ANY.rangeMs,
     fromMs: pinned ? from : null,
     toMs: pinned ? to : null,
     services: p.getAll('service'),
@@ -75,8 +74,6 @@ function encode(query: LogQuery): string | undefined {
   if (isPinned(query)) {
     p.set('from', String(query.fromMs))
     p.set('to', String(query.toMs))
-  } else if (query.rangeMs !== ANY.rangeMs) {
-    p.set('range', String(query.rangeMs))
   }
   for (const service of query.services) p.append('service', service)
   for (const severity of query.severities) p.append('severity', severity)
@@ -179,7 +176,8 @@ function Chip({ children, onRemove, label }: { children: React.ReactNode; onRemo
 export function Logs() {
   const navigate = useRouterNavigate()
   const raw = useSearchParam('f')
-  const query = useMemo(() => decode(raw), [raw])
+  const span = useWindow()
+  const query = useMemo(() => ({ ...decode(raw), rangeMs: span.ms }), [raw, span.ms])
   const [typed, setTyped] = useState(query.q)
   const [attr, setAttr] = useState('')
   const [live, setLive] = useState(false)
@@ -217,7 +215,7 @@ export function Logs() {
     apply({ attrs: [...query.attrs, value] })
     setAttr('')
   }
-  const range = isPinned(query) ? `${stamp(query.fromMs as number)} to ${stamp(query.toMs as number)}` : `last ${RANGES.find(([, ms]) => ms === query.rangeMs)?.[0] ?? 'window'}`
+  const range = isPinned(query) ? `${stamp(query.fromMs as number)} to ${stamp(query.toMs as number)}` : `last ${span.label}`
   const unconfigured = failed instanceof ApiError && failed.status === 503
   const pinnedNow = () => (isPinned(query) ? query : { ...query, fromMs: Date.now() - query.rangeMs, toMs: Date.now() })
   const attachment = {
@@ -235,10 +233,7 @@ export function Logs() {
       </PageHeader>
       <Filters active={query.services.length + query.attrs.length + (query.q ? 1 : 0) + (query.trace ? 1 : 0) + placedCount(placement)}>
       <div className="flex flex-wrap items-center gap-2" role="search">
-        <NativeSelect aria-label="Time range" value={isPinned(query) ? 'pinned' : query.rangeMs} onChange={(e) => apply({ rangeMs: Number(e.target.value), fromMs: null, toMs: null })} className="w-[190px]">
-          {isPinned(query) ? <option value="pinned" disabled>Selected window</option> : null}
-          {RANGES.map(([label, ms]) => <option key={ms} value={ms}>Last {label}</option>)}
-        </NativeSelect>
+        {isPinned(query) ? <Button size="sm" onClick={() => apply({ fromMs: null, toMs: null })}><X aria-hidden />Back to the last {span.label}</Button> : null}
         <NativeSelect aria-label="Add a service" value="" onChange={(e) => e.target.value && apply({ services: toggle(query.services, e.target.value) })} className="w-[170px]">
           <option value="">Service: add…</option>
           {names.filter((n) => !query.services.includes(n)).map((n) => <option key={n} value={n}>{n}</option>)}

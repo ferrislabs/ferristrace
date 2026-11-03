@@ -40,13 +40,15 @@ function NoOrganisation() {
 }
 
 export function AppShell() {
-  const mock = useMatches().some((m) => m.staticData.mock === true)
+  const matches = useMatches()
+  const mock = matches.some((m) => m.staticData.mock === true)
+  const timed = matches.some((m) => m.staticData.timed === true)
   const { palette, setPalette, shortcuts, setShortcuts } = useGlobalShortcuts()
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar onOpenShortcuts={() => setShortcuts(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onPalette={() => setPalette(true)} mock={mock} />
+        <Topbar onPalette={() => setPalette(true)} mock={mock} timed={timed} />
         <UnavailableBanner />
         <main className="flex min-w-0 flex-1 flex-col gap-4 px-[max(16px,env(safe-area-inset-left))] pb-[calc(84px+env(safe-area-inset-bottom))] pt-4 md:px-5 md:pb-10">
           <NoOrganisation />

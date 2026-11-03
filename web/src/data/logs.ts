@@ -39,14 +39,6 @@ export type LogQuery = {
   limit: number
 }
 
-export const RANGES: [string, number][] = [
-  ['15 min', 15 * 60 * 1000],
-  ['1 hour', 60 * 60 * 1000],
-  ['6 hours', 6 * 60 * 60 * 1000],
-  ['24 hours', 24 * 60 * 60 * 1000],
-  ['7 days', 7 * 24 * 60 * 60 * 1000],
-]
-
 export const ANY: LogQuery = {
   rangeMs: 60 * 60 * 1000,
   fromMs: null,

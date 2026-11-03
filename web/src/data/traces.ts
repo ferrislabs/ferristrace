@@ -124,14 +124,6 @@ export type Sift = {
   limit: number
 }
 
-export const RANGES: [string, number][] = [
-  ['15 min', 15 * 60 * 1000],
-  ['1 hour', 60 * 60 * 1000],
-  ['6 hours', 6 * 60 * 60 * 1000],
-  ['24 hours', 24 * 60 * 60 * 1000],
-  ['7 days', 7 * 24 * 60 * 60 * 1000],
-]
-
 export const COUNTS = [50, 100, 200, 500]
 
 export const AN_HOUR = 60 * 60 * 1000

@@ -8,7 +8,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { Switch } from '@/components/ui/switch'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
-import { ANY, COUNTS, RANGES, useTraces, type Order, type Sift } from '@/data/traces'
+import { ANY, COUNTS, useTraces, type Order, type Sift } from '@/data/traces'
 import { useServiceNames } from '@/data/services'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
@@ -17,10 +17,13 @@ import { because } from '@/auth/client'
 import { shortId } from '@/lib/format'
 import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
+import { useWindow } from '@/lib/window'
 
 export function Traces() {
   const navigate = useNavigate()
-  const [sift, setSift] = useState<Sift>(ANY)
+  const { ms: windowMs, label: windowLabel } = useWindow()
+  const [chosen, setSift] = useState<Sift>(ANY)
+  const sift = useMemo(() => ({ ...chosen, rangeMs: windowMs }), [chosen, windowMs])
   const [typed, setTyped] = useState('')
   const [density, setDensity] = useState<'compact' | 'comfy'>('compact')
   const [cursor, setCursor] = useState(0)
@@ -46,19 +49,15 @@ export function Traces() {
   }, [rows, cursor, navigate])
 
   const copy = (id: string) => { void navigator.clipboard?.writeText(id); toast.success('Trace id copied', { description: shortId(id) }) }
-  const range = RANGES.find(([, ms]) => ms === sift.rangeMs)?.[0] ?? 'a window'
 
   return (
     <>
-      <PageHeader title="Traces" meta={sift.order === 'started' ? `Newest first · last ${range}` : `Last ${range}`}>
+      <PageHeader title="Traces" meta={sift.order === 'started' ? `Newest first · last ${windowLabel}` : `Last ${windowLabel}`}>
         <Segmented label="Row density" value={density} onChange={setDensity} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfortable' }]} />
         <span className="hidden items-center gap-1 text-caption text-muted-foreground lg:inline-flex"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>open</span>
       </PageHeader>
       <Filters active={[sift.service, typed, sift.errorsOnly, sift.atLeastMs].filter(Boolean).length + placedCount(placement)}>
       <div className="flex flex-wrap items-center gap-2" role="search">
-        <NativeSelect aria-label="Time range" value={sift.rangeMs} onChange={(e) => change({ rangeMs: Number(e.target.value) })} className="w-[150px]">
-          {RANGES.map(([label, ms]) => <option key={ms} value={ms}>Last {label}</option>)}
-        </NativeSelect>
         <NativeSelect aria-label="Service" value={sift.service} onChange={(e) => change({ service: e.target.value })} className="w-[190px]">
           <option value="">Service: any</option>
           {names.map((s) => <option key={s} value={s}>{s}</option>)}
