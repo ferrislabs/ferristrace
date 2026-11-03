@@ -190,7 +190,7 @@ export function Metrics() {
               </form>
               {picked.groupBy.map((k) => <Chip key={k} label={`Remove group by ${k}`} onRemove={() => apply({ groupBy: picked.groupBy.filter((x) => x !== k) })}>by {k}</Chip>)}
             </div>
-            <PlacementPicker placement={placement} onChange={place} windowMs={isPinned(picked) ? (picked.toMs as number) - (picked.fromMs as number) : picked.rangeMs} />
+            <PlacementPicker collapsible placement={placement} onChange={place} windowMs={isPinned(picked) ? (picked.toMs as number) - (picked.fromMs as number) : picked.rangeMs} />
             {series.failed ? (
               status === 404 ? (
                 <EmptyState title="Unknown metric">No metric named <span className="font-mono">{picked.name}</span> is known to this project.</EmptyState>
