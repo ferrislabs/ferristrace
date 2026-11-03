@@ -5,12 +5,16 @@ on:
     paths:
       - "charts/**"
       - ".github/workflows/helm.yaml"
-  push:
-    tags:
-      - "ferristrace-chart-v[0-9]+.[0-9]+.[0-9]+"
+  # A release tag publishes the chart at the tag's version, once its images
+  # are on ghcr, so the chart never names an image that is not there.
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: helm-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -48,7 +52,7 @@ jobs:
           done
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/ferristrace-chart-v')
+    if: inputs.version != ''
     needs: lint
     runs-on: ubuntu-latest
     permissions:
@@ -59,17 +63,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - name: the tag matches the chart version
-        id: version
-        run: |
-          set -eu
-          tag_version="${GITHUB_REF_NAME#ferristrace-chart-v}"
-          chart_version="$(awk '/^version:/ {print $2}' charts/ferristrace/Chart.yaml)"
-          if [ "$tag_version" != "$chart_version" ]; then
-            echo "tag version '${tag_version}' does not match chart version '${chart_version}'"
-            exit 1
-          fi
-          echo "version=${tag_version}" >> "$GITHUB_OUTPUT"
       - name: log in to ghcr
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,8 +70,8 @@ jobs:
         run: echo "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
       - name: package and push
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          helm package charts/ferristrace
+          helm package charts/ferristrace --version "$VERSION" --app-version "$VERSION"
           helm push "ferristrace-${VERSION}.tgz" "$REGISTRY"

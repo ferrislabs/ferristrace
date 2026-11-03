@@ -10,10 +10,11 @@ What the number means is [ADR 0018](adr/0018-a-version-is-cut-from-a-tag-that-ma
 
 ## Cut it
 
-The version bump is its own pull request, because the release refuses to publish a tag that disagrees with the manifest.
+The version bump is its own pull request, because the release refuses to publish a tag that disagrees with the manifest or with the chart.
 
 ```sh
-# 1. bump workspace.package.version in Cargo.toml, nothing else
+# 1. bump workspace.package.version in Cargo.toml, and version and
+#    appVersion in charts/ferristrace/Chart.yaml to the same number
 git switch -c chore/release-0.2.0
 git commit -s -am "chore(release): 0.2.0"
 gh pr create --base develop --fill
@@ -33,24 +34,26 @@ The tag is annotated, which is what `git-cliff --latest` reads to find the range
 
 ## What happens then
 
-The `release` workflow runs three jobs in order:
+The `release` workflow runs four jobs in order:
 
-1. `check` — the tag matches the manifest, then fmt, clippy, the tests and the doc tests. Nothing is published before this passes.
+1. `check` — the tag matches the manifest and the chart, then fmt, clippy, the tests and the doc tests. Nothing is published before this passes.
 2. `images` — builds and pushes `X.Y.Z` and `X.Y.Z-ee` for linux/amd64 and linux/arm64, with provenance and an SBOM, and attests them. A stable community release also moves `latest`.
-3. `release` — generates the changelog from the commits since the previous tag, measures the published images, and creates the GitHub Release.
+3. `chart` — lints the chart and pushes it to `oci://ghcr.io/ferrislabs/charts/ferristrace` at the tag's version, with the same appVersion. It runs after the images, so a published chart never names an image that is not there.
+4. `release` — generates the changelog from the commits since the previous tag, measures the published images, and creates the GitHub Release.
 
 ## After
 
 ```sh
 docker pull ghcr.io/ferrislabs/ferristrace:0.2.0
 docker run --rm ghcr.io/ferrislabs/ferristrace:0.2.0 --help
+helm show chart oci://ghcr.io/ferrislabs/charts/ferristrace --version 0.2.0
 ```
 
 Then read the release body: the image table carries a line per image and per architecture, and the changelog underneath should name every change an operator would notice. Check that `latest` moved if this was a stable release, and that it did not if this was a candidate.
 
 ## A release candidate
 
-Same steps, with the manifest at `0.2.0` and the tag at `v0.2.0-rc.1`. The workflow strips the `-rc.N` before comparing it to the manifest, publishes `0.2.0-rc.1` and `0.2.0-rc.1-ee`, marks the release as a prerelease, and moves nothing. Cut one when the risk is in a migration or in the image rather than in the code, because that is the part CI cannot prove before a tag exists.
+Same steps, with the manifest at `0.2.0` and the tag at `v0.2.0-rc.1`. The workflow strips the `-rc.N` before comparing it to the manifest, publishes `0.2.0-rc.1`, `0.2.0-rc.1-ee` and the chart at `0.2.0-rc.1`, marks the release as a prerelease, and moves nothing. Cut one when the risk is in a migration or in the image rather than in the code, because that is the part CI cannot prove before a tag exists.
 
 ## When it goes wrong
 
