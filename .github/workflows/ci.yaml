@@ -5,16 +5,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main, develop]
-    paths:
-      - "crates/**"
-      - "apps/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".github/workflows/ci.yaml"
-      - "Dockerfile"
-      - "deploy/**"
-      - "web/**"
 
 permissions:
   contents: read
@@ -30,65 +20,78 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
-  check:
+  # Decides which of the jobs below have anything to check. A pull request
+  # that only touches the web app never compiles Rust, and one that only
+  # touches Rust never installs the web app. A manual run checks everything.
+  changes:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [fmt, clippy, test]
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
+      web: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            rust:
+              - "crates/**"
+              - "apps/**"
+              - "Cargo.toml"
+              - "Cargo.lock"
+              - "rust-toolchain.toml"
+              - ".github/workflows/ci.yaml"
+            web:
+              - "web/**"
+              - ".github/workflows/ci.yaml"
+
+  fmt:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
         with:
+          components: rustfmt
+          cache: false
+      - run: cargo fmt --all -- --check
+
+  # Pull requests restore the caches main saved and never write their own:
+  # one multi-GB entry per pull request would evict main's under the 10 GB
+  # repository quota.
+  clippy:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
+        with:
+          components: clippy
           cache: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: matrix.task != 'fmt'
         with:
-          shared-key: rust-${{ matrix.task }}
+          shared-key: rust-clippy
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: fmt
-        if: matrix.task == 'fmt'
-        run: cargo fmt --all -- --check
-      - name: clippy
-        if: matrix.task == 'clippy'
+      - name: the workspace
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: test
-        if: matrix.task == 'test'
-        run: |
-          cargo test --workspace --locked
-          cargo test --doc --workspace --locked
+      - name: the server with the ee crate
+        run: cargo clippy -p ferristrace-server --all-targets --features ee --locked -- -D warnings
 
-  ee-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
-        with:
-          cache: false
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: rust-ee-gate
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: the default build excludes the ee crate
-        run: |
-          if cargo tree -p ferristrace-server -e normal --locked | grep -q ferristrace-ee; then
-            echo "::error::ferristrace-ee is in the default dependency graph"
-            exit 1
-          fi
-      - name: the ee feature pulls the ee crate in
-        run: |
-          if ! cargo tree -p ferristrace-server -e normal --features ee --locked | grep -q ferristrace-ee; then
-            echo "::error::the ee feature does not pull ferristrace-ee in"
-            exit 1
-          fi
-      - name: the ee crate builds behind its feature
-        run: cargo build -p ferristrace-server --features ee --locked
-
+  # Reads the dependency graph only, so it compiles nothing.
   layers:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,13 +124,29 @@ jobs:
             echo "::error::ferristrace-api depends on $(echo "$found" | tr '\n' ' ')"
             exit 1
           fi
+      - name: the default build excludes the ee crate
+        run: |
+          if cargo tree -p ferristrace-server -e normal --locked | grep -q ferristrace-ee; then
+            echo "::error::ferristrace-ee is in the default dependency graph"
+            exit 1
+          fi
+      - name: the ee feature pulls the ee crate in
+        run: |
+          if ! cargo tree -p ferristrace-server -e normal --features ee --locked | grep -q ferristrace-ee; then
+            echo "::error::the ee feature does not pull ferristrace-ee in"
+            exit 1
+          fi
 
-  control-plane:
+  # One build of the workspace runs every test, the adapters' included: the
+  # REQUIRE_* variables turn a store that is not there into a failure rather
+  # than a skipped suite.
+  test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    needs: check
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16-alpine
         env:
           POSTGRES_USER: ferristrace
           POSTGRES_PASSWORD: ferristrace
@@ -139,40 +158,15 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       redis:
-        image: redis:7
+        image: redis:7-alpine
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-    env:
-      DATABASE_URL: postgres://ferristrace:ferristrace@localhost:5432/ferristrace
-      REQUIRE_DATABASE_URL: "1"
-      REDIS_URL: redis://localhost:6379
-      REQUIRE_REDIS_URL: "1"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
-        with:
-          cache: false
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: rust-postgres
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: the control plane schema and the usage counter
-        run: |
-          cargo test -p ferristrace-postgres --test control_plane --test usage_history --test auth --test memberships --test roster --test teams --test projects --locked
-          cargo test -p ferristrace-redis --test usage_counter --locked
-
-  clickhouse:
-    runs-on: ubuntu-latest
-    needs: check
-    services:
       clickhouse:
-        image: clickhouse/clickhouse-server:24.8
+        image: clickhouse/clickhouse-server:24.8-alpine
         env:
           CLICKHOUSE_PASSWORD: ferristrace
         ports: ["8123:8123"]
@@ -182,6 +176,10 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
+      DATABASE_URL: postgres://ferristrace:ferristrace@localhost:5432/ferristrace
+      REQUIRE_DATABASE_URL: "1"
+      REDIS_URL: redis://localhost:6379
+      REQUIRE_REDIS_URL: "1"
       CLICKHOUSE_URL: http://localhost:8123
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ferristrace
@@ -195,188 +193,54 @@ jobs:
           cache: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: rust-clickhouse
+          shared-key: rust-test
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: migrations up, down and up again against a real server
-        run: cargo test -p ferristrace-clickhouse --test clickhouse_migrations --test span_sink --locked
+      - name: unit, integration and adapter tests
+        run: cargo test --workspace --locked
+      - name: doc tests
+        run: cargo test --doc --workspace --locked
       - name: small versus large batches
+        if: github.event_name == 'push'
         run: cargo run -p ferristrace-clickhouse --example batching_benchmark --release --locked
 
-  self-hosting:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: the image builds
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          load: true
-          tags: ferristrace:local
-          cache-from: type=gha,scope=self-hosting
-          cache-to: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'type=gha,mode=max,scope=self-hosting' || '' }}
-      - name: how big the image is
-        run: |
-          set -eu
-          bytes=$(docker image inspect ferristrace:local --format '{{.Size}}')
-          mib=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1048576 }')
-          echo "The runtime image is **${mib} MiB** uncompressed." >> "$GITHUB_STEP_SUMMARY"
-      - name: the stack comes up on a clean machine
-        working-directory: deploy
-        run: |
-          docker compose up --detach --no-build --wait --wait-timeout 180
-      - name: the server migrated the span store it was pointed at
-        working-directory: deploy
-        run: |
-          set -eu
-          exists=$(docker compose exec -T clickhouse clickhouse-client \
-            --user=ferristrace --password=ferristrace --database=ferristrace \
-            --query="EXISTS TABLE spans")
-          test "$exists" = "1" || { echo "the spans table is missing"; exit 1; }
-          applied=$(docker compose exec -T clickhouse clickhouse-client \
-            --user=ferristrace --password=ferristrace --database=ferristrace \
-            --query="SELECT max(version) FROM schema_migrations FINAL")
-          shipped=$(ls ../crates/clickhouse/migrations/clickhouse/*.up.sql | wc -l | tr -d " ")
-          test "$applied" = "$shipped" ||
-            { echo "the span schema is at $applied of $shipped"; exit 1; }
-      - name: the server migrated its control plane
-        working-directory: deploy
-        run: |
-          set -eu
-          tables=$(docker compose exec -T postgres psql --username ferristrace \
-            --dbname ferristrace --tuples-only --no-align \
-            --command "SELECT count(*) FROM information_schema.tables \
-                       WHERE table_schema = 'public' AND table_name IN \
-                       ('accounts', 'orgs', 'org_members', 'api_keys', 'sessions')")
-          test "$tables" = "5" || { echo "only $tables control plane tables exist"; exit 1; }
-      - name: bootstrap gives the deployment a way in, once
-        working-directory: deploy
-        run: |
-          set -eu
-          docker compose exec -T server ferristrace bootstrap \
-            --email operator@example.com > token.txt 2> bootstrap.log
-          cat bootstrap.log
-          test -s token.txt || { echo "no token was printed"; exit 1; }
-          grep -q '^ft_pr_' token.txt || { echo "that is not a reset token"; exit 1; }
-          docker compose exec -T server ferristrace bootstrap \
-            --email someone.else@example.com 2>&1 | tee second.log
-          grep -q "already holds an organisation" second.log \
-            || { echo "bootstrap was not idempotent"; exit 1; }
-      - name: the token sets a password and the password opens a session
-        working-directory: deploy
-        run: |
-          set -eu
-          token=$(grep -m1 "^ft_pr_" token.txt)
-          curl --fail --silent --show-error -X POST \
-            http://localhost:4318/auth/reset/confirm \
-            -H 'x-requested-with: ci' -H 'content-type: application/json' \
-            -d "{\"token\":\"$token\",\"password\":\"a long enough one\"}"
-          curl --fail --silent --show-error -X POST \
-            http://localhost:4318/auth/sign-in \
-            -H 'x-requested-with: ci' -H 'content-type: application/json' \
-            -d '{"email":"operator@example.com","password":"a long enough one"}' \
-            --cookie-jar jar.txt
-          grep -q ft_session jar.txt || { echo "no session cookie was set"; exit 1; }
-      - name: a short password is refused with the rule that refused it
-        working-directory: deploy
-        run: |
-          set -eu
-          code=$(curl --silent --output body.txt --write-out '%{http_code}' -X POST \
-            http://localhost:4318/auth/reset/confirm \
-            -H 'x-requested-with: ci' -H 'content-type: application/json' \
-            -d '{"token":"ft_pr_whatever","password":"short"}')
-          test "$code" = "422" || { echo "a weak password answered $code"; exit 1; }
-          grep -q "at least 12 characters" body.txt || { cat body.txt; exit 1; }
-      - name: the app is served and every deep link reaches it
-        working-directory: deploy
-        run: |
-          set -eu
-          curl --fail --silent --show-error http://localhost:4318/ > root.html
-          grep -qi "<!doctype html" root.html || { head -c 200 root.html; exit 1; }
-          for deep in /traces /traces/abc123 /reset?token=ft_pr_abc; do
-            code=$(curl --silent --output /dev/null --write-out "%{http_code}" "http://localhost:4318$deep")
-            test "$code" = "200" || { echo "$deep answered $code"; exit 1; }
-          done
-      - name: the session carries the organisation it owns
-        working-directory: deploy
-        run: |
-          set -eu
-          curl --fail --silent --show-error http://localhost:4318/auth/me \
-            -H 'x-requested-with: ci' --cookie jar.txt > me.json
-          cat me.json
-          grep -q "\"role\":\"owner\"" me.json || { echo "the owner lost its role"; exit 1; }
-          grep -q "operator@example.com" me.json || { echo "no address to show"; exit 1; }
-          grep -q "\"name\":\"Default\"" me.json || { echo "no org name to show"; exit 1; }
-      - name: the organisation card is served and the owner can rename it
-        working-directory: deploy
-        run: |
-          set -eu
-          org=$(docker compose exec -T postgres psql --username ferristrace \
-            --dbname ferristrace --tuples-only --no-align \
-            --command "SELECT id FROM orgs LIMIT 1" | tr -d '[:space:]')
-          curl --fail --silent --show-error "http://localhost:4318/api/orgs/$org" \
-            -H 'x-requested-with: ci' --cookie jar.txt > card.json
-          cat card.json
-          grep -q "\"name\":\"Default\"" card.json || { echo "the card lost the name"; exit 1; }
-          grep -q "\"plan\":\"Self-hosted\"" card.json || { echo "no plan on the card"; exit 1; }
-          grep -q "\"version\":\"" card.json || { echo "no version on the card"; exit 1; }
-          grep -qE "\"created_at_ms\":1[0-9]{12}" card.json \
-            || { echo "created_at_ms is not a millisecond count"; exit 1; }
-          refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH \
-            "http://localhost:4318/api/orgs/$org" -H 'x-requested-with: ci' --cookie jar.txt \
-            -H 'content-type: application/json' --data '{"name":"   "}')
-          test "$refused" = "422" || { echo "a blank name answered $refused"; exit 1; }
-          curl --fail --silent --show-error -X PATCH "http://localhost:4318/api/orgs/$org" \
-            -H 'x-requested-with: ci' --cookie jar.txt -H 'content-type: application/json' \
-            --data '{"name":"  Renamed  "}' > renamed.json
-          cat renamed.json
-          grep -q "\"name\":\"Renamed\"" renamed.json \
-            || { echo "the rename did not take, or kept the space"; exit 1; }
-          curl --fail --silent --show-error http://localhost:4318/auth/me \
-            -H 'x-requested-with: ci' --cookie jar.txt > me-after.json
-          grep -q "\"name\":\"Renamed\"" me-after.json \
-            || { echo "the top bar would still show the old name"; exit 1; }
-      - name: an issued key authenticates a payload and an unissued one does not
-        working-directory: deploy
-        run: |
-          set -eu
-          org=$(docker compose exec -T postgres psql --username ferristrace \
-            --dbname ferristrace --tuples-only --no-align \
-            --command "SELECT id FROM orgs LIMIT 1" | tr -d '[:space:]')
-          key=$(docker compose exec -T server ferristrace issue-key --org "$org" 2>/dev/null \
-            | grep -m1 "^ft_" | tr -d "[:space:]")
-          accepted=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
-            http://localhost:4318/v1/traces -H "authorization: Bearer $key" \
-            -H 'content-type: application/x-protobuf' --data-binary '')
-          test "$accepted" = "200" || { echo "an issued key answered $accepted"; exit 1; }
-          refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
-            http://localhost:4318/v1/traces -H "authorization: Bearer ft_live_nonsense.nonsense" \
-            -H 'content-type: application/x-protobuf' --data-binary '')
-          test "$refused" = "401" || { echo "an unissued key answered $refused"; exit 1; }
-      - name: what the server said
-        if: always()
-        working-directory: deploy
-        run: docker compose logs server
-      - name: stop
-        if: always()
-        working-directory: deploy
-        run: docker compose down --volumes
-
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - name: the front end type checks
-        working-directory: web
+        run: pnpm typecheck
+      - name: the front end builds
+        run: pnpm build
+
+  # The one check to require: green when every job that had something to
+  # check passed, whichever of them the changes above skipped.
+  ci:
+    if: always()
+    needs: [changes, fmt, clippy, layers, test, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every job that ran passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
-          npm install --global corepack@0.36.0
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm typecheck
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then
+            echo "::error::a check failed or was cancelled"
+            exit 1
+          fi
