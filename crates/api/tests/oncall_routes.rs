@@ -1374,7 +1374,7 @@ async fn the_oncall_lookup_by_email_answers_sessions_keys_and_agents() {
         .as_role(
             OrgRole::Member,
             Method::GET,
-            &format!("/api/orgs/{}/oncall/now", id(MINE)),
+            &format!("/api/orgs/{}/oncall/now?email=", id(MINE)),
             None,
         )
         .await;
@@ -1396,7 +1396,52 @@ async fn the_oncall_lookup_by_email_answers_sessions_keys_and_agents() {
     assert_eq!(by_key, mine);
     assert_eq!(agent, StatusCode::OK);
     assert_eq!(by_agent, mine);
-    assert_eq!(missing, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(missing, StatusCode::OK);
+    assert_eq!(foreign, StatusCode::NOT_FOUND);
+    assert!(harness.actions().contains(&Action::AgentRead));
+}
+
+fn everyone() -> String {
+    format!("/api/orgs/{}/oncall/now", id(MINE))
+}
+
+#[tokio::test]
+async fn oncall_now_without_an_email_lists_every_schedule_with_who_is_on_call() {
+    let harness = Harness::new();
+
+    let (session, listed) = harness
+        .as_role(OrgRole::Member, Method::GET, &everyone(), None)
+        .await;
+    let (keyed, by_key) = harness
+        .served(OrgRole::Member, as_key(Method::GET, &everyone(), None))
+        .await;
+    let (agent, by_agent) = harness
+        .served(
+            OrgRole::Member,
+            as_agent(Method::GET, &everyone(), "reader", None),
+        )
+        .await;
+    let (foreign, _) = harness
+        .as_role(
+            OrgRole::Member,
+            Method::GET,
+            &format!("/api/orgs/{}/oncall/now", id(THEIRS)),
+            None,
+        )
+        .await;
+
+    assert_eq!(session, StatusCode::OK, "{listed}");
+    let schedules = listed["schedules"].as_array().expect("a list");
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0]["name"], "Primary");
+    assert!(schedules[0]["id"].is_string());
+    assert!(schedules[0]["team"].is_string());
+    assert_eq!(schedules[0]["on_call"]["email"], "me@example.com");
+    assert!(schedules[0]["on_call"].get("name").is_some());
+    assert!(schedules[0]["until_ms"].is_u64());
+    assert_eq!((keyed, agent), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(by_key, listed);
+    assert_eq!(by_agent, listed);
     assert_eq!(foreign, StatusCode::NOT_FOUND);
     assert!(harness.actions().contains(&Action::AgentRead));
 }

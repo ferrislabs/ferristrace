@@ -102,6 +102,14 @@ pub struct OnCallNow {
     pub until_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnCallSchedule {
+    pub schedule: ScheduleId,
+    pub name: ScheduleName,
+    pub team: TeamId,
+    pub now: OnCallNow,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OnCallStatus {
     pub on_call: bool,
