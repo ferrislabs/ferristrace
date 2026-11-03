@@ -26,7 +26,7 @@ export function OrganisationSwitcher() {
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" aria-haspopup="listbox" aria-label={`Organisation: ${orgLabel(active?.name)}`} loading={change.isPending} className="min-w-0 max-sm:px-1.5"><Building2 /><span className="max-w-[96px] truncate sm:max-w-none">{orgLabel(active?.name)}</span><ChevronDown className="text-muted-foreground" /></Button>
+          <Button variant="ghost" size="sm" aria-haspopup="listbox" aria-label={`Organisation: ${orgLabel(active?.name)}`} loading={change.isPending} className="min-w-0 max-sm:px-1.5"><Building2 /><span className="max-w-[96px] truncate sm:max-w-none">{orgLabel(active?.name)}</span><ChevronDown className="text-muted-foreground max-sm:hidden" /></Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[300px] p-1">
           {list.map((m) => (

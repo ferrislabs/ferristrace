@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect } from '@tanstack/react-router'
+import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect, retainSearchParams } from '@tanstack/react-router'
 import { accountQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
 import { AppShell } from '@/components/layout/AppShell'
@@ -46,15 +46,17 @@ import { ProjectApiKeys } from '@/pages/settings/ProjectApiKeys'
 declare module '@tanstack/react-router' {
   interface StaticDataRouteOption {
     mock?: boolean
+    timed?: boolean
   }
   interface Register {
     router: AppRouter
   }
 }
 
-type Marker = { mock?: boolean }
+type Marker = { mock?: boolean; timed?: boolean }
 const mock: Marker = { mock: true }
 const real: Marker = {}
+const timed: Marker = { timed: true }
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: Outlet, notFoundComponent: NotFound })
 
@@ -81,6 +83,10 @@ const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'shell',
   component: AppShell,
+  validateSearch: (search: Record<string, unknown>): { window?: string } => ({
+    window: typeof search.window === 'string' ? search.window : undefined,
+  }),
+  search: { middlewares: [retainSearchParams(['window'])] },
   beforeLoad: async ({ context, location }) => {
     try {
       await context.queryClient.ensureQueryData(accountQuery)
@@ -119,10 +125,10 @@ const routeTree = rootRoute.addChildren([
   publicStatusRoute,
   publicPostmortemRoute,
   shellRoute.addChildren([
-    inShell('/', Overview, {}),
+    inShell('/', Overview, timed),
     inShell('/onboarding', Onboarding, real),
-    inShell('/services', Services, {}),
-    inShell('/services/$name', ServiceDetail, {}),
+    inShell('/services', Services, timed),
+    inShell('/services/$name', ServiceDetail, timed),
     inShell('/issues', Issues),
     inShell('/issues/$id', IssueDetail),
     inShell('/releases', Releases, real),
@@ -133,10 +139,10 @@ const routeTree = rootRoute.addChildren([
     inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra/kubernetes', Kubernetes, real),
     inShell('/infra/kubernetes/nodes/$name', KubernetesNode, real),
-    inShell('/traces', Traces, {}),
+    inShell('/traces', Traces, timed),
     inShell('/traces/$id', TraceDetail, {}),
-    inShell('/logs', Logs, {}),
-    inShell('/metrics', Metrics, {}),
+    inShell('/logs', Logs, timed),
+    inShell('/metrics', Metrics, timed),
     inShell('/backend/$view', () => <SignalPage group="backend" />),
     inShell('/frontend/$view', () => <SignalPage group="frontend" />),
     inShell('/status-page', StatusPageEditor, real),

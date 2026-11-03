@@ -43,14 +43,6 @@ export const AGGREGATIONS: Record<MetricKind, Aggregation[]> = {
 
 export const DEFAULT_AGG: Record<MetricKind, Aggregation> = { gauge: 'avg', sum: 'rate', histogram: 'p95' }
 
-export const RANGES: [string, number][] = [
-  ['15 min', 15 * 60 * 1000],
-  ['1 hour', 60 * 60 * 1000],
-  ['6 hours', 6 * 60 * 60 * 1000],
-  ['24 hours', 24 * 60 * 60 * 1000],
-  ['7 days', 7 * 24 * 60 * 60 * 1000],
-]
-
 export const DEFAULT_RANGE_MS = 60 * 60 * 1000
 
 const FRESH_MS = 15_000
