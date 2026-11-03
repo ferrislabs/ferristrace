@@ -44,7 +44,7 @@ export function Services() {
         <Segmented label="Sort by" value={sort} onChange={setSort} options={[{ value: 'err', label: 'Error rate' }, { value: 'rps', label: 'Requests' }, { value: 'p95', label: 'p95' }, { value: 'name', label: 'Name' }]} />
         <Switch checked={hideEmpty} onCheckedChange={setHideEmpty} label="Hide services with no data" />
       </div>
-      <PlacementPicker placement={placement} onChange={place} windowMs={windowMs} />
+      <PlacementPicker collapsible placement={placement} onChange={place} windowMs={windowMs} />
       {failed ? <EmptyState title="The services could not be read">{because(failed, 'The span store did not answer')}</EmptyState> : null}
       {!failed && !pending && services.length === 0 ? <EmptyState title={settledEnv.trim() ? `No services in ${settledEnv.trim()} in the last ${label}` : `No services in the last ${label}`} code="OTEL_SERVICE_NAME=checkout-api">A service appears as soon as one span it served arrives with a service.name. The environment filter reads the deployment.environment span attribute.</EmptyState> : null}
       <div className={cn('-mx-4 overflow-x-auto border-t md:-mx-5', services.length === 0 && 'hidden')}>

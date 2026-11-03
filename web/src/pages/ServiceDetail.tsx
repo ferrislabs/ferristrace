@@ -56,7 +56,7 @@ export function ServiceDetail() {
         {environment ? <span>Environment <span className="font-mono text-foreground">{environment}</span></span> : null}
         {s ? <span>Last span <span className="font-mono text-foreground">{s.seen}</span></span> : null}
       </div>
-      <PlacementPicker placement={placement} onChange={place} windowMs={windowMs} />
+      <PlacementPicker collapsible placement={placement} onChange={place} windowMs={windowMs} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
         <Kpi label="Requests" value={s?.rps ?? '—'} sub="server and consumer spans" />
         <Kpi label="Error rate" value={s?.err == null ? '—' : `${s.err.toFixed(1)} %`} sub={`amber from ${ERROR_THRESHOLD} %`} tone={bad ? 'warn' : undefined} />

@@ -17,7 +17,7 @@ export function PlacementPicker({ placement, onChange, windowMs, collapsible }: 
   const workloads = kept(seen.workloads.filter((w) => inNamespace(w.namespace)).map((w) => `${w.kind}:${w.name}`), placement.workload)
   const pods = kept(seen.pods.filter((p) => inNamespace(p.namespace) && (!placement.node || p.node === placement.node)).map((p) => p.name), placement.pod)
   const select = (place: Place, label: string, options: string[], width: string) => (
-    <NativeSelect aria-label={label} value={placement[place]} onChange={(e) => onChange({ [place]: e.target.value })} className={cn(width, placement[place] && 'font-mono')}>
+    <NativeSelect aria-label={label} value={placement[place]} onChange={(e) => onChange({ [place]: e.target.value })} className={cn(width, 'max-md:h-11 max-md:w-full max-md:min-w-0', placement[place] && 'font-mono')}>
       <option value="">{label}: any</option>
       {options.map((option) => <option key={option} value={option}>{option}</option>)}
     </NativeSelect>
