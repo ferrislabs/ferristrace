@@ -1,0 +1,121 @@
+namespace FerrisKey {
+  entity Role = {
+    name: String,
+  };
+
+  entity Organization = {
+    alias: String,
+    name: String,
+  };
+
+  entity Group in [Group, Organization] = {
+    name: String,
+  };
+
+  entity User in [Role, Group, Organization] = {
+    username: String,
+    email?: String,
+    email_verified: Bool,
+    enabled: Bool,
+    roles?: Set<String>,
+    organisation?: String,
+    on_call?: Bool,
+    on_call_schedules?: Set<String>,
+  } tags String;
+
+  entity Client in [Role] = {
+    client_id: String,
+  };
+
+  entity Agent in [Role] = {
+    client_id: String,
+  };
+
+  entity McpServer = {
+    name: String,
+  };
+
+  entity Tool in [McpServer] = {
+    server: String,
+    tool: String,
+    organisation?: String,
+    organisation_name?: String,
+    access?: String,
+    destructive?: Bool,
+    annotations?: {
+      readOnlyHint?: Bool,
+      destructiveHint?: Bool,
+      idempotentHint?: Bool,
+      openWorldHint?: Bool,
+    },
+  };
+
+  entity Resource in [McpServer] = {
+    server: String,
+    uri: String,
+  };
+
+  entity Prompt in [McpServer] = {
+    server: String,
+    name: String,
+  };
+
+  type Target = {
+    service?: String,
+    services?: Set<String>,
+    namespace?: String,
+    cluster?: String,
+    pod?: String,
+    environment?: String,
+    environments?: Set<String>,
+    project?: String,
+    severity?: String,
+    incident_status?: String,
+    alert_state?: String,
+    log_severity?: String,
+  };
+
+  type AgentContext = {
+    agent: String,
+    delegated: Bool,
+    target: Target,
+    act?: {
+      sub?: String,
+      client_id?: String,
+      act?: {
+        sub?: String,
+        client_id?: String,
+        act?: {
+          sub?: String,
+          client_id?: String,
+        },
+      },
+    },
+    time: {
+      weekday: Long,
+      hour: Long,
+      minute: Long,
+      timezone: String,
+      iso_utc: String,
+      iso?: String,
+    },
+  };
+
+  action call_tool appliesTo {
+    principal: [User, Agent, Client],
+    resource: [Tool],
+    context: AgentContext,
+  };
+
+  action read_resource appliesTo {
+    principal: [User, Agent, Client],
+    resource: [Resource],
+    context: AgentContext,
+  };
+
+  action get_prompt appliesTo {
+    principal: [User, Agent, Client],
+    resource: [Prompt],
+    context: AgentContext,
+  };
+}

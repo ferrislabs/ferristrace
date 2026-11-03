@@ -1,0 +1,1137 @@
+{
+  "timezone": "Europe/Paris",
+  "users": {
+    "alice": {
+      "groups": [
+        "Dev"
+      ]
+    },
+    "bob": {
+      "groups": []
+    },
+    "carol": {
+      "groups": [
+        "Support"
+      ]
+    },
+    "dave": {
+      "groups": [
+        "Interns"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "dev_reads_checkout_logs_tuesday_10",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "production"
+        ]
+      },
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "production"
+        ],
+        "environment": "production"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "dev_reads_checkout_traces_tuesday_10",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_traces",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "production"
+        ]
+      },
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "production"
+        ],
+        "environment": "production"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "dev_reads_checkout_logs_at_09_00",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T08:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 9,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "dev_reads_checkout_logs_at_17_59",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T16:59:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 17,
+        "minute": 59
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_checkout_logs_at_08_59",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T07:59:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 8,
+        "minute": 59
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_checkout_logs_at_18_00",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T17:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 18,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_checkout_logs_tuesday_20",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T19:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 20,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_checkout_logs_saturday_10",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-07T09:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 6,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_payments_logs_tuesday_10",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "payments"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "service": "payments"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_logs_without_a_service",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {},
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {},
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "dev_refused_checkout_metrics",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "query_metric",
+      "arguments": {
+        "name": "latency",
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "non_member_refused_checkout_logs",
+      "policies": [
+        "01-dev-reads-checkout.cedar"
+      ],
+      "user": "bob",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {},
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "oncall_resolves_a_sev3",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+    },
+    {
+      "name": "oncall_acknowledges_a_page",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "acknowledge_page",
+      "arguments": {
+        "page_id": "33333333-3333-4333-8333-333333333333"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {},
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+    },
+    {
+      "name": "off_call_refused_to_resolve_a_sev3",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar"
+      ],
+      "user": "bob",
+      "on_call": false,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "off_call_refused_to_acknowledge_a_page",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar"
+      ],
+      "user": "bob",
+      "on_call": false,
+      "tool": "acknowledge_page",
+      "arguments": {
+        "page_id": "33333333-3333-4333-8333-333333333333"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {},
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "oncall_refused_to_resolve_a_sev1",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03a-no-resolve-of-sev1.cedar",
+        "03b-members-comment.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev1",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev1",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "oncall_resolves_a_sev3_beside_the_sev1_rule",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03a-no-resolve-of-sev1.cedar",
+        "03b-members-comment.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+    },
+    {
+      "name": "oncall_comments_on_a_sev1",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03a-no-resolve-of-sev1.cedar",
+        "03b-members-comment.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "rolling back"
+      },
+      "incident": {
+        "severity": "sev1",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev1",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "member_comments_on_a_sev1",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03a-no-resolve-of-sev1.cedar",
+        "03b-members-comment.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "seen it too"
+      },
+      "incident": {
+        "severity": "sev1",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "severity": "sev1",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "support_reads_staging_logs",
+      "policies": [
+        "04-support-reads-staging.cedar"
+      ],
+      "user": "carol",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "staging"
+        ]
+      },
+      "at": "2026-11-03T02:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "staging"
+        ],
+        "environment": "staging"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 3,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "support_refused_production_logs",
+      "policies": [
+        "04-support-reads-staging.cedar"
+      ],
+      "user": "carol",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "production"
+        ]
+      },
+      "at": "2026-11-03T02:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "production"
+        ],
+        "environment": "production"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 3,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "support_refused_a_service_without_environment",
+      "policies": [
+        "04-support-reads-staging.cedar"
+      ],
+      "user": "carol",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": []
+      },
+      "at": "2026-11-03T02:00:00Z",
+      "target": {
+        "service": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 3,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "support_refused_a_service_seen_in_both",
+      "policies": [
+        "04-support-reads-staging.cedar"
+      ],
+      "user": "carol",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "staging",
+          "production"
+        ]
+      },
+      "at": "2026-11-03T02:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "staging",
+          "production"
+        ]
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 3,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "non_support_refused_staging_logs",
+      "policies": [
+        "04-support-reads-staging.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "service": "checkout"
+      },
+      "incident": null,
+      "placement": {
+        "environments": [
+          "staging"
+        ]
+      },
+      "at": "2026-11-03T02:00:00Z",
+      "target": {
+        "service": "checkout",
+        "environments": [
+          "staging"
+        ],
+        "environment": "staging"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 3,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "intern_refused_payments_namespace_logs",
+      "policies": [
+        "seed-members-read.cedar",
+        "05-interns-not-payments.cedar"
+      ],
+      "user": "dave",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "namespace": "payments"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "namespace": "payments"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "intern_refused_payments_namespace_cluster",
+      "policies": [
+        "seed-members-read.cedar",
+        "05-interns-not-payments.cedar"
+      ],
+      "user": "dave",
+      "on_call": false,
+      "tool": "cluster_status",
+      "arguments": {
+        "namespace": "payments"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "namespace": "payments"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "intern_reads_checkout_namespace_logs",
+      "policies": [
+        "seed-members-read.cedar",
+        "05-interns-not-payments.cedar"
+      ],
+      "user": "dave",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "namespace": "checkout"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "namespace": "checkout"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "member_reads_payments_namespace_logs",
+      "policies": [
+        "seed-members-read.cedar",
+        "05-interns-not-payments.cedar"
+      ],
+      "user": "bob",
+      "on_call": false,
+      "tool": "search_logs",
+      "arguments": {
+        "namespace": "payments"
+      },
+      "incident": null,
+      "placement": null,
+      "at": "2026-11-03T09:00:00Z",
+      "target": {
+        "namespace": "payments"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 10,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "member_refused_to_comment_at_23_00",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "late"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T22:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 23,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "member_refused_to_comment_at_06_59",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "early"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T05:59:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 6,
+        "minute": 59
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "member_refused_to_comment_at_22_00",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "edge"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T21:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 22,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    },
+    {
+      "name": "member_comments_at_07_00",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "morning"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T06:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 7,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "member_comments_at_21_59",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "alice",
+      "on_call": false,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "evening"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T20:59:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 21,
+        "minute": 59
+      },
+      "expect": "permit",
+      "today": "permit",
+      "why": ""
+    },
+    {
+      "name": "oncall_comments_at_23_00",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "comment_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222",
+        "text": "night shift"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T22:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 23,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+    },
+    {
+      "name": "oncall_resolves_at_night",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "bob",
+      "on_call": true,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T22:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 23,
+        "minute": 0
+      },
+      "expect": "permit",
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+    },
+    {
+      "name": "off_call_refused_to_resolve_at_night",
+      "policies": [
+        "02-oncall-resolves-and-acknowledges.cedar",
+        "03b-members-comment.cedar",
+        "06-no-night-writes-unless-on-call.cedar"
+      ],
+      "user": "bob",
+      "on_call": false,
+      "tool": "resolve_incident",
+      "arguments": {
+        "incident_id": "22222222-2222-4222-8222-222222222222"
+      },
+      "incident": {
+        "severity": "sev3",
+        "status": "open",
+        "services": []
+      },
+      "placement": null,
+      "at": "2026-11-03T22:00:00Z",
+      "target": {
+        "severity": "sev3",
+        "incident_status": "open"
+      },
+      "time": {
+        "weekday": 2,
+        "hour": 23,
+        "minute": 0
+      },
+      "expect": "deny",
+      "today": "deny",
+      "why": ""
+    }
+  ]
+}
