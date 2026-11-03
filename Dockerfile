@@ -16,19 +16,15 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
-ARG FEATURES=""
-
 COPY --from=planner /usr/local/src/ferristrace/recipe.json recipe.json
 
-RUN cargo chef cook --release --locked --recipe-path recipe.json --package ferristrace-server \
-    ${FEATURES:+--features "$FEATURES"}
+RUN cargo chef cook --release --locked --recipe-path recipe.json --package ferristrace-server
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY apps apps
 
-RUN cargo build --release --locked --package ferristrace-server \
-    ${FEATURES:+--features "$FEATURES"}
+RUN cargo build --release --locked --package ferristrace-server
 
 FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web-build
 

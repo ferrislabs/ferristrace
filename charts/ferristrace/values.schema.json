@@ -27,12 +27,6 @@
         }
       }
     },
-    "edition": {
-      "enum": [
-        "community",
-        "ee"
-      ]
-    },
     "imagePullSecrets": {
       "type": "array"
     },

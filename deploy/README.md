@@ -203,8 +203,7 @@ docker compose exec server ferristrace bootstrap --email you@example.com
 ## Using a published image instead of building
 
 Images land on `ghcr.io/ferrislabs/ferristrace` for every released tag:
-`1.2.3` is the community build and `1.2.3-ee` the cloud one, both for
-linux/amd64 and linux/arm64.
+`1.2.3`, for linux/amd64 and linux/arm64.
 
 ```sh
 export FERRISTRACE_IMAGE=ghcr.io/ferrislabs/ferristrace:1.2.3

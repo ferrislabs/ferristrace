@@ -13,7 +13,7 @@ thibault.pointurier.pro@gmail.com instead.
 
 A report is easiest to act on when it carries:
 
-- the version or commit, and whether it is the community or the `-ee` image
+- the version or commit
 - what an attacker can reach, and what they get out of it
 - the smallest sequence of steps that shows it
 - anything that would narrow the blast radius in the meantime
@@ -50,7 +50,7 @@ are no backports to earlier ones.
 
 ## Scope
 
-In scope, for both the community and the `-ee` builds:
+In scope:
 
 - the server: the OTLP endpoints on 4317 and 4318, the HTTP API, the web
   application it serves

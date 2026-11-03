@@ -105,17 +105,17 @@ jobs:
             echo "| Image | Platform | Compressed |"
             echo "| --- | --- | --- |"
           } > sizes.md
-          for suffix in "" "-ee"; do
-            tag="${version}${suffix}"
-            docker buildx imagetools inspect "${IMAGE}:${tag}" --raw \
+          for image in ferristrace ferristrace-mcp ferristrace-mcp-gateway; do
+            ref="ghcr.io/ferrislabs/${image}:${version}"
+            docker buildx imagetools inspect "$ref" --raw \
               | jq -r '.manifests[]? | select(.platform.os == "linux")
                        | select(.platform.architecture != "unknown")
                        | "\(.platform.architecture) \(.digest)"' \
               | while read -r arch digest; do
-                  bytes=$(docker buildx imagetools inspect "${IMAGE}@${digest}" --raw \
+                  bytes=$(docker buildx imagetools inspect "${ref%:*}@${digest}" --raw \
                     | jq '[.layers[].size] | add')
                   mib=$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1048576 }')
-                  echo "| \`${IMAGE}:${tag}\` | linux/${arch} | ${mib} MiB |" >> sizes.md
+                  echo "| \`${ref}\` | linux/${arch} | ${mib} MiB |" >> sizes.md
                 done
           done
           cat sizes.md >> "$GITHUB_STEP_SUMMARY"
@@ -133,7 +133,7 @@ jobs:
             echo "docker pull ${IMAGE}:${version}"
             echo '```'
             echo
-            echo "The \`-ee\` tag carries the cloud build. Both are"
+            echo "The server, the MCP server and the MCP gateway, each for"
             echo "linux/amd64 and linux/arm64 with provenance attached."
             echo
             cat sizes.md

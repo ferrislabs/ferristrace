@@ -1,6 +1,6 @@
 # 0014 — A release is two images on a tag
 
-- Status: accepted
+- Status: accepted, the `-ee` image dropped by [0030](0030-ferristrace-is-open-source-in-one-build.md)
 - Date: 2026-10-24
 
 ## Context

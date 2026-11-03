@@ -41,9 +41,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "ferristrace.image" -}}
 {{- $tag := default .Chart.AppVersion .Values.image.tag -}}
-{{- if and (eq .Values.edition "ee") (not (hasSuffix "-ee" $tag)) -}}
-{{- $tag = printf "%s-ee" $tag -}}
-{{- end -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end }}
 

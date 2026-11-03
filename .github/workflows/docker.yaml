@@ -53,7 +53,7 @@ jobs:
   # Decides what this run builds. Every run builds the three images for
   # amd64 and starts the stack on them. Pushing, which a release, a manual
   # run or the push-image label on a pull request asks for, adds arm64 and
-  # the cloud build of the server, and tags the result sha-<short sha>.
+  # tags the result sha-<short sha>.
   plan:
     runs-on: ubuntu-latest
     outputs:
@@ -83,14 +83,13 @@ jobs:
           fi
           amd='{"runner":"ubuntu-24.04","platform":"linux/amd64","arch":"amd64"}'
           arm='{"runner":"ubuntu-24.04-arm","platform":"linux/arm64","arch":"arm64"}'
-          server='{"name":"server","file":"Dockerfile","features":"","local":"ferristrace:local","repository":"ferristrace","suffix":""}'
-          cloud='{"name":"server-ee","file":"Dockerfile","features":"ee","local":"","repository":"ferristrace","suffix":"-ee"}'
-          mcp='{"name":"mcp","file":"Dockerfile.mcp","features":"","local":"ferristrace-mcp:local","repository":"ferristrace-mcp","suffix":""}'
-          gateway='{"name":"mcp-gateway","file":"Dockerfile.mcp-gateway","features":"","local":"ferristrace-mcp-gateway:local","repository":"ferristrace-mcp-gateway","suffix":""}'
+          server='{"name":"server","file":"Dockerfile","local":"ferristrace:local","repository":"ferristrace"}'
+          mcp='{"name":"mcp","file":"Dockerfile.mcp","local":"ferristrace-mcp:local","repository":"ferristrace-mcp"}'
+          gateway='{"name":"mcp-gateway","file":"Dockerfile.mcp-gateway","local":"ferristrace-mcp-gateway:local","repository":"ferristrace-mcp-gateway"}'
           images="[$server,$mcp,$gateway]"
           runners="[$amd]"
           if [ "$push" = true ]; then
-            images="[$server,$cloud,$mcp,$gateway]"
+            images="[$server,$mcp,$gateway]"
             runners="[$amd,$arm]"
           fi
           builds=$(jq -nc --argjson images "$images" --argjson runners "$runners" \
@@ -137,8 +136,6 @@ jobs:
           context: .
           file: ${{ matrix.file }}
           platforms: ${{ matrix.platform }}
-          build-args: |
-            FEATURES=${{ matrix.features }}
           tags: ${{ matrix.local || format('{0}:check', matrix.name) }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
           cache-to: ${{ env.WRITES_CACHE == 'true' && format('type=gha,mode=max,scope={0}', env.CACHE_SCOPE) || '' }}
@@ -169,8 +166,6 @@ jobs:
           context: .
           file: ${{ matrix.file }}
           platforms: ${{ matrix.platform }}
-          build-args: |
-            FEATURES=${{ matrix.features }}
           tags: ${{ env.REGISTRY }}/${{ matrix.repository }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
           provenance: mode=max
@@ -390,12 +385,11 @@ jobs:
           images: ${{ env.IMAGE }}
           flavor: |
             latest=false
-            suffix=${{ matrix.suffix }}
           tags: |
             type=sha
             type=ref,event=pr
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && matrix.suffix == '' && !contains(github.ref_name, '-rc') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-rc') }}
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
@@ -408,7 +402,7 @@ jobs:
       # Keyless: the signature is bound to this workflow's OIDC identity.
       - name: sign the manifest
         run: |
-          ref="$(jq -er '.tags | map(select(test(":sha-[0-9a-f]+(-ee)?$"))) | first' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          ref="$(jq -er '.tags | map(select(test(":sha-[0-9a-f]+$"))) | first' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
           digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r .digest)"
           cosign sign --yes "$IMAGE@$digest"
           echo "### $ref" >> "$GITHUB_STEP_SUMMARY"

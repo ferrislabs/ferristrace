@@ -42,7 +42,6 @@ Organisation > Audit log.
 | `crates/redis` | The usage counter. |
 | `crates/infra` | S3 photos, SMTP, OIDC, the secret seal, clocks, in-memory adapters. |
 | `crates/api` | The driving adapters: the HTTP routers, the OTLP gRPC service, the DTOs. |
-| `crates/ee` | The cloud build, behind the `ee` feature. Empty in this repository. |
 | `apps/server` | The binary: configuration, wiring, the CLI, the server. |
 | `apps/mcp`, `apps/mcp-gateway` | The MCP server and the policy gateway in front of it. |
 | `web` | The front end: React, Vite, TypeScript. |
@@ -87,9 +86,10 @@ Running the front end against the stack, without rebuilding the image, is in
 
 ## Releases
 
-A tag `vX.Y.Z` publishes two images for linux/amd64 and linux/arm64:
-`ghcr.io/ferrislabs/ferristrace:X.Y.Z` is the community build and
-`:X.Y.Z-ee` the cloud one. Both carry provenance and an SBOM.
+A tag `vX.Y.Z` publishes `ghcr.io/ferrislabs/ferristrace:X.Y.Z`, the MCP
+server and gateway images, for linux/amd64 and linux/arm64, with provenance
+and an SBOM, and the Helm chart at the same version. Everything is open
+source: there is one build, and the hosted service runs it too.
 
 The number follows SemVer read for a pre-1.0 product: a breaking change bumps
 the minor, everything else the patch. What counts as breaking, and why the
