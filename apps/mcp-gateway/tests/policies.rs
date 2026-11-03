@@ -29,7 +29,11 @@ fn policy_files() -> Vec<String> {
     let mut files: Vec<String> = fs::read_dir(docs().join("policies"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.ends_with(".cedar"))
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|extension| extension == "cedar")
+        })
         .collect();
     files.sort();
     files
@@ -53,7 +57,7 @@ fn validation_errors(source: &str) -> Vec<String> {
     let result = Validator::new(schema()).validate(&set, ValidationMode::Strict);
     result
         .validation_errors()
-        .map(|error| error.to_string())
+        .map(ToString::to_string)
         .collect()
 }
 
@@ -252,4 +256,19 @@ fn the_worked_examples_permit_and_refuse_exactly_the_calls_they_describe() {
     }
     let every: BTreeSet<String> = policy_files().into_iter().collect();
     assert_eq!(covered, every);
+}
+
+#[test]
+fn the_guide_shows_every_policy_exactly_as_it_is_tested() {
+    let guide = fs::read_to_string(docs().join("../mcp.md")).unwrap();
+    for file in policy_files() {
+        if file.starts_with("seed-") {
+            continue;
+        }
+        let source = policy_text(&file);
+        assert!(
+            guide.contains(source.trim_end()),
+            "docs/mcp.md does not show {file} as it is"
+        );
+    }
 }

@@ -166,8 +166,10 @@ impl Admin {
         items(&found)
             .iter()
             .find(|scope| text(scope, "name") == name)
-            .map(|scope| text(scope, "id").to_owned())
-            .unwrap_or_else(|| panic!("client scope {name} is missing: run ferriskey-init"))
+            .map_or_else(
+                || panic!("client scope {name} is missing: run ferriskey-init"),
+                |scope| text(scope, "id").to_owned(),
+            )
     }
 }
 
@@ -178,7 +180,7 @@ struct Fixture {
     users: BTreeMap<String, String>,
 }
 
-async fn provision(admin: &Admin, users: &Value) -> Fixture {
+async fn check_realm(admin: &Admin) {
     let state = admin.get("/authz/state").await;
     assert_eq!(
         state["enabled"], true,
@@ -204,38 +206,26 @@ async fn provision(admin: &Admin, users: &Value) -> Fixture {
     );
     assert_eq!(settings["dcr_enabled"], true);
     assert_eq!(settings["cimd_enabled"], true);
+}
 
-    let gateway_uuid = admin
-        .client_uuid(GATEWAY_CLIENT)
-        .await
-        .expect("the gateway client is missing: run ferriskey-init");
-    let pep_uuid = admin
-        .client_uuid(PEP_CLIENT)
-        .await
-        .expect("the policy client is missing: run ferriskey-init");
-    let gateway_secret = admin.client_secret(&gateway_uuid).await;
-    let pep_secret = admin.client_secret(&pep_uuid).await;
-
-    let e2e_uuid = match admin.client_uuid(E2E_CLIENT).await {
-        Some(uuid) => uuid,
-        None => {
-            let created = admin
-                .post(
-                    "/clients",
-                    &json!({
-                        "client_id": E2E_CLIENT, "name": "FerrisTrace MCP end to end",
-                        "client_type": "confidential", "protocol": "openid-connect",
-                        "enabled": true, "public_client": false,
-                        "direct_access_grants_enabled": true,
-                    }),
-                )
-                .await;
-            text(&created, "id").to_owned()
-        }
+async fn ensure_e2e_client(admin: &Admin) -> String {
+    let uuid = if let Some(uuid) = admin.client_uuid(E2E_CLIENT).await {
+        uuid
+    } else {
+        let created = admin
+            .post(
+                "/clients",
+                &json!({
+                    "client_id": E2E_CLIENT, "name": "FerrisTrace MCP end to end",
+                    "client_type": "confidential", "protocol": "openid-connect",
+                    "enabled": true, "public_client": false,
+                    "direct_access_grants_enabled": true,
+                }),
+            )
+            .await;
+        text(&created, "id").to_owned()
     };
-    let held = admin
-        .get(&format!("/clients/{e2e_uuid}/client-scopes"))
-        .await;
+    let held = admin.get(&format!("/clients/{uuid}/client-scopes")).await;
     let held: Vec<String> = items(&held)
         .iter()
         .map(|scope| text(scope, "name").to_owned())
@@ -246,75 +236,98 @@ async fn provision(admin: &Admin, users: &Value) -> Fixture {
             let (status, body) = admin
                 .realm_call(
                     Method::PUT,
-                    &format!("/clients/{e2e_uuid}/optional-client-scopes/{id}"),
+                    &format!("/clients/{uuid}/optional-client-scopes/{id}"),
                     None,
                 )
                 .await;
             assert_eq!(status, 200, "{body}");
         }
     }
-    let e2e_secret = admin.client_secret(&e2e_uuid).await;
+    uuid
+}
 
+async fn ensure_org_with_groups(admin: &Admin) -> (String, BTreeMap<&'static str, String>) {
     let orgs = items(&admin.get("/organizations").await);
-    let org = match orgs.iter().find(|org| text(org, "alias") == E2E_ORG) {
-        Some(org) => text(org, "id").to_owned(),
-        None => text(
-            &admin
-                .post("/organizations", &json!({"name": "FerrisTrace MCP end to end", "alias": E2E_ORG, "enabled": true}))
-                .await,
-            "id",
-        )
-        .to_owned(),
+    let org = if let Some(org) = orgs.iter().find(|org| text(org, "alias") == E2E_ORG) {
+        text(org, "id").to_owned()
+    } else {
+        let created = admin
+            .post(
+                "/organizations",
+                &json!({"name": "FerrisTrace MCP end to end", "alias": E2E_ORG, "enabled": true}),
+            )
+            .await;
+        text(&created, "id").to_owned()
     };
-    let mut group_ids = BTreeMap::new();
     let groups = items(
         &admin
             .get(&format!("/organizations/{org}/groups?limit=100"))
             .await,
     );
+    let mut ids = BTreeMap::new();
     for name in ["Dev", "Support", "Interns"] {
-        let id = match groups.iter().find(|group| text(group, "name") == name) {
-            Some(group) => text(group, "id").to_owned(),
-            None => text(
-                &admin
-                    .post(
-                        &format!("/organizations/{org}/groups"),
-                        &json!({"name": name}),
-                    )
-                    .await,
-                "id",
-            )
-            .to_owned(),
+        let id = if let Some(group) = groups.iter().find(|group| text(group, "name") == name) {
+            text(group, "id").to_owned()
+        } else {
+            let created = admin
+                .post(
+                    &format!("/organizations/{org}/groups"),
+                    &json!({"name": name}),
+                )
+                .await;
+            text(&created, "id").to_owned()
         };
-        group_ids.insert(name, id);
+        ids.insert(name, id);
     }
+    (org, ids)
+}
+
+async fn ensure_user(admin: &Admin, name: &str) -> String {
+    let found = items(&admin.get(&format!("/users?username={name}")).await);
+    let id = if let Some(user) = found.iter().find(|user| text(user, "username") == name) {
+        text(user, "id").to_owned()
+    } else {
+        let created = admin
+            .post(
+                "/users",
+                &json!({
+                    "username": name, "email": format!("{name}@example.com"),
+                    "firstname": name, "lastname": "E2E", "email_verified": true,
+                }),
+            )
+            .await;
+        text(&created, "id").to_owned()
+    };
+    admin
+        .realm_call(
+            Method::PUT,
+            &format!("/users/{id}/reset-password"),
+            Some(
+                &json!({"credential_type": "password", "temporary": false, "value": E2E_PASSWORD}),
+            ),
+        )
+        .await;
+    id
+}
+
+async fn provision(admin: &Admin, users: &Value) -> Fixture {
+    check_realm(admin).await;
+    let gateway_uuid = admin
+        .client_uuid(GATEWAY_CLIENT)
+        .await
+        .expect("the gateway client is missing: run ferriskey-init");
+    let pep_uuid = admin
+        .client_uuid(PEP_CLIENT)
+        .await
+        .expect("the policy client is missing: run ferriskey-init");
+    let gateway_secret = admin.client_secret(&gateway_uuid).await;
+    let pep_secret = admin.client_secret(&pep_uuid).await;
+    let e2e_secret = admin.client_secret(&ensure_e2e_client(admin).await).await;
+    let (org, groups) = ensure_org_with_groups(admin).await;
 
     let mut ids = BTreeMap::new();
     for (name, facts) in users.as_object().unwrap() {
-        let found = items(&admin.get(&format!("/users?username={name}")).await);
-        let id = match found.iter().find(|user| text(user, "username") == name) {
-            Some(user) => text(user, "id").to_owned(),
-            None => text(
-                &admin
-                    .post(
-                        "/users",
-                        &json!({
-                            "username": name, "email": format!("{name}@example.com"),
-                            "firstname": name, "lastname": "E2E", "email_verified": true,
-                        }),
-                    )
-                    .await,
-                "id",
-            )
-            .to_owned(),
-        };
-        admin
-            .realm_call(
-                Method::PUT,
-                &format!("/users/{id}/reset-password"),
-                Some(&json!({"credential_type": "password", "temporary": false, "value": E2E_PASSWORD})),
-            )
-            .await;
+        let id = ensure_user(admin, name).await;
         admin
             .realm_call(
                 Method::POST,
@@ -323,7 +336,7 @@ async fn provision(admin: &Admin, users: &Value) -> Fixture {
             )
             .await;
         for group in facts["groups"].as_array().unwrap() {
-            let group = group_ids.get(group.as_str().unwrap()).unwrap();
+            let group = &groups[group.as_str().unwrap()];
             admin
                 .realm_call(
                     Method::POST,
@@ -638,7 +651,7 @@ async fn the_worked_policies_decide_the_gateways_own_requests_in_ferriskeys_real
             .as_array()
             .unwrap()
             .iter()
-            .map(|file| text_of(file))
+            .map(text_of)
             .collect();
         sets.entry(files).or_default().push(case);
     }
@@ -840,30 +853,8 @@ async fn a_realm_with_a_schema_validates_policies_and_cannot_hold_the_gateways_c
     assert!((200..300).contains(&status), "{status}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_and_drops_those() {
-    let Some(target) = target() else { return };
-    let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
-    let admin = Admin::login(&target).await;
-    let fixture = provision(&admin, &cases["users"]).await;
-    let http = reqwest::Client::new();
-    let pep: Value = http
-        .post(format!(
-            "{}/realms/{}/protocol/openid-connect/token",
-            target.url, target.realm
-        ))
-        .form(&[
-            ("grant_type", "client_credentials"),
-            ("client_id", PEP_CLIENT),
-            ("client_secret", fixture.pep_secret.as_str()),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request = json!({
+fn probe_request() -> Value {
+    json!({
         "subject": {"type": "User", "id": "probe-sub", "properties": {
             "email": "probe@example.com", "groups": ["Dev"], "roles": ["member"],
             "on_call": true, "on_call_schedules": ["primary"]}},
@@ -874,8 +865,11 @@ async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_an
             "target": {"service": "checkout"}, "arguments": {"service": "checkout"},
             "time": {"weekday": 2, "hour": 10, "minute": 0, "timezone": "Europe/Paris",
                 "iso_utc": "2026-11-03T09:00:00Z"}},
-    });
-    let probes: [(&str, &str, bool); 11] = [
+    })
+}
+
+fn probes() -> [(&'static str, &'static str, bool); 11] {
+    [
         (
             "principal.groups",
             "principal in FerrisKey::Group::\"Dev\"",
@@ -915,7 +909,34 @@ async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_an
             true,
         ),
         ("context.arguments", "context has arguments", false),
-    ];
+    ]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_and_drops_those() {
+    let Some(target) = target() else { return };
+    let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
+    let admin = Admin::login(&target).await;
+    let fixture = provision(&admin, &cases["users"]).await;
+    let http = reqwest::Client::new();
+    let pep: Value = http
+        .post(format!(
+            "{}/realms/{}/protocol/openid-connect/token",
+            target.url, target.realm
+        ))
+        .form(&[
+            ("grant_type", "client_credentials"),
+            ("client_id", PEP_CLIENT),
+            ("client_secret", fixture.pep_secret.as_str()),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let request = probe_request();
+    let probes = probes();
     let mut report = Vec::new();
     for (what, condition, forwarded) in probes {
         let source = format!(

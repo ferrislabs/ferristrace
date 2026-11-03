@@ -39,7 +39,6 @@ namespace FerrisKey {
     server: String,
     tool: String,
     organisation?: String,
-    organisation_name?: String,
     access?: String,
     destructive?: Bool,
     annotations?: {

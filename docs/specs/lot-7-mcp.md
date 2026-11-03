@@ -204,20 +204,26 @@ Design
       say "any read" without listing tools.
     Resource: Tool
       id `ferristrace/<tool>`; `tool` (name), `organisation` (id),
-      `organisation_name`, `access` (`read` | `write`), `destructive`
-      (bool), from the tool's annotations.
+      `access` (`read` | `write`), `destructive` (bool), from the tool's
+      annotations.
     Context
       `agent` (client id), `delegated` (bool), `act` (when present).
       `target`: what the call is about, each key present only when the
       call names it or the PIP resolves it —
         `service`, `namespace`, `cluster`, `pod`, `environment`,
         `project` (name), `severity` (sev1..sev4, the incident's),
-        `incident_status`, `alert_state`, `log_severity`.
-      `arguments`: the primitive arguments as sent.
+        `incident_status`, `alert_state`, `log_severity`; and the sets
+        `services` (every service of an incident) and `environments`
+        (every environment a service was seen in), because `service` and
+        `environment` are only set when there is exactly one.
+      `arguments`: the primitive arguments as the tool will run them
+      (text trimmed, choices lower-cased, ids in canonical form).
       `time`: `weekday` 1..7 and `hour` 0..23 and `minute` 0..59 local
       to the organisation, `timezone`, `iso_utc`.
     Examples the guide works through, each a few lines of Cedar and each
-    an acceptance test against FerrisKey's real PDP:
+    an acceptance test against FerrisKey's real PDP (the Support example
+    is a permit on a known environment, not a forbid on production, since a
+    service without spans has no environment):
       - group Dev may read logs and traces of service checkout only, on
         weekdays 9:00-18:00 local time;
       - only the person on call may resolve or acknowledge;
@@ -274,3 +280,45 @@ Verify (exit, per PR)
   DATABASE_URL=... REQUIRE_DATABASE_URL=1 cargo test -p ferristrace-postgres
   cd web && pnpm typecheck && pnpm build
   7D: docker compose up, connect an MCP client, run @spec-l7-1..4
+
+Amended: 7A-7D as built
+  7A  The time zone is edited under Settings > Organisation > General.
+      `GET .../oncall/now` without `email` answers every schedule with the
+      person on call now. The acknowledge route is the existing
+      `POST .../pages/{id}/ack`. `.../incidents/{id}` also lists the
+      services of its opening alert, for the PIP.
+  7B  Fifteen tools; the server answers `GET /healthz`; it speaks the
+      2026-07-28 and legacy streamable HTTP handshakes itself.
+  7C  `organisation_name` and `time.iso` are not sent. `arguments` are the
+      normalised values the tool runs, built in `crates/mcp-args` and shared
+      with apps/mcp; the target also carries `services` and `environments`.
+      Unknown incidents and services are refused (`unknown_target`), a tool
+      without `readOnlyHint` is a destructive write, decisions are bounded
+      records, and `server/discover` passes. ADR 0029 records the decision.
+  7D  The stack runs `mcp` and `mcp-gateway`; `ferriskey-init` provisions two
+      clients, not one: `ferristrace-mcp-gateway` (token exchange toward the
+      audience `ferristrace-agents`, an audience mapper for its own PIP token
+      and the `telemetry:read` scope) and `ferristrace-mcp-pep` (the role
+      holding `evaluate_authorization`). The agent audience is a client of its
+      own, not the sign-in client. It also creates the agent scopes and a
+      `groups` scope (FerrisKey has no groups claim by default), sets dynamic
+      and metadata-document registration, makes the gateway the owner of each
+      allowed resource (`FERRISTRACE_MCP_ORGS`, one exact address each: the
+      token exchange needs it) and seeds `members-read-tools`.
+      Measured against FerrisKey 0.10.1, the newest release: the AuthZEN
+      request reaches Cedar as `FerrisKey::User`, `FerrisKey::Tool` and
+      `FerrisKey::Action::"call_tool"`; `principal.on_call` and
+      `on_call_schedules`, `resource.access`, `destructive` and
+      `organisation`, and `context.arguments` are dropped; groups and roles
+      become `FerrisKey::Group` and `FerrisKey::Role` parents. A realm schema
+      must live in its own namespace and is merged with FerrisKey's, and the
+      context is then checked against the built-in `AgentContext`, which
+      refuses `target` and the extra `time` keys: a realm with a schema
+      answers the gateway 400, so the vocabulary schema (a superset of
+      FerrisKey's, docs/mcp/ferristrace.cedarschema) is used to validate
+      policies offline and is not stored. Consequently the examples that
+      test `on_call` (2, 6) match nobody today and fail closed; they are
+      tested against the real PDP as such and flip when FerrisKey forwards
+      the attribute. The policies list tools by name instead of testing
+      `access`. @spec-l7-7 holds for attributes the built-in schema lacks
+      once a schema is stored, and offline for the whole vocabulary.
