@@ -10,7 +10,6 @@ members = [
     "crates/redis",
     "crates/infra",
     "crates/api",
-    "crates/ee",
     "crates/mcp-args",
     "crates/env-file",
     "apps/server",
@@ -49,7 +48,6 @@ ferristrace-clickhouse = { path = "crates/clickhouse" }
 ferristrace-redis = { path = "crates/redis" }
 ferristrace-infra = { path = "crates/infra" }
 ferristrace-api = { path = "crates/api" }
-ferristrace-ee = { path = "crates/ee" }
 ferristrace-mcp-args = { path = "crates/mcp-args" }
 ferristrace-env-file = { path = "crates/env-file" }
 

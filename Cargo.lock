@@ -1272,10 +1272,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferristrace-ee"
-version = "0.0.1"
-
-[[package]]
 name = "ferristrace-env-file"
 version = "0.0.1"
 dependencies = [
@@ -1437,7 +1433,6 @@ dependencies = [
  "ferristrace-application",
  "ferristrace-clickhouse",
  "ferristrace-domain",
- "ferristrace-ee",
  "ferristrace-env-file",
  "ferristrace-infra",
  "ferristrace-postgres",

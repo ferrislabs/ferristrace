@@ -83,10 +83,7 @@ jobs:
         with:
           shared-key: rust-clippy
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: the workspace
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: the server with the ee crate
-        run: cargo clippy -p ferristrace-server --all-targets --features ee --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   # Reads the dependency graph only, so it compiles nothing.
   layers:
@@ -122,18 +119,6 @@ jobs:
             | sort -u || true)
           if [ -n "$found" ]; then
             echo "::error::ferristrace-api depends on $(echo "$found" | tr '\n' ' ')"
-            exit 1
-          fi
-      - name: the default build excludes the ee crate
-        run: |
-          if cargo tree -p ferristrace-server -e normal --locked | grep -q ferristrace-ee; then
-            echo "::error::ferristrace-ee is in the default dependency graph"
-            exit 1
-          fi
-      - name: the ee feature pulls the ee crate in
-        run: |
-          if ! cargo tree -p ferristrace-server -e normal --features ee --locked | grep -q ferristrace-ee; then
-            echo "::error::the ee feature does not pull ferristrace-ee in"
             exit 1
           fi
 

@@ -31,11 +31,6 @@ them under `secrets.*`. Each entry is `{name, key}`.
 | `secrets.smtpPassword` | `FERRISTRACE_MAIL__PASSWORD` | `config.mail.enabled` |
 | `secrets.objectsAccessKeyId`, `secrets.objectsSecretAccessKey` | `FERRISTRACE_OBJECTS__ACCESS_KEY_ID`, `..._SECRET_ACCESS_KEY` | `config.objects.enabled` |
 
-## Editions
-
-`edition: community` runs `ghcr.io/ferrislabs/ferristrace:X.Y.Z`; `edition: ee`
-appends `-ee`. `image.tag` overrides the version (default: chart appVersion).
-
 ## Values
 
 | Key | Default | Description |
@@ -43,7 +38,6 @@ appends `-ee`. `image.tag` overrides the version (default: chart appVersion).
 | `image.repository` | `ghcr.io/ferrislabs/ferristrace` | Image repository |
 | `image.tag` | `""` | Tag, empty means appVersion |
 | `image.pullPolicy` | `IfNotPresent` | Pull policy |
-| `edition` | `community` | `community` or `ee` |
 | `replicaCount` | `1` | Replicas; the PDB exists above 1 |
 | `terminationGracePeriodSeconds` | `60` | Time to flush spans on SIGTERM |
 | `resources` | 200m / 256Mi requests, 1Gi memory limit | Container resources |

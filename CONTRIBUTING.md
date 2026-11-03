@@ -148,7 +148,6 @@ labels that say where and how big:
 - **`help wanted`** — worth doing, nobody is on it.
 - **`area/ingest`, `area/storage`, `area/web`, `area/auth`, `area/docs`** —
   which part of the system it touches.
-- **`ee`** — the commercial edition. Not open to outside contributions.
 - **`bug`**, **`enhancement`** — what kind of change it is.
 
 Say on the issue that you are taking it before you start, so two people do

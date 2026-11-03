@@ -11,9 +11,6 @@ image:
   # -- Image pull policy.
   pullPolicy: IfNotPresent
 
-# -- Edition: `community` runs `X.Y.Z`, `ee` runs `X.Y.Z-ee`.
-edition: community
-
 # -- Pull secrets for a private registry.
 imagePullSecrets: []
 

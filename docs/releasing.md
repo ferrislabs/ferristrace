@@ -37,7 +37,7 @@ The tag is annotated, which is what `git-cliff --latest` reads to find the range
 The `release` workflow runs four jobs in order:
 
 1. `check` — the tag matches the manifest and the chart, then fmt, clippy, the tests and the doc tests. Nothing is published before this passes.
-2. `images` — builds and pushes `X.Y.Z` and `X.Y.Z-ee` for linux/amd64 and linux/arm64, with provenance and an SBOM, and attests them. A stable community release also moves `latest`.
+2. `images` — builds and pushes `X.Y.Z` of the server, the MCP server and the MCP gateway for linux/amd64 and linux/arm64, with provenance and an SBOM, and attests them. A stable release also moves `latest`.
 3. `chart` — lints the chart and pushes it to `oci://ghcr.io/ferrislabs/charts/ferristrace` at the tag's version, with the same appVersion. It runs after the images, so a published chart never names an image that is not there.
 4. `release` — generates the changelog from the commits since the previous tag, measures the published images, and creates the GitHub Release.
 
@@ -53,7 +53,7 @@ Then read the release body: the image table carries a line per image and per arc
 
 ## A release candidate
 
-Same steps, with the manifest at `0.2.0` and the tag at `v0.2.0-rc.1`. The workflow strips the `-rc.N` before comparing it to the manifest, publishes `0.2.0-rc.1`, `0.2.0-rc.1-ee` and the chart at `0.2.0-rc.1`, marks the release as a prerelease, and moves nothing. Cut one when the risk is in a migration or in the image rather than in the code, because that is the part CI cannot prove before a tag exists.
+Same steps, with the manifest at `0.2.0` and the tag at `v0.2.0-rc.1`. The workflow strips the `-rc.N` before comparing it to the manifest, publishes the images and the chart at `0.2.0-rc.1`, marks the release as a prerelease, and moves nothing. Cut one when the risk is in a migration or in the image rather than in the code, because that is the part CI cannot prove before a tag exists.
 
 ## When it goes wrong
 
