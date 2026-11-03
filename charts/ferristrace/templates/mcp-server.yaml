@@ -1,0 +1,97 @@
+{{- if .Values.mcp.enabled }}
+{{- $m := .Values.mcp.server }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ferristrace.fullname" . }}-mcp
+  labels:
+    {{- include "ferristrace.mcpLabels" (dict "root" . "component" "mcp") | nindent 4 }}
+spec:
+  replicas: {{ $m.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp") | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp") | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ferristrace.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mcp
+          image: {{ printf "%s:%s" $m.image.repository (default .Chart.AppVersion $m.image.tag) | quote }}
+          imagePullPolicy: {{ $m.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: FERRISTRACE_MCP_LISTEN
+              value: "0.0.0.0:8081"
+            - name: FERRISTRACE_MCP_API_URL
+              value: {{ default (printf "http://%s:%v" (include "ferristrace.fullname" .) .Values.service.httpPort) $m.apiUrl | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.config.logLevel | quote }}
+            {{- with $m.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ferristrace.fullname" . }}-mcp
+  labels:
+    {{- include "ferristrace.mcpLabels" (dict "root" . "component" "mcp") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $m.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp") | nindent 4 }}
+{{- end }}

@@ -1,0 +1,35 @@
+secrets:
+  databaseUrl:
+    name: ferristrace-app
+    key: uri
+  redisUrl:
+    name: ferristrace-redis
+    key: url
+config:
+  agents:
+    issuer: https://id.example.com/realms/ferristrace
+    audience: ferristrace-agents
+mcp:
+  enabled: true
+  gateway:
+    publicUrl: https://mcp.example.com
+    issuer: https://id.example.com/realms/ferristrace
+    scopesSupported:
+      - telemetry:read
+      - incidents:comment
+      - incidents:resolve
+      - oncall:acknowledge
+      - groups
+    ingestEndpoint: http://ferristrace:4318/v1/logs
+    pdp:
+      url: https://id.example.com
+      realm: ferristrace
+      clientId: ferristrace-mcp-pep
+    exchange:
+      clientId: ferristrace-mcp-gateway
+    secrets:
+      ingestKey:
+        name: ferristrace-mcp-gateway
+        key: ingest-key
+    service:
+      type: ClusterIP

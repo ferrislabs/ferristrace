@@ -159,3 +159,81 @@ secrets:
   objectsSecretAccessKey:
     name: ferristrace-objects
     key: secret-access-key
+
+# The MCP server and its policy gateway (docs/mcp.md). Off by default.
+mcp:
+  # -- Deploy `ferristrace-mcp` and `ferristrace-mcp-gateway`. Needs config.oidc or config.agents, an agent audience, and a FerrisKey realm provisioned for it.
+  enabled: false
+  server:
+    image:
+      # -- Image repository of the MCP server.
+      repository: ghcr.io/ferrislabs/ferristrace-mcp
+      # -- Image tag. Empty means the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    # -- FerrisTrace HTTP API the tools call. Empty means this release's own Service.
+    apiUrl: ""
+    service:
+      port: 8081
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    extraEnv: []
+  gateway:
+    image:
+      # -- Image repository of the gateway.
+      repository: ghcr.io/ferrislabs/ferristrace-mcp-gateway
+      # -- Image tag. Empty means the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    # -- Required. Public base URL of the gateway; the canonical resource of an organisation is `<publicUrl>/orgs/{org}/mcp`.
+    publicUrl: ""
+    # -- Required. FerrisKey realm issuer, e.g. https://id.example.com/realms/ferristrace.
+    issuer: ""
+    # -- FerrisTrace's agent audience. Empty means config.agents.audience.
+    agentAudience: ""
+    # -- FerrisTrace HTTP API read for the PIP lookups. Empty means this release's own Service.
+    apiUrl: ""
+    # -- Scopes listed in the resource metadata. Empty keeps the four agent scopes.
+    scopesSupported: []
+    # -- OTLP/HTTP logs url (e.g. http://ferristrace:4318/v1/logs) to also export decisions to FerrisTrace. Needs secrets.ingestKey.
+    ingestEndpoint: ""
+    pdp:
+      # -- Required. FerrisKey base url.
+      url: ""
+      # -- Required. Realm holding the Cedar policies.
+      realm: ""
+      # -- Required. The PEP service account (holds evaluate_authorization).
+      clientId: ""
+      timeoutMs: 1500
+    exchange:
+      # -- Required. The gateway's own confidential client.
+      clientId: ""
+    # Existing Secrets, by name and key.
+    secrets:
+      pdpClientSecret:
+        name: ferristrace-mcp-gateway
+        key: pdp-client-secret
+      exchangeClientSecret:
+        name: ferristrace-mcp-gateway
+        key: exchange-client-secret
+      # -- Read when name is set.
+      ingestKey:
+        name: ""
+        key: ingest-key
+    service:
+      type: ClusterIP
+      port: 8080
+      annotations: {}
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    extraEnv: []
