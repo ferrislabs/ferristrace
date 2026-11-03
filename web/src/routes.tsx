@@ -25,6 +25,7 @@ import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
 import { Traces } from '@/pages/Traces'
 import { SignIn } from '@/pages/auth/SignIn'
+import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
 import { Security } from '@/pages/settings/Security'
@@ -77,16 +78,32 @@ const publicStatusRoute = createRoute({
 
 const publicPostmortemRoute = createRoute({ getParentRoute: () => rootRoute, path: '/status/$slug/postmortems/$incident', component: PublicPostmortem, staticData: real })
 
+async function signedIn(queryClient: QueryClient, href: string) {
+  try {
+    return await queryClient.ensureQueryData(accountQuery)
+  } catch (error) {
+    if (isUnauthorized(error)) throw redirect({ to: '/sign-in', search: { redirect: href } })
+    return undefined
+  }
+}
+
+const welcomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/welcome',
+  component: Welcome,
+  beforeLoad: async ({ context, location }) => {
+    const account = await signedIn(context.queryClient, location.href)
+    if (account && account.memberships.length > 0) throw redirect({ to: '/' })
+  },
+})
+
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'shell',
   component: AppShell,
   beforeLoad: async ({ context, location }) => {
-    try {
-      await context.queryClient.ensureQueryData(accountQuery)
-    } catch (error) {
-      if (isUnauthorized(error)) throw redirect({ to: '/sign-in', search: { redirect: location.href } })
-    }
+    const account = await signedIn(context.queryClient, location.href)
+    if (account?.memberships.length === 0) throw redirect({ to: '/welcome' })
   },
 })
 
@@ -116,6 +133,7 @@ const settingsChildren = [
 
 const routeTree = rootRoute.addChildren([
   signInRoute,
+  welcomeRoute,
   publicStatusRoute,
   publicPostmortemRoute,
   shellRoute.addChildren([
