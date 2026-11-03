@@ -100,6 +100,9 @@ services:
       FERRISTRACE_SPANS__PASSWORD: ${CLICKHOUSE_PASSWORD:-ferristrace}
       FERRISTRACE_SPANS__RETENTION_DAYS: ${RETENTION_DAYS:-30}
       FERRISTRACE_COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FERRISTRACE_AGENTS__AUDIENCE: ${FERRISTRACE_AGENTS__AUDIENCE:-ferristrace-agents}
+      FERRISTRACE_MCP__GATEWAY_CLIENT_ID: ${FERRISKEY_MCP_GATEWAY_CLIENT_ID:-ferristrace-mcp-gateway}
+      FERRISTRACE_MCP__PUBLIC_URL: ${FERRISTRACE_MCP_PUBLIC_URL:-http://localhost:8080}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "${OTLP_GRPC_PORT:-4317}:4317"
@@ -109,6 +112,52 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile.mcp
+    image: ${FERRISTRACE_MCP_IMAGE:-ferristrace-mcp:local}
+    environment:
+      FERRISTRACE_MCP_API_URL: http://server:4318
+      FERRISTRACE_MCP_LISTEN: 0.0.0.0:8081
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      server:
+        condition: service_healthy
+
+  mcp-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile.mcp-gateway
+    image: ${FERRISTRACE_MCP_GATEWAY_IMAGE:-ferristrace-mcp-gateway:local}
+    extra_hosts:
+      - "ferriskey:host-gateway"
+    env_file:
+      - path: ferriskey/mcp-gateway.env
+        required: false
+      - path: .env
+        required: false
+    environment:
+      FERRISTRACE_MCP_GATEWAY_LISTEN: 0.0.0.0:8080
+      FERRISTRACE_MCP_GATEWAY_PUBLIC_URL: ${FERRISTRACE_MCP_PUBLIC_URL:-http://localhost:8080}
+      FERRISTRACE_MCP_GATEWAY_UPSTREAM: http://mcp:8081
+      FERRISTRACE_MCP_GATEWAY_ISSUER: http://ferriskey:3333/realms/ferristrace
+      FERRISTRACE_MCP_GATEWAY_API_URL: http://server:4318
+      FERRISTRACE_MCP_GATEWAY_AGENT_AUDIENCE: ${FERRISTRACE_AGENTS__AUDIENCE:-ferristrace-agents}
+      FERRISTRACE_MCP_GATEWAY_SCOPES_SUPPORTED: '["telemetry:read","incidents:comment","incidents:resolve","oncall:acknowledge","groups"]'
+      FERRISTRACE_MCP_GATEWAY_PDP__URL: http://ferriskey:3333
+      FERRISTRACE_MCP_GATEWAY_PDP__REALM: ferristrace
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "${MCP_GATEWAY_BIND:-127.0.0.1}:${MCP_GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      mcp:
+        condition: service_started
+      server:
+        condition: service_healthy
+      ferriskey-init:
+        condition: service_completed_successfully
 
   # FerrisKey is the only way in: it holds every account's identity and
   # issues the token the server trusts. Its own database, below, is
@@ -120,6 +169,7 @@ services:
       POSTGRES_USER: ferriskey
       POSTGRES_PASSWORD: ${FERRISKEY_DB_PASSWORD:-ferriskey}
       POSTGRES_DB: ferriskey
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - ferriskey-db:/var/lib/postgresql/data
     healthcheck:
@@ -159,6 +209,7 @@ services:
       ADMIN_EMAIL: ${FERRISKEY_ADMIN_EMAIL:-admin@ferristrace.local}
       ALLOWED_ORIGINS: ${FERRISKEY_ALLOWED_ORIGINS:-http://localhost:5555}
       WEBAPP_URL: ${FERRISKEY_WEBAPP_URL:-http://localhost:5555}
+      AUTHZ_ENABLED: "true"
     # Published on the host under its own name, 3333, because that is also
     # the port `ferriskey-init` and `server` reach it on through the shared
     # hostname described above `server`. Bound to the loopback, like
@@ -199,6 +250,7 @@ services:
     volumes:
       - ./ferriskey-init.sh:/ferriskey-init.sh:ro
       - ./ferriskey:/out
+      - ../docs/mcp:/mcp:ro
     environment:
       FERRISKEY_API_URL: http://ferriskey-api:3333
       ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
@@ -210,6 +262,11 @@ services:
       # published port above; see the extra_hosts comment on `server`.
       FERRISKEY_ISSUER_BASE_URL: http://ferriskey:3333
       OUT_FILE: /out/ferriskey.env
+      MCP_OUT_FILE: /out/mcp-gateway.env
+      FERRISKEY_MCP_GATEWAY_CLIENT_ID: ${FERRISKEY_MCP_GATEWAY_CLIENT_ID:-ferristrace-mcp-gateway}
+      FERRISKEY_AGENT_AUDIENCE: ${FERRISTRACE_AGENTS__AUDIENCE:-ferristrace-agents}
+      FERRISKEY_MCP_PUBLIC_URL: ${FERRISTRACE_MCP_PUBLIC_URL:-http://localhost:8080}
+      FERRISKEY_MCP_ORGS: ${FERRISTRACE_MCP_ORGS:-}
     depends_on:
       ferriskey-api:
         condition: service_started

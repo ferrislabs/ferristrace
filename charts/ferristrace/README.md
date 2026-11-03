@@ -60,14 +60,29 @@ appends `-ee`. `image.tag` overrides the version (default: chart appVersion).
 | `config.oidc.*`, `config.mail.*`, `config.objects.*` | disabled | Optional integrations |
 | `config.agents.issuer`, `config.agents.audience` | empty | Issuer and required audience of the access tokens AI agents present; agents stay off without the audience (`FERRISTRACE_AGENTS__*`) |
 | `secrets.*` | see above | Existing Secrets, by name and key |
+| `mcp.enabled` | `false` | Deploy the MCP server and its policy gateway (see below) |
+| `mcp.server.*` | image `ghcr.io/ferrislabs/ferristrace-mcp`, 1 replica, port 8081 | The MCP server; `apiUrl` defaults to this release's Service |
+| `mcp.gateway.publicUrl`, `.issuer`, `.pdp.*`, `.exchange.clientId` | required when enabled | Public base url, FerrisKey issuer, FerrisKey base url, realm and policy client, the gateway's own client |
+| `mcp.gateway.agentAudience`, `.apiUrl`, `.scopesSupported`, `.ingestEndpoint` | `config.agents.audience`, this release, the four agent scopes, empty | Optional gateway settings |
+| `mcp.gateway.secrets.*` | `ferristrace-mcp-gateway` | Existing Secrets: `pdpClientSecret` and `exchangeClientSecret` always, `ingestKey` when `name` is set |
 
 gRPC (4317) is exposed by the Service only; route it with your own
 `GRPCRoute` or a LoadBalancer Service if clients are outside the cluster.
+
+## MCP
+
+`mcp.enabled: true` adds a Deployment and a Service for `ferristrace-mcp` and
+for `ferristrace-mcp-gateway`. Put your own ingress or HTTPRoute in front of
+the gateway Service only: the server holds no credential and trusts the
+gateway to have decided. The realm, its clients, the Cedar rules and the
+policy guide are in `docs/mcp.md`; `ferriskey-init.sh` shows the calls that
+provision a realm. Values in `ci/mcp-values.yaml` render a complete example.
 
 ## Validation
 
 ```sh
 helm lint charts/ferristrace -f charts/ferristrace/ci/full-values.yaml
+helm lint charts/ferristrace -f charts/ferristrace/ci/mcp-values.yaml
 helm template t charts/ferristrace -f charts/ferristrace/ci/full-values.yaml \
   | kubeconform -strict -summary -ignore-missing-schemas
 ```

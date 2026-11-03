@@ -436,6 +436,198 @@
           }
         }
       }
+    },
+    "mcp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "server": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "pullPolicy": {
+                  "enum": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                }
+              }
+            },
+            "replicaCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "apiUrl": {
+              "type": "string"
+            },
+            "service": {
+              "type": "object",
+              "properties": {
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              }
+            },
+            "resources": {
+              "type": "object"
+            },
+            "extraEnv": {
+              "type": "array"
+            }
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "pullPolicy": {
+                  "enum": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                }
+              }
+            },
+            "replicaCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "publicUrl": {
+              "type": "string"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "agentAudience": {
+              "type": "string"
+            },
+            "apiUrl": {
+              "type": "string"
+            },
+            "scopesSupported": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ingestEndpoint": {
+              "type": "string"
+            },
+            "pdp": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "realm": {
+                  "type": "string"
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "timeoutMs": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "exchange": {
+              "type": "object",
+              "properties": {
+                "clientId": {
+                  "type": "string"
+                }
+              }
+            },
+            "secrets": {
+              "type": "object",
+              "properties": {
+                "pdpClientSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "exchangeClientSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "ingestKey": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "service": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "ClusterIP",
+                    "NodePort",
+                    "LoadBalancer"
+                  ]
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "annotations": {
+                  "type": "object"
+                }
+              }
+            },
+            "resources": {
+              "type": "object"
+            },
+            "extraEnv": {
+              "type": "array"
+            }
+          }
+        }
+      }
     }
   }
 }

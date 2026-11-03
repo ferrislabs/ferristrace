@@ -311,7 +311,7 @@ stores inside its own network rather than something to choose.
 | `FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS` | `false` | Whether a webhook may reach a private, loopback or link-local address |
 | `FERRISTRACE_ALERTS__BASE_URL` | the mail `base_url` | Public address of the app, for the link in an alert |
 | `FERRISTRACE_AGENTS__ISSUER` | the OIDC issuer | Issuer of the access tokens AI agents present; without it (and without OIDC) or without the audience every agent token is refused with 401 |
-| `FERRISTRACE_AGENTS__AUDIENCE` | unset | Required for agents to be on: an agent token must carry this audience. An issuer without it leaves agents off (a warning is logged at startup, sign-in is unaffected) |
+| `FERRISTRACE_AGENTS__AUDIENCE` | `ferristrace-agents` in this compose file | Required for agents to be on: an agent token must carry this audience. An issuer without it leaves agents off (a warning is logged at startup, sign-in is unaffected) |
 | `FERRISTRACE_WEB_ROOT` | set in the image | Where the built web application lives |
 | `FERRISTRACE_IMAGE` | built locally | A published image to run instead |
 | `FERRISKEY_DB_PASSWORD` | `ferriskey` | FerrisKey's own database password |
@@ -320,6 +320,9 @@ stores inside its own network rather than something to choose.
 | `FERRISKEY_ADMIN_EMAIL` | `admin@ferristrace.local` | FerrisKey's first admin's address, read once before its first start |
 | `FERRISKEY_API_BIND` | `127.0.0.1` | Which address FerrisKey's api answers on |
 | `FERRISKEY_WEBAPP_BIND` | `127.0.0.1` | Which address FerrisKey's console answers on |
+| `FERRISTRACE_MCP_PUBLIC_URL` | `http://localhost:8080` | The address MCP clients use for the gateway; the audience of their tokens is `<it>/orgs/<organisation id>/mcp` |
+| `FERRISTRACE_MCP_ORGS` | unset | Organisation ids (comma separated) whose MCP address the realm allows; read by `ferriskey-init` |
+| `MCP_GATEWAY_BIND`, `MCP_GATEWAY_PORT` | `127.0.0.1`, `8080` | Where the MCP gateway answers |
 
 The four `FERRISTRACE_OIDC__*` settings are not in that table because this
 compose file writes them for you: `ferriskey-init` provisions the bundled
@@ -448,6 +451,17 @@ pages stay refused to agents. A project-bound agent finds only the incidents of
 its project (`404` for the others, incidents without a project included). Each
 accepted write leaves one audit entry (`incident.commented`, `incident.resolved`)
 naming the agent and the `jti`; a refused one leaves nothing.
+
+## MCP
+
+`mcp` and `mcp-gateway` run with the stack. The gateway, on
+`http://localhost:8080`, is the only door: it checks the caller's token, asks
+FerrisKey (Cedar policies in the realm) whether each call is permitted and
+forwards it to `mcp` with a token made for FerrisTrace. `ferriskey-init`
+provisions the realm for it and seeds one policy, members may call read-only
+tools. List your organisation ids in `FERRISTRACE_MCP_ORGS`, turn MCP on in
+Settings > Organisation > MCP, and see [`docs/mcp.md`](../docs/mcp.md) to
+connect Claude Code or Claude Desktop, write policies and read the decision log.
 
 ## Second factor and credentials
 

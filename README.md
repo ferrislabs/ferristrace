@@ -44,6 +44,7 @@ Organisation > Audit log.
 | `crates/api` | The driving adapters: the HTTP routers, the OTLP gRPC service, the DTOs. |
 | `crates/ee` | The cloud build, behind the `ee` feature. Empty in this repository. |
 | `apps/server` | The binary: configuration, wiring, the CLI, the server. |
+| `apps/mcp`, `apps/mcp-gateway` | The MCP server and the policy gateway in front of it. |
 | `web` | The front end: React, Vite, TypeScript. |
 | `deploy` | The self-hosted stack and its guide. |
 | `docs/adr` | Every architecture decision, in the order it was taken. |
@@ -52,6 +53,13 @@ Dependencies point inward: the adapter crates know `crates/application`
 and `crates/domain`, `crates/api` knows `crates/application`, and neither
 the application nor the domain knows any of them. `apps/server` is the only
 place that names a concrete adapter. See ADR 0023 and ADR 0024.
+
+## MCP
+
+Claude Code, Claude Desktop or any MCP client can read FerrisTrace and act on
+incidents through a gateway that asks FerrisKey, call by call, what the person
+may do; the rules are your own Cedar policies. The compose stack runs it. See
+[`docs/mcp.md`](docs/mcp.md).
 
 ## Working on it
 

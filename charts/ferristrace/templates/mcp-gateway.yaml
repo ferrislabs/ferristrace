@@ -1,0 +1,133 @@
+{{- if .Values.mcp.enabled }}
+{{- $g := .Values.mcp.gateway }}
+{{- $s := $g.secrets }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ferristrace.fullname" . }}-mcp-gateway
+  labels:
+    {{- include "ferristrace.mcpLabels" (dict "root" . "component" "mcp-gateway") | nindent 4 }}
+spec:
+  replicas: {{ $g.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp-gateway") | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp-gateway") | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ferristrace.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mcp-gateway
+          image: {{ printf "%s:%s" $g.image.repository (default .Chart.AppVersion $g.image.tag) | quote }}
+          imagePullPolicy: {{ $g.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: FERRISTRACE_MCP_GATEWAY_LISTEN
+              value: "0.0.0.0:8080"
+            - name: FERRISTRACE_MCP_GATEWAY_PUBLIC_URL
+              value: {{ required "mcp.gateway.publicUrl is required when mcp.enabled" $g.publicUrl | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_UPSTREAM
+              value: {{ printf "http://%s-mcp:%v" (include "ferristrace.fullname" .) .Values.mcp.server.service.port | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_ISSUER
+              value: {{ required "mcp.gateway.issuer is required when mcp.enabled" $g.issuer | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_API_URL
+              value: {{ default (printf "http://%s:%v" (include "ferristrace.fullname" .) .Values.service.httpPort) $g.apiUrl | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_AGENT_AUDIENCE
+              value: {{ required "mcp.gateway.agentAudience (or config.agents.audience) is required when mcp.enabled" (default .Values.config.agents.audience $g.agentAudience) | quote }}
+            {{- with $g.scopesSupported }}
+            - name: FERRISTRACE_MCP_GATEWAY_SCOPES_SUPPORTED
+              value: {{ toJson . | quote }}
+            {{- end }}
+            - name: FERRISTRACE_MCP_GATEWAY_PDP__URL
+              value: {{ required "mcp.gateway.pdp.url is required when mcp.enabled" $g.pdp.url | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_PDP__REALM
+              value: {{ required "mcp.gateway.pdp.realm is required when mcp.enabled" $g.pdp.realm | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_ID
+              value: {{ required "mcp.gateway.pdp.clientId is required when mcp.enabled" $g.pdp.clientId | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_PDP__TIMEOUT_MS
+              value: {{ $g.pdp.timeoutMs | quote }}
+            - name: FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_ID
+              value: {{ required "mcp.gateway.exchange.clientId is required when mcp.enabled" $g.exchange.clientId | quote }}
+            {{- with $g.ingestEndpoint }}
+            - name: FERRISTRACE_MCP_GATEWAY_INGEST_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: RUST_LOG
+              value: {{ .Values.config.logLevel | quote }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_SECRET" "ref" $s.pdpClientSecret) | nindent 12 }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_SECRET" "ref" $s.exchangeClientSecret) | nindent 12 }}
+            {{- if $s.ingestKey.name }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_MCP_GATEWAY_INGEST_KEY" "ref" $s.ingestKey) | nindent 12 }}
+            {{- end }}
+            {{- with $g.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml $g.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ferristrace.fullname" . }}-mcp-gateway
+  labels:
+    {{- include "ferristrace.mcpLabels" (dict "root" . "component" "mcp-gateway") | nindent 4 }}
+  {{- with $g.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $g.service.type }}
+  ports:
+    - name: http
+      port: {{ $g.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "ferristrace.mcpSelectorLabels" (dict "root" . "component" "mcp-gateway") | nindent 4 }}
+{{- end }}

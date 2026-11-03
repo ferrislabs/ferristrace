@@ -1,0 +1,62 @@
+namespace FerrisTrace {
+  type UserExtension = {
+    email?: String,
+    groups?: Set<String>,
+    roles?: Set<String>,
+    on_call?: Bool,
+    on_call_schedules?: Set<String>,
+  };
+
+  type ToolExtension = {
+    organisation?: String,
+    access?: String,
+    destructive?: Bool,
+  };
+
+  type ContextExtension = {
+    target: {
+      service?: String,
+      services?: Set<String>,
+      namespace?: String,
+      cluster?: String,
+      pod?: String,
+      environment?: String,
+      environments?: Set<String>,
+      project?: String,
+      severity?: String,
+      incident_status?: String,
+      alert_state?: String,
+      log_severity?: String,
+    },
+    arguments: {
+      service?: String,
+      severity?: String,
+      text?: String,
+      namespace?: String,
+      pod?: String,
+      window?: String,
+      name?: String,
+      aggregation?: String,
+      group_by?: String,
+      cluster?: String,
+      state?: String,
+      status?: String,
+      alert_id?: String,
+      incident_id?: String,
+      page_id?: String,
+      trace_id?: String,
+      schedule?: String,
+      errors_only?: Bool,
+      min_duration_ms?: Long,
+      limit?: Long,
+    },
+    time: {
+      weekday: Long,
+      hour: Long,
+      minute: Long,
+      timezone: String,
+      iso_utc: String,
+      iso?: String,
+    },
+  };
+}

@@ -54,3 +54,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ .ref.name | quote }}
       key: {{ .ref.key | quote }}
 {{- end }}
+
+{{- define "ferristrace.mcpSelectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-%s" (include "ferristrace.name" .root) .component | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- end }}
+
+{{- define "ferristrace.mcpLabels" -}}
+helm.sh/chart: {{ include "ferristrace.chart" .root }}
+{{ include "ferristrace.mcpSelectorLabels" . }}
+app.kubernetes.io/version: {{ .root.Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .root.Release.Service }}
+{{- end }}
