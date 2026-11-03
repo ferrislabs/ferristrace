@@ -36,9 +36,9 @@ No single name among these resolves on both sides unaided.
 
 ## Decision
 The shared name is `ferriskey`. `deploy/docker-compose.yml` gives the
-`server` service `extra_hosts: ["ferriskey:host-gateway"]`, so the server
-resolves `ferriskey` to the host and discovers FerrisKey's issuer under
-that name. The operator adds one line to their own hosts file —
+`ferriskey-api` service the network alias `ferriskey`, so the server, the
+MCP gateway and `ferriskey-init` reach FerrisKey under that name on port
+3333 and discover its issuer as `http://ferriskey:3333`. The operator adds one line to their own hosts file —
 `127.0.0.1 ferriskey` — so the browser resolves the same name to the same
 published port. Both sides now agree on one `iss`, and the product itself
 carries no proxy, gateway or extra service to make that agreement happen.
@@ -77,4 +77,14 @@ production never has.
 - What becomes harder: nothing in production, where the shared name is
   already real. Locally, anyone proxying or renaming the FerrisKey
   service in `docker-compose.yml` has to remember to keep the hosts file
-  entry and the `extra_hosts` entry naming the same host.
+  entry and the network alias naming the same host.
+
+## Amendment
+The first version gave `server` `extra_hosts: ["ferriskey:host-gateway"]`
+to reach the host's published port. FerrisKey publishes 3333 on the host's
+loopback only, so its default admin never faces a network, and on Linux a
+container reaching the host through the bridge cannot connect to a port
+bound to the host's loopback: the server failed discovery on a clean Linux
+machine while it worked on macOS. A network alias on `ferriskey-api` gives
+the containers the same name on the same port without going through the
+host, and keeps the published port on the loopback.

@@ -71,10 +71,9 @@ services:
     # document carries, so the browser that signs somebody in and this
     # container that verifies the result have to ask for the same name or the
     # issuer the server discovered will never match the issuer the token
-    # carries. See the "Signing in" section of the README for the one line
-    # this costs the operator on their own machine.
-    extra_hosts:
-      - "ferriskey:host-gateway"
+    # carries. Inside this network the name is an alias of ferriskey-api,
+    # below; on the operator's machine it is the one hosts line the README
+    # asks for, pointing at the published port.
     # Anything else the server reads — the identity provider, the mail relay,
     # a project management token — is set in `.env` rather than named above,
     # so that adding a setting does not mean editing this file. A missing
@@ -134,8 +133,6 @@ services:
       context: ..
       dockerfile: Dockerfile.mcp-gateway
     image: ${FERRISTRACE_MCP_GATEWAY_IMAGE:-ferristrace-mcp-gateway:local}
-    extra_hosts:
-      - "ferriskey:host-gateway"
     env_file:
       - path: .env
         required: false
@@ -215,9 +212,15 @@ services:
       ALLOWED_ORIGINS: ${FERRISKEY_ALLOWED_ORIGINS:-http://ferriskey:5555}
       WEBAPP_URL: ${FERRISKEY_WEBAPP_URL:-http://ferriskey:5555}
       AUTHZ_ENABLED: "true"
-    # Published on the host under its own name, 3333, because that is also
-    # the port `ferriskey-init` and `server` reach it on through the shared
-    # hostname described above `server`. Bound to the loopback, like
+    # The shared name the server, the gateway and ferriskey-init reach it
+    # under, on the port the browser reaches it on: see `server`. An alias
+    # rather than the host's published port, which a container cannot
+    # reach on Linux while it is bound to the host's loopback.
+    networks:
+      default:
+        aliases: [ferriskey]
+    # Published on the host under its own name, 3333, for the browser.
+    # Bound to the loopback, like
     # `postgres` above, because FerrisKey's first admin defaults to
     # `admin`/`admin`: an administrator of this realm can mark any address
     # verified and sign into FerrisTrace as whoever holds it, so that
@@ -268,8 +271,8 @@ services:
       FERRISKEY_REALM: ferristrace
       FERRISKEY_CLIENT_ID: ferristrace
       FERRISKEY_REDIRECT_URI: http://localhost:${OTLP_HTTP_PORT:-4318}/auth/oidc/callback
-      # The name the server and the browser both have to resolve to the
-      # published port above; see the extra_hosts comment on `server`.
+      # The name the server and the browser both resolve to FerrisKey;
+      # see the comment on `server`.
       FERRISKEY_ISSUER_BASE_URL: http://ferriskey:3333
       OUT_FILE: /out/ferriskey.env
       MCP_OUT_FILE: /out/mcp-gateway.env
