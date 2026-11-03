@@ -717,6 +717,14 @@ async fn the_worked_policies_decide_the_gateways_own_requests_in_ferriskeys_real
                 "{}: the real PDP answered {got} ({reason}), the guide expects {expected}",
                 case["name"]
             );
+            if got == "permit" {
+                assert_eq!(
+                    text(case, "expect"),
+                    "permit",
+                    "{}: this build permits what the guide refuses",
+                    case["name"]
+                );
+            }
             if got == "deny" {
                 assert_eq!(reason, "no_permitting_policy", "{}", case["name"]);
             }

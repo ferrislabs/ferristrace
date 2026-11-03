@@ -142,10 +142,10 @@ talking to, by looking for `ContextExtension` in the api description
 | Validation | a policy that tests an attribute the vocabulary lacks is refused when saved (422, with the position) | none, since no schema is stored |
 
 On a FerrisKey without #1912, a rule that depends on a dropped attribute never
-matches, which is safe for a `permit` and unsafe for a `forbid`:
-`principal.on_call` is never true, so "only the person on call resolves" permits
-nobody; but "no write at night" (`resource.access == "write"`) forbids nothing.
-The suite runs against both kinds (`FERRISKEY_URL=... REQUIRE_FERRISKEY_URL=1
+matches. The examples are written so that is safe: `principal.on_call` is never
+true, so "only the person on call resolves" permits nobody and the night
+`forbid` applies to everyone. The suite fails if any build permits what the
+guide refuses, and runs against both kinds (`FERRISKEY_URL=... REQUIRE_FERRISKEY_URL=1
 cargo test -p ferristrace-mcp-gateway --test real_pdp -- --nocapture`) and
 asserts what each decides. Upgrade FerrisKey before you rely on a `forbid` that
 tests a forwarded attribute.
@@ -228,9 +228,11 @@ forbid (
   resource is FerrisKey::Tool
 )
 when {
-  resource.tool == "resolve_incident" &&
+  resource.tool == "resolve_incident"
+}
+unless {
   context.target has severity &&
-  context.target.severity == "sev1"
+  context.target.severity != "sev1"
 };
 ```
 
@@ -246,9 +248,10 @@ when {
 };
 ```
 
-The `forbid` is final: even the person on call is refused. `target.severity` is
-the incident's, read by the gateway before it asks (a lookup that fails refuses
-the call with `pip_unavailable`, it never leaves the severity out). The second
+The `forbid` is final: even the person on call is refused. It is written as
+"forbid resolving unless the severity is known and is not sev1", so an unknown
+severity forbids. `target.severity` is the incident's, read by the gateway before
+it asks (a lookup that fails refuses the call with `pip_unavailable`). The second
 policy lets any signed-in person comment.
 
 ### 4. Support reads staging, and nothing of production
@@ -301,16 +304,19 @@ forbid (
   resource is FerrisKey::Tool
 )
 when {
-  resource has access &&
-  resource.access == "write" &&
   (context.time.hour >= 22 || context.time.hour < 7) &&
-  !(principal has on_call && principal.on_call)
+  !(resource has access && resource.access == "read")
+}
+unless {
+  principal has on_call &&
+  principal.on_call
 };
 ```
 
-`resource.access` is `write` for every tool that changes something, so a new
-write tool is covered without touching the rule. On a FerrisKey without #1912
-it forbids nothing (above).
+Everything that is not known to be a read is a write, so a new tool is covered
+without touching the rule, and so is a FerrisKey that does not pass
+`resource.access` on (it then also refuses reads at night, which is the safe
+side). The person on call is let through by the `unless`.
 
 ## Writing policies
 
@@ -325,6 +331,21 @@ it forbids nothing (above).
   `!(context.target has service) || context.target.service == "checkout"`, and
   accept what that allows: a call that names no service passes that clause too.
   The first example is written the strict way and is hidden from the list.
+- Write a forbid so that a missing attribute forbids, and a permit so that a
+  missing attribute does not permit. Before, the night rule forbade only what it
+  knew to be a write, so on a FerrisKey that does not pass `resource.access` it
+  forbade nothing:
+
+  ```cedar
+  forbid (principal, action == FerrisKey::Action::"call_tool", resource is FerrisKey::Tool)
+  when { resource has access && resource.access == "write" && (context.time.hour >= 22 || context.time.hour < 7) }
+  unless { principal has on_call && principal.on_call };
+  ```
+
+  Now it forbids what it does not know to be a read (policy 6). Put the facts
+  that may be missing in the `unless`, or negate them. The exception is a fact
+  whose absence only means "the call does not name it", like example 5's
+  `target.namespace`.
 - Guard every optional attribute with `has`. On FerrisKey a policy that errors
   while it is evaluated makes the whole decision a deny, even if another policy
   permits, so an unguarded `context.target.service` refuses calls that name no

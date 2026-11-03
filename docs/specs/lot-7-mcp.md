@@ -321,6 +321,6 @@ Amended: 7A-7D as built
       `seed-members-read.cedar` (by `resource.access`); on 0.10.1 it stores no
       schema and seeds `seed-members-read-by-name.cedar`. The worked policies
       test `resource.access` and `principal.on_call` (guarded by `has`);
-      against 0.10.1 the on-call permits match nobody and the access-based
-      support permit and night forbid do not match, which the suite asserts
-      case by case. @spec-l7-7 holds wherever the schema is stored.
+      against 0.10.1 the on-call permits and the access-based support permit
+      match nobody, and the forbids are written so that a missing attribute
+      forbids: no case fails open, which the suite asserts. @spec-l7-7 holds wherever the schema is stored.

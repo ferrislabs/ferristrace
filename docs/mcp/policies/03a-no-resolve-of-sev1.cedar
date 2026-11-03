@@ -4,7 +4,9 @@ forbid (
   resource is FerrisKey::Tool
 )
 when {
-  resource.tool == "resolve_incident" &&
+  resource.tool == "resolve_incident"
+}
+unless {
   context.target has severity &&
-  context.target.severity == "sev1"
+  context.target.severity != "sev1"
 };

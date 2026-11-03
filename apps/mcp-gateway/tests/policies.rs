@@ -347,3 +347,13 @@ fn the_guide_shows_every_policy_exactly_as_it_is_tested() {
         );
     }
 }
+
+#[test]
+fn a_build_that_drops_attributes_never_permits_what_the_guide_refuses() {
+    let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        if case["today"] != case["expect"] {
+            assert_eq!(case["today"], "deny", "{} fails open", case["name"]);
+        }
+    }
+}
