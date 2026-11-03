@@ -1,12 +1,10 @@
-import { Bell, ChevronDown, ChevronsUpDown, Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
+import { ChevronDown, ChevronsUpDown, Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
 import { useState } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Avatar } from '@/components/ui/misc'
 import { Badge } from '@/components/ui/badge'
 import { NAV } from './nav'
-import { NotificationsPanel } from './Notifications'
-import { useNotifications } from '@/data/notifications'
 import { useIssues } from '@/data/issues'
 import { useAlerts } from '@/data/alerts'
 import { useIncidents } from '@/data/incidents'
@@ -20,7 +18,6 @@ import { Logo } from '@/components/ft/Logo'
 export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const { pathname } = useLocation()
   const [open, setOpen] = useState<Record<string, boolean>>({})
-  const notifs = useNotifications()
   const { issues } = useIssues()
   const { alerts } = useAlerts()
   const account = useAccount()
@@ -81,24 +78,6 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
         })}
       </nav>
       <div className="flex flex-col gap-0.5 border-t p-2">
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" aria-label={`Notifications, ${notifs.unread} unread`} className="sb-row data-[state=open]:bg-muted">
-              <span className="relative inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Bell className="size-3.5" aria-hidden />
-                {notifs.unread ? <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-sidebar" /> : null}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col leading-4">
-                <span className="truncate text-control font-semibold">Notifications</span>
-                <span className="truncate text-caption text-muted-foreground">{notifs.items.find((n) => n.unread)?.title ?? 'All caught up'}</span>
-              </span>
-              {notifs.unread ? <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">{notifs.unread}</span> : null}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent side="right" align="end" className="w-[400px] overflow-hidden p-0">
-            <NotificationsPanel />
-          </PopoverContent>
-        </Popover>
         <NavLink to="/settings" className={({ isActive: a }) => cn('sb-row no-underline', a && 'bg-muted')}>
           <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><Settings2 className="size-3.5" aria-hidden /></span>
           <span className="flex min-w-0 flex-1 flex-col leading-4">

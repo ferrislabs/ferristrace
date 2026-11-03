@@ -10,7 +10,7 @@ import { ANY as ANY_TRACE, useTraces } from '@/data/traces'
 import { ANY as ANY_LOG, msOf, useLogs } from '@/data/logs'
 import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
 import { useProjects } from '@/data/projects'
-import { otlpEndpoint } from '@/data/onboarding'
+import { otlpBase } from '@/data/onboarding'
 import { useScope } from '@/lib/scope'
 import { useWindow } from '@/lib/window'
 import { isPlaced, placementSearch, usePlacement } from '@/data/placement'
@@ -50,7 +50,7 @@ export function Overview() {
   const { rows: slow } = useTraces({ ...ANY_TRACE, rangeMs: windowMs, order: 'duration', limit: 5 }, placement)
   const markers = useDeployMarkers(series)
   const scope = projects.find((p) => p.id === project)?.name ?? 'all projects'
-  if (!pending && !all.length && !series?.requests && !isPlaced(placement)) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpEndpoint()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
+  if (!pending && !all.length && !series?.requests && !isPlaced(placement)) return <><PageHeader title="Overview" meta="no signals yet" /><EmptyState icon={<Rocket />} title="No signals yet" code={`OTEL_SERVICE_NAME=checkout-api\nOTEL_EXPORTER_OTLP_ENDPOINT=${otlpBase()}\nOTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <ingest key>"`} actions={<Button asChild size="sm" variant="primary"><Link to="/onboarding">Connect your first service</Link></Button>}>This page fills in as soon as your first span, log record or metric point arrives. Set three environment variables in any OpenTelemetry SDK and restart your service.</EmptyState></>
   const lines = charted(series)
   const requests = series?.requests ?? 0
   const errorRate = requests ? ((series?.errors ?? 0) / requests) * 100 : null
