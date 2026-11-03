@@ -15,11 +15,14 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: the tag matches the version the workspace declares
+        id: version
         run: |
           set -eu
           tagged="${GITHUB_REF_NAME#v}"
@@ -29,6 +32,15 @@ jobs:
             echo "Bump the workspace version in its own commit before tagging."
             exit 1
           }
+          for field in version appVersion; do
+            charted=$(awk -v f="$field:" '$1 == f {gsub(/"/, "", $2); print $2}' charts/ferristrace/Chart.yaml)
+            test "$charted" = "$declared" || {
+              echo "::error::Cargo.toml says $declared and the chart's $field says $charted"
+              echo "Bump charts/ferristrace/Chart.yaml with the workspace."
+              exit 1
+            }
+          done
+          echo "version=${tagged}" >> "$GITHUB_OUTPUT"
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f
         with:
           cache: false
@@ -53,8 +65,17 @@ jobs:
     with:
       push: true
 
+  chart:
+    needs: [check, images]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/helm.yaml
+    with:
+      version: ${{ needs.check.outputs.version }}
+
   release:
-    needs: images
+    needs: [images, chart]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -116,6 +137,12 @@ jobs:
             echo "linux/amd64 and linux/arm64 with provenance attached."
             echo
             cat sizes.md
+            echo
+            echo "## Helm chart"
+            echo
+            echo '```sh'
+            echo "helm install ferristrace oci://ghcr.io/ferrislabs/charts/ferristrace --version ${version}"
+            echo '```'
           } > body.md
           echo >> body.md
           printf '%s\n' "$NOTES" >> body.md
