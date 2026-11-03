@@ -13,6 +13,7 @@ members = [
     "crates/ee",
     "apps/server",
     "apps/mcp",
+    "apps/mcp-gateway",
 ]
 default-members = [
     "crates/domain",
@@ -26,6 +27,7 @@ default-members = [
     "crates/api",
     "apps/server",
     "apps/mcp",
+    "apps/mcp-gateway",
 ]
 
 [workspace.package]
