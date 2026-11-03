@@ -487,6 +487,7 @@ pub enum UpstreamMode {
     ListGarbage,
     Down,
     ListError,
+    Paged,
 }
 
 impl Fake {
@@ -527,8 +528,18 @@ async fn recorded(State(fake): State<Fake>, request: Request) -> Response {
             )
                 .into_response()
         }
+        None if seen_path_is_placement(&key) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({"project": null, "environments": []}).to_string(),
+        )
+            .into_response(),
         None => (StatusCode::NOT_FOUND, "no such route").into_response(),
     }
+}
+
+fn seen_path_is_placement(key: &str) -> bool {
+    key.starts_with("GET ") && key.contains("/services/") && key.ends_with("/placement")
 }
 
 pub async fn start_api() -> (Fake, String) {
@@ -580,6 +591,17 @@ async fn upstream_mcp(State(fake): State<Fake>, request: Request) -> Response {
             )
                 .into_response(),
             UpstreamMode::ListGarbage => json_reply(json!("not an object")),
+            UpstreamMode::Paged => {
+                let all = tools();
+                let all = all.as_array().unwrap();
+                if body["params"]["cursor"] == "p2" {
+                    json_reply(json!({"jsonrpc": "2.0", "id": id, "result": {"tools": all[3..]}}))
+                } else {
+                    json_reply(
+                        json!({"jsonrpc": "2.0", "id": id, "result": {"tools": all[..3], "nextCursor": "p2"}}),
+                    )
+                }
+            }
             UpstreamMode::ListError => json_reply(
                 json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "boom"}}),
             ),

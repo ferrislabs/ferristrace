@@ -1,3 +1,7 @@
+use ferristrace_mcp_args::{
+    AGGREGATIONS, ALERT_STATES, Choice, DEFAULT_INCIDENT_STATUS, INCIDENT_STATUSES, LOG_SEVERITIES,
+    choose,
+};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
@@ -9,25 +13,92 @@ use crate::verifier::Principal;
 pub const SERVER: &str = "ferristrace";
 pub const ACTION: &str = "call_tool";
 
-const NAMED: [(&str, &[(&str, &str)]); 7] = [
-    ("service_health", &[("service", "service")]),
-    ("search_traces", &[("service", "service")]),
+#[derive(Clone, Copy)]
+enum Shape {
+    Text,
+    Choice(&'static [&'static str]),
+    Id,
+}
+
+#[derive(Clone, Copy)]
+struct Field {
+    argument: &'static str,
+    shape: Shape,
+    target: Option<&'static str>,
+}
+
+const fn field(argument: &'static str, shape: Shape, target: Option<&'static str>) -> Field {
+    Field {
+        argument,
+        shape,
+        target,
+    }
+}
+
+const TOOLS: [(&str, &[Field]); 13] = [
+    (
+        "service_health",
+        &[field("service", Shape::Text, Some("service"))],
+    ),
+    (
+        "search_traces",
+        &[field("service", Shape::Text, Some("service"))],
+    ),
     (
         "search_logs",
         &[
-            ("service", "service"),
-            ("severity", "log_severity"),
-            ("namespace", "namespace"),
-            ("pod", "pod"),
+            field("service", Shape::Text, Some("service")),
+            field(
+                "severity",
+                Shape::Choice(&LOG_SEVERITIES),
+                Some("log_severity"),
+            ),
+            field("namespace", Shape::Text, Some("namespace")),
+            field("pod", Shape::Text, Some("pod")),
         ],
     ),
-    ("query_metric", &[("service", "service")]),
+    (
+        "query_metric",
+        &[
+            field("service", Shape::Text, Some("service")),
+            field("aggregation", Shape::Choice(&AGGREGATIONS), None),
+        ],
+    ),
     (
         "cluster_status",
-        &[("cluster", "cluster"), ("namespace", "namespace")],
+        &[
+            field("cluster", Shape::Text, Some("cluster")),
+            field("namespace", Shape::Text, Some("namespace")),
+        ],
     ),
-    ("list_alerts", &[("state", "alert_state")]),
-    ("list_incidents", &[("status", "incident_status")]),
+    (
+        "list_alerts",
+        &[field(
+            "state",
+            Shape::Choice(&ALERT_STATES),
+            Some("alert_state"),
+        )],
+    ),
+    (
+        "list_incidents",
+        &[field(
+            "status",
+            Shape::Choice(&INCIDENT_STATUSES),
+            Some("incident_status"),
+        )],
+    ),
+    ("alert_history", &[field("alert_id", Shape::Id, None)]),
+    ("get_incident", &[field("incident_id", Shape::Id, None)]),
+    (
+        "comment_incident",
+        &[
+            field("incident_id", Shape::Id, None),
+            field("text", Shape::Text, None),
+        ],
+    ),
+    ("resolve_incident", &[field("incident_id", Shape::Id, None)]),
+    ("acknowledge_page", &[field("page_id", Shape::Id, None)]),
+    ("who_is_on_call", &[field("schedule", Shape::Text, None)]),
 ];
 
 const INCIDENT_TOOLS: [&str; 3] = ["get_incident", "comment_incident", "resolve_incident"];
@@ -62,16 +133,9 @@ impl Nature {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub target: Map<String, Value>,
+    pub arguments: Map<String, Value>,
     pub incident: Option<Uuid>,
     pub service: Option<String>,
-}
-
-fn named(arguments: &Map<String, Value>, key: &str) -> Option<String> {
-    arguments
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
 }
 
 fn lookup_safe(name: &str) -> bool {
@@ -81,32 +145,76 @@ fn lookup_safe(name: &str) -> bool {
         && !name.chars().any(char::is_control)
 }
 
-pub fn plan(tool: &str, arguments: &Map<String, Value>) -> Result<Plan, Reason> {
+pub fn plan(tool: &str, sent: &Map<String, Value>) -> Result<Plan, Reason> {
+    let mut arguments = sent.clone();
     let mut target = Map::new();
-    if let Some((_, pairs)) = NAMED.iter().find(|(name, _)| *name == tool) {
-        for (argument, key) in *pairs {
-            if let Some(value) = named(arguments, argument) {
-                target.insert((*key).to_owned(), Value::String(value));
+    let mut incident = None;
+    let fields = TOOLS
+        .iter()
+        .find(|(name, _)| *name == tool)
+        .map_or(&[][..], |(_, fields)| *fields);
+    for field in fields {
+        let held = match sent.get(field.argument) {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => Some(text.as_str()),
+            Some(_) => return Err(Reason::InvalidTarget),
+        };
+        let value = match field.shape {
+            Shape::Text => {
+                let trimmed = held.map_or("", str::trim);
+                if held.is_some() {
+                    arguments.insert(field.argument.to_owned(), json!(trimmed));
+                }
+                (!trimmed.is_empty()).then(|| trimmed.to_owned())
             }
+            Shape::Choice(allowed) => match choose(held, allowed) {
+                Choice::Absent => {
+                    if field.argument == "status" && tool == "list_incidents" {
+                        arguments.insert(field.argument.to_owned(), json!(DEFAULT_INCIDENT_STATUS));
+                        Some(DEFAULT_INCIDENT_STATUS.to_owned())
+                    } else {
+                        None
+                    }
+                }
+                Choice::Is(name) => {
+                    arguments.insert(field.argument.to_owned(), json!(name));
+                    Some(name.to_owned())
+                }
+                Choice::Invalid => return Err(Reason::InvalidTarget),
+            },
+            Shape::Id => {
+                let id = held.and_then(parse_id).ok_or(Reason::InvalidTarget)?;
+                arguments.insert(field.argument.to_owned(), json!(id.to_string()));
+                if INCIDENT_TOOLS.contains(&tool) && field.argument == "incident_id" {
+                    incident = Some(id);
+                }
+                None
+            }
+        };
+        if let (Some(key), Some(value)) = (field.target, value) {
+            target.insert(key.to_owned(), Value::String(value));
         }
     }
-    let service = named(arguments, "service").filter(|_| target.contains_key("service"));
+    let service = target
+        .get("service")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     if service
         .as_deref()
         .is_some_and(|service| !lookup_safe(service))
     {
         return Err(Reason::InvalidTarget);
     }
-    let incident = INCIDENT_TOOLS
-        .contains(&tool)
-        .then(|| named(arguments, "incident_id"))
-        .flatten()
-        .and_then(|id| Uuid::parse_str(&id).ok());
     Ok(Plan {
         target,
+        arguments,
         incident,
         service,
     })
+}
+
+fn parse_id(text: &str) -> Option<Uuid> {
+    ferristrace_mcp_args::uuid(text)
 }
 
 pub fn apply_incident(target: &mut Map<String, Value>, incident: &Incident) {
@@ -405,11 +513,99 @@ mod tests {
     fn a_target_the_call_does_not_name_is_left_out() {
         let plan = plan(
             "search_logs",
-            &args(&json!({"text": "boom", "service": "", "pod": 4, "namespace": null})),
+            &args(&json!({"text": "boom", "service": "  ", "namespace": null})),
         )
         .unwrap();
         assert!(plan.target.is_empty());
         assert_eq!(plan.service, None);
+    }
+
+    #[test]
+    fn a_value_of_the_wrong_type_is_an_invalid_target() {
+        for bad in [
+            json!({"pod": 4}),
+            json!({"service": ["a"]}),
+            json!({"severity": {"a": 1}}),
+        ] {
+            assert_eq!(
+                plan("search_logs", &args(&bad)),
+                Err(Reason::InvalidTarget),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn what_the_policy_sees_is_what_the_tool_will_run() {
+        let plan = plan(
+            "search_logs",
+            &args(&json!({"service": "  checkout\n", "severity": " ERROR ", "namespace": "\tpayments ", "pod": " web-1", "limit": 5, "nested": {"a": 1}})),
+        )
+        .unwrap();
+        assert_eq!(
+            Value::Object(plan.target.clone()),
+            json!({"service": "checkout", "log_severity": "error", "namespace": "payments", "pod": "web-1"})
+        );
+        assert_eq!(
+            Value::Object(plan.arguments),
+            json!({"service": "checkout", "severity": "error", "namespace": "payments", "pod": "web-1", "limit": 5, "nested": {"a": 1}})
+        );
+        assert_eq!(plan.service.as_deref(), Some("checkout"));
+    }
+
+    #[test]
+    fn a_choice_the_tool_would_refuse_is_an_invalid_target() {
+        assert_eq!(
+            plan("search_logs", &args(&json!({"severity": "loud"}))),
+            Err(Reason::InvalidTarget)
+        );
+        assert_eq!(
+            plan("list_alerts", &args(&json!({"state": "busy"}))),
+            Err(Reason::InvalidTarget)
+        );
+        assert_eq!(
+            plan("query_metric", &args(&json!({"aggregation": "median"}))),
+            Err(Reason::InvalidTarget)
+        );
+        assert!(plan("query_metric", &args(&json!({"aggregation": " P95 "}))).is_ok());
+    }
+
+    #[test]
+    fn a_status_left_out_is_the_default_the_tool_applies() {
+        let plan = plan("list_incidents", &args(&json!({}))).unwrap();
+        assert_eq!(plan.target["incident_status"], "open");
+        assert_eq!(plan.arguments["status"], "open");
+        let all = super::plan("list_incidents", &args(&json!({"status": "ALL"}))).unwrap();
+        assert_eq!(all.target["incident_status"], "all");
+    }
+
+    #[test]
+    fn ids_are_trimmed_and_written_in_their_canonical_form() {
+        let id = "22222222-2222-4222-8222-222222222222";
+        let plan = plan(
+            "resolve_incident",
+            &args(&json!({"incident_id": format!("  {}\n", id.to_uppercase())})),
+        )
+        .unwrap();
+        assert_eq!(plan.arguments["incident_id"], id);
+        assert_eq!(plan.incident, Some(Uuid::parse_str(id).unwrap()));
+        let page = super::plan(
+            "acknowledge_page",
+            &args(&json!({"page_id": format!(" {id} ")})),
+        )
+        .unwrap();
+        assert_eq!(page.arguments["page_id"], id);
+    }
+
+    #[test]
+    fn a_comment_is_trimmed() {
+        let id = "22222222-2222-4222-8222-222222222222";
+        let plan = plan(
+            "comment_incident",
+            &args(&json!({"incident_id": id, "text": "  hi \n"})),
+        )
+        .unwrap();
+        assert_eq!(plan.arguments["text"], "hi");
     }
 
     #[test]
@@ -420,23 +616,40 @@ mod tests {
     }
 
     #[test]
-    fn an_incident_tool_plans_an_incident_lookup_by_a_valid_id() {
+    fn an_incident_tool_plans_an_incident_lookup_by_its_id() {
         let id = "22222222-2222-4222-8222-222222222222";
         for tool in ["get_incident", "comment_incident", "resolve_incident"] {
             let plan = plan(tool, &args(&json!({"incident_id": id, "text": "x"}))).unwrap();
             assert_eq!(plan.incident, Some(Uuid::parse_str(id).unwrap()));
         }
         assert_eq!(
-            plan("resolve_incident", &args(&json!({"incident_id": "../x"})))
-                .unwrap()
-                .incident,
-            None
-        );
-        assert_eq!(
             plan("get_trace", &args(&json!({"incident_id": id})))
                 .unwrap()
                 .incident,
             None
+        );
+    }
+
+    #[test]
+    fn an_incident_id_that_is_missing_or_unparseable_is_an_invalid_target() {
+        for tool in ["get_incident", "comment_incident", "resolve_incident"] {
+            for bad in [
+                json!({"text": "x"}),
+                json!({"incident_id": "../x", "text": "x"}),
+                json!({"incident_id": "", "text": "x"}),
+                json!({"incident_id": 7, "text": "x"}),
+                json!({"incident_id": null, "text": "x"}),
+            ] {
+                assert_eq!(
+                    plan(tool, &args(&bad)),
+                    Err(Reason::InvalidTarget),
+                    "{tool} {bad}"
+                );
+            }
+        }
+        assert_eq!(
+            plan("alert_history", &args(&json!({"alert_id": "nope"}))),
+            Err(Reason::InvalidTarget)
         );
     }
 

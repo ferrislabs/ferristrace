@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::export::Queue;
 
@@ -10,6 +10,7 @@ pub struct DecisionRecord {
     pub kind: &'static str,
     pub time: String,
     pub request_id: String,
+    pub client_request_id: Option<String>,
     pub method: String,
     pub org: String,
     pub tool: Option<String>,
@@ -24,6 +25,105 @@ pub struct DecisionRecord {
     pub decision: &'static str,
     pub policies: Vec<String>,
     pub reason: Option<&'static str>,
+}
+
+pub const MAX_TEXT_CHARS: usize = 256;
+pub const MAX_RECORD_BYTES: usize = 4096;
+const MAX_LIST: usize = 32;
+
+fn clip(text: &mut String, limit: usize) {
+    if let Some((index, _)) = text.char_indices().nth(limit) {
+        text.truncate(index);
+    }
+}
+
+fn clipped(map: &Map<String, Value>) -> Map<String, Value> {
+    map.iter()
+        .map(|(key, value)| {
+            let mut key = key.clone();
+            clip(&mut key, MAX_TEXT_CHARS);
+            let value = match value {
+                Value::String(text) => {
+                    let mut text = text.clone();
+                    clip(&mut text, MAX_TEXT_CHARS);
+                    Value::String(text)
+                }
+                Value::Array(items) => Value::Array(
+                    items
+                        .iter()
+                        .take(MAX_LIST)
+                        .map(|item| match item {
+                            Value::String(text) => {
+                                let mut text = text.clone();
+                                clip(&mut text, MAX_TEXT_CHARS);
+                                Value::String(text)
+                            }
+                            other => other.clone(),
+                        })
+                        .collect(),
+                ),
+                other => other.clone(),
+            };
+            (key, value)
+        })
+        .collect()
+}
+
+fn clip_all(items: &mut Vec<String>) {
+    items.truncate(MAX_LIST);
+    for item in items.iter_mut() {
+        clip(item, MAX_TEXT_CHARS);
+    }
+}
+
+impl DecisionRecord {
+    pub fn size(&self) -> usize {
+        serde_json::to_vec(self).map_or(MAX_RECORD_BYTES, |bytes| bytes.len())
+    }
+
+    #[must_use]
+    pub fn bounded(mut self) -> Self {
+        for text in [
+            &mut self.method,
+            &mut self.org,
+            &mut self.subject,
+            &mut self.agent,
+        ] {
+            clip(text, MAX_TEXT_CHARS);
+        }
+        if let Some(tool) = &mut self.tool {
+            clip(tool, MAX_TEXT_CHARS);
+        }
+        if let Some(id) = &mut self.client_request_id {
+            clip(id, 128);
+        }
+        clip_all(&mut self.groups);
+        clip_all(&mut self.policies);
+        self.target = clipped(&self.target);
+        self.arguments = clipped(&self.arguments);
+        if let Some(act) = &self.act
+            && serde_json::to_string(act).map_or(true, |text| text.len() > MAX_RECORD_BYTES / 4)
+        {
+            self.act = Some(json!({"truncated": true}));
+        }
+        if self.size() > MAX_RECORD_BYTES {
+            self.arguments = truncated();
+        }
+        if self.size() > MAX_RECORD_BYTES {
+            self.target = truncated();
+        }
+        if self.size() > MAX_RECORD_BYTES {
+            self.groups.clear();
+            self.policies.clear();
+        }
+        self
+    }
+}
+
+fn truncated() -> Map<String, Value> {
+    let mut map = Map::new();
+    map.insert("truncated".to_owned(), Value::Bool(true));
+    map
 }
 
 pub trait DecisionSink: Send + Sync + 'static {
@@ -55,6 +155,7 @@ impl DecisionSink for Recorder {
             target: "mcp_decision",
             kind = record.kind,
             request_id = %record.request_id,
+            client_request_id = record.client_request_id.as_deref().unwrap_or(""),
             method = %record.method,
             org = %record.org,
             tool = record.tool.as_deref().unwrap_or(""),
@@ -118,6 +219,7 @@ mod tests {
             kind: KIND,
             time: "2026-11-03T09:05:00Z".to_owned(),
             request_id: "req-9".to_owned(),
+            client_request_id: Some("theirs".to_owned()),
             method: "tools/call".to_owned(),
             org: "org-1".to_owned(),
             tool: Some("search_logs".to_owned()),
@@ -161,9 +263,57 @@ mod tests {
             "policies=[\"p1\"]",
             "reason=\"no_permitting_policy\"",
             "request_id=req-9",
+            "client_request_id=\"theirs\"",
         ] {
             assert!(output.contains(expected), "{expected} missing in {output}");
         }
+    }
+
+    #[test]
+    fn long_strings_are_cut_and_the_record_stays_small() {
+        let mut long = record();
+        long.arguments
+            .insert("service".to_owned(), json!("é".repeat(1000)));
+        long.groups = (0..100).map(|index| format!("group-{index}")).collect();
+        long.policies = vec!["p".repeat(5000)];
+        let bounded = long.bounded();
+        assert_eq!(
+            bounded.arguments["service"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            256
+        );
+        assert_eq!(bounded.groups.len(), 32);
+        assert_eq!(bounded.policies[0].chars().count(), 256);
+        assert!(bounded.size() <= MAX_RECORD_BYTES);
+    }
+
+    #[test]
+    fn a_record_over_the_cap_drops_its_arguments_then_its_target() {
+        let mut huge = record();
+        for index in 0..400 {
+            huge.arguments
+                .insert(format!("argument-{index}"), json!("x".repeat(200)));
+        }
+        let bounded = huge.bounded();
+        assert_eq!(bounded.arguments["truncated"], true);
+        assert!(bounded.size() <= MAX_RECORD_BYTES);
+        let mut wide = record();
+        for index in 0..400 {
+            wide.target
+                .insert(format!("t-{index}"), json!("x".repeat(200)));
+        }
+        let bounded = wide.bounded();
+        assert_eq!(bounded.target["truncated"], true);
+        assert!(bounded.size() <= MAX_RECORD_BYTES);
+    }
+
+    #[test]
+    fn a_small_record_is_left_alone() {
+        let small = record();
+        assert_eq!(small.clone().bounded(), small);
     }
 
     #[test]

@@ -52,13 +52,16 @@ public MCP door. It enforces; FerrisKey decides; the gateway holds no policy.
   caller's on-call state, an incident's severity and services, a service's
   project and environment). A lookup that applies and fails, times out, is
   refused or answers unreadably refuses the call with `pip_unavailable`. An
-  attribute that applies is never left out. Only a definite 404 (an incident
-  or a service FerrisTrace does not know) leaves its attributes out, since
-  there is then nothing to resolve and FerrisTrace answers the same 404.
+  attribute that applies is never left out. A 404 for an incident or service the call
+  names is `unknown_target`: it is refused, never evaluated with the
+  attribute missing.
 - The caller's token is exchanged (RFC 8693, audience FerrisTrace's agent
   audience, the gateway as actor, so the exchanged token carries `act`) and
   only the exchanged token is forwarded. Hop-by-hop headers and the caller's
   credentials are dropped.
+- What is evaluated is what runs: arguments are normalised exactly as
+  apps/mcp does (shared in `crates/mcp-args`, a leaf crate depending on
+  `uuid` only) and the forwarded body is rebuilt from them.
 - A refusal is a JSON-RPC error with the reason code, never policy text. HTTP
   status 200: a 403 reads as an OAuth step-up to several MCP clients.
 - Every decision is one `tracing` event (`kind=mcp_decision`) and, with an

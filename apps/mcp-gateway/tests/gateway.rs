@@ -464,6 +464,11 @@ async fn a_list_shows_only_the_tools_the_policies_permit_decided_in_one_batch() 
 async fn a_call_to_a_tool_the_policies_refuse_gets_a_reason_is_recorded_once_and_never_reaches_the_server()
  {
     let world = world_with(Pdp::Rule(read_only_tools)).await;
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev3", &[]),
+    );
     let token = world.user_token();
     warm(&world, &token).await;
 
@@ -474,6 +479,9 @@ async fn a_call_to_a_tool_the_policies_refuse_gets_a_reason_is_recorded_once_and
             &[("x-request-id", "req-42")],
         )
         .await;
+    let generated = headers["x-request-id"].to_str().unwrap().to_owned();
+    assert_ne!(generated, "req-42");
+    assert_eq!(generated.len(), 36);
     assert_eq!(status, StatusCode::OK);
     assert_eq!(answer["id"], 8);
     assert_eq!(answer["error"]["code"], -32001);
@@ -481,7 +489,6 @@ async fn a_call_to_a_tool_the_policies_refuse_gets_a_reason_is_recorded_once_and
     assert!(answer.get("result").is_none());
     let text = answer.to_string();
     assert!(!text.contains("members-read-only"));
-    assert_eq!(headers["x-request-id"], "req-42");
     assert_eq!(world.upstream.log.len(), 0);
 
     let records = world.decisions.all();
@@ -499,7 +506,8 @@ async fn a_call_to_a_tool_the_policies_refuse_gets_a_reason_is_recorded_once_and
     assert_eq!(record.decision, "deny");
     assert_eq!(record.reason, Some("no_permitting_policy"));
     assert_eq!(record.policies, ["members-read-only"]);
-    assert_eq!(record.request_id, "req-42");
+    assert_eq!(record.request_id, generated);
+    assert_eq!(record.client_request_id.as_deref(), Some("req-42"));
     assert_eq!(record.arguments["incident_id"], INCIDENT);
 }
 
@@ -964,36 +972,445 @@ async fn the_gateways_own_token_is_used_for_lookups_and_names_the_agent_audience
 }
 
 #[tokio::test]
-async fn an_incident_that_does_not_exist_adds_no_attribute_and_the_server_answers() {
+async fn an_incident_or_service_ferristrace_does_not_know_is_refused_as_unknown_target() {
     let world = world_with(Pdp::Rule(permit_all)).await;
-    let answer = world
+    let token = world.user_token();
+    let missing = world
+        .call(&token, "get_incident", &json!({"incident_id": INCIDENT}))
+        .await;
+    assert_eq!(reason(&missing), "unknown_target");
+    world.reply_api("services/ghost/placement", 404, &json!({}));
+    let ghost = world
+        .call(&token, "search_logs", &json!({"service": "ghost"}))
+        .await;
+    assert_eq!(reason(&ghost), "unknown_target");
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev2", &["vanished"]),
+    );
+    world.reply_api("services/vanished/placement", 404, &json!({}));
+    let through = world
         .call(
-            &world.user_token(),
-            "get_incident",
+            &token,
+            "resolve_incident",
             &json!({"incident_id": INCIDENT}),
         )
         .await;
-    assert_eq!(answer["result"]["content"][0]["text"], "ran get_incident");
-    let sent = &world.realm.evaluation()[0].body;
-    assert_eq!(sent["context"]["target"], json!({}));
-    assert_eq!(
-        sent["context"]["arguments"],
-        json!({"incident_id": INCIDENT})
+    assert_eq!(reason(&through), "unknown_target");
+    assert_eq!(world.realm.pdp_calls(), 0);
+    assert!(world.upstream.log.rpc("tools/call").is_empty());
+    let records = world.decisions.all();
+    assert_eq!(records.len(), 3);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.reason == Some("unknown_target") && record.decision == "deny")
     );
 }
 
 #[tokio::test]
-async fn a_service_the_registry_does_not_know_adds_no_placement() {
+async fn a_cached_definite_no_still_refuses_and_is_not_asked_again() {
     let world = world_with(Pdp::Rule(permit_all)).await;
+    let token = world.user_token();
+    for _ in 0..3 {
+        let answer = world
+            .call(&token, "get_incident", &json!({"incident_id": INCIDENT}))
+            .await;
+        assert_eq!(reason(&answer), "unknown_target");
+    }
+    assert_eq!(
+        world
+            .api
+            .log
+            .to_path(&format!("/incidents/{INCIDENT}"))
+            .len(),
+        1
+    );
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev3", &[]),
+    );
+    let write = world
+        .call(
+            &token,
+            "resolve_incident",
+            &json!({"incident_id": INCIDENT}),
+        )
+        .await;
+    assert_eq!(
+        write["result"]["content"][0]["text"],
+        "ran resolve_incident"
+    );
+}
+
+#[tokio::test]
+async fn an_unparseable_incident_id_is_refused_before_any_lookup() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let token = world.user_token();
+    for arguments in [
+        json!({"incident_id": "../../x"}),
+        json!({"incident_id": 4}),
+        json!({}),
+        json!({"incident_id": ""}),
+    ] {
+        let answer = world.call(&token, "resolve_incident", &arguments).await;
+        assert_eq!(reason(&answer), "invalid_target", "{arguments}");
+    }
+    assert_eq!(world.realm.pdp_calls(), 0);
+    assert!(world.api.log.to_path("/incidents/").is_empty());
+    assert!(world.upstream.log.rpc("tools/call").is_empty());
+}
+
+#[tokio::test]
+async fn what_the_policy_decided_is_what_the_server_is_asked_to_run() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let token = world.user_token();
+    world.reply_api(
+        "services/checkout/placement",
+        200,
+        &json!({"project": "shop", "environments": ["production"]}),
+    );
+    world
+        .call(
+            &token,
+            "search_logs",
+            &json!({"service": "  checkout\n", "severity": " ERROR ", "namespace": " payments", "limit": 5}),
+        )
+        .await;
+    let sent = &world.realm.evaluation()[0].body["context"];
+    assert_eq!(sent["target"]["service"], "checkout");
+    assert_eq!(sent["target"]["log_severity"], "error");
+    assert_eq!(sent["target"]["environment"], "production");
+    assert_eq!(
+        sent["arguments"],
+        json!({"service": "checkout", "severity": "error", "namespace": "payments", "limit": 5})
+    );
+    assert_eq!(
+        world.api.log.to_path("/services/checkout/placement").len(),
+        1
+    );
+    let run = &world.upstream.log.rpc("tools/call")[0].body;
+    assert_eq!(
+        run["params"]["arguments"],
+        json!({"service": "checkout", "severity": "error", "namespace": "payments", "limit": 5})
+    );
+    assert_eq!(run["params"]["name"], "search_logs");
+    assert_eq!(run["id"], 1);
+}
+
+#[tokio::test]
+async fn an_incident_id_is_looked_up_and_forwarded_in_its_canonical_form() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev1", &[]),
+    );
+    let loud = format!("  {}\t", INCIDENT.to_uppercase());
+    world
+        .call(
+            &world.user_token(),
+            "resolve_incident",
+            &json!({"incident_id": loud}),
+        )
+        .await;
+    assert_eq!(
+        world
+            .api
+            .log
+            .to_path(&format!("/incidents/{INCIDENT}"))
+            .len(),
+        1
+    );
+    let run = &world.upstream.log.rpc("tools/call")[0].body;
+    assert_eq!(run["params"]["arguments"]["incident_id"], INCIDENT);
+    assert_eq!(
+        world.realm.evaluation()[0].body["context"]["target"]["severity"],
+        "sev1"
+    );
+}
+
+#[tokio::test]
+async fn a_choice_the_tool_would_refuse_never_reaches_the_policy() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let answer = world
+        .call(
+            &world.user_token(),
+            "search_logs",
+            &json!({"severity": "loud"}),
+        )
+        .await;
+    assert_eq!(reason(&answer), "invalid_target");
+    assert_eq!(world.realm.pdp_calls(), 0);
+}
+
+#[tokio::test]
+async fn a_comment_is_never_logged_and_long_arguments_are_cut() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let secret = "the database password is hunter2";
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev3", &[]),
+    );
+    world
+        .call(
+            &world.user_token(),
+            "comment_incident",
+            &json!({"incident_id": INCIDENT, "text": secret}),
+        )
+        .await;
+    world.reply_api(
+        "services/checkout/placement",
+        200,
+        &json!({"project": null, "environments": []}),
+    );
     world
         .call(
             &world.user_token(),
             "search_logs",
-            &json!({"service": "ghost"}),
+            &json!({"service": "checkout", "text": "x".repeat(5000)}),
         )
         .await;
-    let sent = &world.realm.evaluation()[0].body;
-    assert_eq!(sent["context"]["target"], json!({"service": "ghost"}));
+    let records = world.decisions.all();
+    let comment = &records[0];
+    assert!(!comment.arguments.contains_key("text"));
+    assert_eq!(comment.arguments["text_length"], secret.len());
+    assert!(!serde_json::to_string(comment).unwrap().contains("hunter2"));
+    let search = &records[1];
+    assert_eq!(search.arguments["text"].as_str().unwrap().len(), 256);
+    assert!(records.iter().all(|record| record.size() <= 4096));
+    assert_eq!(
+        world.upstream.log.rpc("tools/call")[0].body["params"]["arguments"]["text"],
+        secret
+    );
+}
+
+#[tokio::test]
+async fn every_refusal_path_leaves_one_decision_with_its_own_reason() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let token = world.user_token();
+    let (status, _, _) = world.post_raw(Some(&token), "{".to_owned(), &[]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    world.rpc(&token, "resources/list", json!({})).await;
+    world.call(&token, "no_such_tool", &json!({})).await;
+    let reasons: Vec<_> = world
+        .decisions
+        .all()
+        .iter()
+        .map(|record| record.reason)
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            Some("invalid_request"),
+            Some("method_not_allowed"),
+            Some("unknown_tool")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_exchange_is_recorded_on_every_path_and_a_permit_is_not() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let alice = world.user_token();
+    world.rpc(&alice, "tools/list", json!({})).await;
+    world.decisions.0.lock().unwrap().clear();
+    world.realm.token.lock().unwrap().failing_clients = vec!["gateway".to_owned()];
+    let mut claims = world.claims();
+    claims["sub"] = json!("bob-sub");
+    let bob = sign(&claims);
+    let (status, _, answer) = world
+        .post(
+            Some(&bob),
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(reason(&answer), "exchange_failed");
+    let records = world.decisions.all();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].decision, "deny");
+    assert_eq!(records[0].reason, Some("exchange_failed"));
+    assert_eq!(records[0].policies, ["permit-all"]);
+
+    let (status, _, answer) = world
+        .post(
+            Some(&bob),
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(reason(&answer), "exchange_failed");
+    let (status, _, _) = world
+        .post(
+            Some(&bob),
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let reasons: Vec<_> = world
+        .decisions
+        .all()
+        .iter()
+        .map(|record| record.reason)
+        .collect();
+    assert_eq!(reasons, [Some("exchange_failed"); 3]);
+}
+
+#[tokio::test]
+async fn a_nature_discovery_that_fails_is_recorded_as_upstream_unavailable() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    world.upstream.set_mode(UpstreamMode::ListGarbage);
+    let (status, _, answer) = world
+        .post(
+            Some(&world.user_token()),
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "search_logs", "arguments": {}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(reason(&answer), "upstream_unavailable");
+    assert_eq!(world.realm.pdp_calls(), 0);
+    let records = world.decisions.all();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].reason, Some("upstream_unavailable"));
+    assert_eq!(records[0].tool.as_deref(), Some("search_logs"));
+}
+
+#[tokio::test]
+async fn discovery_follows_pages_and_a_later_page_does_not_evict_the_first() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    world.upstream.set_mode(UpstreamMode::Paged);
+    world.reply_api(
+        &format!("incidents/{INCIDENT}"),
+        200,
+        &incident_body("sev3", &[]),
+    );
+    let token = world.user_token();
+    let answer = world
+        .call(
+            &token,
+            "comment_incident",
+            &json!({"incident_id": INCIDENT, "text": "x"}),
+        )
+        .await;
+    assert_ne!(reason(&answer), "unknown_tool");
+    assert_eq!(
+        world.realm.evaluation()[0].body["resource"]["properties"]["access"],
+        "write"
+    );
+    let lists = world.upstream.log.rpc("tools/list");
+    assert_eq!(lists.len(), 2);
+    assert_eq!(lists[1].body["params"]["cursor"], "p2");
+
+    let page = world
+        .rpc(&token, "tools/list", json!({"cursor": "p2"}))
+        .await;
+    assert_eq!(page["result"]["tools"].as_array().unwrap().len(), 3);
+    world.call(&token, "search_logs", &json!({})).await;
+    assert_eq!(world.upstream.log.rpc("tools/list").len(), 3);
+    assert_eq!(
+        world.realm.evaluation()[1].body["resource"]["properties"]["access"],
+        "read"
+    );
+    let unknown = world.call(&token, "drop_database", &json!({})).await;
+    assert_eq!(reason(&unknown), "unknown_tool");
+    assert_eq!(world.upstream.log.rpc("tools/list").len(), 3);
+}
+
+#[tokio::test]
+async fn the_tool_natures_of_one_organisation_do_not_answer_for_another() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    world.api.reply(
+        "GET",
+        &format!("/api/orgs/{OTHER_ORG}/clock"),
+        200,
+        &json!({"timezone": "UTC"}),
+    );
+    world.api.reply(
+        "GET",
+        &format!("/api/orgs/{OTHER_ORG}/oncall/now"),
+        200,
+        &json!({"on_call": false, "schedules": []}),
+    );
+    world
+        .call(&world.user_token(), "search_logs", &json!({}))
+        .await;
+    assert_eq!(world.upstream.log.rpc("tools/list").len(), 1);
+    let mut claims = world.claims();
+    claims["aud"] = json!(canonical(OTHER_ORG));
+    world
+        .http
+        .post(world.endpoint(OTHER_ORG))
+        .bearer_auth(sign(&claims))
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "search_logs", "arguments": {}}}))
+        .send()
+        .await
+        .unwrap();
+    let lists = world.upstream.log.rpc("tools/list");
+    assert_eq!(lists.len(), 2);
+    assert_eq!(lists[1].path, format!("/orgs/{OTHER_ORG}/mcp"));
+}
+
+#[tokio::test]
+async fn the_request_id_is_always_ours_and_the_clients_is_logged_beside_it() {
+    let world = world_with(Pdp::Rule(permit_all)).await;
+    let (_, headers, _) = world
+        .post_raw(
+            Some(&world.user_token()),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}}).to_string(),
+            &[("x-request-id", "bad id")],
+        )
+        .await;
+    let ours = headers["x-request-id"].to_str().unwrap().to_owned();
+    assert_eq!(ours.len(), 36);
+    let record = &world.decisions.all()[0];
+    assert_eq!(record.request_id, ours);
+    assert_eq!(record.client_request_id, None);
+    let sent = world.upstream.log.rpc("tools/call");
+    assert_eq!(sent[0].header("x-request-id"), ours);
+    world
+        .post_raw(
+            Some(&world.user_token()),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}}).to_string(),
+            &[("x-request-id", "trace-77")],
+        )
+        .await;
+    assert_eq!(
+        world.decisions.all()[1].client_request_id.as_deref(),
+        Some("trace-77")
+    );
+    assert_ne!(world.decisions.all()[1].request_id, "trace-77");
+}
+
+#[tokio::test]
+async fn a_body_that_never_arrives_times_out_and_is_recorded() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let world = World::start_at(clock_at("2026-11-03T09:05:00Z"), |config| {
+        config.body_timeout_ms = 200;
+    })
+    .await;
+    let address = world.url.trim_start_matches("http://").to_owned();
+    let mut stream = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let head = format!(
+        "POST /orgs/{ORG}/mcp HTTP/1.1\r\nhost: {address}\r\nauthorization: Bearer {}\r\ncontent-type: application/json\r\ncontent-length: 500\r\n\r\n{{\"jsonrpc\"",
+        world.user_token()
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let mut answer = String::new();
+    let mut buffer = [0_u8; 1024];
+    let read = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buffer))
+        .await
+        .expect("the gateway answered")
+        .unwrap();
+    answer.push_str(&String::from_utf8_lossy(&buffer[..read]));
+    assert!(answer.starts_with("HTTP/1.1 408"), "{answer}");
+    let records = world.decisions.all();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].reason, Some("invalid_request"));
+    assert_eq!(world.upstream.log.len(), 0);
 }
 
 #[tokio::test]
@@ -1337,7 +1754,7 @@ async fn the_worked_example_is_decided_on_the_organisations_local_time() {
             "2026-11-03T09:05:00Z",
             "checkout",
             "Dev",
-            "get_incident",
+            "list_services",
             false,
         ),
         case(
@@ -1526,7 +1943,7 @@ async fn a_list_the_server_answers_oddly_is_never_passed_on_unfiltered() {
     for (mode, expected) in [
         (UpstreamMode::ListAsEventStream, StatusCode::BAD_GATEWAY),
         (UpstreamMode::ListGarbage, StatusCode::BAD_GATEWAY),
-        (UpstreamMode::Down, StatusCode::INTERNAL_SERVER_ERROR),
+        (UpstreamMode::Down, StatusCode::BAD_GATEWAY),
     ] {
         let world = world_with(Pdp::Rule(permit_all)).await;
         world.upstream.set_mode(mode);
@@ -1545,7 +1962,7 @@ async fn a_list_the_server_answers_oddly_is_never_passed_on_unfiltered() {
     let answer = world
         .rpc(&world.user_token(), "tools/list", json!({}))
         .await;
-    assert_eq!(answer["error"]["message"], "boom");
+    assert_eq!(reason(&answer), "upstream_unavailable");
     assert_eq!(world.realm.pdp_calls(), 0);
 }
 

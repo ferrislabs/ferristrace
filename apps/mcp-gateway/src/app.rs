@@ -19,10 +19,10 @@ use crate::credentials::ClientCredentials;
 use crate::decision::{DecisionRecord, DecisionSink, KIND};
 use crate::exchange::Exchanger;
 use crate::pdp::{Pdp, PdpError, Verdict};
-use crate::pip::{Facts, Needs, Pip};
+use crate::pip::{Facts, Needs, Pip, Unavailable};
 use crate::reason::Reason;
 use crate::rpc::{self, Kind, Message, ToolCall};
-use crate::upstream::{HOP_BY_HOP, REQUEST_ID, Upstream, UpstreamError, natures_of};
+use crate::upstream::{HOP_BY_HOP, REQUEST_ID, Upstream, UpstreamError, natures_of, next_cursor};
 use crate::verifier::{JwksVerifier, Principal, Refusal};
 use crate::vocab::{self, ACTION, Nature};
 
@@ -46,6 +46,7 @@ pub struct Gateway<C, S> {
     upstream: Upstream,
     clock: C,
     sink: S,
+    body_deadline: std::time::Duration,
 }
 
 impl<C: Clock, S: DecisionSink> Gateway<C, S> {
@@ -109,6 +110,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             upstream: Upstream::new(upstream_http, base),
             clock,
             sink,
+            body_deadline: config.body_timeout(),
         })
     }
 
@@ -153,41 +155,60 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
 
     fn record(&self, ctx: &Ctx<'_>, entry: &Entry<'_>) {
         let (subject_type, subject) = vocab::subject_kind(ctx.principal);
-        self.sink.record(DecisionRecord {
-            kind: KIND,
-            time: self.now().to_string(),
-            request_id: ctx.request_id.to_owned(),
-            method: entry.method.to_owned(),
-            org: ctx.org.to_string(),
-            tool: entry.tool.map(str::to_owned),
-            subject_type,
-            subject: subject.to_owned(),
-            groups: ctx.principal.groups.clone(),
-            agent: ctx.principal.client_id.clone(),
-            delegated: ctx.principal.delegated,
-            act: ctx.principal.act.clone(),
-            target: entry.target.clone(),
-            arguments: entry.arguments.clone(),
-            decision: if entry.reason.is_none() {
-                "permit"
-            } else {
-                "deny"
-            },
-            policies: entry.policies.to_vec(),
-            reason: entry.reason.map(Reason::code),
-        });
+        let mut arguments = entry.arguments.clone();
+        if entry.tool == Some("comment_incident")
+            && let Some(Value::String(text)) = arguments.remove("text")
+        {
+            arguments.insert("text_length".to_owned(), json!(text.chars().count()));
+        }
+        self.sink.record(
+            DecisionRecord {
+                kind: KIND,
+                time: self.now().to_string(),
+                request_id: ctx.request_id.to_owned(),
+                client_request_id: ctx.client_request_id.map(str::to_owned),
+                method: entry.method.to_owned(),
+                org: ctx.org.to_string(),
+                tool: entry.tool.map(str::to_owned),
+                subject_type,
+                subject: subject.to_owned(),
+                groups: ctx.principal.groups.clone(),
+                agent: ctx.principal.client_id.clone(),
+                delegated: ctx.principal.delegated,
+                act: ctx.principal.act.clone(),
+                target: entry.target.clone(),
+                arguments,
+                decision: if entry.reason.is_none() {
+                    "permit"
+                } else {
+                    "deny"
+                },
+                policies: entry.policies.to_vec(),
+                reason: entry.reason.map(Reason::code),
+            }
+            .bounded(),
+        );
     }
 
-    fn refuse(
+    fn refuse(&self, ctx: &Ctx<'_>, id: &Value, entry: Entry<'_>, status: StatusCode) -> Response {
+        let reason = entry.reason.unwrap_or(Reason::NoPermittingPolicy);
+        self.record(ctx, &entry);
+        (status, Json(rpc::refusal(id, reason))).into_response()
+    }
+
+    fn bad_gateway(
         &self,
         ctx: &Ctx<'_>,
         message: &Message,
-        entry: Entry<'_>,
-        status: StatusCode,
+        tool: Option<&str>,
+        reason: Reason,
     ) -> Response {
-        let reason = entry.reason.unwrap_or(Reason::NoPermittingPolicy);
-        self.record(ctx, &entry);
-        (status, Json(rpc::refusal(&message.id, reason))).into_response()
+        self.refuse(
+            ctx,
+            &message.id,
+            Entry::denied(&message.method, tool, reason),
+            StatusCode::BAD_GATEWAY,
+        )
     }
 
     async fn exchange(&self, ctx: &Ctx<'_>) -> Result<String, UpstreamError> {
@@ -202,7 +223,8 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
 
     async fn handle(&self, org: Uuid, request: Request) -> Response {
         let (parts, body) = request.into_parts();
-        let request_id = request_id(&parts.headers);
+        let request_id = Uuid::new_v4().to_string();
+        let client_request_id = client_request_id(&parts.headers);
         let Some(token) = bearer(&parts.headers) else {
             return self.unauthorized(org, false);
         };
@@ -218,15 +240,33 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
                 .insert(header::ALLOW, HeaderValue::from_static("POST"));
             return response;
         }
-        let Ok(body) = to_bytes(body, MAX_BODY_BYTES).await else {
-            return plain(StatusCode::PAYLOAD_TOO_LARGE);
-        };
         let ctx = Ctx {
             org,
             principal: &principal,
             token,
             request_id: &request_id,
+            client_request_id: client_request_id.as_deref(),
         };
+        let body =
+            match tokio::time::timeout(self.body_deadline, to_bytes(body, MAX_BODY_BYTES)).await {
+                Ok(Ok(body)) => body,
+                Ok(Err(_)) => {
+                    return self.refuse(
+                        &ctx,
+                        &Value::Null,
+                        Entry::denied("", None, Reason::InvalidRequest),
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                    );
+                }
+                Err(_) => {
+                    return self.refuse(
+                        &ctx,
+                        &Value::Null,
+                        Entry::denied("", None, Reason::InvalidRequest),
+                        StatusCode::REQUEST_TIMEOUT,
+                    );
+                }
+            };
         let mut response = self.post(&ctx, &parts, body).await;
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             response
@@ -240,11 +280,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
         let message = match rpc::parse(&body) {
             Ok(message) => message,
             Err(rejection) => {
-                tracing::info!(
-                    request_id = ctx.request_id,
-                    code = rejection.code,
-                    "request rejected"
-                );
+                self.record(ctx, &Entry::denied("", None, Reason::InvalidRequest));
                 return (StatusCode::BAD_REQUEST, Json(rejection.body())).into_response();
             }
         };
@@ -252,41 +288,50 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
         if !rpc::headers_agree(&parts.headers, &message) {
             return self.refuse(
                 ctx,
-                &message,
+                &message.id,
                 Entry::denied(&message.method, tool, Reason::HeaderMismatch),
                 StatusCode::BAD_REQUEST,
             );
         }
         match message.kind {
-            Kind::Pass => self.pass(ctx, parts, body).await,
+            Kind::Pass => self.pass(ctx, parts, body, &message).await,
             Kind::Other => self.refuse(
                 ctx,
-                &message,
+                &message.id,
                 Entry::denied(&message.method, tool, Reason::MethodNotAllowed),
                 StatusCode::OK,
             ),
             Kind::ListTools => self.list(ctx, parts, body, &message).await,
             Kind::CallTool => match &message.call {
-                Some(call) => self.call(ctx, parts, body, &message, call).await,
-                None => (
+                Some(call) => self.call(ctx, parts, &message, call).await,
+                None => self.refuse(
+                    ctx,
+                    &message.id,
+                    Entry::denied(&message.method, None, Reason::InvalidRequest),
                     StatusCode::BAD_REQUEST,
-                    Json(rpc::refusal(&message.id, Reason::InvalidTarget)),
-                )
-                    .into_response(),
+                ),
             },
         }
     }
 
-    async fn pass(&self, ctx: &Ctx<'_>, parts: &Parts, body: Bytes) -> Response {
+    async fn pass(&self, ctx: &Ctx<'_>, parts: &Parts, body: Bytes, message: &Message) -> Response {
         let Ok(exchanged) = self.exchange(ctx).await else {
-            return upstream_unavailable();
+            return self.bad_gateway(ctx, message, None, Reason::ExchangeFailed);
         };
-        self.send(ctx, parts, body, &exchanged).await
+        match self.send(ctx, parts, body, &exchanged).await {
+            Ok(response) => response,
+            Err(_) => self.bad_gateway(ctx, message, None, Reason::UpstreamUnavailable),
+        }
     }
 
-    async fn send(&self, ctx: &Ctx<'_>, parts: &Parts, body: Bytes, exchanged: &str) -> Response {
-        match self
-            .upstream
+    async fn send(
+        &self,
+        ctx: &Ctx<'_>,
+        parts: &Parts,
+        body: Bytes,
+        exchanged: &str,
+    ) -> Result<Response, UpstreamError> {
+        self.upstream
             .forward(
                 ctx.org,
                 Method::POST,
@@ -296,10 +341,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
                 ctx.request_id,
             )
             .await
-        {
-            Ok(response) => stream_back(response),
-            Err(_) => upstream_unavailable(),
-        }
+            .map(stream_back)
     }
 
     async fn facts(&self, ctx: &Ctx<'_>, needs: &Needs<'_>) -> Result<(Facts, LocalTime), Reason> {
@@ -307,7 +349,10 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             .pip
             .gather(ctx.org, needs)
             .await
-            .map_err(|_| Reason::PipUnavailable)?;
+            .map_err(|error| match error {
+                Unavailable::Failed => Reason::PipUnavailable,
+                Unavailable::Unknown => Reason::UnknownTarget,
+            })?;
         let time = local_time(self.clock.now(), &facts.timezone).map_err(|error| {
             tracing::warn!(%error, request_id = ctx.request_id, "the organisation's time zone is unusable");
             Reason::PipUnavailable
@@ -325,14 +370,14 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             Err(reason) => {
                 return self.refuse(
                     ctx,
-                    message,
+                    &message.id,
                     Entry::denied(&message.method, None, reason),
                     StatusCode::OK,
                 );
             }
         };
         let Ok(exchanged) = self.exchange(ctx).await else {
-            return upstream_unavailable();
+            return self.bad_gateway(ctx, message, None, Reason::ExchangeFailed);
         };
         let Ok(upstream) = self
             .upstream
@@ -346,21 +391,16 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             )
             .await
         else {
-            return upstream_unavailable();
+            return self.bad_gateway(ctx, message, None, Reason::UpstreamUnavailable);
         };
-        let (status, mut headers, mut answer) = match listing(upstream).await {
-            Listing::Relay(response) => return response,
-            Listing::Json {
-                status,
-                headers,
-                answer,
-            } => (status, headers, answer),
+        let Some((status, mut headers, mut answer)) = listing(upstream).await else {
+            return self.bad_gateway(ctx, message, None, Reason::UpstreamUnavailable);
         };
         match self.screen(ctx, message, &facts, &time, &mut answer).await {
             Ok(()) => rebuilt(status, &mut headers, &answer),
             Err(reason) => self.refuse(
                 ctx,
-                message,
+                &message.id,
                 Entry::denied(&message.method, None, reason),
                 StatusCode::OK,
             ),
@@ -376,6 +416,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
         answer: &mut Value,
     ) -> Result<(), Reason> {
         let empty = Map::new();
+        let complete = !message.paged && next_cursor(answer).is_none();
         let Some(tools) = answer
             .get_mut("result")
             .and_then(|result| result.get_mut("tools"))
@@ -397,7 +438,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             })
             .collect();
         if let Some(found) = natures_of(answer) {
-            self.upstream.remember(found);
+            self.upstream.remember(ctx.org, found, complete);
         }
         let subject = vocab::subject(ctx.principal, facts.oncall.as_ref());
         let context = vocab::context(ctx.principal, &empty, &empty, time);
@@ -426,54 +467,59 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
         Ok(())
     }
 
-    async fn nature(&self, ctx: &Ctx<'_>, tool: &str) -> Result<Option<Nature>, UpstreamError> {
-        if let Some(nature) = self.upstream.nature_of(tool) {
+    async fn nature(&self, ctx: &Ctx<'_>, tool: &str) -> Result<Option<Nature>, Reason> {
+        if let Some(nature) = self.upstream.nature_of(ctx.org, tool) {
             return Ok(Some(nature));
         }
-        if self.upstream.is_warm() {
+        if self.upstream.is_warm(ctx.org) {
             return Ok(None);
         }
-        let exchanged = self.exchange(ctx).await?;
-        let found = self
-            .upstream
+        let exchanged = self
+            .exchange(ctx)
+            .await
+            .map_err(|_| Reason::ExchangeFailed)?;
+        self.upstream
             .discover(ctx.org, &exchanged, ctx.request_id)
-            .await?;
-        let nature = found.get(tool).copied();
-        self.upstream.remember(found);
-        Ok(nature)
+            .await
+            .map_err(|_| Reason::UpstreamUnavailable)?;
+        Ok(self.upstream.nature_of(ctx.org, tool))
     }
 
     async fn call(
         &self,
         ctx: &Ctx<'_>,
         parts: &Parts,
-        body: Bytes,
         message: &Message,
         call: &ToolCall,
     ) -> Response {
-        let arguments = vocab::primitives(&call.arguments);
         let name = call.name.as_str();
         let method = message.method.as_str();
-        let refuse = |reason: Reason, target: &Map<String, Value>| {
-            self.refuse(
-                ctx,
-                message,
-                Entry {
-                    target,
-                    arguments: &arguments,
-                    ..Entry::denied(method, Some(name), reason)
-                },
-                StatusCode::OK,
-            )
-        };
+        let refuse =
+            |reason: Reason, target: &Map<String, Value>, arguments: &Map<String, Value>| {
+                let status = match reason {
+                    Reason::ExchangeFailed | Reason::UpstreamUnavailable => StatusCode::BAD_GATEWAY,
+                    _ => StatusCode::OK,
+                };
+                self.refuse(
+                    ctx,
+                    &message.id,
+                    Entry {
+                        target,
+                        arguments,
+                        ..Entry::denied(method, Some(name), reason)
+                    },
+                    status,
+                )
+            };
         let plan = match vocab::plan(name, &call.arguments) {
             Ok(plan) => plan,
-            Err(reason) => return refuse(reason, &Map::new()),
+            Err(reason) => return refuse(reason, &Map::new(), &vocab::primitives(&call.arguments)),
         };
+        let arguments = vocab::primitives(&plan.arguments);
         let nature = match self.nature(ctx, name).await {
             Ok(Some(nature)) => nature,
-            Ok(None) => return refuse(Reason::UnknownTool, &plan.target),
-            Err(_) => return upstream_unavailable(),
+            Ok(None) => return refuse(Reason::UnknownTool, &plan.target, &arguments),
+            Err(reason) => return refuse(reason, &plan.target, &arguments),
         };
         let needs = Needs {
             oncall_email: oncall_email(ctx.principal),
@@ -483,7 +529,7 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
         };
         let (facts, time) = match self.facts(ctx, &needs).await {
             Ok(found) => found,
-            Err(reason) => return refuse(reason, &plan.target),
+            Err(reason) => return refuse(reason, &plan.target, &arguments),
         };
         let mut target = plan.target.clone();
         if let Some(incident) = &facts.incident {
@@ -501,24 +547,36 @@ impl<C: Clock, S: DecisionSink> Gateway<C, S> {
             .await
         {
             Ok(verdict) => verdict,
-            Err(error) => return refuse(error.reason(), &target),
+            Err(error) => return refuse(error.reason(), &target, &arguments),
         };
+        let decided = Entry::decided(method, Some(name), &target, &arguments, &verdict);
         if !verdict.allowed {
-            return self.refuse(
-                ctx,
-                message,
-                Entry::decided(method, Some(name), &target, &arguments, &verdict),
-                StatusCode::OK,
-            );
+            return self.refuse(ctx, &message.id, decided, StatusCode::OK);
         }
-        self.record(
-            ctx,
-            &Entry::decided(method, Some(name), &target, &arguments, &verdict),
-        );
-        let Ok(exchanged) = self.exchange(ctx).await else {
-            return upstream_unavailable();
+        let failed = |reason: Reason| {
+            self.refuse(
+                ctx,
+                &message.id,
+                Entry {
+                    reason: Some(reason),
+                    ..decided
+                },
+                StatusCode::BAD_GATEWAY,
+            )
         };
-        self.send(ctx, parts, body, &exchanged).await
+        let Ok(exchanged) = self.exchange(ctx).await else {
+            return failed(Reason::ExchangeFailed);
+        };
+        let Some(body) = rpc::rewritten(message, &plan.arguments) else {
+            return failed(Reason::UpstreamUnavailable);
+        };
+        match self.send(ctx, parts, Bytes::from(body), &exchanged).await {
+            Ok(response) => {
+                self.record(ctx, &decided);
+                response
+            }
+            Err(_) => failed(Reason::UpstreamUnavailable),
+        }
     }
 }
 
@@ -528,6 +586,7 @@ struct Ctx<'a> {
     principal: &'a Principal,
     token: &'a str,
     request_id: &'a str,
+    client_request_id: Option<&'a str>,
 }
 
 #[derive(Clone, Copy)]
@@ -593,13 +652,13 @@ pub fn bearer(headers: &HeaderMap) -> Option<&str> {
     .then_some(token)
 }
 
-fn request_id(headers: &HeaderMap) -> String {
+fn client_request_id(headers: &HeaderMap) -> Option<String> {
     headers
         .get(REQUEST_ID)
         .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty() && value.len() <= 128 && value.is_ascii())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
         .filter(|value| value.bytes().all(|byte| byte.is_ascii_graphic()))
-        .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned)
+        .map(str::to_owned)
 }
 
 fn plain(status: StatusCode) -> Response {
@@ -614,18 +673,9 @@ fn upstream_unavailable() -> Response {
         .into_response()
 }
 
-enum Listing {
-    Relay(Response),
-    Json {
-        status: StatusCode,
-        headers: HeaderMap,
-        answer: Value,
-    },
-}
-
-async fn listing(upstream: reqwest::Response) -> Listing {
+async fn listing(upstream: reqwest::Response) -> Option<(StatusCode, HeaderMap, Value)> {
     if !upstream.status().is_success() {
-        return Listing::Relay(stream_back(upstream));
+        return None;
     }
     let is_json = upstream
         .headers()
@@ -633,31 +683,17 @@ async fn listing(upstream: reqwest::Response) -> Listing {
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().starts_with("application/json"));
     if !is_json {
-        return Listing::Relay(upstream_unavailable());
+        return None;
     }
     let status = upstream.status();
-    let mut headers = upstream.headers().clone();
-    let Some(bytes) = read_bounded(upstream).await else {
-        return Listing::Relay(upstream_unavailable());
-    };
-    let Ok(answer) = serde_json::from_slice::<Value>(&bytes) else {
-        return Listing::Relay(upstream_unavailable());
-    };
-    if answer
+    let headers = upstream.headers().clone();
+    let bytes = read_bounded(upstream).await?;
+    let answer = serde_json::from_slice::<Value>(&bytes).ok()?;
+    answer
         .get("result")
         .and_then(|result| result.get("tools"))
         .is_some_and(Value::is_array)
-    {
-        return Listing::Json {
-            status,
-            headers,
-            answer,
-        };
-    }
-    if answer.get("result").is_none() && answer.get("error").is_some_and(Value::is_object) {
-        return Listing::Relay(rebuilt(status, &mut headers, &answer));
-    }
-    Listing::Relay(upstream_unavailable())
+        .then_some((status, headers, answer))
 }
 
 async fn read_bounded(mut response: reqwest::Response) -> Option<Vec<u8>> {

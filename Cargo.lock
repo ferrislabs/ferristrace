@@ -1175,6 +1175,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
+ "ferristrace-mcp-args",
  "figment",
  "jiff",
  "reqwest 0.12.28",
@@ -1189,6 +1190,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferristrace-mcp-args"
+version = "0.2.0"
+dependencies = [
+ "uuid",
+]
+
+[[package]]
 name = "ferristrace-mcp-gateway"
 version = "0.2.0"
 dependencies = [
@@ -1197,6 +1205,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "ferristrace-mcp",
+ "ferristrace-mcp-args",
  "figment",
  "jiff",
  "jsonwebtoken",

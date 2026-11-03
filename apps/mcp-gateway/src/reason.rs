@@ -9,6 +9,10 @@ pub enum Reason {
     InvalidTarget,
     MethodNotAllowed,
     HeaderMismatch,
+    UnknownTarget,
+    InvalidRequest,
+    UpstreamUnavailable,
+    ExchangeFailed,
 }
 
 impl Reason {
@@ -23,6 +27,10 @@ impl Reason {
             Self::InvalidTarget => "invalid_target",
             Self::MethodNotAllowed => "method_not_allowed",
             Self::HeaderMismatch => "header_mismatch",
+            Self::UnknownTarget => "unknown_target",
+            Self::InvalidRequest => "invalid_request",
+            Self::UpstreamUnavailable => "upstream_unavailable",
+            Self::ExchangeFailed => "exchange_failed",
         }
     }
 
@@ -39,6 +47,12 @@ impl Reason {
             Self::HeaderMismatch => {
                 "the Mcp-Method or Mcp-Name header does not match the request body"
             }
+            Self::UnknownTarget => {
+                "FerrisTrace does not know the incident or service the call names"
+            }
+            Self::InvalidRequest => "the request is not a valid MCP request",
+            Self::UpstreamUnavailable => "the MCP server did not answer usably",
+            Self::ExchangeFailed => "the token for FerrisTrace could not be obtained",
         }
     }
 }
@@ -59,6 +73,10 @@ mod tests {
             Reason::InvalidTarget,
             Reason::MethodNotAllowed,
             Reason::HeaderMismatch,
+            Reason::UnknownTarget,
+            Reason::InvalidRequest,
+            Reason::UpstreamUnavailable,
+            Reason::ExchangeFailed,
         ];
         let mut codes: Vec<_> = all.iter().map(|reason| reason.code()).collect();
         codes.sort_unstable();

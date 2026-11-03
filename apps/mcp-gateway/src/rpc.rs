@@ -31,6 +31,8 @@ pub struct Message {
     pub method: String,
     pub kind: Kind,
     pub call: Option<ToolCall>,
+    pub paged: bool,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,12 +114,35 @@ pub fn parse(body: &[u8]) -> Result<Message, Rejection> {
     } else {
         None
     };
+    let paged = kind == Kind::ListTools
+        && object
+            .get("params")
+            .and_then(|params| params.get("cursor"))
+            .is_some_and(|cursor| !cursor.is_null());
     Ok(Message {
         id,
         method: method.to_owned(),
         kind,
         call,
+        paged,
+        value: Value::Object(object),
     })
+}
+
+pub fn rewritten(message: &Message, arguments: &Map<String, Value>) -> Option<Vec<u8>> {
+    let mut value = message.value.clone();
+    let params = value.as_object_mut()?.get_mut("params")?.as_object_mut()?;
+    params.insert("arguments".to_owned(), Value::Object(arguments.clone()));
+    serde_json::to_vec(&value).ok()
+}
+
+pub fn listing_body(cursor: Option<&str>) -> Option<Vec<u8>> {
+    let mut request =
+        json!({"jsonrpc": "2.0", "id": "ferristrace-gateway-discovery", "method": "tools/list"});
+    if let Some(cursor) = cursor {
+        request["params"] = json!({ "cursor": cursor });
+    }
+    with_meta(request.to_string().as_bytes()).or_else(|| Some(request.to_string().into_bytes()))
 }
 
 pub fn headers_agree(headers: &HeaderMap, message: &Message) -> bool {
@@ -340,6 +365,34 @@ mod tests {
             &headers(Some("tools/list"), Some("x")),
             &list
         ));
+    }
+
+    #[test]
+    fn a_rewritten_body_carries_the_given_arguments_and_keeps_the_rest() {
+        let message = parse(
+            json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"t","arguments":{"a":" x "},"_meta":{"k":1}}})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let mut arguments = Map::new();
+        arguments.insert("a".to_owned(), json!("x"));
+        let body: Value =
+            serde_json::from_slice(&rewritten(&message, &arguments).unwrap()).unwrap();
+        assert_eq!(body["params"]["arguments"], json!({"a": "x"}));
+        assert_eq!(body["params"]["name"], "t");
+        assert_eq!(body["params"]["_meta"], json!({"k": 1}));
+        assert_eq!(body["id"], 7);
+    }
+
+    #[test]
+    fn a_page_cursor_is_noticed() {
+        let first = parse(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).unwrap();
+        assert!(!first.paged);
+        let next =
+            parse(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":"c2"}}"#)
+                .unwrap();
+        assert!(next.paged);
     }
 
     #[test]

@@ -100,6 +100,7 @@ when a required one is missing or not a URL. Secrets are never logged.
 | `FERRISTRACE_MCP_GATEWAY_AGENT_AUDIENCE`          | required                 | FerrisTrace's agent audience (`FERRISTRACE_AGENTS__AUDIENCE`): the exchange and PIP tokens are for it.    |
 | `FERRISTRACE_MCP_GATEWAY_SCOPES_SUPPORTED`        | the four agent scopes    | Scopes listed in the resource metadata and the challenge.                                                 |
 | `FERRISTRACE_MCP_GATEWAY_UPSTREAM_TIMEOUT_MS`     | `30000`                  | Total time allowed to `ferristrace-mcp`.                                                                  |
+| `FERRISTRACE_MCP_GATEWAY_BODY_TIMEOUT_MS`         | `10000`                  | Time allowed to read a request body.                                                                      |
 | `FERRISTRACE_MCP_GATEWAY_PDP__URL`                | required                 | FerrisKey base URL; AuthZEN is `<url>/realms/<realm>/authzen/access/v1/evaluation[s]`.                    |
 | `FERRISTRACE_MCP_GATEWAY_PDP__REALM`              | required                 | Realm holding the Cedar policies.                                                                         |
 | `FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_ID`          | required                 | PEP service account (holds `evaluate_authorization`).                                                     |
@@ -137,7 +138,11 @@ A refused call is a JSON-RPC error with code `-32001`, HTTP 200, and
 | `pdp_malformed`        | The PDP's answer could not be read.                                                      |
 | `pip_unavailable`      | A fact the call needs (time zone, on-call state, incident, service) could not be read.   |
 | `unknown_tool`         | `ferristrace-mcp` has no such tool.                                                      |
-| `invalid_target`       | A name in the call cannot be looked up safely.                                           |
+| `invalid_target`       | A name in the call cannot be looked up safely, an id is missing or not a UUID, or a choice is not one the tool accepts. |
+| `unknown_target`       | The incident or service the call names is not known to FerrisTrace.                      |
+| `invalid_request`      | Not a valid MCP request (parse error, bad params, body too large or too slow).           |
+| `upstream_unavailable` | `ferristrace-mcp` did not answer usably (HTTP 502).                                      |
+| `exchange_failed`      | The token for FerrisTrace could not be obtained (HTTP 502).                              |
 | `method_not_allowed`   | MCP method other than initialize, server/discover, ping, notifications, tools/list/call. |
 | `header_mismatch`      | `Mcp-Method` or `Mcp-Name` disagrees with the body (HTTP 400).                           |
 
@@ -148,7 +153,8 @@ Every decision is one `tracing` event with `kind="mcp_decision"` (target
 
 | Field         | Content                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `request_id`  | `X-Request-Id` of the request, or a generated one; also sent back and upstream.  |
+| `request_id`  | Generated for every request; sent back as `X-Request-Id` and to `ferristrace-mcp`. |
+| `client_request_id` | The caller's own `X-Request-Id`, when it sent a printable one.            |
 | `method`      | `tools/call` or `tools/list`, or the refused method.                             |
 | `org`         | Organisation id.                                                                 |
 | `tool`        | Tool name (empty for a refusal that is not about one tool).                      |
@@ -158,7 +164,7 @@ Every decision is one `tracing` event with `kind="mcp_decision"` (target
 | `delegated`   | Whether the call is made for a person.                                           |
 | `act`         | The token's `act` claim as JSON, empty when absent.                              |
 | `target`      | The target the policy saw, as JSON.                                              |
-| `arguments`   | The primitive arguments the policy saw, as JSON.                                 |
+| `arguments`   | The normalised primitive arguments the policy saw, as JSON; strings cut at 256 characters, a `comment_incident` `text` replaced by `text_length`; the whole record is capped at 4 KiB. |
 | `decision`    | `permit` or `deny`.                                                              |
 | `policies`    | The policies FerrisKey reported as having decided, as a JSON list.               |
 | `reason`      | One of the reasons above when denied, empty otherwise.                           |
@@ -169,3 +175,8 @@ FerrisTrace as OTLP logs (`service.name` `ferristrace-mcp-gateway`, severity
 The export is batched and never blocks a decision: when the queue is full or
 FerrisTrace does not accept a batch, the records are dropped and counted
 (`dropped_total` in the gateway's own log).
+
+The policy is given the arguments as the tool will run them: the gateway trims
+text, lower-cases choices (log severity, alert state, incident status,
+aggregation), writes ids in canonical form, and forwards a body rebuilt from
+those same arguments. Both programs share that logic in `crates/mcp-args`.

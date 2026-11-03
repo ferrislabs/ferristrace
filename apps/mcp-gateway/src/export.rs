@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -17,6 +17,7 @@ use crate::secret::Secret;
 
 pub const SERVICE_NAME: &str = "ferristrace-mcp-gateway";
 const QUEUE_CAPACITY: usize = 1024;
+const QUEUE_BYTES: usize = 4 * 1024 * 1024;
 const BATCH_SIZE: usize = 100;
 const FLUSH_EVERY: Duration = Duration::from_secs(2);
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,24 +26,41 @@ const SEVERITY_WARN: i32 = 13;
 
 #[derive(Debug)]
 pub struct Queue {
-    sender: mpsc::Sender<DecisionRecord>,
+    sender: mpsc::Sender<Queued>,
     dropped: Arc<AtomicU64>,
+    pending: Arc<AtomicUsize>,
+    max_bytes: usize,
+}
+
+#[derive(Debug)]
+pub struct Queued {
+    record: DecisionRecord,
+    size: usize,
 }
 
 impl Queue {
-    pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<DecisionRecord>) {
+    pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<Queued>) {
+        Self::bounded_by_bytes(capacity, QUEUE_BYTES)
+    }
+
+    pub fn bounded_by_bytes(capacity: usize, max_bytes: usize) -> (Self, mpsc::Receiver<Queued>) {
         let (sender, receiver) = mpsc::channel(capacity);
         (
             Self {
                 sender,
                 dropped: Arc::new(AtomicU64::new(0)),
+                pending: Arc::new(AtomicUsize::new(0)),
+                max_bytes,
             },
             receiver,
         )
     }
 
     pub fn offer(&self, record: DecisionRecord) {
-        if self.sender.try_send(record).is_err() {
+        let size = record.size();
+        let held = self.pending.fetch_add(size, Ordering::Relaxed);
+        if held + size > self.max_bytes || self.sender.try_send(Queued { record, size }).is_err() {
+            self.pending.fetch_sub(size, Ordering::Relaxed);
             let total = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             tracing::warn!(
                 dropped_total = total,
@@ -51,12 +69,16 @@ impl Queue {
         }
     }
 
+    pub fn pending_bytes(&self) -> usize {
+        self.pending.load(Ordering::Relaxed)
+    }
+
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    fn counter(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.dropped)
+    fn counters(&self) -> (Arc<AtomicU64>, Arc<AtomicUsize>) {
+        (Arc::clone(&self.dropped), Arc::clone(&self.pending))
     }
 }
 
@@ -72,13 +94,13 @@ pub fn spawn_with(
     flush_every: Duration,
 ) -> Queue {
     let (queue, receiver) = Queue::bounded(QUEUE_CAPACITY);
-    let dropped = queue.counter();
+    let counters = queue.counters();
     tokio::spawn(run(
         receiver,
         http,
         endpoint,
         key,
-        dropped,
+        counters,
         batch_size,
         flush_every,
     ));
@@ -86,14 +108,16 @@ pub fn spawn_with(
 }
 
 async fn run(
-    mut receiver: mpsc::Receiver<DecisionRecord>,
+    mut receiver: mpsc::Receiver<Queued>,
     http: reqwest::Client,
     endpoint: String,
     key: Secret,
-    dropped: Arc<AtomicU64>,
+    counters: (Arc<AtomicU64>, Arc<AtomicUsize>),
+
     batch_size: usize,
     flush_every: Duration,
 ) {
+    let (dropped, pending) = counters;
     while let Some(first) = receiver.recv().await {
         let mut batch = vec![first];
         let deadline = Instant::now() + flush_every;
@@ -103,7 +127,11 @@ async fn run(
                 Ok(None) | Err(_) => break,
             }
         }
-        if ship(&http, &endpoint, &key, &batch).await.is_err() {
+        let freed: usize = batch.iter().map(|queued| queued.size).sum();
+        let batch: Vec<DecisionRecord> = batch.into_iter().map(|queued| queued.record).collect();
+        let shipped = ship(&http, &endpoint, &key, &batch).await;
+        pending.fetch_sub(freed, Ordering::Relaxed);
+        if shipped.is_err() {
             let lost = u64::try_from(batch.len()).unwrap_or(u64::MAX);
             let total = dropped.fetch_add(lost, Ordering::Relaxed) + lost;
             tracing::warn!(
@@ -247,6 +275,7 @@ mod tests {
             kind: crate::decision::KIND,
             time: "2026-11-03T09:05:00Z".to_owned(),
             request_id: "r".to_owned(),
+            client_request_id: None,
             method: "tools/call".to_owned(),
             org: "o".to_owned(),
             tool: None,
@@ -276,6 +305,18 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         queue.offer(record());
         assert_eq!(queue.dropped(), 3);
+    }
+
+    #[test]
+    fn a_queue_over_its_byte_budget_drops_and_frees_what_is_taken() {
+        let size = record().size();
+        let (queue, mut receiver) = Queue::bounded_by_bytes(100, size * 2 + 1);
+        for _ in 0..5 {
+            queue.offer(record());
+        }
+        assert_eq!(queue.dropped(), 3);
+        assert_eq!(queue.pending_bytes(), size * 2);
+        assert!(receiver.try_recv().is_ok());
     }
 
     #[test]

@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::cache::TtlCache;
+use crate::cache::OrgCache;
 use crate::credentials::ClientCredentials;
 
 const MAX_ANSWER_BYTES: usize = 1 << 20;
@@ -42,8 +42,12 @@ struct ClockAnswer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a fact the policies need could not be read from FerrisTrace")]
-pub struct Unavailable;
+pub enum Unavailable {
+    #[error("a fact the policies need could not be read from FerrisTrace")]
+    Failed,
+    #[error("FerrisTrace does not know the incident or service the call names")]
+    Unknown,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Needs<'a> {
@@ -67,10 +71,10 @@ pub struct Pip {
     api: Url,
     credentials: ClientCredentials,
     budget: Duration,
-    zones: TtlCache<Uuid, String>,
-    oncall: TtlCache<(Uuid, String), OnCall>,
-    incidents: TtlCache<(Uuid, Uuid), Option<Incident>>,
-    placements: TtlCache<(Uuid, String), Option<Placement>>,
+    zones: OrgCache<String>,
+    oncall: OrgCache<OnCall>,
+    incidents: OrgCache<Option<Incident>>,
+    placements: OrgCache<Option<Placement>>,
 }
 
 impl Pip {
@@ -85,10 +89,10 @@ impl Pip {
             api,
             credentials,
             budget,
-            zones: TtlCache::new(ZONE_TTL),
-            oncall: TtlCache::new(ONCALL_TTL),
-            incidents: TtlCache::new(TARGET_TTL),
-            placements: TtlCache::new(TARGET_TTL),
+            zones: OrgCache::new(ZONE_TTL),
+            oncall: OrgCache::new(ONCALL_TTL),
+            incidents: OrgCache::new(TARGET_TTL),
+            placements: OrgCache::new(TARGET_TTL),
         }
     }
 
@@ -97,7 +101,7 @@ impl Pip {
             .await
             .map_err(|_| {
                 tracing::warn!(%org, "the lookups did not finish within the budget");
-                Unavailable
+                Unavailable::Failed
             })?
     }
 
@@ -132,12 +136,13 @@ impl Pip {
 
     async fn timezone(&self, org: Uuid) -> Result<String, Unavailable> {
         let now = Instant::now();
-        if let Some(zone) = self.zones.get(&org, now) {
+        if let Some(zone) = self.zones.get(org, "", now) {
             return Ok(zone);
         }
         let url = self.url(org, &["clock"]);
-        let answer: ClockAnswer = self.fetch(url).await?.ok_or(Unavailable)?;
-        self.zones.put(org, answer.timezone.clone(), now);
+        let answer: ClockAnswer = self.fetch(url).await?.ok_or(Unavailable::Failed)?;
+        self.zones
+            .put(org, String::new(), answer.timezone.clone(), now);
         Ok(answer.timezone)
     }
 
@@ -146,14 +151,14 @@ impl Pip {
             return Ok(None);
         };
         let now = Instant::now();
-        let key = (org, email.to_ascii_lowercase());
-        if let Some(held) = self.oncall.get(&key, now) {
+        let key = email.to_ascii_lowercase();
+        if let Some(held) = self.oncall.get(org, &key, now) {
             return Ok(Some(held));
         }
         let mut url = self.url(org, &["oncall", "now"]);
         url.query_pairs_mut().append_pair("email", email);
-        let answer: OnCall = self.fetch(url).await?.ok_or(Unavailable)?;
-        self.oncall.put(key, answer.clone(), now);
+        let answer: OnCall = self.fetch(url).await?.ok_or(Unavailable::Failed)?;
+        self.oncall.put(org, key, answer.clone(), now);
         Ok(Some(answer))
     }
 
@@ -167,13 +172,13 @@ impl Pip {
             return Ok(None);
         };
         let now = Instant::now();
-        if !fresh && let Some(held) = self.incidents.get(&(org, id), now) {
-            return Ok(held);
+        if !fresh && let Some(held) = self.incidents.get(org, &id.to_string(), now) {
+            return held.map(Some).ok_or(Unavailable::Unknown);
         }
         let url = self.url(org, &["incidents", &id.to_string()]);
         let answer: Option<Incident> = self.fetch(url).await?;
-        self.incidents.put((org, id), answer.clone(), now);
-        Ok(answer)
+        self.incidents.put(org, id.to_string(), answer.clone(), now);
+        answer.map(Some).ok_or(Unavailable::Unknown)
     }
 
     async fn placement(
@@ -183,14 +188,14 @@ impl Pip {
         fresh: bool,
     ) -> Result<Option<Placement>, Unavailable> {
         let now = Instant::now();
-        let key = (org, service.to_owned());
-        if !fresh && let Some(held) = self.placements.get(&key, now) {
-            return Ok(held);
+        if !fresh && let Some(held) = self.placements.get(org, service, now) {
+            return held.map(Some).ok_or(Unavailable::Unknown);
         }
         let url = self.url(org, &["services", service, "placement"]);
         let answer: Option<Placement> = self.fetch(url).await?;
-        self.placements.put(key, answer.clone(), now);
-        Ok(answer)
+        self.placements
+            .put(org, service.to_owned(), answer.clone(), now);
+        answer.map(Some).ok_or(Unavailable::Unknown)
     }
 
     fn url(&self, org: Uuid, tail: &[&str]) -> Url {
@@ -208,7 +213,7 @@ impl Pip {
         loop {
             let token = self.credentials.token().await.map_err(|error| {
                 tracing::warn!(%error, "the gateway could not get its own token");
-                Unavailable
+                Unavailable::Failed
             })?;
             let mut response = self
                 .http
@@ -218,7 +223,7 @@ impl Pip {
                 .await
                 .map_err(|error| {
                     tracing::warn!(%error, path = url.path(), "a lookup failed");
-                    Unavailable
+                    Unavailable::Failed
                 })?;
             match response.status() {
                 StatusCode::UNAUTHORIZED if !renewed => {
@@ -231,23 +236,25 @@ impl Pip {
                         .content_length()
                         .is_some_and(|length| length > MAX_ANSWER_BYTES as u64)
                     {
-                        return Err(Unavailable);
+                        return Err(Unavailable::Failed);
                     }
                     let mut body = Vec::new();
-                    while let Some(chunk) = response.chunk().await.map_err(|_| Unavailable)? {
+                    while let Some(chunk) =
+                        response.chunk().await.map_err(|_| Unavailable::Failed)?
+                    {
                         if body.len() + chunk.len() > MAX_ANSWER_BYTES {
-                            return Err(Unavailable);
+                            return Err(Unavailable::Failed);
                         }
                         body.extend_from_slice(&chunk);
                     }
                     return serde_json::from_slice(&body).map(Some).map_err(|error| {
                         tracing::warn!(%error, path = url.path(), "a lookup answered unreadably");
-                        Unavailable
+                        Unavailable::Failed
                     });
                 }
                 status => {
                     tracing::warn!(%status, path = url.path(), "a lookup was refused");
-                    return Err(Unavailable);
+                    return Err(Unavailable::Failed);
                 }
             }
         }

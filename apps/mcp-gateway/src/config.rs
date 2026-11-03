@@ -21,6 +21,7 @@ pub struct Config {
     pub agent_audience: String,
     pub scopes_supported: Vec<String>,
     pub upstream_timeout_ms: u64,
+    pub body_timeout_ms: u64,
     pub pdp: PdpConfig,
     pub exchange: ExchangeConfig,
     pub ingest_key: Option<Secret>,
@@ -63,6 +64,7 @@ impl Default for Config {
             .map(str::to_owned)
             .to_vec(),
             upstream_timeout_ms: 30_000,
+            body_timeout_ms: 10_000,
             pdp: PdpConfig {
                 url: String::new(),
                 realm: String::new(),
@@ -161,6 +163,9 @@ impl Config {
         if self.upstream_timeout_ms == 0 {
             invalid.push("upstream_timeout_ms");
         }
+        if self.body_timeout_ms == 0 {
+            invalid.push("body_timeout_ms");
+        }
         match (&self.ingest_key, &self.ingest_endpoint) {
             (Some(key), Some(endpoint)) if !key.is_empty() => {
                 if !usable(endpoint) {
@@ -224,6 +229,10 @@ impl Config {
 
     pub fn exchange_timeout(&self) -> Duration {
         Duration::from_millis(self.exchange.timeout_ms)
+    }
+
+    pub fn body_timeout(&self) -> Duration {
+        Duration::from_millis(self.body_timeout_ms)
     }
 
     pub fn upstream_timeout(&self) -> Duration {

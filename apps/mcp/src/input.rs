@@ -3,16 +3,12 @@ use uuid::Uuid;
 use crate::fault::Fault;
 
 pub const MAX_LIMIT: u32 = 200;
-pub const LOG_SEVERITIES: [&str; 6] = ["trace", "debug", "info", "warn", "error", "fatal"];
-pub const ALERT_STATES: [&str; 4] = ["ok", "pending", "firing", "no_data"];
-pub const INCIDENT_STATUSES: [&str; 3] = ["open", "resolved", "all"];
-pub const AGGREGATIONS: [&str; 8] = ["sum", "avg", "min", "max", "rate", "p50", "p95", "p99"];
+pub use ferristrace_mcp_args::{
+    AGGREGATIONS, ALERT_STATES, DEFAULT_INCIDENT_STATUS, INCIDENT_STATUSES, LOG_SEVERITIES, given,
+};
+use ferristrace_mcp_args::{Choice, choose};
 const MAX_COMMENT_CHARS: usize = 10_000;
 const TRACE_ID_HEX: usize = 32;
-
-pub fn given(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|typed| !typed.is_empty())
-}
 
 pub fn required<'a>(label: &str, value: &'a str) -> Result<&'a str, Fault> {
     given(Some(value)).ok_or_else(|| Fault::argument(format!("{label} is required")))
@@ -23,8 +19,9 @@ pub fn limit(asked: Option<u32>, default: u32) -> u32 {
 }
 
 pub fn uuid(label: &str, value: &str) -> Result<Uuid, Fault> {
-    Uuid::parse_str(required(label, value)?)
-        .map_err(|_| Fault::argument(format!("{label} must be a UUID")))
+    required(label, value)?;
+    ferristrace_mcp_args::uuid(value)
+        .ok_or_else(|| Fault::argument(format!("{label} must be a UUID")))
 }
 
 pub fn trace_id(value: &str) -> Result<String, Fault> {
@@ -43,20 +40,15 @@ pub fn choice(
     value: Option<&str>,
     allowed: &[&'static str],
 ) -> Result<Option<&'static str>, Fault> {
-    let Some(typed) = given(value) else {
-        return Ok(None);
-    };
-    allowed
-        .iter()
-        .copied()
-        .find(|name| name.eq_ignore_ascii_case(typed))
-        .map(Some)
-        .ok_or_else(|| {
-            Fault::argument(format!(
-                "{label} must be one of {}, not {typed:?}",
-                allowed.join(", ")
-            ))
-        })
+    match choose(value, allowed) {
+        Choice::Absent => Ok(None),
+        Choice::Is(name) => Ok(Some(name)),
+        Choice::Invalid => Err(Fault::argument(format!(
+            "{label} must be one of {}, not {:?}",
+            allowed.join(", "),
+            given(value).unwrap_or_default()
+        ))),
+    }
 }
 
 pub fn comment(value: &str) -> Result<&str, Fault> {

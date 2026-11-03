@@ -63,6 +63,7 @@ fn record(decision: &'static str, reason: Option<&'static str>, tool: &str) -> D
         kind: KIND,
         time: "2026-11-03T09:05:00Z".to_owned(),
         request_id: "req-1".to_owned(),
+        client_request_id: None,
         method: "tools/call".to_owned(),
         org: "11111111-1111-4111-8111-111111111111".to_owned(),
         tool: Some(tool.to_owned()),

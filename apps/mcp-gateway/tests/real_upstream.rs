@@ -28,6 +28,12 @@ async fn stack() -> Stack {
     let mcp = serve(mcp_router(ApiClient::new(&api_url).unwrap())).await;
     let config = base_config(&realm, &mcp, &api_url);
     let (upstream, _) = start_upstream().await;
+    api.reply(
+        "GET",
+        &format!("/api/orgs/{ORG}/incidents/{INCIDENT}"),
+        200,
+        &json!({"severity": "sev3", "status": "open", "services": []}),
+    );
     realm.set_pdp(Pdp::Rule(read_only_tools));
     let world = World::assemble(
         realm,
