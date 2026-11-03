@@ -1,21 +1,54 @@
-import { useMock } from './seam'
+import { useQuery } from '@tanstack/react-query'
+import { get, json } from '@/auth/client'
+import { useOrganisations } from '@/auth/session'
+import { useScope } from '@/lib/scope'
 
 export type Arrival = 'unknown' | 'waiting' | 'arrived'
-export type FirstSignals = { traces: Arrival; logs: Arrival; metrics: Arrival }
+export type Signal = 'traces' | 'logs' | 'metrics'
+export type FirstSignals = Record<Signal, Arrival> & { trace: string | null }
 
-export function useFirstSignals(): FirstSignals {
-  return useMock(['onboarding', 'first-signals'], () => ({ traces: 'unknown', logs: 'unknown', metrics: 'unknown' }) as FirstSignals)
+const LOOKBACK_MS = 24 * 60 * 60 * 1000
+const POLL_MS = 5000
+
+function useArrived(kind: Signal, path: (org: string, query: URLSearchParams) => string, found: (body: unknown) => string | null | undefined) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const { data, error } = useQuery({
+    queryKey: ['first-signal', kind, active?.org, project],
+    enabled: Boolean(active),
+    refetchInterval: (query) => (query.state.data === undefined || query.state.data === null ? POLL_MS : false),
+    queryFn: async () => {
+      const to = Date.now()
+      const query = new URLSearchParams({ from: String(to - LOOKBACK_MS), to: String(to), limit: '1' })
+      if (project) query.set('project', project)
+      return (found(await json<unknown>(await get(path(active?.org ?? '', query))))) ?? null
+    },
+  })
+  const arrival: Arrival = error ? 'unknown' : data ? 'arrived' : 'waiting'
+  return { arrival, first: data ?? null }
 }
 
-export const otlpEndpoint = () => `${window.location.origin}/v1/traces`
+export function useFirstSignals(): FirstSignals {
+  const traces = useArrived('traces', (org, q) => `/api/orgs/${org}/traces?${q.toString()}`, (b) => (b as { traces: { trace_id: string }[] }).traces[0]?.trace_id)
+  const logs = useArrived('logs', (org, q) => `/api/orgs/${org}/logs?${q.toString()}`, (b) => ((b as { records: unknown[] }).records.length ? 'logs' : null))
+  const metrics = useArrived('metrics', (org, q) => {
+    const kept = new URLSearchParams()
+    const project = q.get('project')
+    if (project) kept.set('project', project)
+    return `/api/orgs/${org}/metrics?${kept.toString()}`
+  }, (b) => (b as { metrics: { name: string }[] }).metrics[0]?.name)
+  return { traces: traces.arrival, logs: logs.arrival, metrics: metrics.arrival, trace: traces.first }
+}
 
-export const ingestKeyCommand = 'docker compose exec server ferristrace issue-key --org <org-uuid>'
+export const otlpBase = () => window.location.origin
+
+export const otlpEndpoint = () => `${otlpBase()}/v1/traces`
 
 export const SNIPPETS: { language: string; code: string }[] = [
   {
     language: 'Environment',
     code: `OTEL_SERVICE_NAME=checkout-api
-OTEL_EXPORTER_OTLP_ENDPOINT=<endpoint>
+OTEL_EXPORTER_OTLP_ENDPOINT=<base>
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <key>"
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0`,

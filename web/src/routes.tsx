@@ -115,12 +115,12 @@ const shellRoute = createRoute({
 
 const inShell = (path: string, component: () => React.ReactNode, staticData: Marker = mock) => createRoute({ getParentRoute: () => shellRoute, path, component, staticData })
 
-const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: '/settings', component: SettingsLayout, staticData: mock })
+const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: '/settings', component: SettingsLayout, staticData: real })
 
 const settingsChildren = [
   createRoute({ getParentRoute: () => settingsRoute, path: '/', beforeLoad: () => { throw redirect({ to: '/settings/general' }) } }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'profile', component: Profile, staticData: real }),
-  createRoute({ getParentRoute: () => settingsRoute, path: 'security', component: Security, staticData: mock }),
+  createRoute({ getParentRoute: () => settingsRoute, path: 'security', component: Security, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'preferences', component: Preferences, staticData: mock }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'general', component: OrgGeneral, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'members', component: Members, staticData: real }),
@@ -147,8 +147,8 @@ const routeTree = rootRoute.addChildren([
     inShell('/onboarding', Onboarding, real),
     inShell('/services', Services, timed),
     inShell('/services/$name', ServiceDetail, timed),
-    inShell('/issues', Issues),
-    inShell('/issues/$id', IssueDetail),
+    inShell('/issues', Issues, real),
+    inShell('/issues/$id', IssueDetail, real),
     inShell('/releases', Releases, real),
     inShell('/releases/$service/$version', ReleaseDetail, real),
     inShell('/ai', Ai, real),
