@@ -41,7 +41,7 @@ real hostname that the browser and the server already both resolve, so
 nothing like this line is needed there.
 
 FerrisKey's own console, if you want to look at what `ferriskey-init`
-provisioned rather than trust this file, is at <http://localhost:5555>,
+provisioned rather than trust this file, is at <http://ferriskey:5555>,
 signed into as `admin` / `admin` unless `FERRISKEY_ADMIN_USERNAME` and
 `FERRISKEY_ADMIN_PASSWORD` were set before its first start.
 
@@ -52,7 +52,7 @@ anything and no key can authenticate a payload. Two steps fix that, in
 either order.
 
 Give the person who will own the deployment a user in FerrisKey. Open its
-console at <http://localhost:5555>, sign in as the admin, select the
+console at <http://ferriskey:5555>, sign in as the admin, select the
 `ferristrace` realm, and create a user with the address that person will
 use, marking that address as verified. FerrisTrace adopts an account by
 address only when the token says the address is verified, and refuses the
@@ -237,7 +237,7 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
 - **`FERRISKEY_ADMIN_USERNAME` and `FERRISKEY_ADMIN_PASSWORD`.** Read once,
   before FerrisKey's own database holds anything, to create its first
   admin. Left unset, that account is `admin` / `admin`, reachable at
-  <http://localhost:5555>. FerrisKey's api and console are bound to the
+  <http://ferriskey:5555>. FerrisKey's api and console are bound to the
   loopback for exactly that reason, like Postgres above: an administrator
   of this realm can mark any address verified and sign into FerrisTrace as
   whoever holds it, so that default must not face a network. Change

@@ -18,6 +18,7 @@ ferristrace-mcp-args.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 bytes.workspace = true
+ferristrace-env-file.workspace = true
 figment.workspace = true
 jiff.workspace = true
 jsonwebtoken.workspace = true
