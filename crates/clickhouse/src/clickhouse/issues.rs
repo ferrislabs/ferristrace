@@ -24,7 +24,7 @@ const COUNTED: &str = "SELECT \
      AND time < fromUnixTimestamp64Nano(?) \
      AND (? = 0 OR project_id = ?) \
      AND (? = '' OR service_name = ?) \
-     AND (? = '' OR fingerprint = toFixedString(unhex(?), 16)) \
+     AND (? = '' OR span_events.fingerprint = toFixedString(unhex(?), 16)) \
    GROUP BY project_id, fingerprint \
    HAVING (? = '' \
        OR positionCaseInsensitive(exception_type, ?) > 0 \
@@ -44,10 +44,10 @@ const OCCURRENCES: &str = "SELECT \
    WHERE tenant_id = ? \
      AND project_id = ? \
      AND name = 'exception' \
-     AND fingerprint = toFixedString(unhex(?), 16) \
-     AND time >= fromUnixTimestamp64Nano(?) \
-     AND time < fromUnixTimestamp64Nano(?) \
-   ORDER BY time DESC \
+     AND span_events.fingerprint = toFixedString(unhex(?), 16) \
+     AND span_events.time >= fromUnixTimestamp64Nano(?) \
+     AND span_events.time < fromUnixTimestamp64Nano(?) \
+   ORDER BY span_events.time DESC \
    LIMIT ?";
 
 #[derive(Debug, Clone)]

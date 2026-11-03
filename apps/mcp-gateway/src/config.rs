@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use ferristrace_env_file::EnvFile;
 use figment::Figment;
 use figment::providers::{Env, Serialized};
 use reqwest::Url;
@@ -94,7 +95,9 @@ pub enum ConfigError {
 }
 
 pub fn figment() -> Figment {
-    Figment::from(Serialized::defaults(Config::default())).merge(Env::prefixed(PREFIX).split("__"))
+    Figment::from(Serialized::defaults(Config::default()))
+        .merge(EnvFile::prefixed(PREFIX))
+        .merge(Env::prefixed(PREFIX).split("__"))
 }
 
 pub fn load() -> Result<Config, Box<figment::Error>> {

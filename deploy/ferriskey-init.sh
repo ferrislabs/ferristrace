@@ -34,6 +34,7 @@ AGENT_AUDIENCE="${FERRISKEY_AGENT_AUDIENCE:-ferristrace-agents}"
 MCP_PUBLIC_URL="${FERRISKEY_MCP_PUBLIC_URL:-http://localhost:8080}"
 MCP_ORGS="${FERRISKEY_MCP_ORGS:-}"
 MCP_OUT_FILE="${MCP_OUT_FILE:-/out/mcp-gateway.env}"
+READER="${READER:-65532:65532}"
 MCP_POLICY_DIR="${MCP_POLICY_DIR:-/mcp/policies}"
 MCP_SEED_POLICY="${MCP_SEED_POLICY:-seed-members-read.cedar}"
 MCP_SEED_POLICY_LEGACY="${MCP_SEED_POLICY_LEGACY:-seed-members-read-by-name.cedar}"
@@ -404,6 +405,7 @@ FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_ID=$MCP_GATEWAY_CLIENT_ID
 FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_SECRET=$GATEWAY_SECRET
 EOF
   chmod 600 "$MCP_OUT_FILE.tmp"
+  chown "$READER" "$MCP_OUT_FILE.tmp"
   mv "$MCP_OUT_FILE.tmp" "$MCP_OUT_FILE"
 fi
 
@@ -415,7 +417,9 @@ FERRISTRACE_OIDC__CLIENT_SECRET=$CLIENT_SECRET
 FERRISTRACE_OIDC__REDIRECT_URI=$REDIRECT_URI
 EOF
 # Owner-only before it ever lands at its final name, so the client secret
-# is never briefly world-readable on the host bind mount.
+# is never briefly world-readable on the host bind mount. The owner is the
+# user the server and the gateway run as, since they read it themselves.
 chmod 600 "$OUT_FILE.tmp"
+chown "$READER" "$OUT_FILE.tmp"
 mv "$OUT_FILE.tmp" "$OUT_FILE"
 echo "ferriskey-init: done"

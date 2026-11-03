@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use ferristrace_clickhouse::SpanStoreSettings;
 use ferristrace_domain::DecompressedBytes;
 use ferristrace_domain::telemetry::Allowance;
+use ferristrace_env_file::EnvFile;
 use ferristrace_infra::PhotoStoreSettings;
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
@@ -263,6 +264,7 @@ impl Default for Config {
 pub fn figment() -> Figment {
     Figment::from(Serialized::defaults(Config::default()))
         .merge(Toml::file(FILE))
+        .merge(EnvFile::prefixed(PREFIX))
         .merge(Env::prefixed(PREFIX).split("__"))
 }
 

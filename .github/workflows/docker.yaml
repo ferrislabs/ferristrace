@@ -1,301 +1,358 @@
 name: docker
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - .github/workflows/docker.yaml
+      - .dockerignore
+      - Cargo.*
+      - Dockerfile*
+      - apps/**
+      - crates/**
+      - deploy/**
+      - docs/mcp/**
+      - web/**
   push:
     branches: [main, develop]
     paths:
       - .github/workflows/docker.yaml
-      - crates/**
-      - apps/**
-      - apps/mcp/**
-      - apps/mcp-gateway/**
-      - web/**
       - .dockerignore
       - Cargo.*
-      - Dockerfile
-      - Dockerfile.mcp
-      - Dockerfile.mcp-gateway
-  pull_request:
-    paths:
-      - .github/workflows/docker.yaml
-      - crates/**
+      - Dockerfile*
       - apps/**
-      - apps/mcp/**
-      - apps/mcp-gateway/**
+      - crates/**
+      - deploy/**
+      - docs/mcp/**
       - web/**
-      - .dockerignore
-      - Cargo.*
-      - Dockerfile
-      - Dockerfile.mcp
-      - Dockerfile.mcp-gateway
+  workflow_dispatch:
+    inputs:
+      push:
+        type: boolean
+        default: false
+        description: Push the images, tagged sha-<short sha>
   workflow_call:
     inputs:
       push:
         type: boolean
         default: false
 
+# A label other than push-image gets a group of its own, so adding one
+# never cancels the build already running for the last commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'push-image' && github.event.label.name || 'build' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/ferrislabs/ferristrace
-  MCP_IMAGE: ghcr.io/ferrislabs/ferristrace-mcp
-  MCP_GATEWAY_IMAGE: ghcr.io/ferrislabs/ferristrace-mcp-gateway
+  REGISTRY: ghcr.io/ferrislabs
 
 jobs:
+  # Decides what this run builds. Every run builds the three images for
+  # amd64 and starts the stack on them. Pushing, which a release, a manual
+  # run or the push-image label on a pull request asks for, adds arm64 and
+  # the cloud build of the server, and tags the result sha-<short sha>.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      push: ${{ steps.plan.outputs.push }}
+      builds: ${{ steps.plan.outputs.builds }}
+      images: ${{ steps.plan.outputs.images }}
+    steps:
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          ASKED: ${{ inputs.push }}
+        run: |
+          set -eu
+          run=true
+          if [ "$EVENT" = pull_request ] && [ "$ACTION" = labeled ] && [ "$LABEL" != push-image ]; then
+            run=false
+          fi
+          push=false
+          if [ "$ASKED" = true ]; then
+            push=true
+          elif [ "$EVENT" = pull_request ] && echo "$LABELS" | grep -q '"push-image"'; then
+            push=true
+          fi
+          amd='{"runner":"ubuntu-24.04","platform":"linux/amd64","arch":"amd64"}'
+          arm='{"runner":"ubuntu-24.04-arm","platform":"linux/arm64","arch":"arm64"}'
+          server='{"name":"server","file":"Dockerfile","features":"","local":"ferristrace:local","repository":"ferristrace","suffix":""}'
+          cloud='{"name":"server-ee","file":"Dockerfile","features":"ee","local":"","repository":"ferristrace","suffix":"-ee"}'
+          mcp='{"name":"mcp","file":"Dockerfile.mcp","features":"","local":"ferristrace-mcp:local","repository":"ferristrace-mcp","suffix":""}'
+          gateway='{"name":"mcp-gateway","file":"Dockerfile.mcp-gateway","features":"","local":"ferristrace-mcp-gateway:local","repository":"ferristrace-mcp-gateway","suffix":""}'
+          images="[$server,$mcp,$gateway]"
+          runners="[$amd]"
+          if [ "$push" = true ]; then
+            images="[$server,$cloud,$mcp,$gateway]"
+            runners="[$amd,$arm]"
+          fi
+          builds=$(jq -nc --argjson images "$images" --argjson runners "$runners" \
+            '[$images[] as $image | $runners[] as $runner | $image + $runner]')
+          {
+            echo "run=$run"
+            echo "push=$push"
+            echo "builds=$builds"
+            echo "images=$images"
+          } >> "$GITHUB_OUTPUT"
+          echo "run=$run push=$push"
+          echo "$builds" | jq -r '.[] | "\(.name) \(.arch)"'
+
+  # Main and develop write the layer cache; every other run reads it and
+  # writes nothing, so a pull request reuses main's compiled dependencies
+  # and, when it leaves the Rust code alone, main's compiled binaries too.
   build:
-    runs-on: ${{ matrix.runner.name }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    name: build ${{ matrix.name }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
       matrix:
-        runner:
-          - name: ubuntu-24.04
-            platform: linux/amd64
-          - name: ubuntu-24.04-arm
-            platform: linux/arm64
-        variant:
-          - name: community
-            features: ""
-          - name: cloud
-            features: ee
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
+    env:
+      CACHE_SCOPE: ${{ matrix.name }}-${{ matrix.arch }}
+      WRITES_CACHE: ${{ github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'develop') }}
     steps:
-      - name: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: restore layer cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-${{ runner.arch }}-${{ matrix.variant.name }}-${{ github.sha }}
-          restore-keys: |
-            buildx-${{ runner.arch }}-${{ matrix.variant.name }}-
-
-      - name: log-in to ghcr
-        if: inputs.push
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: build and push
-        id: build
+      # The image the stack job starts. Only amd64 builds of the three
+      # images the compose file runs are kept.
+      - name: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: ${{ matrix.runner.platform }}
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.platform }}
           build-args: |
-            FEATURES=${{ matrix.variant.features }}
-          tags: ${{ env.IMAGE }}
-          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
-          provenance: mode=max
-          sbom: true
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ inputs.push || false }}
+            FEATURES=${{ matrix.features }}
+          tags: ${{ matrix.local || format('{0}:check', matrix.name) }}
+          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
+          cache-to: ${{ env.WRITES_CACHE == 'true' && format('type=gha,mode=max,scope={0}', env.CACHE_SCOPE) || '' }}
+          outputs: ${{ matrix.local != '' && matrix.arch == 'amd64' && format('type=docker,dest={0}/image.tar', runner.temp) || 'type=cacheonly' }}
 
-      - name: prepare digest
-        if: inputs.push
-        run: |
-          mkdir -p ${{ runner.temp }}/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
-
-      - name: upload digest
-        if: inputs.push
+      - name: keep the image for the stack
+        if: matrix.local != '' && matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: digests-${{ runner.arch }}-${{ matrix.variant.name }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
+          name: image-${{ matrix.name }}
+          path: ${{ runner.temp }}/image.tar
           retention-days: 1
 
-      - name: move cache
-        run: |
-          rm -rf ${{ runner.temp }}/.buildx-cache
-          mv ${{ runner.temp }}/.buildx-cache-new ${{ runner.temp }}/.buildx-cache
-
-      - name: save layer cache
-        if: github.ref_name == 'main' || github.ref_name == 'develop'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-${{ runner.arch }}-${{ matrix.variant.name }}-${{ github.sha }}
-
-  build-mcp:
-    runs-on: ${{ matrix.runner.name }}
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        runner:
-          - name: ubuntu-24.04
-            platform: linux/amd64
-          - name: ubuntu-24.04-arm
-            platform: linux/arm64
-    steps:
-      - name: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: restore layer cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-mcp-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: |
-            buildx-mcp-${{ runner.arch }}-
-
       - name: log-in to ghcr
-        if: inputs.push
+        if: needs.plan.outputs.push == 'true'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: build and push
-        id: build
+      # Every layer is in this builder already, so this only exports.
+      - name: push by digest
+        id: push
+        if: needs.plan.outputs.push == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: ${{ matrix.runner.platform }}
-          file: Dockerfile.mcp
-          tags: ${{ env.MCP_IMAGE }}
-          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            FEATURES=${{ matrix.features }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.repository }}
+          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
           provenance: mode=max
           sbom: true
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ inputs.push || false }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
-      - name: prepare digest
-        if: inputs.push
+      - name: keep the digest
+        if: needs.plan.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          mkdir -p ${{ runner.temp }}/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
 
-      - name: upload digest
-        if: inputs.push
+      - name: upload the digest
+        if: needs.plan.outputs.push == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: digests-mcp-${{ runner.arch }}
+          name: digest-${{ matrix.name }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
-      - name: move cache
-        run: |
-          rm -rf ${{ runner.temp }}/.buildx-cache
-          mv ${{ runner.temp }}/.buildx-cache-new ${{ runner.temp }}/.buildx-cache
-
-      - name: save layer cache
-        if: github.ref_name == 'main' || github.ref_name == 'develop'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-mcp-${{ runner.arch }}-${{ github.sha }}
-
-  build-mcp-gateway:
-    runs-on: ${{ matrix.runner.name }}
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        runner:
-          - name: ubuntu-24.04
-            platform: linux/amd64
-          - name: ubuntu-24.04-arm
-            platform: linux/arm64
+  # The compose stack, from nothing, on the images built above: what an
+  # operator following the README gets on a clean machine.
+  stack:
+    needs: [plan, build]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: deploy
     steps:
-      - name: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: restore layer cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-mcp-gateway-${{ runner.arch }}-${{ github.sha }}
-          restore-keys: |
-            buildx-mcp-gateway-${{ runner.arch }}-
+          path: ${{ runner.temp }}/images
+          pattern: image-*
 
-      - name: log-in to ghcr
-        if: inputs.push
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: load the images
+        run: for tar in "$RUNNER_TEMP"/images/*/image.tar; do docker load --input "$tar"; done
 
-      - name: build and push
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: ${{ matrix.runner.platform }}
-          file: Dockerfile.mcp-gateway
-          tags: ${{ env.MCP_GATEWAY_IMAGE }}
-          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
-          provenance: mode=max
-          sbom: true
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ inputs.push || false }}
+      # The browser and the server reach FerrisKey under one name; the
+      # README asks the operator for this line.
+      - name: name ferriskey
+        run: echo "127.0.0.1 ferriskey" | sudo tee -a /etc/hosts
 
-      - name: prepare digest
-        if: inputs.push
+      - name: the stack comes up on a clean machine, in one go
+        run: docker compose up --detach --no-build --wait --wait-timeout 300
+
+      - name: the server migrated its stores
         run: |
-          mkdir -p ${{ runner.temp }}/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+          set -eu
+          exists=$(docker compose exec -T clickhouse clickhouse-client \
+            --user=ferristrace --password=ferristrace --database=ferristrace \
+            --query="EXISTS TABLE spans")
+          test "$exists" = "1" || { echo "the spans table is missing"; exit 1; }
+          applied=$(docker compose exec -T clickhouse clickhouse-client \
+            --user=ferristrace --password=ferristrace --database=ferristrace \
+            --query="SELECT max(version) FROM schema_migrations FINAL")
+          shipped=$(ls ../crates/clickhouse/migrations/clickhouse/*.up.sql | wc -l | tr -d " ")
+          test "$applied" = "$shipped" || { echo "the span schema is at $applied of $shipped"; exit 1; }
+          tables=$(docker compose exec -T postgres psql --username ferristrace \
+            --dbname ferristrace --tuples-only --no-align \
+            --command "SELECT count(*) FROM information_schema.tables \
+                       WHERE table_schema = 'public' AND table_name IN \
+                       ('accounts', 'orgs', 'org_members', 'api_keys', 'sessions')")
+          test "$tables" = "5" || { echo "only $tables control plane tables exist"; exit 1; }
 
-      - name: upload digest
-        if: inputs.push
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digests-gateway-${{ runner.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: move cache
+      - name: bootstrap founds the organisation, once
         run: |
-          rm -rf ${{ runner.temp }}/.buildx-cache
-          mv ${{ runner.temp }}/.buildx-cache-new ${{ runner.temp }}/.buildx-cache
+          set -eu
+          docker compose exec -T server ferristrace bootstrap --email operator@example.com 2>&1 | tee first.log
+          grep -q "operator@example.com owns Default" first.log || { echo "nothing was founded"; exit 1; }
+          docker compose exec -T server ferristrace bootstrap --email someone.else@example.com 2>&1 | tee second.log
+          grep -q "already holds an organisation" second.log || { echo "bootstrap was not idempotent"; exit 1; }
 
-      - name: save layer cache
-        if: github.ref_name == 'main' || github.ref_name == 'develop'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.buildx-cache
-          key: buildx-mcp-gateway-${{ runner.arch }}-${{ github.sha }}
+      - name: the operator signs in through FerrisKey
+        run: |
+          set -eu
+          # --fail-with-body prints what FerrisKey refused, not just the code.
+          admin=$(curl --fail-with-body --silent --show-error -X POST \
+            http://ferriskey:3333/realms/master/protocol/openid-connect/token \
+            -d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
+            | jq -r .access_token)
+          user=$(curl --fail-with-body --silent --show-error -X POST http://ferriskey:3333/realms/ferristrace/users \
+            -H "authorization: Bearer $admin" -H 'content-type: application/json' \
+            -d '{"username":"operator","email":"operator@example.com","email_verified":true,"firstname":"Op","lastname":"Erator"}' \
+            | jq -r '.data.id // .id')
+          curl --fail-with-body --silent --show-error -X PUT \
+            "http://ferriskey:3333/realms/ferristrace/users/$user/reset-password" \
+            -H "authorization: Bearer $admin" -H 'content-type: application/json' \
+            -d '{"credential_type":"password","value":"Operator-pass-1234!","temporary":false}'
+          authorize=$(curl --silent --output /dev/null --write-out '%{redirect_url}' \
+            --cookie-jar jar.txt --cookie jar.txt http://localhost:4318/auth/oidc/start)
+          case "$authorize" in http://ferriskey:3333/*) ;; *) echo "start sent the browser to $authorize"; exit 1 ;; esac
+          curl --silent --output /dev/null --cookie-jar jar.txt --cookie jar.txt "$authorize"
+          callback=$(curl --fail-with-body --silent --show-error --cookie-jar jar.txt --cookie jar.txt -X POST \
+            'http://ferriskey:3333/realms/ferristrace/login-actions/authenticate?client_id=ferristrace' \
+            -H 'origin: http://ferriskey:5555' -H 'content-type: application/json' \
+            -d '{"username":"operator","password":"Operator-pass-1234!"}' | jq -r .url)
+          case "$callback" in http://localhost:4318/auth/oidc/callback*) ;; *) echo "FerrisKey answered $callback"; exit 1 ;; esac
+          landed=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --cookie-jar jar.txt --cookie jar.txt "$callback")
+          test "$landed" = "303" || { echo "the callback answered $landed"; exit 1; }
+          grep -q ft_session jar.txt || { echo "no session cookie was set"; exit 1; }
 
-  push-manifest:
-    if: inputs.push
-    needs: build
+      - name: the session carries the organisation bootstrap founded
+        run: |
+          set -eu
+          curl --fail --silent --show-error http://localhost:4318/auth/me \
+            -H 'x-requested-with: ci' --cookie jar.txt > me.json
+          cat me.json
+          jq -e '.email == "operator@example.com"' me.json > /dev/null || { echo "not the operator"; exit 1; }
+          jq -e '.memberships | any(.name == "Default" and .role == "owner")' me.json > /dev/null \
+            || { echo "the operator does not own Default"; exit 1; }
+
+      - name: the owner can rename the organisation
+        run: |
+          set -eu
+          org=$(jq -r '.memberships[0].org' me.json)
+          refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH \
+            "http://localhost:4318/api/orgs/$org" -H 'x-requested-with: ci' --cookie jar.txt \
+            -H 'content-type: application/json' --data '{"name":"   "}')
+          test "$refused" = "422" || { echo "a blank name answered $refused"; exit 1; }
+          curl --fail --silent --show-error -X PATCH "http://localhost:4318/api/orgs/$org" \
+            -H 'x-requested-with: ci' --cookie jar.txt -H 'content-type: application/json' \
+            --data '{"name":"  Renamed  "}' | jq -e '.name == "Renamed"' > /dev/null \
+            || { echo "the rename did not take, or kept the space"; exit 1; }
+
+      - name: an issued key authenticates a payload and an unissued one does not
+        run: |
+          set -eu
+          org=$(jq -r '.memberships[0].org' me.json)
+          key=$(docker compose exec -T server ferristrace issue-key --org "$org" 2>/dev/null \
+            | grep -m1 "^ft_" | tr -d "[:space:]")
+          accepted=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
+            http://localhost:4318/v1/traces -H "authorization: Bearer $key" \
+            -H 'content-type: application/x-protobuf' --data-binary '')
+          test "$accepted" = "200" || { echo "an issued key answered $accepted"; exit 1; }
+          refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
+            http://localhost:4318/v1/traces -H "authorization: Bearer ft_live_nonsense.nonsense" \
+            -H 'content-type: application/x-protobuf' --data-binary '')
+          test "$refused" = "401" || { echo "an unissued key answered $refused"; exit 1; }
+
+      - name: the app is served and every deep link reaches it
+        run: |
+          set -eu
+          curl --fail --silent --show-error http://localhost:4318/ | grep -qi "<!doctype html"
+          for deep in /traces /traces/abc123 /incidents /welcome; do
+            code=$(curl --silent --output /dev/null --write-out "%{http_code}" "http://localhost:4318$deep")
+            test "$code" = "200" || { echo "$deep answered $code"; exit 1; }
+          done
+
+      - name: the mcp gateway asks an agent for a token
+        run: |
+          set -eu
+          org=$(jq -r '.memberships[0].org' me.json)
+          curl --fail --silent --show-error \
+            "http://localhost:8080/.well-known/oauth-protected-resource/orgs/$org/mcp" | tee prm.json
+          jq -e '.authorization_servers | length > 0' prm.json > /dev/null || { echo "no authorization server"; exit 1; }
+          code=$(curl --silent --output /dev/null --dump-header headers.txt --write-out '%{http_code}' \
+            -X POST "http://localhost:8080/orgs/$org/mcp" -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+          test "$code" = "401" || { echo "an anonymous call answered $code"; exit 1; }
+          grep -qi '^www-authenticate: Bearer' headers.txt || { cat headers.txt; exit 1; }
+
+      - name: what the services said
+        if: failure()
+        run: docker compose logs --no-color ferriskey-init server mcp-gateway
+
+      - name: stop
+        if: always()
+        run: docker compose down --volumes
+
+  publish:
+    needs: [plan, build, stack]
+    if: needs.plan.outputs.push == 'true'
+    name: publish ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -304,159 +361,52 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant:
-          - name: community
-            suffix: ""
-          - name: cloud
-            suffix: -ee
+        include: ${{ fromJSON(needs.plan.outputs.images) }}
+    env:
+      IMAGE: ${{ format('ghcr.io/ferrislabs/{0}', matrix.repository) }}
+      # Tag pull requests with their head commit, not the merge commit
+      # GitHub checks out for them.
+      DOCKER_METADATA_PR_HEAD_SHA: "true"
     steps:
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: download digests
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digests-*-${{ matrix.variant.name }}
+          pattern: digest-${{ matrix.name }}-*
           merge-multiple: true
 
-      - name: log-in to ghcr
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: get image metadata
-        id: meta
+      - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           flavor: |
             latest=false
-            suffix=${{ matrix.variant.suffix }}
+            suffix=${{ matrix.suffix }}
           tags: |
-            type=semver,pattern={{version}}
             type=sha
-            type=raw,value=latest,enable=${{ matrix.variant.name == 'community' && !contains(github.ref_name, '-rc') }}
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && matrix.suffix == '' && !contains(github.ref_name, '-rc') }}
 
-      - name: install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: push manifest
+      - name: push the manifest
         working-directory: ${{ runner.temp }}/digests
         run: |
           # shellcheck disable=SC2046 # the tag flags and digest list are meant to split
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf "$IMAGE@sha256:%s " *)
 
-      - name: sign manifest
+      # Keyless: the signature is bound to this workflow's OIDC identity.
+      - name: sign the manifest
         run: |
           ref="$(jq -er '.tags | map(select(test(":sha-[0-9a-f]+(-ee)?$"))) | first' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
           digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r .digest)"
           cosign sign --yes "$IMAGE@$digest"
-
-  push-manifest-mcp:
-    if: inputs.push
-    needs: build-mcp
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    steps:
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: download digests
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-mcp-*
-          merge-multiple: true
-
-      - name: log-in to ghcr
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: get image metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.MCP_IMAGE }}
-          flavor: |
-            latest=false
-          tags: |
-            type=semver,pattern={{version}}
-            type=sha
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-rc') }}
-
-      - name: install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: push manifest
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          # shellcheck disable=SC2046 # the tag flags and digest list are meant to split
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf '${{ env.MCP_IMAGE }}@sha256:%s ' *)
-
-      - name: sign manifest
-        run: |
-          ref="$(jq -er '.tags | map(select(test(":sha-[0-9a-f]+$"))) | first' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
-          digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r .digest)"
-          cosign sign --yes "$MCP_IMAGE@$digest"
-
-  push-manifest-mcp-gateway:
-    if: inputs.push
-    needs: build-mcp-gateway
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    steps:
-      - name: set up buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: download digests
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-gateway-*
-          merge-multiple: true
-
-      - name: log-in to ghcr
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: get image metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.MCP_GATEWAY_IMAGE }}
-          flavor: |
-            latest=false
-          tags: |
-            type=semver,pattern={{version}}
-            type=sha
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-rc') }}
-
-      - name: install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: push manifest
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          # shellcheck disable=SC2046 # the tag flags and digest list are meant to split
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf '${{ env.MCP_GATEWAY_IMAGE }}@sha256:%s ' *)
-
-      - name: sign manifest
-        run: |
-          ref="$(jq -er '.tags | map(select(test(":sha-[0-9a-f]+$"))) | first' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
-          digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r .digest)"
-          cosign sign --yes "$MCP_GATEWAY_IMAGE@$digest"
+          echo "### $ref" >> "$GITHUB_STEP_SUMMARY"

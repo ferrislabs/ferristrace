@@ -71,27 +71,29 @@ services:
     # document carries, so the browser that signs somebody in and this
     # container that verifies the result have to ask for the same name or the
     # issuer the server discovered will never match the issuer the token
-    # carries. See the "Signing in" section of the README for the one line
-    # this costs the operator on their own machine.
-    extra_hosts:
-      - "ferriskey:host-gateway"
+    # carries. Inside this network the name is an alias of ferriskey-api,
+    # below; on the operator's machine it is the one hosts line the README
+    # asks for, pointing at the published port.
     # Anything else the server reads — the identity provider, the mail relay,
-    # a project management token — is set here rather than named above, so
-    # that adding a setting does not mean editing this file. A missing .env is
-    # the ordinary case: the stack comes up on a clean machine without one.
-    # The first entry is ferriskey-init's own doing: the realm, client and
-    # redirect uri it provisioned, and the client secret it read back, so
-    # that nobody has to copy anything into .env. The second entry, read
-    # after it, is `.env` itself, so a setting an operator actually writes
-    # there — to point at a FerrisKey running somewhere else — wins.
+    # a project management token — is set in `.env` rather than named above,
+    # so that adding a setting does not mean editing this file. A missing
+    # .env is the ordinary case: the stack comes up on a clean machine
+    # without one.
     env_file:
-      - path: ferriskey/ferriskey.env
-        required: false
       - path: .env
         required: false
+    # ferriskey-init writes the realm, client and redirect uri it provisioned,
+    # and the client secret it read back, into ferriskey/ferriskey.env, so
+    # that nobody has to copy anything into .env. Compose reads env_file
+    # entries before any container runs, so on a first `up` that file does
+    # not exist yet; the server reads it itself when it starts instead,
+    # after ferriskey-init has finished. A setting in .env still wins.
+    volumes:
+      - ./ferriskey:/run/ferriskey:ro
     # These win over the file, because they are how the server reaches the
     # three stores inside this network rather than something to choose.
     environment:
+      FERRISTRACE_ENV_FILE: /run/ferriskey/ferriskey.env
       FERRISTRACE_DATABASE_URL: postgres://ferristrace:${POSTGRES_PASSWORD:-ferristrace}@postgres:5432/ferristrace
       FERRISTRACE_REDIS_URL: redis://redis:6379
       FERRISTRACE_SPANS__URL: http://clickhouse:8123
@@ -131,14 +133,14 @@ services:
       context: ..
       dockerfile: Dockerfile.mcp-gateway
     image: ${FERRISTRACE_MCP_GATEWAY_IMAGE:-ferristrace-mcp-gateway:local}
-    extra_hosts:
-      - "ferriskey:host-gateway"
     env_file:
-      - path: ferriskey/mcp-gateway.env
-        required: false
       - path: .env
         required: false
+    # Read at start for the same reason as the server's, above.
+    volumes:
+      - ./ferriskey:/run/ferriskey:ro
     environment:
+      FERRISTRACE_ENV_FILE: /run/ferriskey/mcp-gateway.env
       FERRISTRACE_MCP_GATEWAY_LISTEN: 0.0.0.0:8080
       FERRISTRACE_MCP_GATEWAY_PUBLIC_URL: ${FERRISTRACE_MCP_PUBLIC_URL:-http://localhost:8080}
       FERRISTRACE_MCP_GATEWAY_UPSTREAM: http://mcp:8081
@@ -207,12 +209,18 @@ services:
       ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${FERRISKEY_ADMIN_PASSWORD:-admin}
       ADMIN_EMAIL: ${FERRISKEY_ADMIN_EMAIL:-admin@ferristrace.local}
-      ALLOWED_ORIGINS: ${FERRISKEY_ALLOWED_ORIGINS:-http://localhost:5555}
-      WEBAPP_URL: ${FERRISKEY_WEBAPP_URL:-http://localhost:5555}
+      ALLOWED_ORIGINS: ${FERRISKEY_ALLOWED_ORIGINS:-http://ferriskey:5555}
+      WEBAPP_URL: ${FERRISKEY_WEBAPP_URL:-http://ferriskey:5555}
       AUTHZ_ENABLED: "true"
-    # Published on the host under its own name, 3333, because that is also
-    # the port `ferriskey-init` and `server` reach it on through the shared
-    # hostname described above `server`. Bound to the loopback, like
+    # The shared name the server, the gateway and ferriskey-init reach it
+    # under, on the port the browser reaches it on: see `server`. An alias
+    # rather than the host's published port, which a container cannot
+    # reach on Linux while it is bound to the host's loopback.
+    networks:
+      default:
+        aliases: [ferriskey]
+    # Published on the host under its own name, 3333, for the browser.
+    # Bound to the loopback, like
     # `postgres` above, because FerrisKey's first admin defaults to
     # `admin`/`admin`: an administrator of this realm can mark any address
     # verified and sign into FerrisTrace as whoever holds it, so that
@@ -224,13 +232,15 @@ services:
       ferriskey-migrations:
         condition: service_completed_successfully
 
-  # The FerrisKey console, for the operator who wants to look at a realm or
-  # a client rather than trust this file. Nothing in the sign-in path this
-  # stack automates needs it.
+  # The FerrisKey console. Signing in to FerrisTrace goes through its login
+  # page, so it is served under the shared `ferriskey` name too: FerrisKey's
+  # session cookie is set on that host when the browser is sent to
+  # authorize, and a console on localhost would never get it back, then
+  # start a sign in of its own that FerrisTrace refuses.
   ferriskey-webapp:
     image: ghcr.io/ferriskey/ferriskey-webapp:0.10.1
     environment:
-      API_URL: ${FERRISKEY_WEBAPP_API_URL:-http://localhost:3333}
+      API_URL: ${FERRISKEY_WEBAPP_API_URL:-http://ferriskey:3333}
     # Bound to the loopback for the same reason as ferriskey-api, above:
     # this is where that admin password is typed in.
     ports:
@@ -247,6 +257,9 @@ services:
   ferriskey-init:
     image: curlimages/curl:8.11.1
     entrypoint: ["sh", "/ferriskey-init.sh"]
+    # Root only to hand the files it writes to the distroless nonroot user
+    # (65532) the server and the gateway run as, and who read them.
+    user: "0:0"
     volumes:
       - ./ferriskey-init.sh:/ferriskey-init.sh:ro
       - ./ferriskey:/out
@@ -258,8 +271,8 @@ services:
       FERRISKEY_REALM: ferristrace
       FERRISKEY_CLIENT_ID: ferristrace
       FERRISKEY_REDIRECT_URI: http://localhost:${OTLP_HTTP_PORT:-4318}/auth/oidc/callback
-      # The name the server and the browser both have to resolve to the
-      # published port above; see the extra_hosts comment on `server`.
+      # The name the server and the browser both resolve to FerrisKey;
+      # see the comment on `server`.
       FERRISKEY_ISSUER_BASE_URL: http://ferriskey:3333
       OUT_FILE: /out/ferriskey.env
       MCP_OUT_FILE: /out/mcp-gateway.env

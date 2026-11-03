@@ -1276,6 +1276,14 @@ name = "ferristrace-ee"
 version = "0.2.0"
 
 [[package]]
+name = "ferristrace-env-file"
+version = "0.2.0"
+dependencies = [
+ "figment",
+ "serde",
+]
+
+[[package]]
 name = "ferristrace-infra"
 version = "0.2.0"
 dependencies = [
@@ -1349,6 +1357,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "cedar-policy",
+ "ferristrace-env-file",
  "ferristrace-mcp",
  "ferristrace-mcp-args",
  "figment",
@@ -1429,6 +1438,7 @@ dependencies = [
  "ferristrace-clickhouse",
  "ferristrace-domain",
  "ferristrace-ee",
+ "ferristrace-env-file",
  "ferristrace-infra",
  "ferristrace-postgres",
  "ferristrace-redis",

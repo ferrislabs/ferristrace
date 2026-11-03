@@ -21,6 +21,7 @@ ferristrace-ee = { workspace = true, optional = true }
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+ferristrace-env-file.workspace = true
 figment.workspace = true
 reqwest.workspace = true
 serde = { workspace = true, features = ["derive"] }

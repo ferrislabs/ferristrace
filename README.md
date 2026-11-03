@@ -19,7 +19,7 @@ docker compose exec server ferristrace bootstrap --email you@example.com
 The hosts line is the one thing the stack cannot do for you: the browser and
 the server have to reach FerrisKey under the same name. Create a user with
 that address in the `ferristrace` realm of FerrisKey's console at
-<http://localhost:5555> (`admin` / `admin`, marking the address verified),
+<http://ferriskey:5555> (`admin` / `admin`, marking the address verified),
 then sign in with *Continue with FerrisKey*. `bootstrap` prints no token,
 and FerrisTrace stores no password.
 

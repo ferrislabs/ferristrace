@@ -1,0 +1,16 @@
+[package]
+name = "ferristrace-env-file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+figment.workspace = true
+
+[dev-dependencies]
+figment = { workspace = true, features = ["test"] }
+serde.workspace = true
+
+[lints]
+workspace = true
