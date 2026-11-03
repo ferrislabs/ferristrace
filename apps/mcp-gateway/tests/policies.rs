@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use cedar_policy::{
-    Authorizer, Context, Decision, Entities, EntityUid, PolicySet, Request, Schema, ValidationMode,
-    Validator,
+    Authorizer, Context, Decision, Entities, EntityUid, PolicySet, Request, Schema, SchemaFragment,
+    ValidationMode, Validator,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 fn docs() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/mcp")
@@ -17,8 +17,77 @@ fn schema_text() -> String {
     fs::read_to_string(docs().join("ferristrace.cedarschema")).unwrap()
 }
 
+fn fragment(text: &str) -> SchemaFragment {
+    SchemaFragment::from_cedarschema_str(text).unwrap().0
+}
+
+fn is_record(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("Record")
+}
+
+fn copy_required(target: &mut Value, source: &Value) {
+    if let Some(object) = target.as_object_mut() {
+        match source.get("required") {
+            Some(required) => {
+                object.insert("required".to_owned(), required.clone());
+            }
+            None => {
+                object.remove("required");
+            }
+        }
+    }
+}
+
+fn merge(base: &mut Map<String, Value>, extension: &Map<String, Value>) {
+    for (key, added) in extension {
+        let Some(existing) = base.get_mut(key) else {
+            base.insert(key.clone(), added.clone());
+            continue;
+        };
+        if is_record(existing) && is_record(added) {
+            let inner = added["attributes"].as_object().cloned().unwrap_or_default();
+            if let Some(Value::Object(attributes)) = existing.get_mut("attributes") {
+                merge(attributes, &inner);
+            }
+        }
+        copy_required(existing, added);
+    }
+}
+
+fn extension(realm: &Value, name: &str) -> Map<String, Value> {
+    realm["FerrisTrace"]["commonTypes"][name]["attributes"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn schema() -> Schema {
-    Schema::from_cedarschema_str(&schema_text()).unwrap().0
+    let builtin = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ferriskey-builtin.cedarschema"),
+    )
+    .unwrap();
+    let realm = fragment(&schema_text());
+    let declared = realm.clone().to_json_value().unwrap();
+    let mut merged = fragment(&builtin).to_json_value().unwrap();
+    let root = merged["FerrisKey"].as_object_mut().unwrap();
+    for (name, entity) in [("UserExtension", "User"), ("ToolExtension", "Tool")] {
+        let Some(Value::Object(base)) = root
+            .get_mut("entityTypes")
+            .and_then(|types| types.pointer_mut(&format!("/{entity}/shape/attributes")))
+        else {
+            panic!("{entity} has no attributes");
+        };
+        merge(base, &extension(&declared, name));
+    }
+    let Some(Value::Object(base)) = root
+        .get_mut("commonTypes")
+        .and_then(|types| types.pointer_mut("/AgentContext/attributes"))
+    else {
+        panic!("AgentContext has no attributes");
+    };
+    merge(base, &extension(&declared, "ContextExtension"));
+    Schema::from_schema_fragments([SchemaFragment::from_json_value(merged).unwrap(), realm])
+        .unwrap()
 }
 
 fn policy_text(file: &str) -> String {
@@ -130,6 +199,7 @@ fn decide(case: &Value, users: &Value) -> Decision {
         "agent": "claude-code",
         "delegated": true,
         "target": case["target"],
+        "arguments": case["arguments"],
         "time": {
             "weekday": time["weekday"],
             "hour": time["hour"],
@@ -168,15 +238,17 @@ fn decide(case: &Value, users: &Value) -> Decision {
 fn the_vocabulary_schema_extends_the_ferriskey_one() {
     let text = schema_text();
     for needed in [
-        "entity User in [Role, Group, Organization]",
-        "entity Tool in [McpServer]",
-        "type AgentContext",
-        "action call_tool appliesTo",
+        "namespace FerrisTrace",
+        "type UserExtension",
+        "type ToolExtension",
+        "type ContextExtension",
         "on_call?: Bool",
         "on_call_schedules?: Set<String>",
         "access?: String",
         "destructive?: Bool",
-        "type Target",
+        "target: {",
+        "arguments: {",
+        "minute: Long",
     ] {
         assert!(text.contains(needed), "{needed}");
     }
@@ -200,14 +272,14 @@ fn the_vocabulary_names_every_target_key_of_the_spec() {
         "alert_state",
         "log_severity",
     ] {
-        assert!(text.contains(&format!("    {key}?:")), "{key}");
+        assert!(text.contains(&format!("{key}?:")), "{key}");
     }
 }
 
 #[test]
 fn every_policy_of_the_guide_validates_against_the_schema() {
     let files = policy_files();
-    assert_eq!(files.len(), 8, "{files:?}");
+    assert_eq!(files.len(), 9, "{files:?}");
     for file in files {
         let errors = validation_errors(&policy_text(&file));
         assert!(errors.is_empty(), "{file}: {errors:?}");
@@ -254,7 +326,10 @@ fn the_worked_examples_permit_and_refuse_exactly_the_calls_they_describe() {
             covered.insert(file.as_str().unwrap().to_owned());
         }
     }
-    let every: BTreeSet<String> = policy_files().into_iter().collect();
+    let every: BTreeSet<String> = policy_files()
+        .into_iter()
+        .filter(|file| file != "seed-members-read-by-name.cedar")
+        .collect();
     assert_eq!(covered, every);
 }
 

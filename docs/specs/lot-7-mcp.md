@@ -305,20 +305,22 @@ Amended: 7A-7D as built
       and metadata-document registration, makes the gateway the owner of each
       allowed resource (`FERRISTRACE_MCP_ORGS`, one exact address each: the
       token exchange needs it) and seeds `members-read-tools`.
-      Measured against FerrisKey 0.10.1, the newest release: the AuthZEN
-      request reaches Cedar as `FerrisKey::User`, `FerrisKey::Tool` and
-      `FerrisKey::Action::"call_tool"`; `principal.on_call` and
-      `on_call_schedules`, `resource.access`, `destructive` and
-      `organisation`, and `context.arguments` are dropped; groups and roles
-      become `FerrisKey::Group` and `FerrisKey::Role` parents. A realm schema
-      must live in its own namespace and is merged with FerrisKey's, and the
-      context is then checked against the built-in `AgentContext`, which
-      refuses `target` and the extra `time` keys: a realm with a schema
-      answers the gateway 400, so the vocabulary schema (a superset of
-      FerrisKey's, docs/mcp/ferristrace.cedarschema) is used to validate
-      policies offline and is not stored. Consequently the examples that
-      test `on_call` (2, 6) match nobody today and fail closed; they are
-      tested against the real PDP as such and flip when FerrisKey forwards
-      the attribute. The policies list tools by name instead of testing
-      `access`. @spec-l7-7 holds for attributes the built-in schema lacks
-      once a schema is stored, and offline for the whole vocabulary.
+      FerrisKey: measured against 0.10.1, the newest release when this was
+      written, the AuthZEN request reaches Cedar as `FerrisKey::User`,
+      `FerrisKey::Tool` and `FerrisKey::Action::"call_tool"` with
+      `principal.on_call`, `on_call_schedules`, `resource.access`,
+      `destructive`, `organisation` and `context.arguments` dropped, and a
+      stored realm schema is checked against the built-in `AgentContext`,
+      which refuses `target` and the extra `time` keys (a 400 to the gateway).
+      The release containing ferriskey/ferriskey#1912 forwards every property
+      and the whole context, and lets a realm extend the built-in types with
+      the reserved `UserExtension`, `ToolExtension` and `ContextExtension` in
+      its own namespace: `docs/mcp/ferristrace.cedarschema` is that extension,
+      the single source. `ferriskey-init` stores it only when the api
+      description mentions `ContextExtension`, and seeds
+      `seed-members-read.cedar` (by `resource.access`); on 0.10.1 it stores no
+      schema and seeds `seed-members-read-by-name.cedar`. The worked policies
+      test `resource.access` and `principal.on_call` (guarded by `has`);
+      against 0.10.1 the on-call permits match nobody and the access-based
+      support permit and night forbid do not match, which the suite asserts
+      case by case. @spec-l7-7 holds wherever the schema is stored.

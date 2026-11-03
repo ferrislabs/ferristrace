@@ -250,7 +250,7 @@ services:
     volumes:
       - ./ferriskey-init.sh:/ferriskey-init.sh:ro
       - ./ferriskey:/out
-      - ../docs/mcp/policies:/mcp/policies:ro
+      - ../docs/mcp:/mcp:ro
     environment:
       FERRISKEY_API_URL: http://ferriskey-api:3333
       ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}

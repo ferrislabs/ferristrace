@@ -621,8 +621,8 @@
         "minute": 0
       },
       "expect": "permit",
-      "today": "permit",
-      "why": ""
+      "today": "deny",
+      "why": "FerrisKey 0.10.1 does not forward resource.access, so the permit never matches"
     },
     {
       "name": "support_refused_production_logs",
@@ -894,8 +894,8 @@
         "minute": 0
       },
       "expect": "deny",
-      "today": "deny",
-      "why": ""
+      "today": "permit",
+      "why": "FerrisKey 0.10.1 does not forward resource.access, so the forbid never matches"
     },
     {
       "name": "member_refused_to_comment_at_06_59",
@@ -928,8 +928,8 @@
         "minute": 59
       },
       "expect": "deny",
-      "today": "deny",
-      "why": ""
+      "today": "permit",
+      "why": "FerrisKey 0.10.1 does not forward resource.access, so the forbid never matches"
     },
     {
       "name": "member_refused_to_comment_at_22_00",
@@ -962,8 +962,8 @@
         "minute": 0
       },
       "expect": "deny",
-      "today": "deny",
-      "why": ""
+      "today": "permit",
+      "why": "FerrisKey 0.10.1 does not forward resource.access, so the forbid never matches"
     },
     {
       "name": "member_comments_at_07_00",
@@ -1064,8 +1064,8 @@
         "minute": 0
       },
       "expect": "permit",
-      "today": "deny",
-      "why": "FerrisKey 0.10.1 does not forward subject.on_call"
+      "today": "permit",
+      "why": ""
     },
     {
       "name": "oncall_resolves_at_night",

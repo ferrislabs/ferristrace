@@ -36,6 +36,9 @@ MCP_ORGS="${FERRISKEY_MCP_ORGS:-}"
 MCP_OUT_FILE="${MCP_OUT_FILE:-/out/mcp-gateway.env}"
 MCP_POLICY_DIR="${MCP_POLICY_DIR:-/mcp/policies}"
 MCP_SEED_POLICY="${MCP_SEED_POLICY:-seed-members-read.cedar}"
+MCP_SEED_POLICY_LEGACY="${MCP_SEED_POLICY_LEGACY:-seed-members-read-by-name.cedar}"
+MCP_SCHEMA_FILE="${MCP_SCHEMA_FILE:-/mcp/ferristrace.cedarschema}"
+MCP_SCHEMA_NAMESPACE="FerrisTrace"
 MCP_SEED_NAME="${MCP_SEED_NAME:-members-read-tools}"
 MCP_MANAGED_BY="ferristrace-init"
 
@@ -359,6 +362,27 @@ else
     expect "setting the resource owners" 200
   fi
 
+  http "$API_URL/api-docs/openapi.json"
+  expect "reading the api description" 200
+  if grep -qF "ContextExtension" /tmp/body; then
+    echo "ferriskey-init: this FerrisKey lets a realm extend the agent types"
+    http "$API_URL/realms/$REALM/authz/schema" -H "$AUTH"
+    expect "reading the realm schema" 200 404
+    if [ "$(cat /tmp/status)" = "404" ] || grep -qF "\"namespace\":\"$MCP_SCHEMA_NAMESPACE\"" /tmp/body; then
+      echo "ferriskey-init: storing the $MCP_SCHEMA_NAMESPACE schema"
+      SCHEMA_SOURCE=$(json_body_of "$MCP_SCHEMA_FILE")
+      http -X PUT "$API_URL/realms/$REALM/authz/schema" -H "$AUTH" -H 'content-type: application/json' \
+        -d "{\"namespace\":\"$MCP_SCHEMA_NAMESPACE\",\"source\":\"$SCHEMA_SOURCE\"}"
+      expect "storing the schema" 200
+    else
+      echo "ferriskey-init: the realm already has a schema of its own, leaving it alone: add the types of $MCP_SCHEMA_FILE to it" >&2
+    fi
+    SEED_FILE="$MCP_SEED_POLICY"
+  else
+    echo "ferriskey-init: this FerrisKey keeps only part of the AuthZEN request and checks a stored schema against its own agent context, so no schema is stored and the seeded policy names its tools (see docs/mcp.md)"
+    SEED_FILE="$MCP_SEED_POLICY_LEGACY"
+  fi
+
   echo "ferriskey-init: checking the seeded policy $MCP_SEED_NAME"
   http "$API_URL/realms/$REALM/authz/policies?managed_by=$MCP_MANAGED_BY" -H "$AUTH"
   expect "listing the seeded policies" 200
@@ -366,7 +390,7 @@ else
     echo "ferriskey-init: policy $MCP_SEED_NAME already exists, leaving it alone"
   else
     echo "ferriskey-init: creating policy $MCP_SEED_NAME"
-    SEED_SOURCE=$(json_body_of "$MCP_POLICY_DIR/$MCP_SEED_POLICY")
+    SEED_SOURCE=$(json_body_of "$MCP_POLICY_DIR/$SEED_FILE")
     http -X POST "$API_URL/realms/$REALM/authz/policies?managed_by=$MCP_MANAGED_BY" -H "$AUTH" -H 'content-type: application/json' \
       -d "{\"name\":\"$MCP_SEED_NAME\",\"description\":\"Members of the realm may call the read-only FerrisTrace MCP tools\",\"enabled\":true,\"body\":{\"type\":\"static\",\"source\":\"$SEED_SOURCE\"}}"
     expect "creating policy $MCP_SEED_NAME" 201

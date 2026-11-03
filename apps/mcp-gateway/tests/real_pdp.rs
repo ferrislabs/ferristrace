@@ -62,6 +62,20 @@ fn target() -> Option<Target> {
     }
 }
 
+async fn extends_agent_types(target: &Target) -> bool {
+    let description = reqwest::get(format!("{}/api-docs/openapi.json", target.url))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    description.contains("ContextExtension")
+}
+
+fn tests_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
+}
+
 fn items(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(all) => all.clone(),
@@ -206,6 +220,24 @@ async fn check_realm(admin: &Admin) {
     );
     assert_eq!(settings["dcr_enabled"], true);
     assert_eq!(settings["cimd_enabled"], true);
+}
+
+async fn assert_vocabulary_stored(admin: &Admin) {
+    let stored = admin.get("/authz/schema").await;
+    assert_eq!(stored["namespace"], "FerrisTrace");
+    let docs_schema = fs::read_to_string(docs().join("../ferristrace.cedarschema")).unwrap();
+    assert_eq!(
+        text(&stored, "source").trim(),
+        docs_schema.trim(),
+        "the realm holds a stale vocabulary: run ferriskey-init"
+    );
+    let builtin = admin.get("/authz/schema/builtin").await;
+    let copy = fs::read_to_string(tests_dir().join("ferriskey-builtin.cedarschema")).unwrap();
+    assert_eq!(
+        text(&builtin, "source").trim(),
+        copy.trim(),
+        "FerrisKey's built-in schema changed: refresh tests/ferriskey-builtin.cedarschema"
+    );
 }
 
 async fn ensure_e2e_client(admin: &Admin) -> String {
@@ -363,13 +395,18 @@ fn stem(file: &str) -> &str {
     file.strip_suffix(".cedar").unwrap_or(file)
 }
 
-async fn sync_policies(admin: &Admin, wanted: &[String]) {
+async fn sync_policies(admin: &Admin, wanted: &[String], capable: bool) {
     let sources: Vec<(String, String)> = wanted
         .iter()
         .map(|file| {
+            let read = if file == "seed-members-read.cedar" && !capable {
+                "seed-members-read-by-name.cedar"
+            } else {
+                file.as_str()
+            };
             (
                 format!("{E2E_PREFIX}{}", stem(file)),
-                fs::read_to_string(docs().join(file)).unwrap(),
+                fs::read_to_string(docs().join(read)).unwrap(),
             )
         })
         .collect();
@@ -643,6 +680,10 @@ async fn the_worked_policies_decide_the_gateways_own_requests_in_ferriskeys_real
     let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
     let admin = Admin::login(&target).await;
     let fixture = provision(&admin, &cases["users"]).await;
+    let capable = extends_agent_types(&target).await;
+    if capable {
+        assert_vocabulary_stored(&admin).await;
+    }
     let timezone = text(&cases, "timezone").to_owned();
 
     let mut sets: BTreeMap<Vec<String>, Vec<&Value>> = BTreeMap::new();
@@ -659,14 +700,14 @@ async fn the_worked_policies_decide_the_gateways_own_requests_in_ferriskeys_real
     let mut checked_credentials = false;
     let mut report = Vec::new();
     for (files, set) in &sets {
-        sync_policies(&admin, files).await;
+        sync_policies(&admin, files, capable).await;
         for case in set {
             let user = text(case, "user");
             let token = user_token(&target, &fixture, user).await;
             let stack = stack(&target, &fixture, &timezone, case).await;
             let client = client(&stack, &token).await;
             let outcome = call(&client, case).await;
-            let expected = text(case, "today");
+            let expected = text(case, if capable { "expect" } else { "today" });
             let (got, reason) = match &outcome {
                 Outcome::Permit => ("permit", String::new()),
                 Outcome::Deny(reason) => ("deny", reason.clone()),
@@ -698,7 +739,7 @@ async fn the_worked_policies_decide_the_gateways_own_requests_in_ferriskeys_real
                 String::new()
             } else {
                 format!(
-                    " (guide: {}, FerrisKey drops the attribute)",
+                    " (guide: {}, this FerrisKey drops the attribute)",
                     text(case, "expect")
                 )
             };
@@ -723,10 +764,11 @@ async fn tools_list_shows_the_seeded_read_tools_and_hides_what_needs_a_target() 
     let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
     let admin = Admin::login(&target).await;
     let fixture = provision(&admin, &cases["users"]).await;
+    let capable = extends_agent_types(&target).await;
     let timezone = text(&cases, "timezone").to_owned();
     let probe = json!({"at": "2026-11-03T09:00:00Z", "on_call": false, "incident": null, "placement": null, "arguments": {}});
 
-    sync_policies(&admin, &["seed-members-read.cedar".to_owned()]).await;
+    sync_policies(&admin, &["seed-members-read.cedar".to_owned()], capable).await;
     let token = user_token(&target, &fixture, "alice").await;
     let stack_a = stack(&target, &fixture, &timezone, &probe).await;
     let listed = client(&stack_a, &token)
@@ -758,7 +800,7 @@ async fn tools_list_shows_the_seeded_read_tools_and_hides_what_needs_a_target() 
         12
     );
 
-    sync_policies(&admin, &["01-dev-reads-checkout.cedar".to_owned()]).await;
+    sync_policies(&admin, &["01-dev-reads-checkout.cedar".to_owned()], capable).await;
     let stack_b = stack(&target, &fixture, &timezone, &probe).await;
     let listed = client(&stack_b, &token)
         .await
@@ -770,7 +812,7 @@ async fn tools_list_shows_the_seeded_read_tools_and_hides_what_needs_a_target() 
         "a rule that needs a service shows nothing in tools/list"
     );
 
-    sync_policies(&admin, &[]).await;
+    sync_policies(&admin, &[], capable).await;
     let stack_c = stack(&target, &fixture, &timezone, &probe).await;
     let listed = client(&stack_c, &token)
         .await
@@ -782,7 +824,7 @@ async fn tools_list_shows_the_seeded_read_tools_and_hides_what_needs_a_target() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_realm_with_a_schema_validates_policies_and_cannot_hold_the_gateways_context() {
+async fn a_realm_with_a_schema_validates_policies() {
     let Some(target) = target() else { return };
     let admin = Admin::login(&target).await;
     let scratch = "ftmcp-validate";
@@ -808,11 +850,18 @@ async fn a_realm_with_a_schema_validates_policies_and_cannot_hold_the_gateways_c
         .realm_call(Method::PUT, "/authz/state", Some(&json!({"enabled": true})))
         .await;
     assert_eq!(status, 200, "{body}");
+    let capable = extends_agent_types(&target).await;
+    let vocabulary = fs::read_to_string(docs().join("../ferristrace.cedarschema")).unwrap();
+    let schema = if capable {
+        vocabulary
+    } else {
+        "namespace FerrisTrace {}".to_owned()
+    };
     let (status, body) = scratch_admin
         .realm_call(
             Method::PUT,
             "/authz/schema",
-            Some(&json!({"namespace": "FerrisTrace", "source": "namespace FerrisTrace {}"})),
+            Some(&json!({"namespace": "FerrisTrace", "source": schema})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -831,21 +880,39 @@ async fn a_realm_with_a_schema_validates_policies_and_cannot_hold_the_gateways_c
     assert_eq!(status, 201, "{body}");
     let (status, body) = attempt("typo-on-the-tool", "resource.toool == \"search_logs\"").await;
     assert_eq!(status, 422, "a typo must be reported by FerrisKey: {body}");
-    let (status, body) = attempt("on-call", "principal.on_call").await;
-    assert_eq!(
-        status, 422,
-        "FerrisKey 0.10.1 builtin User has no on_call: {body}"
-    );
     let (status, body) = attempt("guarded-typo", "principal has oncall && principal.oncall").await;
     assert_eq!(
         status, 201,
         "a typo behind a has guard is accepted, never matching: {body}"
     );
-    let (status, body) = attempt("target", "context.target has service").await;
+    for (name, condition, legacy) in [
+        ("on-call", "principal has on_call && principal.on_call", 201),
+        (
+            "access",
+            "resource has access && resource.access == \"read\"",
+            201,
+        ),
+        (
+            "target",
+            "context.target has service && context.target.service == \"checkout\"",
+            422,
+        ),
+        ("minute", "context.time.minute < 30", 422),
+    ] {
+        let (status, body) = attempt(name, condition).await;
+        assert_eq!(status, if capable { 201 } else { legacy }, "{name}: {body}");
+    }
+    let (status, body) = attempt("bare-on-call", "principal.on_call").await;
     assert_eq!(
         status, 422,
-        "FerrisKey 0.10.1 builtin AgentContext has no target: {body}"
+        "an unguarded optional attribute is reported: {body}"
     );
+    let (status, body) = attempt(
+        "typo-in-the-target",
+        "context.target.servce == \"checkout\"",
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
 
     let (status, _) = admin
         .call(Method::DELETE, master(&format!("/{scratch}")), None)
@@ -918,6 +985,7 @@ async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_an
     let cases: Value = serde_json::from_str(include_str!("policy_cases.json")).unwrap();
     let admin = Admin::login(&target).await;
     let fixture = provision(&admin, &cases["users"]).await;
+    let capable = extends_agent_types(&target).await;
     let http = reqwest::Client::new();
     let pep: Value = http
         .post(format!(
@@ -956,6 +1024,7 @@ async fn ferriskey_forwards_these_attributes_of_the_gateways_request_to_cedar_an
             .json()
             .await
             .unwrap();
+        let forwarded = forwarded || capable;
         assert_eq!(answer["decision"], forwarded, "{what}: {answer}");
         report.push(format!(
             "{what:<28} {}",

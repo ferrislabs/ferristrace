@@ -1,94 +1,54 @@
-namespace FerrisKey {
-  entity Role = {
-    name: String,
-  };
-
-  entity Organization = {
-    alias: String,
-    name: String,
-  };
-
-  entity Group in [Group, Organization] = {
-    name: String,
-  };
-
-  entity User in [Role, Group, Organization] = {
-    username: String,
+namespace FerrisTrace {
+  type UserExtension = {
     email?: String,
-    email_verified: Bool,
-    enabled: Bool,
+    groups?: Set<String>,
     roles?: Set<String>,
-    organisation?: String,
     on_call?: Bool,
     on_call_schedules?: Set<String>,
-  } tags String;
-
-  entity Client in [Role] = {
-    client_id: String,
   };
 
-  entity Agent in [Role] = {
-    client_id: String,
-  };
-
-  entity McpServer = {
-    name: String,
-  };
-
-  entity Tool in [McpServer] = {
-    server: String,
-    tool: String,
+  type ToolExtension = {
     organisation?: String,
     access?: String,
     destructive?: Bool,
-    annotations?: {
-      readOnlyHint?: Bool,
-      destructiveHint?: Bool,
-      idempotentHint?: Bool,
-      openWorldHint?: Bool,
+  };
+
+  type ContextExtension = {
+    target: {
+      service?: String,
+      services?: Set<String>,
+      namespace?: String,
+      cluster?: String,
+      pod?: String,
+      environment?: String,
+      environments?: Set<String>,
+      project?: String,
+      severity?: String,
+      incident_status?: String,
+      alert_state?: String,
+      log_severity?: String,
     },
-  };
-
-  entity Resource in [McpServer] = {
-    server: String,
-    uri: String,
-  };
-
-  entity Prompt in [McpServer] = {
-    server: String,
-    name: String,
-  };
-
-  type Target = {
-    service?: String,
-    services?: Set<String>,
-    namespace?: String,
-    cluster?: String,
-    pod?: String,
-    environment?: String,
-    environments?: Set<String>,
-    project?: String,
-    severity?: String,
-    incident_status?: String,
-    alert_state?: String,
-    log_severity?: String,
-  };
-
-  type AgentContext = {
-    agent: String,
-    delegated: Bool,
-    target: Target,
-    act?: {
-      sub?: String,
-      client_id?: String,
-      act?: {
-        sub?: String,
-        client_id?: String,
-        act?: {
-          sub?: String,
-          client_id?: String,
-        },
-      },
+    arguments: {
+      service?: String,
+      severity?: String,
+      text?: String,
+      namespace?: String,
+      pod?: String,
+      window?: String,
+      name?: String,
+      aggregation?: String,
+      group_by?: String,
+      cluster?: String,
+      state?: String,
+      status?: String,
+      alert_id?: String,
+      incident_id?: String,
+      page_id?: String,
+      trace_id?: String,
+      schedule?: String,
+      errors_only?: Bool,
+      min_duration_ms?: Long,
+      limit?: Long,
     },
     time: {
       weekday: Long,
@@ -98,23 +58,5 @@ namespace FerrisKey {
       iso_utc: String,
       iso?: String,
     },
-  };
-
-  action call_tool appliesTo {
-    principal: [User, Agent, Client],
-    resource: [Tool],
-    context: AgentContext,
-  };
-
-  action read_resource appliesTo {
-    principal: [User, Agent, Client],
-    resource: [Resource],
-    context: AgentContext,
-  };
-
-  action get_prompt appliesTo {
-    principal: [User, Agent, Client],
-    resource: [Prompt],
-    context: AgentContext,
   };
 }

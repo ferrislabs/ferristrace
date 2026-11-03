@@ -52,7 +52,8 @@ service account whose role holds `evaluate_authorization`); the client scopes
 `oncall:acknowledge` and `groups` (open to dynamically registered clients),
 plus an audience mapper that puts `ferristrace-agents` in the gateway's own
 token only; dynamic client registration and metadata-document registration
-turned on; the allowed resources and their owner; and the policy
+turned on; the allowed resources and their owner; on a FerrisKey that carries
+the vocabulary (below), the `FerrisTrace` schema; and the policy
 `members-read-tools`. Its secrets land in `deploy/ferriskey/mcp-gateway.env`.
 
 ## Connect a client
@@ -118,50 +119,49 @@ with `has`.
 The time zone is the organisation's (Settings > Organisation > General). The vocabulary
 only grows: an attribute once published is not renamed or removed.
 `docs/mcp/ferristrace.cedarschema` is the same table as a Cedar schema, with
-exact types.
+exact types. It lives in its own namespace, `FerrisTrace`, and extends
+FerrisKey's built-in agent types through the reserved types `UserExtension`,
+`ToolExtension` and `ContextExtension`.
 
-### What FerrisKey 0.10.1 passes on, today
+### Which FerrisKey carries the vocabulary
 
-This was measured against `ghcr.io/ferriskey/ferriskey-api:0.10.1`, the
-newest release, with the gateway's own requests (the suite
-`apps/mcp-gateway/tests/real_pdp.rs`, run with `FERRISKEY_URL`). FerrisKey maps
-the AuthZEN request onto its built-in agent types (`FerrisKey::User`,
-`FerrisKey::Tool`, `FerrisKey::Action::"call_tool"`) and keeps only part of it:
+The whole vocabulary reaches Cedar on a FerrisKey that contains
+ferriskey/ferriskey#1912: every AuthZEN property becomes a Cedar attribute, the
+whole context is forwarded, and a realm schema may extend the built-in types
+with the `...Extension` types. Releases up to and including 0.10.1 (the newest
+when this was written) do not, and `ferriskey-init` detects which one it is
+talking to, by looking for `ContextExtension` in the api description
+(`/api-docs/openapi.json`):
 
-| Passed to Cedar | Dropped before Cedar sees it |
-| --- | --- |
-| `principal` in `FerrisKey::Group::"<group>"` and `FerrisKey::Role::"<role>"`, `principal.email` | `principal.on_call`, `principal.on_call_schedules` |
-| `resource.tool`, `resource.server` (always `ferristrace`) | `resource.access`, `resource.destructive`, `resource.organisation` |
-| `context.agent`, `context.delegated`, `context.act`, `context.target.*`, `context.time.*` | `context.arguments` |
+| | A release containing #1912 | 0.10.1 and earlier |
+| --- | --- | --- |
+| Passed to Cedar | everything the gateway sends | `principal` in `FerrisKey::Group::"<group>"` and `FerrisKey::Role::"<role>"`, `principal.email`, `resource.tool`, `resource.server`, `context.agent`, `delegated`, `act`, `target.*`, `time.*` |
+| Dropped | nothing a realm schema declares; undeclared attributes are ignored | `principal.on_call`, `on_call_schedules`, `resource.access`, `destructive`, `organisation`, `context.arguments` |
+| Schema stored by init | `ferristrace.cedarschema` (only if the realm has none, or already has this one) | none: a stored schema is checked against the built-in agent context, which has no `target`, no `time.minute` and requires `time.iso`, so the gateway's request would get a 400 and everything would be refused |
+| Seeded policy | `seed-members-read.cedar`: any signed-in person, tools whose `resource.access` is `read` | `seed-members-read-by-name.cedar`: the same, by tool name |
+| Validation | a policy that tests an attribute the vocabulary lacks is refused when saved (422, with the position) | none, since no schema is stored |
 
-Three consequences, all fail closed:
+On a FerrisKey without #1912, a rule that depends on a dropped attribute never
+matches, which is safe for a `permit` and unsafe for a `forbid`:
+`principal.on_call` is never true, so "only the person on call resolves" permits
+nobody; but "no write at night" (`resource.access == "write"`) forbids nothing.
+The suite runs against both kinds (`FERRISKEY_URL=... REQUIRE_FERRISKEY_URL=1
+cargo test -p ferristrace-mcp-gateway --test real_pdp -- --nocapture`) and
+asserts what each decides. Upgrade FerrisKey before you rely on a `forbid` that
+tests a forwarded attribute.
 
-- A rule that tests `principal.on_call` (the second and sixth examples below)
-  never matches: nobody is ever "on call" to FerrisKey, so a rule that permits
-  only the person on call permits nobody, and "forbid at night unless on call"
-  forbids everybody. Spell the guard `principal has on_call && principal.on_call`
-  so it stays valid and matches the day FerrisKey passes the attribute on.
-- A rule cannot say "any read": list the tools (the examples do), or wait for
-  `access`.
-- `context.target` already carries the values `arguments` would.
+A policy is also checked offline, without FerrisKey, with
+`cargo test -p ferristrace-mcp-gateway --test policies`: it merges the
+extension into a copy of FerrisKey's built-in schema
+(`apps/mcp-gateway/tests/ferriskey-builtin.cedarschema`), validates every
+policy of the guide and evaluates the cases of `policy_cases.json` with
+`cedar-policy` 4.14, the version FerrisKey runs. A typo like `principal.oncall`
+is reported by both, but a typo behind a `has` guard is accepted by both and
+simply never matches.
 
-The vocabulary schema cannot be stored in the realm either, and a realm without
-a schema validates nothing. FerrisKey merges a realm schema, which must live in
-its own namespace, with its built-in one, and then checks every request's
-context against the built-in `AgentContext`, which has no `target`, no
-`time.minute` and requires `time.iso`: a realm with any schema answers the
-gateway's request with a 400, so everything is refused. `ferriskey-init`
-therefore stores no schema (the realm answers, and nothing validates), and
-`ferristrace.cedarschema` is used where you can use it: to check policies
-before you paste them into the console, with
-`cargo test -p ferristrace-mcp-gateway --test policies`, which validates and
-evaluates the examples with `cedar-policy` 4.14, the version FerrisKey runs.
-A typo like `principal.oncall` is caught there, and by FerrisKey for
-attributes the built-in schema does lack once a schema is stored, but a typo
-behind a `has` guard is accepted by both and simply never matches. Closing
-this gap needs FerrisKey to pass these attributes on and to let a realm
-extend the agent context, or the gateway to speak a realm-namespaced
-vocabulary; see the amendment in `docs/specs/lot-7-mcp.md`.
+With a schema stored, a declared attribute of the wrong type is a 400 to the
+gateway, which refuses the call: a client that sends `limit` as a string is
+refused rather than evaluated.
 
 ## Worked policies
 
@@ -169,10 +169,10 @@ Each is one file in `docs/mcp/policies/`, validated against the schema and
 evaluated for the cases in `apps/mcp-gateway/tests/policy_cases.json`, and
 decided by FerrisKey's own PDP in the suite above. Cedar denies by default, so
 every example is a `permit` for what to allow or a `forbid` for what to make
-final. They are written for the built-in agent types FerrisKey understands.
+final. They are written for FerrisKey's built-in agent types, extended as above.
 Load them in the console (Authorization, Policies) or with
 `POST /realms/<realm>/authz/policies`, one policy each. The seeded
-`members-read-tools` permits every read tool to any signed-in person; an
+`members-read-tools` permits every read tool (`resource.access` is `read`) to any signed-in person; an
 example that must be the only permit, such as the first, needs it disabled.
 
 ### 1. Dev reads checkout's logs and traces on weekdays, 9 to 18, local time
@@ -216,8 +216,8 @@ when {
 };
 ```
 
-Anyone off call is refused. FerrisKey 0.10.1 does not pass `on_call` on (above),
-so until it does, this permits nobody.
+Anyone off call is refused. On a FerrisKey without #1912 `on_call` is not passed
+on (above), so this permits nobody.
 
 ### 3. Nobody resolves a sev1; comments stay possible
 
@@ -261,26 +261,14 @@ permit (
 )
 when {
   resource.server == "ferristrace" &&
-  [
-    "list_services",
-    "service_health",
-    "search_traces",
-    "get_trace",
-    "search_logs",
-    "query_metric",
-    "cluster_status",
-    "list_alerts",
-    "alert_history",
-    "list_incidents",
-    "get_incident",
-    "who_is_on_call"
-  ].contains(resource.tool) &&
+  resource has access &&
+  resource.access == "read" &&
   context.target has environment &&
   context.target.environment == "staging"
 };
 ```
 
-A permit on a known value. A service without spans has no environment, and one
+Any read tool, only for a known environment. A service without spans has no environment, and one
 seen in both staging and production has no single `environment`: both are
 refused, which is what you want. Do not write this as "forbid production": it
 would let through whatever has no environment.
@@ -313,14 +301,16 @@ forbid (
   resource is FerrisKey::Tool
 )
 when {
-  ["comment_incident", "resolve_incident", "acknowledge_page"].contains(resource.tool) &&
+  resource has access &&
+  resource.access == "write" &&
   (context.time.hour >= 22 || context.time.hour < 7) &&
   !(principal has on_call && principal.on_call)
 };
 ```
 
-The tools are listed by name until FerrisKey passes `resource.access` on. See
-the note on `on_call` above: today this forbids every night write.
+`resource.access` is `write` for every tool that changes something, so a new
+write tool is covered without touching the rule. On a FerrisKey without #1912
+it forbids nothing (above).
 
 ## Writing policies
 
@@ -339,9 +329,10 @@ the note on `on_call` above: today this forbids every night write.
   while it is evaluated makes the whole decision a deny, even if another policy
   permits, so an unguarded `context.target.service` refuses calls that name no
   service.
-- A rule that tests an attribute the vocabulary does not have never matches. A
-  realm with a schema reports it when you save the policy (422 with the position),
-  but not behind a `has` guard.
+- A rule that tests an attribute the vocabulary does not have never matches. With
+  the schema stored (see "Which FerrisKey carries the vocabulary") FerrisKey
+  reports it when you save the policy (422 with the position), but not behind a
+  `has` guard.
 - Test a rule with `cargo test -p ferristrace-mcp-gateway --test policies`
   after adding a case to `policy_cases.json`, then against FerrisKey with
   `FERRISKEY_URL=... REQUIRE_FERRISKEY_URL=1 cargo test -p ferristrace-mcp-gateway --test real_pdp -- --nocapture`.
