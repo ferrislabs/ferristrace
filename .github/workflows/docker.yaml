@@ -254,26 +254,27 @@ jobs:
       - name: the operator signs in through FerrisKey
         run: |
           set -eu
-          admin=$(curl --fail --silent --show-error -X POST \
+          # --fail-with-body prints what FerrisKey refused, not just the code.
+          admin=$(curl --fail-with-body --silent --show-error -X POST \
             http://ferriskey:3333/realms/master/protocol/openid-connect/token \
             -d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
             | jq -r .access_token)
-          user=$(curl --fail --silent --show-error -X POST http://ferriskey:3333/realms/ferristrace/users \
+          user=$(curl --fail-with-body --silent --show-error -X POST http://ferriskey:3333/realms/ferristrace/users \
             -H "authorization: Bearer $admin" -H 'content-type: application/json' \
             -d '{"username":"operator","email":"operator@example.com","email_verified":true,"firstname":"Op","lastname":"Erator"}' \
             | jq -r '.data.id // .id')
-          curl --fail --silent --show-error -X PUT \
+          curl --fail-with-body --silent --show-error -X PUT \
             "http://ferriskey:3333/realms/ferristrace/users/$user/reset-password" \
             -H "authorization: Bearer $admin" -H 'content-type: application/json' \
-            -d '{"credential_type":"password","value":"a long enough one","temporary":false}'
+            -d '{"credential_type":"password","value":"Operator-pass-1234!","temporary":false}'
           authorize=$(curl --silent --output /dev/null --write-out '%{redirect_url}' \
             --cookie-jar jar.txt --cookie jar.txt http://localhost:4318/auth/oidc/start)
           case "$authorize" in http://ferriskey:3333/*) ;; *) echo "start sent the browser to $authorize"; exit 1 ;; esac
           curl --silent --output /dev/null --cookie-jar jar.txt --cookie jar.txt "$authorize"
-          callback=$(curl --fail --silent --show-error --cookie-jar jar.txt --cookie jar.txt -X POST \
+          callback=$(curl --fail-with-body --silent --show-error --cookie-jar jar.txt --cookie jar.txt -X POST \
             'http://ferriskey:3333/realms/ferristrace/login-actions/authenticate?client_id=ferristrace' \
             -H 'origin: http://ferriskey:5555' -H 'content-type: application/json' \
-            -d '{"username":"operator","password":"a long enough one"}' | jq -r .url)
+            -d '{"username":"operator","password":"Operator-pass-1234!"}' | jq -r .url)
           case "$callback" in http://localhost:4318/auth/oidc/callback*) ;; *) echo "FerrisKey answered $callback"; exit 1 ;; esac
           landed=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --cookie-jar jar.txt --cookie jar.txt "$callback")
