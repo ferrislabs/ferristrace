@@ -1,5 +1,5 @@
 import { useIsFetching, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Clock, Folder, RefreshCw, Search } from 'lucide-react'
+import { Check, ChevronDown, Clock, Folder, RefreshCw, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,7 @@ function WindowPicker() {
         <div role="listbox" aria-label="Time window">
           {WINDOWS.map((w) => (
             <button key={w.key} type="button" role="option" aria-selected={w.key === window.key} onClick={() => { window.choose(w.key); setOpen(false) }} className="flex h-[30px] w-full cursor-pointer items-center rounded-sm px-2 text-left text-control hover:bg-muted max-md:h-11">
-              Last {w.label}{w.key === window.key ? <span className="ml-auto text-accent-text" aria-hidden>✓</span> : null}
+              Last {w.label}{w.key === window.key ? <Check className="ml-auto size-4 text-accent-text" aria-hidden /> : null}
             </button>
           ))}
         </div>
