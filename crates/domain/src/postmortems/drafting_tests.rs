@@ -87,6 +87,7 @@ fn chronicle(entries: Vec<TimelineEntry>) -> Chronicle {
         alerts: vec![AlertRef {
             id: rule(),
             name: "Checkout errors".into(),
+            services: vec!["checkout".into()],
         }],
     }
 }
@@ -272,6 +273,7 @@ fn a_comment_by_an_agent_is_told_under_the_agents_name() {
         Author::Agent {
             id: Some(crate::agents::AgentId::new(Uuid::from_u128(4))),
             name: "triage bot".into(),
+            on_behalf_of: None,
         },
         Change::Comment {
             body: CommentBody::try_from("rolled back the release").expect("a body"),

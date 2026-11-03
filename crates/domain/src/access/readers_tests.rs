@@ -21,6 +21,7 @@ fn calling(client_id: &str, scopes: &[&str]) -> Reader {
             scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
             jti: "jti-1".into(),
             expires_at_unix_secs: 4_000_000_000,
+            delegated: None,
         },
         route: "/api/orgs/{org}/traces".into(),
     })
@@ -326,4 +327,48 @@ async fn unregistered_and_revoked_clients_are_refused_identically() {
 
     assert_eq!(revoked, unregistered);
     assert_eq!(revoked, Err(ReadRefusal::Unknown));
+}
+
+#[tokio::test]
+async fn spec_l7_4_a_delegated_read_names_the_person_in_its_audit_entry() {
+    use crate::agents::Delegation;
+
+    let book = Book::default();
+    book.enrol(an_org(MINE), "bot", &[AgentScope::TelemetryRead], None);
+    let Reader::Agent(mut call) = calling("bot", &["telemetry:read"]) else {
+        unreachable!()
+    };
+    call.token.delegated = Some(Delegation {
+        subject: "sub-dana".into(),
+        email: Some("dana@example.com".into()),
+        act_sub: None,
+        act_client_id: Some("mcp-gateway".into()),
+    });
+
+    agent_readers(&book)
+        .grant(&Reader::Agent(call), an_org(MINE))
+        .await
+        .expect("a delegated read");
+
+    let uses = book.uses();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(
+        uses[0].1.detail.get("on_behalf_of_email"),
+        Some(Some("dana@example.com"))
+    );
+    assert_eq!(uses[0].1.detail.get("jti"), Some(Some("jti-1")));
+}
+
+#[tokio::test]
+async fn an_agent_acting_for_nobody_writes_no_on_behalf_of() {
+    let book = Book::default();
+    book.enrol(an_org(MINE), "bot", &[AgentScope::TelemetryRead], None);
+
+    agent_readers(&book)
+        .grant(&calling("bot", &["telemetry:read"]), an_org(MINE))
+        .await
+        .expect("a read");
+
+    assert_eq!(book.uses()[0].1.detail.get("on_behalf_of"), None);
 }

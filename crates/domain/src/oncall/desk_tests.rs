@@ -9,6 +9,7 @@ use crate::access::key_ring_tests::{
     MINE, MemberOfMine, OneSession, Ring, THEIRS, an_org, scopes, token,
 };
 use crate::access::{KeyScope, Reader, Readers};
+use crate::agents::{AgentCall, AgentScope, Delegation, VerifiedToken};
 use crate::audit::{Action, Actor, TargetKind};
 use crate::incidents::{Author, Change, IncidentId};
 use crate::organisation::{OrgRole, Whoami};
@@ -331,4 +332,202 @@ async fn spec_l2_5_an_acknowledged_page_stops_escalating() {
     )));
     assert_eq!(world.oncall.pages()[0].target, person(ME));
     assert_eq!(mail.paged().len(), 1, "only the first email went out");
+}
+
+fn agent_calling(client: &str, claimed: &[&str], delegated: Option<Delegation>) -> Reader {
+    Reader::Agent(AgentCall {
+        token: VerifiedToken {
+            client_id: client.into(),
+            scopes: claimed.iter().map(|scope| (*scope).into()).collect(),
+            jti: "jti-ack".into(),
+            expires_at_unix_secs: 4_000_000_000,
+            delegated,
+        },
+        route: "/api/orgs/{org}/pages/{id}/ack".into(),
+    })
+}
+
+fn dana() -> Delegation {
+    Delegation {
+        subject: "sub-dana".into(),
+        email: Some("dana@example.com".into()),
+        act_sub: None,
+        act_client_id: Some("mcp-gateway".into()),
+    }
+}
+
+#[tokio::test]
+async fn spec_l7_4_an_agent_with_the_scope_acknowledges_for_the_person_and_it_is_told_everywhere() {
+    let world = World::new();
+    let page = world.paged(0).await;
+    let agent = world.keys.book.enrol(
+        an_org(MINE),
+        "gateway",
+        &[AgentScope::TelemetryRead, AgentScope::OncallAcknowledge],
+        None,
+    );
+
+    let acknowledged = world
+        .desk(OrgRole::Member)
+        .acknowledge(
+            &agent_calling("gateway", &["oncall:acknowledge"], Some(dana())),
+            an_org(MINE),
+            page.id,
+            at(60),
+        )
+        .await
+        .expect("the agent acknowledges");
+
+    assert_eq!(acknowledged.page.state, PageState::Acknowledged);
+    assert_eq!(acknowledged.page.acknowledged_by, None);
+    let uses = world.keys.book.uses();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0].1.actor, Actor::Agent(agent));
+    assert_eq!(uses[0].1.action, Action::PageAcknowledged);
+    assert_eq!(uses[0].1.detail.get("jti"), Some(Some("jti-ack")));
+    assert_eq!(uses[0].1.detail.get("via"), Some(Some("agent")));
+    assert_eq!(uses[0].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(
+        uses[0].1.detail.get("on_behalf_of_email"),
+        Some(Some("dana@example.com"))
+    );
+    let told = world.incidents.timeline();
+    assert_eq!(told.len(), 1);
+    assert_eq!(
+        told[0].author,
+        Author::Agent {
+            id: Some(agent),
+            name: "triage".into(),
+            on_behalf_of: Some("dana@example.com".into()),
+        }
+    );
+}
+
+#[tokio::test]
+async fn an_agent_without_the_acknowledge_scope_in_its_grant_or_its_token_is_refused() {
+    let world = World::new();
+    let page = world.paged(0).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "reader", &[AgentScope::TelemetryRead], None);
+    world.keys.book.enrol(
+        an_org(MINE),
+        "gateway",
+        &[AgentScope::OncallAcknowledge],
+        None,
+    );
+    let desk = world.desk(OrgRole::Member);
+
+    let not_granted = desk
+        .acknowledge(
+            &agent_calling("reader", &["oncall:acknowledge", "telemetry:read"], None),
+            an_org(MINE),
+            page.id,
+            at(1),
+        )
+        .await;
+    let not_claimed = desk
+        .acknowledge(
+            &agent_calling("gateway", &["telemetry:read"], None),
+            an_org(MINE),
+            page.id,
+            at(1),
+        )
+        .await;
+
+    assert_eq!(not_granted.map(|_| ()), Err(OncallError::OutOfScope));
+    assert_eq!(not_claimed.map(|_| ()), Err(OncallError::OutOfScope));
+    assert!(world.keys.book.uses().is_empty());
+    assert!(world.incidents.timeline().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_of_another_organisation_or_a_project_bound_one_acknowledges_nothing() {
+    let world = World::new();
+    let page = world.paged(0).await;
+    world.keys.book.enrol(
+        an_org(THEIRS),
+        "foreign",
+        &[AgentScope::OncallAcknowledge],
+        None,
+    );
+    world.keys.book.enrol(
+        an_org(MINE),
+        "bound",
+        &[AgentScope::OncallAcknowledge],
+        Some(crate::access::key_ring_tests::a_project(1)),
+    );
+    let desk = world.desk(OrgRole::Member);
+
+    let foreign = desk
+        .acknowledge(
+            &agent_calling("foreign", &["oncall:acknowledge"], None),
+            an_org(MINE),
+            page.id,
+            at(1),
+        )
+        .await;
+    let bound = desk
+        .acknowledge(
+            &agent_calling("bound", &["oncall:acknowledge"], None),
+            an_org(MINE),
+            page.id,
+            at(1),
+        )
+        .await;
+
+    assert_eq!(foreign.map(|_| ()), Err(OncallError::NoSession));
+    assert_eq!(bound.map(|_| ()), Err(OncallError::OutOfScope));
+    assert!(world.keys.book.uses().is_empty());
+}
+
+#[tokio::test]
+async fn a_second_agent_acknowledgement_changes_nothing_and_is_logged_as_a_read() {
+    let world = World::new();
+    let page = world.paged(0).await;
+    world.keys.book.enrol(
+        an_org(MINE),
+        "gateway",
+        &[AgentScope::OncallAcknowledge],
+        None,
+    );
+    let desk = world.desk(OrgRole::Member);
+    let agent = agent_calling("gateway", &["oncall:acknowledge"], Some(dana()));
+
+    desk.acknowledge(&agent, an_org(MINE), page.id, at(1))
+        .await
+        .expect("once");
+    desk.acknowledge(&agent, an_org(MINE), page.id, at(2))
+        .await
+        .expect("twice");
+
+    let uses = world.keys.book.uses();
+    assert_eq!(uses.len(), 2);
+    assert_eq!(uses[1].1.action, Action::AgentRead);
+    assert_eq!(uses[1].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(world.incidents.timeline().len(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_never_does_another_oncall_write_through_the_desk() {
+    let world = World::new();
+    let page = world.paged(0).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "gateway", &[AgentScope::TelemetryRead], None);
+
+    let listed = world
+        .desk(OrgRole::Member)
+        .list(
+            &agent_calling("gateway", &["telemetry:read"], None),
+            an_org(MINE),
+            PageScope::Open,
+        )
+        .await
+        .expect("an agent with telemetry:read lists pages");
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].page.id, page.id);
 }

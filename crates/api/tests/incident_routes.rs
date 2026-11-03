@@ -15,11 +15,11 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, Actor, Agent, AgentId, AgentScope, AgentScopes, AgentToken, AgentTokens,
     AlertRules, AlertSeverity, AlertStates, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned,
-    AuditEntry, AuditTrail, Comparison, Condition, Created, Definition, DefinitionParts, IssuedKey,
-    KeyId, KeyName, KeyScopes, Labels, LiveSession, Membership, Memberships, NoDataPolicy,
-    NoPhotos, OrgRole, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant,
-    RegisteredAgent, Renamed, RuleDraft, RuleId, RuleName, RuleState, SeriesState, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Signal, StoreError,
+    AuditEntry, AuditTrail, Comparison, Condition, Created, Definition, DefinitionParts,
+    Delegation, IssuedKey, KeyId, KeyName, KeyScopes, Labels, LiveSession, Membership, Memberships,
+    NoDataPolicy, NoPhotos, OrgRole, Project, ProjectId, ProjectName, Projects, ProvisionPolicy,
+    ReadGrant, RegisteredAgent, Renamed, RuleDraft, RuleId, RuleName, RuleState, SeriesState,
+    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Signal, StoreError,
     TargetKind, TeamId, TenantId, TokenRefusal, TraceMeasure, TraceSignal, UnixSeconds,
     VerifiedToken, WhoamiError,
 };
@@ -195,9 +195,23 @@ impl Tokens {
                 scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
                 jti: jti.into(),
                 expires_at_unix_secs: 4_000_000_000,
+                delegated: None,
             },
         );
         token
+    }
+}
+
+impl Tokens {
+    fn delegate(&self, token: &str, subject: &str, email: Option<&str>) {
+        if let Some(held) = self.known.lock().expect("the lock").get_mut(token) {
+            held.delegated = Some(Delegation {
+                subject: subject.into(),
+                email: email.map(Into::into),
+                act_sub: Some("gateway".into()),
+                act_client_id: None,
+            });
+        }
     }
 }
 
@@ -1412,4 +1426,103 @@ async fn a_token_the_issuer_would_not_vouch_for_never_reaches_an_incident() {
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(harness.incidents.timeline().len(), 1);
+}
+
+#[tokio::test]
+async fn spec_l7_4_a_delegated_resolve_names_the_person_in_the_timeline_and_the_audit_log() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Checkout down"})).await;
+    let path = one(MINE, &incident);
+    let agent = harness.enrol(
+        "bot",
+        &[AgentScope::IncidentsComment, AgentScope::IncidentsResolve],
+        None,
+    );
+    let commenting = harness.tokens.mint(
+        "commenting",
+        "bot",
+        &["telemetry:read", "incidents:comment"],
+        "jti-1",
+    );
+    let resolving = harness
+        .tokens
+        .mint("resolving", "bot", &["incidents:resolve"], "jti-2");
+    for token in [&commenting, &resolving] {
+        harness
+            .tokens
+            .delegate(token, "sub-dana", Some("dana@example.com"));
+    }
+
+    let (commented, entry) = harness
+        .agent_call(
+            &commenting,
+            Method::POST,
+            &format!("{path}/comments"),
+            Some(json!({"body": "rolling back"})),
+        )
+        .await;
+    let (resolved, _) = harness
+        .agent_call(
+            &resolving,
+            Method::PATCH,
+            &path,
+            Some(json!({"status": "resolved"})),
+        )
+        .await;
+    let (_, read) = harness.member(Method::GET, &path, None).await;
+
+    assert_eq!(commented, StatusCode::CREATED, "{entry}");
+    assert_eq!(entry["author"]["on_behalf_of"], "dana@example.com");
+    assert_eq!(resolved, StatusCode::OK);
+    let timeline = read["timeline"].as_array().expect("a list");
+    let by_agent: Vec<_> = timeline
+        .iter()
+        .filter(|entry| entry["author"]["kind"] == "agent")
+        .collect();
+    assert_eq!(by_agent.len(), 2);
+    for entry in &by_agent {
+        assert_eq!(entry["author"]["label"], "triage bot");
+        assert_eq!(entry["author"]["on_behalf_of"], "dana@example.com");
+    }
+    let first = timeline.first().expect("the opening");
+    assert!(first["author"].get("on_behalf_of").is_none());
+    let audited: Vec<_> = harness
+        .notebook
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.actor == Actor::Agent(agent))
+        .collect();
+    assert_eq!(audited.len(), 2);
+    for entry in audited {
+        assert_eq!(entry.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+        assert_eq!(
+            entry.detail.get("on_behalf_of_email"),
+            Some(Some("dana@example.com"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_incident_tells_its_severity_status_and_the_services_its_alert_concerns() {
+    let harness = Harness::new();
+    let firing = harness.a_rule(AlertStatus::Firing).await;
+    let from_alert = harness.declared(json!({"alert": firing.to_string()})).await;
+    let by_hand = harness.declared(json!({"title": "Disk full"})).await;
+    harness.enrol("bot", &[AgentScope::TelemetryRead], None);
+    let token = harness
+        .tokens
+        .mint("reader", "bot", &["telemetry:read"], "jti-1");
+
+    let (status, read) = harness
+        .agent_call(&token, Method::GET, &one(MINE, &from_alert), None)
+        .await;
+    let (_, manual) = harness
+        .agent_call(&token, Method::GET, &one(MINE, &by_hand), None)
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["severity"], "sev2");
+    assert_eq!(read["status"], "investigating");
+    assert_eq!(read["services"], json!(["checkout"]));
+    assert_eq!(manual["services"], json!([]));
 }

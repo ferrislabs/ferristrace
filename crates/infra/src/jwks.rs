@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferristrace_domain::{AgentToken, AgentTokens, TokenRefusal, VerifiedToken};
+use ferristrace_domain::{AgentToken, AgentTokens, Delegation, TokenRefusal, VerifiedToken};
 use jsonwebtoken::jwk::{AlgorithmParameters, EllipticCurve, Jwk, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
@@ -73,6 +73,40 @@ struct Claims {
     scope: Option<Scope>,
     #[serde(default)]
     typ: Option<String>,
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    act: Option<serde_json::Value>,
+}
+
+fn delegation_of(
+    sub: Option<String>,
+    email: Option<String>,
+    act: Option<serde_json::Value>,
+) -> Result<Option<Delegation>, TokenRefusal> {
+    let Some(act) = act else {
+        return Ok(None);
+    };
+    let serde_json::Value::Object(act) = act else {
+        return Err(TokenRefusal::Invalid);
+    };
+    let subject = sub
+        .filter(|sub| !sub.is_empty())
+        .ok_or(TokenRefusal::Invalid)?;
+    let named = |key: &str| {
+        act.get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|held| !held.is_empty())
+            .map(Box::<str>::from)
+    };
+    Ok(Some(Delegation {
+        subject: subject.into(),
+        email: email.filter(|email| !email.is_empty()).map(Into::into),
+        act_sub: named("sub"),
+        act_client_id: named("client_id"),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,11 +347,13 @@ impl AgentTokens for JwksVerifier {
             .filter(|azp| !azp.is_empty())
             .or_else(|| claims.client_id.filter(|client| !client.is_empty()))
             .ok_or(TokenRefusal::Invalid)?;
+        let delegated = delegation_of(claims.sub, claims.email, claims.act)?;
         Ok(VerifiedToken {
             client_id: client_id.into(),
             scopes: claims.scope.map(Scope::into_scopes).unwrap_or_default(),
             jti: jti.into(),
             expires_at_unix_secs: claims.exp,
+            delegated,
         })
     }
 }

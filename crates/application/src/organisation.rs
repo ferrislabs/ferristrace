@@ -1,9 +1,9 @@
 use ferristrace_domain::{
-    OrgName, OrgSettings, Organisation, Photo, PhotoKind, RetentionDays, SessionToken,
-    SettingError, TenantId, Whoami,
+    OrgClock, OrgName, OrgSettings, OrgTimezone, Organisation, Photo, PhotoKind, ReadRefusal,
+    Reader, Readers, RetentionDays, SessionToken, SettingError, TenantId, Whoami,
 };
 
-use crate::registry::OrgRepos;
+use crate::registry::{OrgRepos, ReadRepos};
 use crate::{Ferristrace, Stack, transactional};
 
 impl<S: Stack> Ferristrace<S>
@@ -61,6 +61,23 @@ where
     }
 
     #[transactional(sessions, memberships, orgs, audit, unavailable = SettingError::StoreUnreachable)]
+    pub async fn set_org_timezone(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        timezone: &OrgTimezone,
+    ) -> Result<Organisation, SettingError> {
+        OrgSettings::new(
+            Whoami::new(sessions, memberships),
+            orgs,
+            &self.photos,
+            audit,
+        )
+        .set_timezone(token, org, timezone)
+        .await
+    }
+
+    #[transactional(sessions, memberships, orgs, audit, unavailable = SettingError::StoreUnreachable)]
     pub async fn put_org_logo(
         &self,
         token: &SessionToken,
@@ -106,6 +123,25 @@ where
             audit,
         )
         .logo(token, org)
+        .await
+    }
+}
+
+impl<S: Stack> Ferristrace<S>
+where
+    S::Repos: OrgRepos + ReadRepos,
+{
+    #[transactional(sessions, memberships, api_keys, orgs, unavailable = ReadRefusal::StoreUnreachable)]
+    pub async fn org_timezone(
+        &self,
+        who: &Reader,
+        org: TenantId,
+    ) -> Result<OrgTimezone, ReadRefusal> {
+        OrgClock::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            orgs,
+        )
+        .timezone(who, org)
         .await
     }
 }

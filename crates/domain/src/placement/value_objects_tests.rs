@@ -207,3 +207,36 @@ fn placements_seen_are_capped_at_five_hundred_of_each() {
     assert_eq!(seen.pods.len(), MAX_PLACEMENTS);
     assert_eq!(seen.nodes.len(), MAX_PLACEMENTS);
 }
+
+#[test]
+fn a_sighting_is_named_by_the_project_it_points_at_or_left_without_one() {
+    use super::{ServiceSite, Sighting};
+    use crate::catalogue::{Project, ProjectId};
+    use crate::telemetry::TenantId;
+    use uuid::Uuid;
+
+    let storefront = Project {
+        id: ProjectId::new(Uuid::from_u128(7)),
+        org: TenantId::new(Uuid::from_u128(1)),
+        name: "storefront".into(),
+        created_at_unix_nanos: 1,
+        team: None,
+        keys: 0,
+    };
+    let seen = |project| Sighting {
+        project,
+        environments: vec!["prod".into(), "staging".into()],
+    };
+
+    let known = ServiceSite::named(seen(Some(storefront.id)), std::slice::from_ref(&storefront));
+    let deleted = ServiceSite::named(
+        seen(Some(ProjectId::new(Uuid::from_u128(8)))),
+        &[storefront],
+    );
+    let loose = ServiceSite::named(seen(None), &[]);
+
+    assert_eq!(known.project.as_deref(), Some("storefront"));
+    assert_eq!(known.environments, ["prod".into(), "staging".into()]);
+    assert_eq!(deleted.project, None);
+    assert_eq!(loose.project, None);
+}

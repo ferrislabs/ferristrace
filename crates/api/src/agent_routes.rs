@@ -27,7 +27,7 @@ pub struct Roll {
 }
 
 #[derive(Debug, Serialize)]
-struct Registered {
+pub(crate) struct Registered {
     id: Uuid,
     name: String,
     client_id: String,

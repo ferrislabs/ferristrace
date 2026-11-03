@@ -359,6 +359,20 @@ impl Signal {
         }
     }
 
+    pub fn services(&self) -> Vec<Box<str>> {
+        match self {
+            Self::Traces(traces) => traces.service.iter().cloned().collect(),
+            Self::Logs(logs) => logs.services.clone(),
+            Self::Metrics(metric) => ["service.name", "service"]
+                .into_iter()
+                .find_map(|key| metric.filter.get(key))
+                .cloned()
+                .into_iter()
+                .collect(),
+            Self::Llm(_) => Vec::new(),
+        }
+    }
+
     pub fn groups(&self) -> bool {
         match self {
             Self::Metrics(metric) => !metric.group_by.is_empty(),

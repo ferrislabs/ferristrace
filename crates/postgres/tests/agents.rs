@@ -282,6 +282,36 @@ async fn the_database_refuses_a_scope_that_is_not_an_agent_scope() {
 }
 
 #[tokio::test]
+async fn the_database_admits_the_oncall_acknowledge_scope() {
+    let Some(pool) = control_plane("agents_ack_scope").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let agents = backend::agents(&pg);
+
+    let registered = agents
+        .register(
+            org,
+            &enrolment(
+                "gateway",
+                &[AgentScope::TelemetryRead, AgentScope::OncallAcknowledge],
+                None,
+            ),
+            owner,
+        )
+        .await
+        .expect("the register")
+        .expect("a fresh client id");
+
+    assert_eq!(
+        registered.scopes.as_slice(),
+        [AgentScope::TelemetryRead, AgentScope::OncallAcknowledge]
+    );
+    assert_eq!(agents.list(org).await.expect("the list"), vec![registered]);
+}
+
+#[tokio::test]
 async fn standing_prefers_the_live_agent_and_never_crosses_organisations() {
     let Some(pool) = control_plane("agents_standing").await else {
         return;
@@ -430,6 +460,7 @@ fn calling(client_id: &str, scopes: &[&str], jti: &str) -> Reader {
             scopes: scopes.iter().map(|scope| (*scope).into()).collect(),
             jti: jti.into(),
             expires_at_unix_secs: NOW + 600,
+            delegated: None,
         },
         route: "/api/orgs/{org}/traces".into(),
     })

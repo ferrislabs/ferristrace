@@ -3,6 +3,7 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::errors::{BadAgentName, BadAgentScopes, BadClientId};
+use crate::audit::Detail;
 use crate::secret::KEY_PREFIX;
 
 pub(super) const MAX_AGENT_NAME_BYTES: usize = 64;
@@ -13,13 +14,15 @@ pub enum AgentScope {
     TelemetryRead,
     IncidentsComment,
     IncidentsResolve,
+    OncallAcknowledge,
 }
 
 impl AgentScope {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::TelemetryRead,
         Self::IncidentsComment,
         Self::IncidentsResolve,
+        Self::OncallAcknowledge,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -27,6 +30,7 @@ impl AgentScope {
             Self::TelemetryRead => "telemetry:read",
             Self::IncidentsComment => "incidents:comment",
             Self::IncidentsResolve => "incidents:resolve",
+            Self::OncallAcknowledge => "oncall:acknowledge",
         }
     }
 
@@ -193,15 +197,45 @@ impl fmt::Debug for AgentToken {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delegation {
+    pub subject: Box<str>,
+    pub email: Option<Box<str>>,
+    pub act_sub: Option<Box<str>>,
+    pub act_client_id: Option<Box<str>>,
+}
+
+impl Delegation {
+    pub fn label(&self) -> &str {
+        self.email.as_deref().unwrap_or(&self.subject)
+    }
+
+    #[must_use]
+    pub fn stamp(&self, detail: Detail) -> Detail {
+        let detail = detail.with("on_behalf_of", &self.subject);
+        match &self.email {
+            Some(email) => detail.with("on_behalf_of_email", email),
+            None => detail,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedToken {
     pub client_id: Box<str>,
     pub scopes: Vec<Box<str>>,
     pub jti: Box<str>,
     pub expires_at_unix_secs: u64,
+    pub delegated: Option<Delegation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCall {
     pub token: VerifiedToken,
     pub route: Box<str>,
+}
+
+impl AgentCall {
+    pub fn delegated(&self) -> Option<&Delegation> {
+        self.token.delegated.as_ref()
+    }
 }

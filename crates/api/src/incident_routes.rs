@@ -102,6 +102,7 @@ pub struct IncidentBody {
     opened_ms: u64,
     resolved_ms: Option<u64>,
     alert: Option<AlertBody>,
+    services: Vec<String>,
     paged_schedule: Option<Uuid>,
 }
 
@@ -119,6 +120,11 @@ impl From<&Briefed> for IncidentBody {
             opened_ms: incident.opened_ms,
             resolved_ms: incident.resolved_ms,
             alert: briefed.alert.as_ref().map(AlertBody::from),
+            services: briefed
+                .alert
+                .as_ref()
+                .map(|alert| alert.services.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
             paged_schedule: incident.paged_schedule.map(ScheduleId::as_uuid),
         }
     }
@@ -155,6 +161,8 @@ struct AuthorBody {
     kind: &'static str,
     id: Option<Uuid>,
     label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_behalf_of: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -255,6 +263,12 @@ fn entry_of(chronicle: &Chronicle, entry: &TimelineEntry) -> EntryBody {
             kind: entry.author.kind(),
             id,
             label: chronicle.author_label(&entry.author).to_owned(),
+            on_behalf_of: match &entry.author {
+                Author::Agent { on_behalf_of, .. } => {
+                    on_behalf_of.as_deref().map(ToOwned::to_owned)
+                }
+                _ => None,
+            },
         },
         detail: detail_of(chronicle, &entry.change),
     }

@@ -102,6 +102,12 @@ pub struct OnCallNow {
     pub until_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OnCallStatus {
+    pub on_call: bool,
+    pub schedules: Vec<ScheduleName>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageSource {
     Alert { rule: RuleId, event: EventId },

@@ -23,6 +23,7 @@ export type Incident = {
   opened_ms: number
   resolved_ms: number | null
   alert: { id: string; name: string } | null
+  services: string[]
   paged_schedule: string | null
 }
 
@@ -30,7 +31,7 @@ export type AttachmentKind = 'trace' | 'logs' | 'metric'
 
 export type Attachment = { id: string; kind: AttachmentKind; reference: string; label: string; at_ms: number }
 
-export type Author = { kind: 'account' | 'api_key' | 'agent' | 'system'; id: string | null; label: string }
+export type Author = { kind: 'account' | 'api_key' | 'agent' | 'system'; id: string | null; label: string; on_behalf_of?: string }
 
 type Pair<T> = { from: T; to: T }
 

@@ -224,10 +224,7 @@ where
         .await?;
         let people = self.people(org).await?;
         let alerts = rule
-            .map(|rule| AlertRef {
-                id: rule.id,
-                name: rule.name.as_str().into(),
-            })
+            .map(|rule| AlertRef::of(&rule))
             .into_iter()
             .collect::<Vec<_>>();
         Ok(brief(incident, &people, &alerts))
@@ -567,10 +564,7 @@ where
             .list(org)
             .await?
             .into_iter()
-            .map(|rule| AlertRef {
-                id: rule.id,
-                name: rule.name.as_str().into(),
-            })
+            .map(|rule| AlertRef::of(&rule))
             .collect())
     }
 
@@ -629,7 +623,7 @@ where
                         actor: Actor::Agent(grant.agent),
                         action,
                         target,
-                        detail: detail.with("jti", &grant.jti),
+                        detail: grant.stamp(detail),
                     },
                 )
                 .await?),
@@ -661,6 +655,10 @@ impl Hand {
             Self::Agent(grant) => Author::Agent {
                 id: Some(grant.agent),
                 name: grant.name.clone(),
+                on_behalf_of: grant
+                    .delegated
+                    .as_ref()
+                    .map(|delegation| delegation.label().into()),
             },
         }
     }

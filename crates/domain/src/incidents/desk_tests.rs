@@ -1045,9 +1045,25 @@ fn called_by(client: &str, claimed: &[&str], jti: &str) -> Reader {
             scopes: claimed.iter().map(|scope| (*scope).into()).collect(),
             jti: jti.into(),
             expires_at_unix_secs: 4_000_000_000,
+            delegated: None,
         },
         route: "/api/orgs/{org}/incidents/{id}".into(),
     })
+}
+
+fn called_for(client: &str, claimed: &[&str], jti: &str, email: Option<&str>) -> Reader {
+    use crate::agents::Delegation;
+
+    let Reader::Agent(mut call) = called_by(client, claimed, jti) else {
+        unreachable!()
+    };
+    call.token.delegated = Some(Delegation {
+        subject: "sub-dana".into(),
+        email: email.map(Into::into),
+        act_sub: Some("gateway".into()),
+        act_client_id: None,
+    });
+    Reader::Agent(call)
 }
 
 fn everything(client: &str, jti: &str) -> Reader {
@@ -1168,7 +1184,8 @@ async fn spec_l5_4_an_agent_with_the_comment_scope_comments_as_itself_and_it_is_
         entries[1].author,
         Author::Agent {
             id: Some(agent_id),
-            name: "triage".into()
+            name: "triage".into(),
+            on_behalf_of: None,
         }
     );
     assert_eq!(
@@ -1318,7 +1335,8 @@ async fn resolving_takes_the_resolve_scope_and_is_audited_once_with_the_jti() {
         entries[1].author,
         Author::Agent {
             id: Some(agent_id),
-            name: "triage".into()
+            name: "triage".into(),
+            on_behalf_of: None,
         }
     );
     let uses = world.keys.book.uses();
@@ -1512,4 +1530,122 @@ async fn resolving_an_already_resolved_incident_is_still_audited_once() {
 
     assert_eq!(world.incidents.timeline().len(), 2);
     assert_eq!(world.keys.book.uses().len(), 2);
+}
+
+#[tokio::test]
+async fn spec_l7_4_a_delegated_comment_names_the_person_in_the_timeline_and_the_audit_entry() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    let agent_id =
+        world
+            .keys
+            .book
+            .enrol(an_org(MINE), "bot", &[AgentScope::IncidentsComment], None);
+
+    desk.comment(
+        &called_for(
+            "bot",
+            &["incidents:comment"],
+            "jti-9",
+            Some("dana@example.com"),
+        ),
+        an_org(MINE),
+        id,
+        &hi(),
+        false,
+        at(1),
+    )
+    .await
+    .expect("commented");
+
+    let entries = world.incidents.timeline();
+    assert_eq!(
+        entries[1].author,
+        Author::Agent {
+            id: Some(agent_id),
+            name: "triage".into(),
+            on_behalf_of: Some("dana@example.com".into()),
+        }
+    );
+    let uses = world.keys.book.uses();
+    assert_eq!(uses.len(), 1);
+    assert_eq!(uses[0].1.detail.get("jti"), Some(Some("jti-9")));
+    assert_eq!(uses[0].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(
+        uses[0].1.detail.get("on_behalf_of_email"),
+        Some(Some("dana@example.com"))
+    );
+}
+
+#[tokio::test]
+async fn spec_l7_4_a_delegated_resolve_without_an_email_names_the_subject() {
+    use crate::agents::AgentScope;
+
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let id = an_open_incident(&world, None).await;
+    world
+        .keys
+        .book
+        .enrol(an_org(MINE), "bot", &[AgentScope::IncidentsResolve], None);
+
+    desk.amend(
+        &called_for("bot", &["incidents:resolve"], "jti-3", None),
+        an_org(MINE),
+        id,
+        resolving(),
+        at(2),
+    )
+    .await
+    .expect("resolved");
+
+    let entries = world.incidents.timeline();
+    assert!(matches!(
+        &entries[1].author,
+        Author::Agent { on_behalf_of: Some(person), .. } if &**person == "sub-dana"
+    ));
+    let uses = world.keys.book.uses();
+    assert_eq!(uses[0].1.action, Action::IncidentResolved);
+    assert_eq!(uses[0].1.detail.get("on_behalf_of"), Some(Some("sub-dana")));
+    assert_eq!(uses[0].1.detail.get("on_behalf_of_email"), None);
+}
+
+#[tokio::test]
+async fn spec_l7_an_incident_from_an_alert_tells_the_services_the_alert_concerns() {
+    let world = World::new();
+    let desk = world.desk(OrgRole::Member);
+    let rule = world
+        .a_rule(an_org(MINE), AlertSeverity::Critical, AlertStatus::Firing)
+        .await;
+    let from_alert = desk
+        .open(
+            &session(),
+            an_org(MINE),
+            &IncidentDraft {
+                alert: Some(rule),
+                ..IncidentDraft::default()
+            },
+            at(0),
+        )
+        .await
+        .expect("declared");
+    let by_hand = an_open_incident(&world, None).await;
+
+    let dossier = desk
+        .get(&session(), an_org(MINE), from_alert.incident.id)
+        .await
+        .expect("read");
+    let manual = desk
+        .get(&session(), an_org(MINE), by_hand)
+        .await
+        .expect("read");
+
+    assert_eq!(
+        dossier.briefed.alert.map(|alert| alert.services),
+        Some(vec![Box::<str>::from("checkout")])
+    );
+    assert_eq!(manual.briefed.alert, None);
 }

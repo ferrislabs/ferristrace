@@ -5,7 +5,7 @@ import { useOrganisations } from '@/auth/session'
 import { useNavigate } from '@/lib/router'
 import { useScope } from '@/lib/scope'
 
-export type OrgCard = { id: string; name: string; plan: string; created_at_ms: number; version: string; logo?: string | null; retention_days: number | null; retention_cap_days: number | null; default_retention_days: number }
+export type OrgCard = { id: string; name: string; plan: string; created_at_ms: number; version: string; logo?: string | null; retention_days: number | null; retention_cap_days: number | null; default_retention_days: number; timezone: string }
 
 const key = (org: string | undefined) => ['org', org]
 
@@ -134,6 +134,20 @@ export function useSetOrgRetention() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (days: number | null) => json<OrgCard>(await patch(`/api/orgs/${active?.org}/retention`, { days })),
+    onSuccess: (card) => client.setQueryData(key(card.id), card),
+  })
+}
+
+export function timeZoneNames(): string[] {
+  const listed = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
+  return listed.includes('UTC') ? listed : ['UTC', ...listed]
+}
+
+export function useSetOrgTimezone() {
+  const { active } = useOrganisations()
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (timezone: string) => json<OrgCard>(await patch(`/api/orgs/${active?.org}/timezone`, { timezone })),
     onSuccess: (card) => client.setQueryData(key(card.id), card),
   })
 }

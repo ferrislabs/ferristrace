@@ -942,3 +942,101 @@ async fn keys_served_from_another_host_than_the_issuer_are_not_trusted() {
     );
     assert_eq!(server.fetched(), 0);
 }
+
+#[tokio::test]
+async fn a_token_without_an_act_claim_is_not_delegated() {
+    let server = issuer_with_keys().await;
+    let token = sign(
+        Algorithm::RS256,
+        Some(FIRST),
+        &default_claims(&server.issuer()),
+        &rsa_signer(&FIRST_KEY),
+    );
+
+    let verified = verifier(&server, Some(AUDIENCE))
+        .verify(&token)
+        .await
+        .expect("a valid token");
+
+    assert_eq!(verified.delegated, None);
+}
+
+#[tokio::test]
+async fn an_act_claim_makes_the_token_delegated_to_its_subject_and_email() {
+    let server = issuer_with_keys().await;
+    let mut claims = default_claims(&server.issuer());
+    claims["email"] = json!("dana@example.com");
+    claims["act"] = json!({
+        "sub": "gateway-service-account",
+        "client_id": "mcp-gateway",
+        "act": { "sub": "an-earlier-actor" }
+    });
+    let token = sign(
+        Algorithm::RS256,
+        Some(FIRST),
+        &claims,
+        &rsa_signer(&FIRST_KEY),
+    );
+
+    let verified = verifier(&server, Some(AUDIENCE))
+        .verify(&token)
+        .await
+        .expect("a valid token");
+
+    let delegated = verified.delegated.expect("a delegated call");
+    assert_eq!(&*delegated.subject, "7f0a0c1e-0000-4000-8000-000000000001");
+    assert_eq!(delegated.email.as_deref(), Some("dana@example.com"));
+    assert_eq!(
+        delegated.act_sub.as_deref(),
+        Some("gateway-service-account")
+    );
+    assert_eq!(delegated.act_client_id.as_deref(), Some("mcp-gateway"));
+}
+
+#[tokio::test]
+async fn a_delegation_without_an_email_names_the_subject_only() {
+    let server = issuer_with_keys().await;
+    let mut claims = default_claims(&server.issuer());
+    claims["act"] = json!({ "client_id": "mcp-gateway" });
+    let token = sign(
+        Algorithm::RS256,
+        Some(FIRST),
+        &claims,
+        &rsa_signer(&FIRST_KEY),
+    );
+
+    let verified = verifier(&server, Some(AUDIENCE))
+        .verify(&token)
+        .await
+        .expect("a valid token");
+
+    let delegated = verified.delegated.expect("a delegated call");
+    assert_eq!(delegated.email, None);
+    assert_eq!(delegated.act_sub, None);
+    assert_eq!(delegated.label(), "7f0a0c1e-0000-4000-8000-000000000001");
+}
+
+#[tokio::test]
+async fn an_act_claim_that_is_not_an_object_or_has_no_subject_is_refused() {
+    let server = issuer_with_keys().await;
+    let mut odd = default_claims(&server.issuer());
+    odd["act"] = json!("the-gateway");
+    let mut anonymous = default_claims(&server.issuer());
+    anonymous.as_object_mut().expect("an object").remove("sub");
+    anonymous["act"] = json!({ "sub": "gateway" });
+    let verifier = verifier(&server, Some(AUDIENCE));
+
+    for claims in [odd, anonymous] {
+        let token = sign(
+            Algorithm::RS256,
+            Some(FIRST),
+            &claims,
+            &rsa_signer(&FIRST_KEY),
+        );
+
+        assert_eq!(
+            verifier.verify(&token).await.map(|_| ()),
+            Err(TokenRefusal::Invalid)
+        );
+    }
+}

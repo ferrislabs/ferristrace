@@ -13,7 +13,8 @@ use anyhow::Context;
 use axum::Router;
 use clap::Parser;
 use ferristrace_api::{
-    AppState, health_router, logs_server, metrics_server, router, trace_server, web_router,
+    AppState, McpSettings, health_router, logs_server, metrics_server, router, trace_server,
+    web_router,
 };
 use ferristrace_application::{Adapters, Ferristrace, Ingestion};
 use ferristrace_clickhouse::{
@@ -206,6 +207,10 @@ fn control_plane(
             config.agent_setup().off_reason(),
             config.reserved_client_id().map(str::to_owned),
         )
+        .with_mcp(McpSettings {
+            gateway_client_id: config.mcp.gateway_client_id.clone(),
+            public_url: config.mcp.public_url.clone(),
+        })
         .with_default_retention_days(default_retention_days(config.spans.as_ref())))
 }
 

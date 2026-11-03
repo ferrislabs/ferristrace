@@ -8,10 +8,11 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole,
-    Organisation, Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProvisionPolicy,
-    RetentionDays, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
-    StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, IssuedKey, KeyId, KeyName, KeyScopes,
+    LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole, OrgTimezone, Organisation,
+    Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProjectId, ProvisionPolicy,
+    ReadGrant, RetentionDays, Session, SessionError, SessionId, SessionRoll, SessionStore,
+    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -20,6 +21,7 @@ const TOKEN: &str = "ft_ss_0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const FOUNDED: u64 = 1_700_000_000_123_456_789;
+const READ_KEY: &str = "ft_live_abcdef012345.secret";
 
 struct OneSession;
 
@@ -93,6 +95,7 @@ struct Kept(
     Mutex<Option<Portrait>>,
     Mutex<Option<RetentionDays>>,
     Option<RetentionDays>,
+    Mutex<OrgTimezone>,
 );
 
 impl Orgs for Kept {
@@ -105,6 +108,7 @@ impl Orgs for Kept {
             logo: self.1.lock().expect("the lock").clone(),
             retention: *self.2.lock().expect("the lock"),
             retention_cap: self.3,
+            timezone: self.4.lock().expect("the lock").clone(),
         }))
     }
 
@@ -127,6 +131,39 @@ impl Orgs for Kept {
     ) -> Result<(), StoreError> {
         *self.2.lock().expect("the lock") = retention;
         Ok(())
+    }
+
+    async fn set_timezone(&self, _org: TenantId, timezone: &OrgTimezone) -> Result<(), StoreError> {
+        *self.4.lock().expect("the lock") = timezone.clone();
+        Ok(())
+    }
+}
+
+struct Doors;
+
+impl ApiKeys for Doors {
+    async fn list(&self, _org: TenantId) -> Result<Vec<ApiKey>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn issue(
+        &self,
+        _org: TenantId,
+        _project: Option<ProjectId>,
+        _name: &KeyName,
+        _scopes: &KeyScopes,
+        _by: AccountId,
+    ) -> Result<IssuedKey, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn revoke(&self, _org: TenantId, _id: KeyId) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError> {
+        Ok((secret.exposed() == READ_KEY)
+            .then(|| ReadGrant::whole(TenantId::new(Uuid::from_u128(MINE)))))
     }
 }
 
@@ -195,6 +232,14 @@ impl RepoFor<domain::Memberships> for Fakes {
 
     fn build(&self, (): &()) -> Self::Repo {
         MemberOfMine(self.role)
+    }
+}
+
+impl RepoFor<domain::ApiKeys> for Fakes {
+    type Repo = Doors;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Doors
     }
 }
 
@@ -296,6 +341,7 @@ fn holding(name: &str) -> Arc<Kept> {
         Mutex::default(),
         Mutex::default(),
         None,
+        Mutex::default(),
     ))
 }
 
@@ -305,6 +351,7 @@ fn holding_under_cap(name: &str, cap: u32) -> Arc<Kept> {
         Mutex::default(),
         Mutex::default(),
         RetentionDays::try_from(cap).ok(),
+        Mutex::default(),
     ))
 }
 
@@ -786,4 +833,125 @@ async fn a_body_with_no_days_does_not_quietly_reset_the_retention() {
     let (status, _) = served(OrgRole::Owner, &kept, asking_retention(MINE, "{}")).await;
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+fn zoning(seed: u128, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/api/orgs/{}/timezone", org(seed)))
+        .header(COOKIE, session())
+        .header("x-requested-with", "fetch")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("a request")
+}
+
+fn clock_of(seed: u128) -> Request<Body> {
+    Request::builder()
+        .uri(format!("/api/orgs/{}/clock", org(seed)))
+        .header(COOKIE, session())
+        .header("x-requested-with", "fetch")
+        .body(Body::empty())
+        .expect("a request")
+}
+
+fn clock_by_key(seed: u128, secret: &str) -> Request<Body> {
+    Request::builder()
+        .uri(format!("/api/orgs/{}/clock", org(seed)))
+        .header("authorization", format!("Bearer {secret}"))
+        .body(Body::empty())
+        .expect("a request")
+}
+
+#[tokio::test]
+async fn the_card_carries_utc_until_an_administrator_picks_a_zone() {
+    let kept = holding("Acme");
+
+    let (_, body) = served(
+        OrgRole::Member,
+        &kept,
+        asking(Method::GET, MINE, None, true),
+    )
+    .await;
+    let (status, changed) = served(
+        OrgRole::Admin,
+        &kept,
+        zoning(MINE, r#"{"timezone":"Europe/Paris"}"#),
+    )
+    .await;
+    let (_, after) = served(
+        OrgRole::Member,
+        &kept,
+        asking(Method::GET, MINE, None, true),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let card = |text: &str| -> serde_json::Value { serde_json::from_str(text).expect("json") };
+    assert_eq!(card(&body)["timezone"], "UTC");
+    assert_eq!(card(&changed)["timezone"], "Europe/Paris");
+    assert_eq!(card(&after)["timezone"], "Europe/Paris");
+}
+
+#[tokio::test]
+async fn a_member_may_not_set_the_zone_and_a_stranger_finds_nothing() {
+    let kept = holding("Acme");
+
+    let (member, _) = served(
+        OrgRole::Member,
+        &kept,
+        zoning(MINE, r#"{"timezone":"Europe/Paris"}"#),
+    )
+    .await;
+    let (stranger, _) = served(
+        OrgRole::Owner,
+        &kept,
+        zoning(THEIRS, r#"{"timezone":"Europe/Paris"}"#),
+    )
+    .await;
+
+    assert_eq!(member, StatusCode::FORBIDDEN);
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
+    assert_eq!(*kept.4.lock().expect("the lock"), OrgTimezone::utc());
+}
+
+#[tokio::test]
+async fn a_zone_that_is_not_an_iana_name_is_unprocessable() {
+    let kept = holding("Acme");
+
+    for bad in [r#"{"timezone":"Mars/Olympus"}"#, r#"{"timezone":""}"#] {
+        let (status, body) = served(OrgRole::Admin, &kept, zoning(MINE, bad)).await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        assert!(body.contains("IANA"), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn the_clock_answers_the_zone_to_a_session_and_to_a_read_key() {
+    let kept = holding("Acme");
+    served(
+        OrgRole::Admin,
+        &kept,
+        zoning(MINE, r#"{"timezone":"Asia/Tokyo"}"#),
+    )
+    .await;
+
+    let (session, by_session) = served(OrgRole::Member, &kept, clock_of(MINE)).await;
+    let (key, by_key) = served(OrgRole::Member, &kept, clock_by_key(MINE, READ_KEY)).await;
+    let (foreign, _) = served(OrgRole::Member, &kept, clock_by_key(THEIRS, READ_KEY)).await;
+    let (unknown, _) = served(
+        OrgRole::Member,
+        &kept,
+        clock_by_key(MINE, "ft_live_000.nope"),
+    )
+    .await;
+    let (stranger, _) = served(OrgRole::Member, &kept, clock_of(THEIRS)).await;
+
+    assert_eq!((session, key), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(by_session, r#"{"timezone":"Asia/Tokyo"}"#);
+    assert_eq!(by_key, r#"{"timezone":"Asia/Tokyo"}"#);
+    assert_eq!(foreign, StatusCode::NOT_FOUND);
+    assert_eq!(unknown, StatusCode::UNAUTHORIZED);
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
 }

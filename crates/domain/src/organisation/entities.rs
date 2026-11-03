@@ -1,4 +1,4 @@
-use super::value_objects::{OrgRole, Owned, TeamId};
+use super::value_objects::{OrgRole, OrgTimezone, Owned, TeamId};
 use crate::identity::{AccountId, Email};
 use crate::profile::Portrait;
 use crate::telemetry::{RetentionDays, TenantId};
@@ -12,6 +12,7 @@ pub struct Organisation {
     pub logo: Option<Portrait>,
     pub retention: Option<RetentionDays>,
     pub retention_cap: Option<RetentionDays>,
+    pub timezone: OrgTimezone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

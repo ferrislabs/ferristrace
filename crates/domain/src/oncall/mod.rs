@@ -28,8 +28,9 @@ mod value_objects_tests;
 pub use ack::{AckClaim, AckKey};
 pub use desk::PageDesk;
 pub use entities::{
-    ClaimedNotice, Escalation, Notice, OnCallNow, Origin, Override, Page, PageDispatch, PageSource,
-    PageView, Paged, Rostered, Rotation, Schedule, ScheduleDraft, SchedulePatch, Shift,
+    ClaimedNotice, Escalation, Notice, OnCallNow, OnCallStatus, Origin, Override, Page,
+    PageDispatch, PageSource, PageView, Paged, Rostered, Rotation, Schedule, ScheduleDraft,
+    SchedulePatch, Shift,
 };
 pub use errors::{AckRefused, BadSchedule, OncallError};
 pub use escalation::{escalated, next};

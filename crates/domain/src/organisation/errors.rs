@@ -12,6 +12,10 @@ pub enum BadName {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a time zone is an IANA name, like Europe/Paris or UTC")]
+pub struct BadTimezone;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SettingError {
     #[error("no live session carries this token")]
     NoSession,

@@ -16,7 +16,7 @@ use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::placement::{
-    MAX_PLACEMENTS, Placement, PlacementName, PlacementReader, Placements, Workload,
+    MAX_PLACEMENTS, Placement, PlacementName, PlacementReader, Placements, Sighting, Workload,
 };
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -120,6 +120,21 @@ impl PlacementReader for &Asked {
                 .map(|n| format!("node-{n}").into())
                 .collect(),
             ..Placements::default()
+        })
+    }
+
+    async fn sighting(
+        &self,
+        tenant: TenantId,
+        service: &str,
+        _window: Window,
+        project: Option<ProjectId>,
+    ) -> Result<Sighting, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(project);
+        Ok(Sighting {
+            project,
+            environments: vec![service.into()],
         })
     }
 }
@@ -806,4 +821,31 @@ async fn the_placements_seen_are_read_for_the_project_of_the_key_and_capped() {
     assert_eq!(stranger, Err(ExploreError::NotYours));
     assert_eq!(asked.projects(), vec![Some(a_project(OURS))]);
     assert_eq!(*asked.tenants.lock().expect("the lock"), vec![an_org(MINE)]);
+}
+
+#[tokio::test]
+async fn a_service_is_sighted_in_the_project_of_the_key_and_a_stranger_sees_nothing() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let whole = keys.holding(an_org(MINE), None, reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let window = Window::new(0, 1000).expect("a window");
+
+    let bound = explore
+        .sighting(&Reader::Key(secret), an_org(MINE), "checkout", window)
+        .await
+        .expect("sighted");
+    let wide = explore
+        .sighting(&Reader::Key(whole), an_org(MINE), "checkout", window)
+        .await
+        .expect("sighted");
+    let stranger = explore
+        .sighting(&session(TOKEN), an_org(THEIRS), "checkout", window)
+        .await;
+
+    assert_eq!(bound.project, Some(a_project(OURS)));
+    assert_eq!(wide.project, None);
+    assert_eq!(stranger, Err(ExploreError::NotYours));
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS)), None]);
 }

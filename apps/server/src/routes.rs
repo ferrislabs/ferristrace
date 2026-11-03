@@ -2,9 +2,10 @@ use axum::Router;
 use ferristrace_api::{
     AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router,
     catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
-    key_router, llm_router, log_router, mark_routes, me_router, methods_router, metric_router,
-    oidc_router, oncall_router, org_router, postmortem_router, release_router, roster_router,
-    session_router, status_router, team_router, usage_router, workspace_router,
+    key_router, llm_router, log_router, mark_routes, mcp_router, me_router, methods_router,
+    metric_router, oidc_router, oncall_router, org_router, postmortem_router, release_router,
+    roster_router, session_router, site_router, status_router, team_router, usage_router,
+    workspace_router,
 };
 
 use crate::adapters::Production;
@@ -43,7 +44,8 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
             .merge(roster_routes(state))
             .merge(team_routes(state))
             .merge(usage_routes(state))
-            .merge(agent_routes(state)),
+            .merge(agent_routes(state))
+            .merge(mcp_routes(state)),
     )
 }
 
@@ -85,6 +87,7 @@ fn explore_routes(state: Option<&State>, held: bool) -> Router {
         .merge(log_router(state.clone()))
         .merge(metric_router(state.clone()))
         .merge(cluster_router(state.clone()))
+        .merge(site_router(state.clone()))
 }
 
 fn issue_routes(state: Option<&State>, held: bool) -> Router {
@@ -110,6 +113,10 @@ fn key_routes(state: Option<&State>) -> Router {
 
 fn agent_routes(state: Option<&State>) -> Router {
     state.map_or_else(Router::new, |state| agent_router(state.clone()))
+}
+
+fn mcp_routes(state: Option<&State>) -> Router {
+    state.map_or_else(Router::new, |state| mcp_router(state.clone()))
 }
 
 fn org_routes(state: Option<&State>) -> Router {

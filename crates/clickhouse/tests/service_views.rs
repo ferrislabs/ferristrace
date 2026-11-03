@@ -12,10 +12,10 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, ProjectId,
-    ProvisionPolicy, Scope, ServiceFilter, ServicePoint, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, Span, SpanId, SpanKind, SpanReader, SpanSink,
-    SpanStatus, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
+    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, PlacementReader,
+    ProjectId, ProvisionPolicy, Scope, ServiceFilter, ServicePoint, Session, SessionError,
+    SessionId, SessionRoll, SessionStore, SessionToken, Span, SpanId, SpanKind, SpanReader,
+    SpanSink, SpanStatus, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -639,4 +639,114 @@ async fn spec_l1_7_the_services_table_shows_the_rate_errors_and_p95_of_the_spans
     let billing = &services[1];
     assert_eq!(billing["name"], "billing");
     assert_eq!(billing["error_rate"], 0.0);
+}
+
+fn in_named(sent: &Sent, key: &str, environment: &str) -> Span {
+    let mut span = sent.span();
+    span.attributes.insert(key.into(), environment.into());
+    span
+}
+
+#[tokio::test]
+async fn a_service_is_sighted_in_its_latest_project_and_every_environment_it_ran_in() {
+    let Some(client) = prepared("ferristrace_views_sighting").await else {
+        return;
+    };
+    stored(
+        &client,
+        Scope::of(org(MINE)).in_project(Some(project(11))),
+        vec![
+            in_named(
+                &Sent::served(1, "checkout", "pay", SECOND, MILLI),
+                "deployment.environment.name",
+                "prod",
+            ),
+            in_named(
+                &Sent::served(2, "checkout", "pay", 2 * SECOND, MILLI),
+                "deployment.environment",
+                "staging",
+            ),
+            in_named(
+                &Sent::served(3, "checkout", "pay", 3 * SECOND, MILLI),
+                "deployment.environment.name",
+                "prod",
+            ),
+            Sent::served(4, "checkout", "pay", 4 * SECOND, MILLI).span(),
+            Sent::served(5, "billing", "charge", 5 * SECOND, MILLI).span(),
+        ],
+    )
+    .await;
+    stored(
+        &client,
+        Scope::of(org(MINE)).in_project(Some(project(12))),
+        vec![in_named(
+            &Sent::served(6, "checkout", "pay", 6 * SECOND, MILLI),
+            "deployment.environment.name",
+            "dev",
+        )],
+    )
+    .await;
+    stored(
+        &client,
+        Scope::of(org(THEIRS)),
+        vec![in_named(
+            &Sent::served(7, "checkout", "pay", 7 * SECOND, MILLI),
+            "deployment.environment.name",
+            "theirs",
+        )],
+    )
+    .await;
+    stored(
+        &client,
+        Scope::of(org(MINE)),
+        vec![in_named(
+            &Sent::served(8, "loose", "job", 8 * SECOND, MILLI),
+            "deployment.environment.name",
+            "prod",
+        )],
+    )
+    .await;
+    let reader = ClickhouseReader::new(client);
+    let window = Window::new(BASE, BASE + HOUR).expect("an hour");
+
+    let whole = reader
+        .sighting(org(MINE), "checkout", window, None)
+        .await
+        .expect("sighted");
+    let storefront = reader
+        .sighting(org(MINE), "checkout", window, Some(project(11)))
+        .await
+        .expect("sighted");
+    let loose = reader
+        .sighting(org(MINE), "loose", window, None)
+        .await
+        .expect("sighted");
+    let unknown = reader
+        .sighting(org(MINE), "nobody", window, None)
+        .await
+        .expect("sighted");
+    let late = Window::new(BASE + 2 * HOUR, BASE + 3 * HOUR).expect("a later hour");
+    let later = reader
+        .sighting(org(MINE), "checkout", late, None)
+        .await
+        .expect("sighted");
+
+    assert_eq!(whole.project, Some(project(12)));
+    assert_eq!(
+        whole.environments,
+        vec![
+            Box::<str>::from("dev"),
+            Box::<str>::from("prod"),
+            Box::<str>::from("staging")
+        ]
+    );
+    assert_eq!(storefront.project, Some(project(11)));
+    assert_eq!(
+        storefront.environments,
+        vec![Box::<str>::from("prod"), Box::<str>::from("staging")]
+    );
+    assert_eq!(loose.project, None);
+    assert_eq!(loose.environments, vec![Box::<str>::from("prod")]);
+    assert_eq!(unknown, ferristrace_domain::Sighting::default());
+    assert_eq!(later, ferristrace_domain::Sighting::default());
 }

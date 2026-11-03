@@ -7,12 +7,19 @@ use crate::session_cookie::SessionCookie;
 
 const FALLBACK_RETENTION_DAYS: u64 = 30;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpSettings {
+    pub gateway_client_id: Option<String>,
+    pub public_url: Option<String>,
+}
+
 pub struct AppState<S: Stack> {
     pub app: Arc<Ferristrace<S>>,
     pub cookie: SessionCookie,
     pub default_retention_days: u64,
     pub agents_off_reason: Option<String>,
     pub reserved_client_id: Option<String>,
+    pub mcp: McpSettings,
 }
 
 impl<S: Stack> AppState<S> {
@@ -23,7 +30,14 @@ impl<S: Stack> AppState<S> {
             default_retention_days: FALLBACK_RETENTION_DAYS,
             agents_off_reason: None,
             reserved_client_id: None,
+            mcp: McpSettings::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_mcp(mut self, mcp: McpSettings) -> Self {
+        self.mcp = mcp;
+        self
     }
 
     #[must_use]
@@ -52,6 +66,7 @@ impl<S: Stack> Clone for AppState<S> {
             default_retention_days: self.default_retention_days,
             agents_off_reason: self.agents_off_reason.clone(),
             reserved_client_id: self.reserved_client_id.clone(),
+            mcp: self.mcp.clone(),
         }
     }
 }

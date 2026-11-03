@@ -1,4 +1,5 @@
-use super::value_objects::{AgentId, AgentName, AgentScope, AgentScopes, ClientId};
+use super::value_objects::{AgentId, AgentName, AgentScope, AgentScopes, ClientId, Delegation};
+use crate::audit::Detail;
 use crate::catalogue::ProjectId;
 use crate::identity::AccountId;
 use crate::telemetry::TenantId;
@@ -40,4 +41,16 @@ pub struct AgentGrant {
     pub scopes: Vec<AgentScope>,
     pub project: Option<ProjectId>,
     pub jti: Box<str>,
+    pub delegated: Option<Delegation>,
+}
+
+impl AgentGrant {
+    #[must_use]
+    pub fn stamp(&self, detail: Detail) -> Detail {
+        let detail = detail.with("jti", &self.jti);
+        match &self.delegated {
+            Some(delegation) => delegation.stamp(detail),
+            None => detail,
+        }
+    }
 }
