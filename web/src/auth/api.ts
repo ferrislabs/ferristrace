@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import { get, json, patch, post } from './client'
+import { forgetStoredData } from '@/lib/offline'
 
 export type Role = 'owner' | 'admin' | 'member'
 export type Membership = { org: string; name: string; role: Role }
@@ -33,7 +34,10 @@ export const healthQuery = queryOptions({
   refetchInterval: 30_000,
 })
 
-export const signOut = () => post('/auth/sign-out')
+export const signOut = async () => {
+  forgetStoredData()
+  return post('/auth/sign-out')
+}
 
 export const renameMe = (name: string) => patch('/auth/me', { name })
 

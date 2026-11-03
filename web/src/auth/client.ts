@@ -1,3 +1,5 @@
+import { noteResponse } from '@/lib/offline'
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -17,6 +19,7 @@ const REQUESTED_WITH = { 'x-requested-with': 'ferristrace-web' }
 
 async function send(path: string, init: RequestInit): Promise<Response> {
   const response = await fetch(path, { credentials: 'include', ...init, headers: { ...REQUESTED_WITH, ...init.headers } })
+  noteResponse(response)
   if (!response.ok) throw new ApiError(response.status, (await response.text()).trim())
   return response
 }

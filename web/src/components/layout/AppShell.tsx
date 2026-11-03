@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { TriangleAlert } from 'lucide-react'
+import { TriangleAlert, WifiOff } from 'lucide-react'
 import { useMatches } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -12,10 +12,24 @@ import { healthQuery } from '@/auth/api'
 import { useOrganisations } from '@/auth/session'
 import { NewOrganisationForm } from './NewOrganisation'
 import { Outlet } from '@/lib/router'
+import { useOffline } from '@/lib/offline'
+import { stamp } from '@/lib/format'
+
+function OfflineBanner() {
+  const { offline, since } = useOffline()
+  if (!offline) return null
+  return (
+    <div role="status" className="flex items-center gap-2.5 border-b border-warning-border bg-warning-subtle px-4 py-2 text-control text-warning-text">
+      <WifiOff className="size-4 shrink-0" aria-hidden />
+      <span className="flex-1"><span className="font-semibold">Offline.</span> {since === null ? 'What is on screen may be stale. ' : `Showing what was saved at ${stamp(since)}. `}Changes are paused until the connection is back.</span>
+    </div>
+  )
+}
 
 function UnavailableBanner() {
   const health = useQuery(healthQuery)
-  if (!health.isError) return null
+  const { offline } = useOffline()
+  if (!health.isError || offline) return null
   return (
     <div role="status" className="flex items-center gap-2.5 border-b border-warning-border bg-warning-subtle px-4 py-2 text-control text-warning-text">
       <TriangleAlert className="size-4 shrink-0" aria-hidden />
@@ -49,6 +63,7 @@ export function AppShell() {
       <Sidebar onOpenShortcuts={() => setShortcuts(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onPalette={() => setPalette(true)} mock={mock} timed={timed} />
+        <OfflineBanner />
         <UnavailableBanner />
         <main className="flex min-w-0 flex-1 flex-col gap-4 px-[max(16px,env(safe-area-inset-left))] pb-[calc(84px+env(safe-area-inset-bottom))] pt-4 md:px-5 md:pb-10">
           <NoOrganisation />
