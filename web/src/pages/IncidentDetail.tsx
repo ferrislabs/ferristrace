@@ -19,6 +19,7 @@ import { useMembers } from '@/data/members'
 import { releasePath } from '@/data/releases'
 import { stamp } from '@/lib/format'
 import { Link, useParams } from '@/lib/router'
+import { useOffline } from '@/lib/offline'
 import { labelOf } from '@/components/ft/MetricChart'
 import { PostmortemSection } from './PostmortemSection'
 
@@ -29,6 +30,7 @@ const KIND_WORD: Record<AttachmentKind, string> = { trace: 'Trace', logs: 'Logs'
 export function IncidentDetail() {
   const { id } = useParams()
   const { incident, failed } = useIncident(id)
+  const { offline } = useOffline()
 
   return (
     <>
@@ -38,7 +40,9 @@ export function IncidentDetail() {
       ) : !incident ? (
         <Card className="px-4 py-3 text-control text-muted-foreground">Reading the incident…</Card>
       ) : (
-        <Opened incident={incident} />
+        <fieldset disabled={offline} className="contents">
+          <Opened incident={incident} />
+        </fieldset>
       )}
     </>
   )
