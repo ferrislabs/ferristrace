@@ -561,3 +561,68 @@ async fn the_lookup_is_scoped_to_the_organisation_and_open_to_keys_and_agents() 
     assert!(by_agent.on_call);
     assert_eq!(world.keys.book.uses().len(), 1);
 }
+
+#[tokio::test]
+async fn every_schedule_of_the_organisation_says_who_is_on_call_now_and_until_when() {
+    let world = World::new();
+    let rota = world.rota(OrgRole::Member);
+    let who = Reader::Session(token());
+    crate::oncall::Schedules::add_override(
+        &world.oncall,
+        an_org(MINE),
+        &override_for(BOB, 100, 200),
+    )
+    .await
+    .expect("kept");
+
+    let plain = rota
+        .duties(&who, an_org(MINE), at(0))
+        .await
+        .expect("a member reads");
+    let covered = rota
+        .duties(&who, an_org(MINE), at(150))
+        .await
+        .expect("a member reads");
+    let foreign = rota.duties(&who, an_org(THEIRS), at(0)).await;
+
+    assert_eq!(plain.len(), 1);
+    assert_eq!(plain[0].schedule, primary());
+    assert_eq!(plain[0].team, team());
+    assert_eq!(
+        plain[0].name,
+        ScheduleName::try_from("Primary").expect("a name")
+    );
+    let held = plain[0].now.person.as_ref().expect("someone is on call");
+    assert_eq!(held.account, person(ME));
+    assert_eq!(
+        held.email.as_ref().map(crate::identity::Email::as_str),
+        Some("me@example.com")
+    );
+    assert!(plain[0].now.until_ms.is_some());
+    let cover = covered[0].now.person.as_ref().expect("cover is on call");
+    assert_eq!(cover.account, person(BOB));
+    assert_eq!(foreign.map(|_| ()), Err(OncallError::NotYours));
+}
+
+#[tokio::test]
+async fn a_schedule_nobody_staffs_is_listed_with_no_one_on_call() {
+    let world = World::new();
+    world
+        .rota(OrgRole::Admin)
+        .create(&token(), an_org(MINE), team(), &draft("Empty", &[]), at(0))
+        .await
+        .expect("created");
+
+    let duties = world
+        .rota(OrgRole::Member)
+        .duties(&Reader::Session(token()), an_org(MINE), at(0))
+        .await
+        .expect("a member reads");
+
+    let empty = duties
+        .iter()
+        .find(|duty| duty.name.as_str() == "Empty")
+        .expect("listed");
+    assert_eq!(empty.now.person, None);
+    assert_eq!(empty.now.until_ms, None);
+}

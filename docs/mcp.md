@@ -54,7 +54,7 @@ agent audience.
 | `alert_history`    | `alert_id`, `window`                                                   | `GET .../alerts/{id}/history`                                      |
 | `list_incidents`   | `status`                                                               | `GET .../incidents`                                                |
 | `get_incident`     | `incident_id`                                                          | `GET .../incidents/{id}`                                           |
-| `who_is_on_call`   | `schedule`                                                             | `GET .../pages`, `GET .../schedules/{id}`, `GET .../schedules/{id}/now` |
+| `who_is_on_call`   | `schedule`                                                             | `GET .../oncall/now` |
 | `comment_incident` | `incident_id`, `text`                                                  | `POST .../incidents/{id}/comments`                                 |
 | `resolve_incident` | `incident_id`                                                          | `PATCH .../incidents/{id}` with `{"status":"resolved"}`            |
 | `acknowledge_page` | `page_id`                                                              | `POST .../pages/{id}/ack`                                          |

@@ -1,5 +1,6 @@
 use super::entities::{
-    OnCallNow, OnCallStatus, Override, Rostered, Schedule, ScheduleDraft, SchedulePatch,
+    OnCallNow, OnCallSchedule, OnCallStatus, Override, Rostered, Schedule, ScheduleDraft,
+    SchedulePatch,
 };
 use super::errors::{BadSchedule, OncallError};
 use super::ports::Schedules;
@@ -89,28 +90,42 @@ where
                 until_ms: None,
             });
         };
-        let person = self
-            .roster
-            .of(org)
-            .await?
-            .into_iter()
-            .find(|member| member.account == held.account)
-            .map_or(
-                Person {
-                    account: held.account,
-                    email: None,
-                    name: None,
-                },
-                |member| Person {
-                    account: member.account,
-                    email: Some(member.email),
-                    name: member.name,
-                },
-            );
+        let roster = self.roster.of(org).await?;
         Ok(OnCallNow {
-            person: Some(person),
+            person: Some(known(&roster, held.account)),
             until_ms: held.until_ms,
         })
+    }
+
+    pub async fn duties(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        now: UnixSeconds,
+    ) -> Result<Vec<OnCallSchedule>, OncallError> {
+        self.readers.grant(who, org).await?;
+        let roster = self.roster.of(org).await?;
+        let mut duties = Vec::new();
+        for schedule in self.schedules.of_org(org).await? {
+            let overrides = self.schedules.overrides(org, schedule.id).await?;
+            let now = shift(&schedule, &overrides, now).map_or(
+                OnCallNow {
+                    person: None,
+                    until_ms: None,
+                },
+                |held| OnCallNow {
+                    person: Some(known(&roster, held.account)),
+                    until_ms: held.until_ms,
+                },
+            );
+            duties.push(OnCallSchedule {
+                schedule: schedule.id,
+                name: schedule.name,
+                team: schedule.team,
+                now,
+            });
+        }
+        Ok(duties)
     }
 
     pub async fn whether_on_call(
@@ -416,4 +431,22 @@ fn merged(held: &Schedule, patch: SchedulePatch) -> Schedule {
         length: patch.length.unwrap_or(held.length),
         starts_on: patch.starts_on.unwrap_or(held.starts_on),
     }
+}
+
+fn known(roster: &[crate::organisation::Member], account: AccountId) -> Person {
+    roster
+        .iter()
+        .find(|member| member.account == account)
+        .map_or(
+            Person {
+                account,
+                email: None,
+                name: None,
+            },
+            |member| Person {
+                account,
+                email: Some(member.email.clone()),
+                name: member.name.clone(),
+            },
+        )
 }

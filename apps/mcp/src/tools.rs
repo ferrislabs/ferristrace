@@ -158,7 +158,7 @@ pub struct IncidentArgs {
 #[schemars(crate = "rmcp::schemars")]
 pub struct OnCallArgs {
     #[schemars(
-        description = "Schedule id (UUID) or name. Omit to list every schedule that has paged someone."
+        description = "Schedule name or id (UUID). Omit to list every schedule of the organisation."
     )]
     pub schedule: Option<String>,
 }
@@ -439,7 +439,7 @@ impl FerristraceTools {
     }
 
     #[tool(
-        description = "Who is on call right now, per on-call schedule, and until when. Give a schedule id or name, or nothing to see every schedule that has paged someone.",
+        description = "Who is on call right now, per on-call schedule, and until when. Give a schedule name or id, or nothing to see every schedule of the organisation.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn who_is_on_call(

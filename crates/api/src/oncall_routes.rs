@@ -7,10 +7,10 @@ use axum::routing::{delete, get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::OncallRepos;
 use ferristrace_domain::{
-    AccountId, AckRefused, BadSchedule, Day, Handoff, OnCallNow, OnCallStatus, OncallError,
-    Override, OverrideId, Page, PageId, PageScope, PageSource, PageView, Person, Rostered,
-    Rotation, RotationLength, ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch, TeamId,
-    TenantId, TimeOfDay, Timezone, Weekday,
+    AccountId, AckRefused, BadSchedule, Day, Handoff, OnCallNow, OnCallSchedule, OnCallStatus,
+    OncallError, Override, OverrideId, Page, PageId, PageScope, PageSource, PageView, Person,
+    Rostered, Rotation, RotationLength, ScheduleDraft, ScheduleId, ScheduleName, SchedulePatch,
+    TeamId, TenantId, TimeOfDay, Timezone, Weekday,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -325,6 +325,48 @@ impl From<&OnCallStatus> for WhetherBody {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct HolderBody {
+    email: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DutyBody {
+    id: Uuid,
+    name: String,
+    team: Uuid,
+    on_call: Option<HolderBody>,
+    until_ms: Option<u64>,
+}
+
+impl From<&OnCallSchedule> for DutyBody {
+    fn from(duty: &OnCallSchedule) -> Self {
+        Self {
+            id: duty.schedule.as_uuid(),
+            name: duty.name.as_str().to_owned(),
+            team: duty.team.as_uuid(),
+            on_call: duty.now.person.as_ref().map(|person| HolderBody {
+                email: person.email.as_ref().map(|email| email.as_str().to_owned()),
+                name: person.name.as_deref().map(ToOwned::to_owned),
+            }),
+            until_ms: duty.now.until_ms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Everyone {
+    schedules: Vec<DutyBody>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Whose {
+    One(WhetherBody),
+    Everyone(Everyone),
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Whether {
     #[serde(default)]
@@ -445,17 +487,22 @@ async fn whether<S: Stack>(
     Path(org): Path<Uuid>,
     Query(asked): Query<Whether>,
     headers: HeaderMap,
-) -> Result<Json<WhetherBody>, OncallRefused>
+) -> Result<Json<Whose>, OncallRefused>
 where
     S::Repos: OncallRepos,
 {
     let who = reading(&state, &headers).await?;
-    let email = asked.email.ok_or(OncallRefused::Malformed("email"))?;
+    let Some(email) = asked.email else {
+        let duties = state.app.on_call_duties(&who, TenantId::new(org)).await?;
+        return Ok(Json(Whose::Everyone(Everyone {
+            schedules: duties.iter().map(DutyBody::from).collect(),
+        })));
+    };
     let status = state
         .app
         .whether_on_call(&who, TenantId::new(org), &email)
         .await?;
-    Ok(Json(WhetherBody::from(&status)))
+    Ok(Json(Whose::One(WhetherBody::from(&status))))
 }
 
 async fn add_override<S: Stack>(

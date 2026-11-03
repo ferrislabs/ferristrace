@@ -11,7 +11,6 @@ use crate::window::Window;
 
 const DEFAULT_TRACES: u32 = 20;
 const DEFAULT_LOGS: u32 = 50;
-const MAX_SCHEDULES: usize = 20;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Call<'a> {
@@ -256,60 +255,34 @@ impl Backend {
         call: Call<'_>,
         schedule: Option<&str>,
     ) -> Result<String, Fault> {
-        let targets = self.schedules(call, input::given(schedule)).await?;
-        let mut rosters = Vec::with_capacity(targets.len());
-        for (id, name) in targets {
-            let now = self
-                .get(call, &["schedules", &id.to_string(), "now"], &[])
-                .await?;
-            rosters.push(Rostered {
-                schedule: name,
-                person: now["account"].clone(),
-                until_ms: now["until_ms"].as_u64(),
-            });
+        let body = self.get(call, &["oncall", "now"], &[]).await?;
+        let wanted = input::given(schedule);
+        let rosters = body["schedules"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|held| {
+                wanted.is_none_or(|wanted| {
+                    held["id"]
+                        .as_str()
+                        .is_some_and(|id| id.eq_ignore_ascii_case(wanted))
+                        || held["name"]
+                            .as_str()
+                            .is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+                })
+            })
+            .map(|held| Rostered {
+                schedule: held["name"].as_str().unwrap_or_default().to_owned(),
+                person: held["on_call"].clone(),
+                until_ms: held["until_ms"].as_u64(),
+            })
+            .collect::<Vec<_>>();
+        if let (Some(wanted), true) = (wanted, rosters.is_empty()) {
+            return Err(Fault::argument(format!(
+                "no schedule has the name or id {wanted:?}; call who_is_on_call without a schedule to list them"
+            )));
         }
         Ok(present::on_call(&rosters).render())
-    }
-
-    async fn schedules(
-        &self,
-        call: Call<'_>,
-        schedule: Option<&str>,
-    ) -> Result<Vec<(Uuid, String)>, Fault> {
-        if let Some(id) = schedule.and_then(|typed| Uuid::parse_str(typed).ok()) {
-            let held = self.get(call, &["schedules", &id.to_string()], &[]).await?;
-            let name = held["name"].as_str().unwrap_or_default().to_owned();
-            return Ok(vec![(id, name)]);
-        }
-        let pages = self
-            .get(call, &["pages"], &[("state", "all".to_owned())])
-            .await?;
-        let mut known: Vec<(Uuid, String)> = Vec::new();
-        for page in pages["pages"].as_array().map_or(&[][..], Vec::as_slice) {
-            let Some(id) = page["schedule"]["id"]
-                .as_str()
-                .and_then(|spelled| Uuid::parse_str(spelled).ok())
-            else {
-                continue;
-            };
-            if known.iter().all(|(seen, _)| *seen != id) {
-                let name = page["schedule"]["name"].as_str().unwrap_or_default();
-                known.push((id, name.to_owned()));
-            }
-        }
-        let Some(name) = schedule else {
-            known.truncate(MAX_SCHEDULES);
-            return Ok(known);
-        };
-        known
-            .into_iter()
-            .find(|(_, held)| held.eq_ignore_ascii_case(name))
-            .map(|found| vec![found])
-            .ok_or_else(|| {
-                Fault::argument(format!(
-                    "no schedule named {name:?} is known; pass the schedule id, or the name of a schedule that has paged someone"
-                ))
-            })
     }
 
     pub async fn comment_incident(

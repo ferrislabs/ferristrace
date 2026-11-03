@@ -647,60 +647,52 @@ async fn get_incident_and_alert_history_validate_their_ids() {
     assert_eq!(h.fake.seen().len(), 1);
 }
 
+fn rota() -> Value {
+    json!({"schedules": [
+        {"id": SCHEDULE, "name": "Primary", "team": INCIDENT,
+         "on_call": {"email": "ada@example.com", "name": "Ada"},
+         "until_ms": 1_700_000_000_000_u64},
+        {"id": PAGE, "name": "Backup", "team": INCIDENT, "on_call": null, "until_ms": null}
+    ]})
+}
+
 #[tokio::test]
-async fn who_is_on_call_resolves_a_schedule_name_through_pages() {
+async fn who_is_on_call_lists_every_schedule_with_one_call() {
     let h = harness().await;
-    h.fake.json(
-        "GET",
-        &api("pages"),
-        200,
-        &json!({"pages": [{"id": PAGE, "schedule": {"id": SCHEDULE, "name": "Primary"}}]}),
-    );
-    h.fake.json(
-        "GET",
-        &api(&format!("schedules/{SCHEDULE}/now")),
-        200,
-        &json!({"account": {"id": "u1", "email": "ada@example.com", "name": "Ada"},
-            "until_ms": 1_700_000_000_000_u64}),
-    );
-    let out = answer(
-        &h.call("who_is_on_call", &json!({"schedule": "primary"}))
-            .await,
-    );
+    h.fake.json("GET", &api("oncall/now"), 200, &rota());
+    let out = answer(&h.call("who_is_on_call", &json!({})).await);
     assert!(
         out.contains("Primary | Ada | 2023-11-14T22:13:20Z"),
         "{out}"
     );
-    let seen = h.fake.seen();
-    assert_eq!(seen[0].param("state"), "all");
-    assert_eq!(seen[1].path, api(&format!("schedules/{SCHEDULE}/now")));
+    assert!(out.contains("Backup | nobody | -"), "{out}");
+    let seen = h.fake.only();
+    assert_eq!(seen.path, api("oncall/now"));
+    assert_eq!(seen.param("email"), "");
+}
 
+#[tokio::test]
+async fn who_is_on_call_filters_by_name_or_id_and_refuses_an_unknown_schedule() {
+    let h = harness().await;
+    h.fake.json("GET", &api("oncall/now"), 200, &rota());
+    let by_name = answer(
+        &h.call("who_is_on_call", &json!({"schedule": "primary"}))
+            .await,
+    );
+    assert!(
+        by_name.contains("Primary") && !by_name.contains("Backup"),
+        "{by_name}"
+    );
+    let by_id = answer(&h.call("who_is_on_call", &json!({"schedule": PAGE})).await);
+    assert!(
+        by_id.contains("Backup") && !by_id.contains("Primary"),
+        "{by_id}"
+    );
     let unknown = h
         .call("who_is_on_call", &json!({"schedule": "ghost"}))
         .await;
     assert_eq!(unknown.is_error, Some(true));
-}
-
-#[tokio::test]
-async fn who_is_on_call_with_an_id_reads_the_schedule_then_its_now() {
-    let h = harness().await;
-    h.fake.json(
-        "GET",
-        &api(&format!("schedules/{SCHEDULE}")),
-        200,
-        &json!({"id": SCHEDULE, "name": "Primary"}),
-    );
-    h.fake.json(
-        "GET",
-        &api(&format!("schedules/{SCHEDULE}/now")),
-        200,
-        &json!({"account": null, "until_ms": null}),
-    );
-    let out = answer(
-        &h.call("who_is_on_call", &json!({"schedule": SCHEDULE}))
-            .await,
-    );
-    assert!(out.contains("Primary | nobody | -"), "{out}");
+    assert!(text(&unknown).contains("\"ghost\""));
 }
 
 #[tokio::test]
