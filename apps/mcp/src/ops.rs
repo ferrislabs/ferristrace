@@ -237,7 +237,8 @@ impl Backend {
         call: Call<'_>,
         status: Option<&str>,
     ) -> Result<String, Fault> {
-        let status = input::choice("status", status, &input::INCIDENT_STATUSES)?.unwrap_or("open");
+        let status = input::choice("status", status, &input::INCIDENT_STATUSES)?
+            .unwrap_or(input::DEFAULT_INCIDENT_STATUS);
         let body = self
             .get(call, &["incidents"], &[("status", status.to_owned())])
             .await?;

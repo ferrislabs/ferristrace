@@ -11,8 +11,10 @@ members = [
     "crates/infra",
     "crates/api",
     "crates/ee",
+    "crates/mcp-args",
     "apps/server",
     "apps/mcp",
+    "apps/mcp-gateway",
 ]
 default-members = [
     "crates/domain",
@@ -24,8 +26,10 @@ default-members = [
     "crates/redis",
     "crates/infra",
     "crates/api",
+    "crates/mcp-args",
     "apps/server",
     "apps/mcp",
+    "apps/mcp-gateway",
 ]
 
 [workspace.package]
@@ -44,6 +48,7 @@ ferristrace-redis = { path = "crates/redis" }
 ferristrace-infra = { path = "crates/infra" }
 ferristrace-api = { path = "crates/api" }
 ferristrace-ee = { path = "crates/ee" }
+ferristrace-mcp-args = { path = "crates/mcp-args" }
 
 anyhow = "1.0.104"
 axum = "0.8.9"

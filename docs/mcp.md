@@ -6,8 +6,9 @@ service in `apps/mcp`. It holds no credential and no database: every tool is
 one or two calls to the FerrisTrace HTTP API, made with the bearer token the
 request arrived with, so FerrisTrace still decides what that token may see.
 
-This page is a stub. The full guide (connecting a client, the policy gateway
-and the Cedar policies) comes with part 7D of `docs/specs/lot-7-mcp.md`.
+This page is a stub. The full guide (connecting a client and the Cedar
+policies) comes with part 7D of `docs/specs/lot-7-mcp.md`. The gateway's
+configuration and its decision log are described at the end of this page.
 
 ## Run it
 
@@ -72,3 +73,110 @@ are capped at 200 rows and 64 KiB, and a cut answer ends with a
 because the token lacks a scope, a 404, a 5xx) or an unreachable API is
 returned as a tool error carrying the API's message, never as a transport
 error.
+
+## The policy gateway
+
+`ferristrace-mcp-gateway` (`apps/mcp-gateway`) is the only public MCP door.
+It verifies the caller's token, asks FerrisKey (AuthZEN) whether the call is
+permitted, exchanges the token for one addressed to FerrisTrace and forwards
+to `ferristrace-mcp`. See ADR 0029.
+
+```sh
+docker build -f Dockerfile.mcp-gateway -t ferristrace-mcp-gateway .
+```
+
+Settings are read from the environment, prefix `FERRISTRACE_MCP_GATEWAY_`,
+nested settings separated by `__` (for example
+`FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_SECRET`). The gateway refuses to start
+when a required one is missing or not a URL. Secrets are never logged.
+
+| Variable                                          | Default                  | Meaning                                                                                                   |
+| ------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `FERRISTRACE_MCP_GATEWAY_LISTEN`                  | `0.0.0.0:8080`           | Address the gateway listens on.                                                                           |
+| `FERRISTRACE_MCP_GATEWAY_PUBLIC_URL`              | required                 | Public base URL. The canonical resource is `<public_url>/orgs/{org}/mcp`, the `aud` a token must carry.   |
+| `FERRISTRACE_MCP_GATEWAY_UPSTREAM`                | `http://localhost:8081`  | Base URL of `ferristrace-mcp`.                                                                            |
+| `FERRISTRACE_MCP_GATEWAY_ISSUER`                  | required                 | FerrisKey realm issuer, e.g. `https://id.example.com/realms/ferristrace`.                                 |
+| `FERRISTRACE_MCP_GATEWAY_API_URL`                 | `http://localhost:3333`  | FerrisTrace HTTP API, read for the PIP lookups.                                                           |
+| `FERRISTRACE_MCP_GATEWAY_AGENT_AUDIENCE`          | required                 | FerrisTrace's agent audience (`FERRISTRACE_AGENTS__AUDIENCE`): the exchange and PIP tokens are for it.    |
+| `FERRISTRACE_MCP_GATEWAY_SCOPES_SUPPORTED`        | the four agent scopes    | Scopes listed in the resource metadata and the challenge.                                                 |
+| `FERRISTRACE_MCP_GATEWAY_UPSTREAM_TIMEOUT_MS`     | `30000`                  | Total time allowed to `ferristrace-mcp`.                                                                  |
+| `FERRISTRACE_MCP_GATEWAY_BODY_TIMEOUT_MS`         | `10000`                  | Time allowed to read a request body.                                                                      |
+| `FERRISTRACE_MCP_GATEWAY_PDP__URL`                | required                 | FerrisKey base URL; AuthZEN is `<url>/realms/<realm>/authzen/access/v1/evaluation[s]`.                    |
+| `FERRISTRACE_MCP_GATEWAY_PDP__REALM`              | required                 | Realm holding the Cedar policies.                                                                         |
+| `FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_ID`          | required                 | PEP service account (holds `evaluate_authorization`).                                                     |
+| `FERRISTRACE_MCP_GATEWAY_PDP__CLIENT_SECRET`      | required                 | Its secret.                                                                                               |
+| `FERRISTRACE_MCP_GATEWAY_PDP__TOKEN_URL`          | `<issuer>/protocol/openid-connect/token` | Token endpoint for the PEP service account.                                               |
+| `FERRISTRACE_MCP_GATEWAY_PDP__TIMEOUT_MS`         | `1500`                   | Budget for one PDP evaluation, and for the PIP lookups of one call. Over it, the call is refused.         |
+| `FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_ID`     | required                 | The gateway's own confidential client: actor of the exchange, and the agent that reads FerrisTrace.       |
+| `FERRISTRACE_MCP_GATEWAY_EXCHANGE__CLIENT_SECRET` | required                 | Its secret.                                                                                               |
+| `FERRISTRACE_MCP_GATEWAY_EXCHANGE__TOKEN_URL`     | `<issuer>/protocol/openid-connect/token` | RFC 8693 token endpoint.                                                                  |
+| `FERRISTRACE_MCP_GATEWAY_EXCHANGE__TIMEOUT_MS`    | `3000`                   | Time allowed to one token request.                                                                        |
+| `FERRISTRACE_MCP_GATEWAY_INGEST_KEY`              | unset                    | FerrisTrace ingest key. With `INGEST_ENDPOINT`, decisions are also exported as OTLP logs.                 |
+| `FERRISTRACE_MCP_GATEWAY_INGEST_ENDPOINT`         | unset                    | OTLP/HTTP logs URL, e.g. `http://ferristrace:4318/v1/logs`.                                               |
+| `RUST_LOG`                                        | `info`                   | Log filter.                                                                                               |
+
+### Endpoints
+
+- `GET /.well-known/oauth-protected-resource/orgs/{org}/mcp`: RFC 9728
+  metadata (`resource`, `authorization_servers` = the issuer, `scopes_supported`).
+- `POST /orgs/{org}/mcp`: MCP. A missing, expired, mis-signed or wrongly
+  addressed token is `401` with
+  `WWW-Authenticate: Bearer resource_metadata="..."`, and nothing is called.
+  `GET` and `DELETE` are `405`: the server is stateless.
+- `GET /healthz`.
+
+### What is refused, and why
+
+A refused call is a JSON-RPC error with code `-32001`, HTTP 200, and
+`error.data.reason`. It never carries a policy's text.
+
+| `reason`               | Meaning                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `no_permitting_policy` | The PDP answered, and no policy permits the call.                                        |
+| `pdp_timeout`          | The PDP did not answer within the budget.                                                |
+| `pdp_unavailable`      | The PDP, or its token endpoint, is down or refused the gateway.                          |
+| `pdp_malformed`        | The PDP's answer could not be read.                                                      |
+| `pip_unavailable`      | A fact the call needs (time zone, on-call state, incident, service) could not be read.   |
+| `unknown_tool`         | `ferristrace-mcp` has no such tool.                                                      |
+| `invalid_target`       | A name in the call cannot be looked up safely, an id is missing or not a UUID, or a choice is not one the tool accepts. |
+| `unknown_target`       | The incident or service the call names is not known to FerrisTrace.                      |
+| `invalid_request`      | Not a valid MCP request (parse error, bad params, body too large or too slow).           |
+| `upstream_unavailable` | `ferristrace-mcp` did not answer usably (HTTP 502).                                      |
+| `exchange_failed`      | The token for FerrisTrace could not be obtained (HTTP 502).                              |
+| `method_not_allowed`   | MCP method other than initialize, server/discover, ping, notifications, tools/list/call. |
+| `header_mismatch`      | `Mcp-Method` or `Mcp-Name` disagrees with the body (HTTP 400).                           |
+
+### The decision log
+
+Every decision is one `tracing` event with `kind="mcp_decision"` (target
+`mcp_decision`), once per tool for a `tools/list` and once per `tools/call`:
+
+| Field         | Content                                                                          |
+| ------------- | -------------------------------------------------------------------------------- |
+| `request_id`  | Generated for every request; sent back as `X-Request-Id` and to `ferristrace-mcp`. |
+| `client_request_id` | The caller's own `X-Request-Id`, when it sent a printable one.            |
+| `method`      | `tools/call` or `tools/list`, or the refused method.                             |
+| `org`         | Organisation id.                                                                 |
+| `tool`        | Tool name (empty for a refusal that is not about one tool).                      |
+| `subject_type`, `subject` | `User` and the token's `sub`, or `Client` and the client id.         |
+| `groups`      | The caller's groups, as a JSON list.                                             |
+| `agent`       | The client id that called.                                                       |
+| `delegated`   | Whether the call is made for a person.                                           |
+| `act`         | The token's `act` claim as JSON, empty when absent.                              |
+| `target`      | The target the policy saw, as JSON.                                              |
+| `arguments`   | The normalised primitive arguments the policy saw, as JSON; strings cut at 256 characters, a `comment_incident` `text` replaced by `text_length`; the whole record is capped at 4 KiB. |
+| `decision`    | `permit` or `deny`.                                                              |
+| `policies`    | The policies FerrisKey reported as having decided, as a JSON list.               |
+| `reason`      | One of the reasons above when denied, empty otherwise.                           |
+
+With `INGEST_KEY` and `INGEST_ENDPOINT` set, the same fields are sent to
+FerrisTrace as OTLP logs (`service.name` `ferristrace-mcp-gateway`, severity
+`INFO` for a permit and `WARN` for a deny), so they are searchable in Logs.
+The export is batched and never blocks a decision: when the queue is full or
+FerrisTrace does not accept a batch, the records are dropped and counted
+(`dropped_total` in the gateway's own log).
+
+The policy is given the arguments as the tool will run them: the gateway trims
+text, lower-cases choices (log severity, alert state, incident status,
+aggregation), writes ids in canonical form, and forwards a body rebuilt from
+those same arguments. Both programs share that logic in `crates/mcp-args`.
