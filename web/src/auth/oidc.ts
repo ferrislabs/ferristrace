@@ -4,6 +4,7 @@ export const RENEW_MARGIN_SECONDS = 60
 const LOCK = 'ferristrace:session-renewal'
 const LOOP_GUARD_KEY = 'ferristrace.reauthenticatedAt'
 const LOOP_GUARD_MS = 30_000
+const SIGNED_OUT_KEY = 'ferristrace.signedOut'
 
 let manager: UserManager | null = null
 
@@ -125,14 +126,17 @@ export const isPublicPath = (path: string) => path.startsWith('/status/')
 
 export const STALLED = 'ferristrace:sign-in-stalled'
 
+export const signedOut = () => window.sessionStorage.getItem(SIGNED_OUT_KEY) !== null
+
 export async function signIn(target: string): Promise<void> {
+  window.sessionStorage.removeItem(SIGNED_OUT_KEY)
   window.sessionStorage.setItem(LOOP_GUARD_KEY, String(Date.now()))
   await manager?.signinRedirect({ state: safeTarget(target) })
 }
 
 export async function reauthenticate(target: string = here()): Promise<void> {
   const current = manager
-  if (!current || isPublicPath(window.location.pathname)) return
+  if (!current || isPublicPath(window.location.pathname) || signedOut()) return
   const last = Number(window.sessionStorage.getItem(LOOP_GUARD_KEY))
   await current.removeUser()
   if (Number.isFinite(last) && Date.now() - last < LOOP_GUARD_MS) {
@@ -146,6 +150,7 @@ export async function leave(): Promise<void> {
   const current = manager
   if (!current) return
   window.sessionStorage.removeItem(LOOP_GUARD_KEY)
+  window.sessionStorage.setItem(SIGNED_OUT_KEY, '1')
   try {
     await current.signoutRedirect()
   } catch {

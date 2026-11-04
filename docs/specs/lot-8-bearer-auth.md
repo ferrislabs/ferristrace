@@ -92,6 +92,8 @@ Design
     they asked for. Public status pages never redirect. A second redirect
     within 30 s stops on a "sign-in did not finish" screen instead of
     looping; a server without `[oidc]` shows "sign-in is unavailable".
+    After a deliberate sign-out the tab shows "you are signed out" with
+    a button, instead of sending the person straight back to FerrisKey.
 
   Configuration
     `[oidc]` keeps `issuer` and `client_id` (now the public web client).

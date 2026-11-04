@@ -7,8 +7,8 @@ import { AuthProvider, useAuth } from 'react-oidc-context'
 import { Toaster } from 'sonner'
 import { methodsQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
-import { STALLED, createUserManager, isPublicPath, keepFresh, reauthenticate, safeTarget } from '@/auth/oidc'
-import { SignInStalled, SignInUnavailable } from '@/pages/auth/SignInTrouble'
+import { STALLED, createUserManager, isPublicPath, keepFresh, reauthenticate, safeTarget, signedOut } from '@/auth/oidc'
+import { SignedOut, SignInStalled, SignInUnavailable } from '@/pages/auth/SignInTrouble'
 import { ScopeProvider } from '@/lib/scope'
 import { ThemeProvider, useTheme } from '@/lib/theme'
 import { createAppRouter } from './routes'
@@ -45,6 +45,7 @@ function Session({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLoading && !isAuthenticated && !open) void reauthenticate()
   }, [isLoading, isAuthenticated, open])
+  if (!isLoading && !isAuthenticated && !open && signedOut()) return <SignedOut />
   if (stalled || (error && !open)) return <SignInStalled />
   if (isLoading || (!isAuthenticated && !open)) return null
   return children

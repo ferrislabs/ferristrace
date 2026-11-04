@@ -23,3 +23,13 @@ export function SignInUnavailable() {
     </AuthFrame>
   )
 }
+
+export function SignedOut() {
+  return (
+    <AuthFrame title="You are signed out" intro="Your FerrisKey session has ended on this browser.">
+      <Button type="button" className="h-10" onClick={() => void signIn('/')}>
+        Sign in again
+      </Button>
+    </AuthFrame>
+  )
+}
