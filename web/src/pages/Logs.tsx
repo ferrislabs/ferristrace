@@ -1,10 +1,12 @@
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
-import { ChevronRight, Plus, Radio, Search, Waypoints, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Braces, ChevronRight, Copy, Plus, Radio, Search, Waypoints, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParam } from '@/lib/router'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Kbd } from '@/components/ui/misc'
 import { EmptyState, PageHeader, SeverityBadge } from '@/components/ft/bits'
 import { AttachToIncident } from '@/components/ft/AttachToIncident'
 import {
@@ -36,15 +38,6 @@ const BAR: Record<Sev, string> = {
   warn: 'bg-sev-warn-bd',
   error: 'bg-sev-error-fg',
   fatal: 'bg-sev-fatal-bg',
-}
-
-const TEXT: Record<Sev, string> = {
-  trace: 'text-sev-trace-fg',
-  debug: 'text-sev-debug-fg',
-  info: 'text-sev-info-fg',
-  warn: 'text-sev-warn-fg',
-  error: 'text-sev-error-fg',
-  fatal: 'text-sev-error-fg',
 }
 
 function decode(raw: string | undefined): LogQuery {
@@ -86,6 +79,8 @@ function encode(query: LogQuery): string | undefined {
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0')
 
+const idOf = (record: LogRecord) => `${record.time_ns}:${record.observed_ns}:${record.span_id ?? ''}:${record.body}`
+
 function clock(ns: number, withDate: boolean): string {
   const ms = msOf(ns)
   const at = new Date(ms)
@@ -124,13 +119,17 @@ function Histogram({ buckets, windowMs, onPick }: { buckets: Bucket[]; windowMs:
   )
 }
 
-function Row({ record, open, onToggle, dated, onPlace }: { record: LogRecord; open: boolean; onToggle: () => void; dated: boolean; onPlace: (part: Partial<Placement>) => void }) {
+function Row({ record, index, open, focused, onToggle, dated, onPlace, onAttr }: { record: LogRecord; index: number; open: boolean; focused: boolean; onToggle: () => void; dated: boolean; onPlace: (part: Partial<Placement>) => void; onAttr: (pair: string) => void }) {
   const hot = record.severity === 'error' || record.severity === 'fatal'
   const attributes = Object.entries(record.attributes)
   const resource = Object.entries(record.resource)
+  const copy = (whole: boolean) => {
+    void navigator.clipboard?.writeText(whole ? JSON.stringify(record, null, 2) : record.body)
+    toast.success(whole ? 'Record copied as JSON' : 'Body copied')
+  }
   return (
-    <div role="listitem" className="border-b border-border-subtle">
-      <button type="button" aria-expanded={open} onClick={onToggle} className={cn('grid w-full cursor-pointer grid-cols-[16px_128px_70px_140px_minmax(0,1fr)] items-center gap-3 px-5 py-1.5 text-left hover:bg-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-md:grid-cols-[16px_70px_minmax(0,1fr)]', open && 'bg-accent-subtle')}>
+    <div role="listitem" data-row={index} className="border-b border-border-subtle">
+      <button type="button" aria-expanded={open} onClick={onToggle} className={cn('grid w-full cursor-pointer grid-cols-[16px_128px_70px_140px_minmax(0,1fr)] items-center gap-3 px-5 py-1.5 text-left hover:bg-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-md:grid-cols-[16px_70px_minmax(0,1fr)]', open && 'bg-accent-subtle', focused && 'outline-2 -outline-offset-2 outline-ring')}>
         <ChevronRight className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />
         <time className="font-mono text-caption text-muted-foreground max-md:hidden" dateTime={new Date(msOf(record.time_ns)).toISOString()}>{clock(record.time_ns, dated)}</time>
         <SeverityBadge level={record.severity} />
@@ -140,8 +139,12 @@ function Row({ record, open, onToggle, dated, onPlace }: { record: LogRecord; op
       {open ? (
         <div className="flex flex-col gap-2 bg-sidebar px-5 py-3 pl-[52px]">
           <pre className="m-0 whitespace-pre-wrap break-all font-mono text-[12.5px]">{record.body}</pre>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => copy(false)}><Copy aria-hidden />Copy body</Button>
+            <Button variant="outline" size="sm" onClick={() => copy(true)}><Braces aria-hidden />Copy JSON</Button>
+          </div>
           <PlacementChips attributes={record.resource} onPick={onPlace} />
-          <Pairs title="Attributes" pairs={attributes} />
+          <Pairs title="Attributes" pairs={attributes} onPick={onAttr} />
           <Pairs title="Resource" pairs={resource} />
           {record.trace_id ? (
             <Link to={`/traces/${record.trace_id}`} className="inline-flex w-fit items-center gap-1.5 rounded-sm text-control focus-visible:outline-2 focus-visible:outline-ring"><Waypoints className="size-3.5" aria-hidden />Open trace {shortId(record.trace_id)}</Link>
@@ -152,13 +155,22 @@ function Row({ record, open, onToggle, dated, onPlace }: { record: LogRecord; op
   )
 }
 
-function Pairs({ title, pairs }: { title: string; pairs: [string, string][] }) {
+function Pairs({ title, pairs, onPick }: { title: string; pairs: [string, string][]; onPick?: (pair: string) => void }) {
   if (pairs.length === 0) return null
   return (
     <section aria-label={title}>
       <h3 className="m-0 text-caption font-semibold text-muted-foreground">{title}</h3>
       <dl className="m-0 grid max-w-[720px] grid-cols-[200px_1fr] gap-x-3 text-caption">
-        {pairs.map(([k, v]) => <div key={k} className="contents"><dt className="py-1 font-mono text-muted-foreground">{k}</dt><dd className="m-0 break-all py-1 font-mono">{v}</dd></div>)}
+        {pairs.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="py-1 font-mono text-muted-foreground">{k}</dt>
+            <dd className="m-0 break-all py-1 font-mono">
+              {onPick
+                ? <button type="button" onClick={() => onPick(`${k}=${v}`)} title={`Keep only records where ${k} is ${v}`} className="cursor-pointer rounded-sm text-left underline decoration-dotted decoration-muted-foreground underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-ring">{v}</button>
+                : v}
+            </dd>
+          </div>
+        ))}
       </dl>
     </section>
   )
@@ -182,6 +194,8 @@ export function Logs() {
   const [attr, setAttr] = useState('')
   const [live, setLive] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
+  const [cursor, setCursor] = useState(-1)
+  const list = useRef<HTMLDivElement>(null)
   const settled = useSettled(typed)
 
   const { placement, place } = usePlacement()
@@ -189,8 +203,9 @@ export function Logs() {
     const f = encode({ ...query, ...part })
     void navigate({ to: '/logs' as never, search: (keepPlacement ? (was: Record<string, unknown>) => ({ ...was, f }) : { f }) as never, replace: true })
     setOpen(null)
+    setCursor(-1)
   }
-  const placeHere = (part: Partial<Placement>) => { place(part); setOpen(null) }
+  const placeHere = (part: Partial<Placement>) => { place(part); setOpen(null); setCursor(-1) }
 
   useEffect(() => {
     if (settled === typed && settled !== query.q) apply({ q: settled })
@@ -203,6 +218,40 @@ export function Logs() {
   const { records, loading, pending, failed, more, older, loadingOlder } = useLogs(query, live, placement)
   const histogram = useLogHistogram(query, live, placement)
   const { names } = useServiceNames(query.rangeMs)
+  const ids = useMemo(() => {
+    const seen = new Map<string, number>()
+    return records.map((record) => {
+      const base = idOf(record)
+      const nth = seen.get(base) ?? 0
+      seen.set(base, nth + 1)
+      return nth === 0 ? base : `${base}#${nth}`
+    })
+  }, [records])
+  const pickAttr = (pair: string) => { if (!query.attrs.includes(pair)) apply({ attrs: [...query.attrs, pair] }) }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (e.metaKey || e.ctrlKey || e.altKey || ids.length === 0) return
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(ids.length - 1, c + 1)); return }
+      if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)); return }
+      if (e.key === 'Escape') { setOpen(null); return }
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      if (el.closest('button, a')) return
+      e.preventDefault()
+      const at = Math.min(Math.max(cursor, 0), ids.length - 1)
+      setCursor(at)
+      setOpen((was) => (was === ids[at] ? null : ids[at]))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [ids, cursor])
+
+  useEffect(() => {
+    if (cursor < 0) return
+    list.current?.querySelector<HTMLElement>(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [cursor])
 
   const windowMs = isPinned(query) ? (query.toMs as number) - (query.fromMs as number) : query.rangeMs
   const dated = windowMs > 24 * 60 * 60 * 1000
@@ -228,6 +277,7 @@ export function Logs() {
   return (
     <>
       <PageHeader title="Logs" meta={`Newest first · ${range}${live ? ' · live' : ''}`}>
+        <span className="hidden items-center gap-1 text-caption text-muted-foreground lg:inline-flex"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>expand</span>
         <AttachToIncident attachment={attachment} />
         <Switch checked={live} onCheckedChange={setLive} label={<span className="inline-flex items-center gap-1.5"><Radio className="size-3.5" aria-hidden />Live</span>} />
       </PageHeader>
@@ -277,14 +327,14 @@ export function Logs() {
         </EmptyState>
       ) : (
         <div className="-mx-4 border-t md:-mx-5">
-          <div role="list" aria-label="Log records">
+          <div role="list" aria-label="Log records" ref={list}>
             {records.map((record, i) => {
-              const id = `${record.time_ns}-${i}`
-              return <Row key={id} record={record} dated={dated} open={open === id} onToggle={() => setOpen(open === id ? null : id)} onPlace={placeHere} />
+              const id = ids[i]
+              return <Row key={id} record={record} index={i} dated={dated} open={open === id} focused={i === cursor} onToggle={() => { setOpen(open === id ? null : id); setCursor(i) }} onPlace={placeHere} onAttr={pickAttr} />
             })}
           </div>
           <div className="flex flex-wrap items-center gap-3 px-5 py-3">
-            <span className={cn('text-caption text-muted-foreground', loading && TEXT.info)}>{records.length} record{records.length === 1 ? '' : 's'} loaded{live ? ', refreshing every 5 s' : ''}.</span>
+            <span className={cn('text-caption', loading ? 'text-sev-info-fg' : 'text-muted-foreground')}>{records.length} record{records.length === 1 ? '' : 's'} loaded{live ? ', refreshing every 5 s' : ''}.</span>
             {more ? <Button size="sm" onClick={older} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load older'}</Button> : null}
           </div>
         </div>
