@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { Outlet, createRootRouteWithContext, createRoute, createRouter, redirect, retainSearchParams } from '@tanstack/react-router'
 import { accountQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
+import { reauthenticate } from '@/auth/oidc'
 import { AppShell } from '@/components/layout/AppShell'
 import { Ai } from '@/pages/Ai'
 import { Alerts } from '@/pages/Alerts'
@@ -24,7 +25,6 @@ import { SignalPage } from '@/pages/SignalPage'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
 import { Traces } from '@/pages/Traces'
-import { SignIn } from '@/pages/auth/SignIn'
 import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
@@ -60,15 +60,6 @@ const timed: Marker = { timed: true }
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: Outlet, notFoundComponent: NotFound })
 
-const signInRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/sign-in',
-  component: SignIn,
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
-    redirect: typeof search.redirect === 'string' && search.redirect.startsWith('/') ? search.redirect : undefined,
-  }),
-})
-
 const publicStatusRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/status/$slug',
@@ -83,7 +74,10 @@ async function signedIn(queryClient: QueryClient, href: string) {
   try {
     return await queryClient.ensureQueryData(accountQuery)
   } catch (error) {
-    if (isUnauthorized(error)) throw redirect({ to: '/sign-in', search: { redirect: href } })
+    if (isUnauthorized(error)) {
+      await reauthenticate(href)
+      return new Promise<never>(() => undefined)
+    }
     return undefined
   }
 }
@@ -136,7 +130,6 @@ const settingsChildren = [
 ]
 
 const routeTree = rootRoute.addChildren([
-  signInRoute,
   welcomeRoute,
   publicStatusRoute,
   publicPostmortemRoute,

@@ -121,26 +121,31 @@ export const safeTarget = (target: unknown) =>
 
 export const here = () => `${window.location.pathname}${window.location.search}${window.location.hash}`
 
+export const isPublicPath = (path: string) => path.startsWith('/status/')
+
+export const STALLED = 'ferristrace:sign-in-stalled'
+
 export async function signIn(target: string): Promise<void> {
+  window.sessionStorage.setItem(LOOP_GUARD_KEY, String(Date.now()))
   await manager?.signinRedirect({ state: safeTarget(target) })
 }
 
-export async function reauthenticate(): Promise<void> {
+export async function reauthenticate(target: string = here()): Promise<void> {
   const current = manager
-  if (!current) return
+  if (!current || isPublicPath(window.location.pathname)) return
   const last = Number(window.sessionStorage.getItem(LOOP_GUARD_KEY))
   await current.removeUser()
   if (Number.isFinite(last) && Date.now() - last < LOOP_GUARD_MS) {
-    window.location.assign(`/sign-in?redirect=${encodeURIComponent(safeTarget(here()))}`)
+    window.dispatchEvent(new Event(STALLED))
     return
   }
-  window.sessionStorage.setItem(LOOP_GUARD_KEY, String(Date.now()))
-  await signIn(here())
+  await signIn(target)
 }
 
 export async function leave(): Promise<void> {
   const current = manager
   if (!current) return
+  window.sessionStorage.removeItem(LOOP_GUARD_KEY)
   try {
     await current.signoutRedirect()
   } catch {

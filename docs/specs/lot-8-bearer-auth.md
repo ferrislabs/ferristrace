@@ -87,6 +87,11 @@ Design
     `x-requested-with`. Avatars and the organisation export are fetched
     with the bearer, not linked. The sessions screen leaves; sign-out is
     `signoutRedirect`.
+    There is no sign-in page: a visitor without a session, or whose call
+    answers 401, is sent to FerrisKey at once and brought back to the page
+    they asked for. Public status pages never redirect. A second redirect
+    within 30 s stops on a "sign-in did not finish" screen instead of
+    looping; a server without `[oidc]` shows "sign-in is unavailable".
 
   Configuration
     `[oidc]` keeps `issuer` and `client_id` (now the public web client).

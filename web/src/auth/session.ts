@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountQuery, roleRank, signOut, type Membership } from './api'
-import { useNavigate } from '@/lib/router'
 
 export function useAccount() {
   return useQuery(accountQuery).data
@@ -21,12 +20,8 @@ export function useOrganisations(): {
 
 export function useSignOut() {
   const client = useQueryClient()
-  const navigate = useNavigate()
   return useMutation({
     mutationFn: signOut,
-    onSettled: () => {
-      client.clear()
-      navigate('/sign-in', { replace: true })
-    },
+    onSettled: () => client.clear(),
   })
 }

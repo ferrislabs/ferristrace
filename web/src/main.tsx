@@ -2,27 +2,26 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from 'react-oidc-context'
 import { Toaster } from 'sonner'
 import { methodsQuery } from '@/auth/api'
 import { isUnauthorized } from '@/auth/client'
-import { createUserManager, keepFresh, reauthenticate, safeTarget } from '@/auth/oidc'
+import { STALLED, createUserManager, isPublicPath, keepFresh, reauthenticate, safeTarget } from '@/auth/oidc'
+import { SignInStalled, SignInUnavailable } from '@/pages/auth/SignInTrouble'
 import { ScopeProvider } from '@/lib/scope'
 import { ThemeProvider, useTheme } from '@/lib/theme'
 import { createAppRouter } from './routes'
 import './styles/globals.css'
 
-function toSignIn(error: unknown) {
+function toProvider(error: unknown) {
   if (!isUnauthorized(error)) return
-  const { pathname, href } = router.state.location
-  if (pathname === '/sign-in') return
-  void router.navigate({ to: '/sign-in', search: { redirect: href }, replace: true })
+  void reauthenticate(router.state.location.href)
 }
 
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: toSignIn }),
-  mutationCache: new MutationCache({ onError: toSignIn }),
+  queryCache: new QueryCache({ onError: toProvider }),
+  mutationCache: new MutationCache({ onError: toProvider }),
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 })
 
@@ -34,9 +33,21 @@ function ThemedToaster() {
 }
 
 function Session({ children }: { children: React.ReactNode }) {
-  const { isLoading } = useAuth()
+  const { isLoading, isAuthenticated, error } = useAuth()
+  const [stalled, setStalled] = useState(false)
+  const open = isPublicPath(window.location.pathname)
+  useEffect(() => {
+    const stall = () => setStalled(true)
+    window.addEventListener(STALLED, stall)
+    return () => window.removeEventListener(STALLED, stall)
+  }, [])
   useEffect(() => keepFresh(() => void reauthenticate()), [])
-  return isLoading ? null : children
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated && !open) void reauthenticate()
+  }, [isLoading, isAuthenticated, open])
+  if (stalled || (error && !open)) return <SignInStalled />
+  if (isLoading || (!isAuthenticated && !open)) return null
+  return children
 }
 
 function App() {
@@ -56,7 +67,7 @@ async function start() {
   const methods = await queryClient.fetchQuery(methodsQuery)
   const root = createRoot(document.getElementById('root')!)
   if (!methods.oidc || !methods.issuer || !methods.client_id) {
-    root.render(<StrictMode><App /></StrictMode>)
+    root.render(<StrictMode>{isPublicPath(window.location.pathname) ? <App /> : <SignInUnavailable />}</StrictMode>)
     return
   }
   const userManager = createUserManager(methods.issuer, methods.client_id)
