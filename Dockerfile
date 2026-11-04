@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
 
+# One file, one image per target: server (the default), mcp, mcp-gateway.
+# The three binaries come out of one Rust build, so building every target
+# compiles the workspace once.
+
 FROM rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137 AS chef
 
 WORKDIR /usr/local/src/ferristrace
@@ -18,13 +22,15 @@ FROM chef AS builder
 
 COPY --from=planner /usr/local/src/ferristrace/recipe.json recipe.json
 
-RUN cargo chef cook --release --locked --recipe-path recipe.json --package ferristrace-server
+RUN cargo chef cook --release --locked --recipe-path recipe.json \
+    --package ferristrace-server --package ferristrace-mcp --package ferristrace-mcp-gateway
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY apps apps
 
-RUN cargo build --release --locked --package ferristrace-server
+RUN cargo build --release --locked \
+    --bin ferristrace --bin ferristrace-mcp --bin ferristrace-mcp-gateway
 
 FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web-build
 
@@ -42,10 +48,33 @@ RUN pnpm build
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:08476c244888bfb425bae1ae4dd7c17f093e972aab8426883d97f3c6f280f7c1 AS runtime
 
+ENV RUST_LOG=info
+
+FROM runtime AS mcp
+
+COPY --from=builder /usr/local/src/ferristrace/target/release/ferristrace-mcp /usr/local/bin/ferristrace-mcp
+
+ENV FERRISTRACE_MCP_LISTEN=0.0.0.0:8081
+
+EXPOSE 8081
+
+ENTRYPOINT ["ferristrace-mcp"]
+
+FROM runtime AS mcp-gateway
+
+COPY --from=builder /usr/local/src/ferristrace/target/release/ferristrace-mcp-gateway /usr/local/bin/ferristrace-mcp-gateway
+
+ENV FERRISTRACE_MCP_GATEWAY_LISTEN=0.0.0.0:8080
+
+EXPOSE 8080
+
+ENTRYPOINT ["ferristrace-mcp-gateway"]
+
+FROM runtime AS server
+
 COPY --from=builder /usr/local/src/ferristrace/target/release/ferristrace /usr/local/bin/ferristrace
 COPY --from=web-build /usr/local/src/ferristrace/web/dist /usr/local/share/ferristrace/web
 
-ENV RUST_LOG=info
 ENV FERRISTRACE_WEB_ROOT=/usr/local/share/ferristrace/web
 
 EXPOSE 4317 4318

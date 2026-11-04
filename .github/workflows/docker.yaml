@@ -7,7 +7,7 @@ on:
       - .github/workflows/docker.yaml
       - .dockerignore
       - Cargo.*
-      - Dockerfile*
+      - Dockerfile
       - apps/**
       - crates/**
       - deploy/**
@@ -19,7 +19,7 @@ on:
       - .github/workflows/docker.yaml
       - .dockerignore
       - Cargo.*
-      - Dockerfile*
+      - Dockerfile
       - apps/**
       - crates/**
       - deploy/**
@@ -83,9 +83,9 @@ jobs:
           fi
           amd='{"runner":"ubuntu-24.04","platform":"linux/amd64","arch":"amd64"}'
           arm='{"runner":"ubuntu-24.04-arm","platform":"linux/arm64","arch":"arm64"}'
-          server='{"name":"server","file":"Dockerfile","local":"ferristrace:local","repository":"ferristrace"}'
-          mcp='{"name":"mcp","file":"Dockerfile.mcp","local":"ferristrace-mcp:local","repository":"ferristrace-mcp"}'
-          gateway='{"name":"mcp-gateway","file":"Dockerfile.mcp-gateway","local":"ferristrace-mcp-gateway:local","repository":"ferristrace-mcp-gateway"}'
+          server='{"name":"server","target":"server","local":"ferristrace:local","repository":"ferristrace"}'
+          mcp='{"name":"mcp","target":"mcp","local":"ferristrace-mcp:local","repository":"ferristrace-mcp"}'
+          gateway='{"name":"mcp-gateway","target":"mcp-gateway","local":"ferristrace-mcp-gateway:local","repository":"ferristrace-mcp-gateway"}'
           images="[$server,$mcp,$gateway]"
           runners="[$amd]"
           if [ "$push" = true ]; then
@@ -134,7 +134,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
           tags: ${{ matrix.local || format('{0}:check', matrix.name) }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
@@ -164,7 +164,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
           tags: ${{ env.REGISTRY }}/${{ matrix.repository }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
@@ -235,8 +235,13 @@ jobs:
             --dbname ferristrace --tuples-only --no-align \
             --command "SELECT count(*) FROM information_schema.tables \
                        WHERE table_schema = 'public' AND table_name IN \
-                       ('accounts', 'orgs', 'org_members', 'api_keys', 'sessions')")
-          test "$tables" = "5" || { echo "only $tables control plane tables exist"; exit 1; }
+                       ('accounts', 'orgs', 'org_members', 'api_keys')")
+          test "$tables" = "4" || { echo "only $tables control plane tables exist"; exit 1; }
+          gone=$(docker compose exec -T postgres psql --username ferristrace \
+            --dbname ferristrace --tuples-only --no-align \
+            --command "SELECT count(*) FROM information_schema.tables \
+                       WHERE table_schema = 'public' AND table_name IN ('sessions', 'oidc_flows')")
+          test "$gone" = "0" || { echo "the session tables are still there"; exit 1; }
 
       - name: bootstrap founds the organisation, once
         run: |
@@ -246,41 +251,62 @@ jobs:
           docker compose exec -T server ferristrace bootstrap --email someone.else@example.com 2>&1 | tee second.log
           grep -q "already holds an organisation" second.log || { echo "bootstrap was not idempotent"; exit 1; }
 
+      - name: the server names its public client and keeps no sign-in routes
+        run: |
+          set -eu
+          curl --fail --silent --show-error http://localhost:4318/auth/methods | tee methods.json
+          jq -e '.oidc and .client_id == "ferristrace" and (.issuer | startswith("http://ferriskey:3333/"))' \
+            methods.json > /dev/null || { echo "the server does not name its client"; exit 1; }
+          for gone in /auth/oidc/start /auth/oidc/callback; do
+            code=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:4318$gone")
+            test "$code" = "404" || { echo "$gone answered $code"; exit 1; }
+          done
+          code=$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:4318/auth/me)
+          test "$code" = "401" || { echo "/auth/me without a bearer answered $code"; exit 1; }
+
+      # What the web app does: code flow with PKCE against the public client,
+      # then the access token as a bearer on every call.
       - name: the operator signs in through FerrisKey
         run: |
           set -eu
+          fk=http://ferriskey:3333
+          origin=http://localhost:4318
           # --fail-with-body prints what FerrisKey refused, not just the code.
           admin=$(curl --fail-with-body --silent --show-error -X POST \
-            http://ferriskey:3333/realms/master/protocol/openid-connect/token \
+            "$fk/realms/master/protocol/openid-connect/token" \
             -d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
             | jq -r .access_token)
-          user=$(curl --fail-with-body --silent --show-error -X POST http://ferriskey:3333/realms/ferristrace/users \
+          user=$(curl --fail-with-body --silent --show-error -X POST "$fk/realms/ferristrace/users" \
             -H "authorization: Bearer $admin" -H 'content-type: application/json' \
             -d '{"username":"operator","email":"operator@example.com","email_verified":true,"firstname":"Op","lastname":"Erator"}' \
             | jq -r '.data.id // .id')
           curl --fail-with-body --silent --show-error -X PUT \
-            "http://ferriskey:3333/realms/ferristrace/users/$user/reset-password" \
+            "$fk/realms/ferristrace/users/$user/reset-password" \
             -H "authorization: Bearer $admin" -H 'content-type: application/json' \
             -d '{"credential_type":"password","value":"Operator-pass-1234!","temporary":false}'
-          authorize=$(curl --silent --output /dev/null --write-out '%{redirect_url}' \
-            --cookie-jar jar.txt --cookie jar.txt http://localhost:4318/auth/oidc/start)
-          case "$authorize" in http://ferriskey:3333/*) ;; *) echo "start sent the browser to $authorize"; exit 1 ;; esac
-          curl --silent --output /dev/null --cookie-jar jar.txt --cookie jar.txt "$authorize"
+          verifier=$(openssl rand -hex 40)
+          challenge=$(printf '%s' "$verifier" | openssl dgst -binary -sha256 | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+          redirect="$origin/"
+          encoded=$(jq -rn --arg uri "$redirect" '$uri | @uri')
+          curl --silent --output /dev/null --cookie-jar jar.txt --cookie jar.txt \
+            "$fk/realms/ferristrace/protocol/openid-connect/auth?client_id=ferristrace&response_type=code&scope=openid%20profile%20email&redirect_uri=$encoded&state=ci&code_challenge=$challenge&code_challenge_method=S256"
           callback=$(curl --fail-with-body --silent --show-error --cookie-jar jar.txt --cookie jar.txt -X POST \
-            'http://ferriskey:3333/realms/ferristrace/login-actions/authenticate?client_id=ferristrace' \
-            -H 'origin: http://ferriskey:5555' -H 'content-type: application/json' \
+            "$fk/realms/ferristrace/login-actions/authenticate?client_id=ferristrace" \
+            -H "origin: $origin" -H 'content-type: application/json' \
             -d '{"username":"operator","password":"Operator-pass-1234!"}' | jq -r .url)
-          case "$callback" in http://localhost:4318/auth/oidc/callback*) ;; *) echo "FerrisKey answered $callback"; exit 1 ;; esac
-          landed=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            --cookie-jar jar.txt --cookie jar.txt "$callback")
-          test "$landed" = "303" || { echo "the callback answered $landed"; exit 1; }
-          grep -q ft_session jar.txt || { echo "no session cookie was set"; exit 1; }
+          case "$callback" in "$redirect"*code=*) ;; *) echo "FerrisKey answered $callback"; exit 1 ;; esac
+          code=$(printf '%s' "$callback" | sed -E 's/.*[?&]code=([^&]*).*/\1/')
+          curl --fail-with-body --silent --show-error -X POST \
+            "$fk/realms/ferristrace/protocol/openid-connect/token" -H "origin: $origin" \
+            --data-urlencode grant_type=authorization_code --data-urlencode client_id=ferristrace \
+            --data-urlencode "code=$code" --data-urlencode "redirect_uri=$redirect" \
+            --data-urlencode "code_verifier=$verifier" | jq -er .access_token > token.txt
 
-      - name: the session carries the organisation bootstrap founded
+      - name: the bearer carries the organisation bootstrap founded
         run: |
           set -eu
           curl --fail --silent --show-error http://localhost:4318/auth/me \
-            -H 'x-requested-with: ci' --cookie jar.txt > me.json
+            -H "authorization: Bearer $(cat token.txt)" > me.json
           cat me.json
           jq -e '.email == "operator@example.com"' me.json > /dev/null || { echo "not the operator"; exit 1; }
           jq -e '.memberships | any(.name == "Default" and .role == "owner")' me.json > /dev/null \
@@ -290,12 +316,13 @@ jobs:
         run: |
           set -eu
           org=$(jq -r '.memberships[0].org' me.json)
+          bearer="authorization: Bearer $(cat token.txt)"
           refused=$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH \
-            "http://localhost:4318/api/orgs/$org" -H 'x-requested-with: ci' --cookie jar.txt \
+            "http://localhost:4318/api/orgs/$org" -H "$bearer" \
             -H 'content-type: application/json' --data '{"name":"   "}')
           test "$refused" = "422" || { echo "a blank name answered $refused"; exit 1; }
           curl --fail --silent --show-error -X PATCH "http://localhost:4318/api/orgs/$org" \
-            -H 'x-requested-with: ci' --cookie jar.txt -H 'content-type: application/json' \
+            -H "$bearer" -H 'content-type: application/json' \
             --data '{"name":"  Renamed  "}' | jq -e '.name == "Renamed"' > /dev/null \
             || { echo "the rename did not take, or kept the space"; exit 1; }
 
