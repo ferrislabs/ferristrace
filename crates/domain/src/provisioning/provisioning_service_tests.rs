@@ -10,9 +10,7 @@ use crate::access::KeyId;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{ProjectId, ProjectName};
 use crate::clock::UnixSeconds;
-use crate::identity::{
-    AccountId, Agent, Email, Session, SessionError, SessionStore, SessionSwitch,
-};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore, SessionSwitch};
 use crate::organisation::{OrgName, OrgRole};
 use crate::secret::SessionToken;
 use crate::telemetry::{IngestKey, TenantId};
@@ -524,17 +522,8 @@ impl OneSession {
 }
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Err(SessionError::Unknown)
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != LIVE_TOKEN {
+        if token.identity().subject.as_str() != LIVE_TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -545,10 +534,6 @@ impl SessionStore for OneSession {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -563,7 +548,7 @@ impl SessionSwitch for OneSession {
 }
 
 fn a_live_token() -> SessionToken {
-    SessionToken::from_plaintext(LIVE_TOKEN)
+    SessionToken::for_subject(LIVE_TOKEN)
 }
 
 #[tokio::test]
@@ -633,7 +618,7 @@ async fn a_token_that_resolves_to_nothing_founds_nothing() {
     );
 
     let refused = founding
-        .found(&SessionToken::from_plaintext("ft_ss_other"), &a_name())
+        .found(&SessionToken::for_subject("ft_ss_other"), &a_name())
         .await;
 
     assert_eq!(refused, Err(FoundError::NoSession));

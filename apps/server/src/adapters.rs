@@ -16,8 +16,8 @@ use ferristrace_domain::{
     UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
-    HttpWebhooks, JwksVerifier, MemoryMeter, MemorySink, OidcProvider, S3Photos, SmtpMailer,
-    StaticDirectory, SystemClock,
+    HttpWebhooks, JwksVerifier, MemoryMeter, MemorySink, S3Photos, SmtpMailer, StaticDirectory,
+    SystemClock,
 };
 use ferristrace_postgres::{Postgres, PostgresDirectory};
 use ferristrace_redis::RedisMeter;
@@ -35,7 +35,7 @@ impl Stack for Production {
     type LogStore = ClickhouseLogReader;
     type MetricStore = ClickhouseMetricReader;
     type Meter = Arc<Meter>;
-    type Oidc = OidcProvider;
+    type Users = JwksVerifier;
     type Agents = JwksVerifier;
     type Sink = Arc<Sink>;
     type Quota = StaticQuota<Arc<Meter>>;

@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried, reading};
-use crate::session_cookie;
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -109,7 +108,7 @@ async fn card<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let card = state.app.org_card(&token, TenantId::new(org)).await?;
     Ok(Json(Card::of(card, state.default_retention_days)))
 }
@@ -123,7 +122,7 @@ async fn rename<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = OrgName::try_from(asked.name.as_str())?;
     let card = state
         .app
@@ -142,7 +141,7 @@ async fn retain<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let days = asked.days.map(RetentionDays::try_from).transpose()?;
     let card = state
         .app
@@ -161,7 +160,7 @@ async fn zone<S: Stack>(
 where
     S::Repos: OrgRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let timezone = OrgTimezone::try_from(asked.timezone.as_str())?;
     let card = state
         .app
@@ -195,7 +194,7 @@ async fn keep<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let logo = Photo::examined(body.to_vec())?;
     let kind = logo.kind();
 
@@ -215,7 +214,7 @@ async fn forget<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
 
     let card = state
         .app
@@ -233,8 +232,7 @@ async fn served<S: Stack>(
 where
     S::Repos: OrgRepos,
 {
-    let token =
-        session_cookie::carried(&headers).ok_or(OrgRefused::Reaching(NotCarried::NoSession))?;
+    let token = carried(&state, &headers).await?;
     let (kind, bytes) = state.app.org_logo(&token, TenantId::new(org)).await?;
 
     Ok((

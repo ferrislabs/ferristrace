@@ -143,7 +143,7 @@ async fn read<S: Stack>(
 where
     S::Repos: AuditRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let filter = asked.filter()?;
     let page = state
         .app

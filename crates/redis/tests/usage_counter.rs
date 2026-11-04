@@ -1,8 +1,6 @@
-use ferristrace_application::testing::Inert;
+use ferristrace_application::testing::{Bearers, Inert};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
-use ferristrace_domain::{
-    DecompressedBytes, NoPhotos, ProvisionPolicy, TenantId, UsageMeter, UsageReader,
-};
+use ferristrace_domain::{DecompressedBytes, NoPhotos, TenantId, UsageMeter, UsageReader};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres, SELF_HOSTED_PLAN};
 use ferristrace_redis::RedisMeter;
@@ -42,7 +40,7 @@ impl Stack for Wired {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = RedisMeter<FixedClock>;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -64,8 +62,7 @@ async fn driven(pool: &PgPool, seconds: u64, namespace: &str) -> Option<Ferristr
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     ))
 }

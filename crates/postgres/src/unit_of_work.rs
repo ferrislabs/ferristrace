@@ -1,14 +1,11 @@
 use core::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 
 use ferristrace_application::registry::{Settle, UnitOfWork};
-use ferristrace_domain::SessionLifetime;
+use ferristrace_domain::ProvisionPolicy;
 use ferristrace_infra::SecretSeal;
 use sqlx::{PgPool, Transaction};
 use tokio::sync::{Mutex, MutexGuard};
-
-use crate::flows::DEFAULT_WINDOW as FLOW_WINDOW;
 
 #[derive(Debug, Clone)]
 pub struct SharedTx(Arc<Mutex<Transaction<'static, sqlx::Postgres>>>);
@@ -27,9 +24,8 @@ impl SharedTx {
 pub struct Postgres<C> {
     pool: PgPool,
     clock: C,
-    pub(crate) lifetime: SessionLifetime,
+    pub(crate) policy: ProvisionPolicy,
     pub(crate) seal: Option<SecretSeal>,
-    pub(crate) flow_window: Duration,
 }
 
 impl<C> Postgres<C> {
@@ -37,27 +33,20 @@ impl<C> Postgres<C> {
         Self {
             pool,
             clock,
-            lifetime: SessionLifetime::default(),
+            policy: ProvisionPolicy::default(),
             seal: None,
-            flow_window: FLOW_WINDOW,
         }
     }
 
     #[must_use]
-    pub fn with_session_lifetime(mut self, lifetime: SessionLifetime) -> Self {
-        self.lifetime = lifetime;
+    pub fn with_provision_policy(mut self, policy: ProvisionPolicy) -> Self {
+        self.policy = policy;
         self
     }
 
     #[must_use]
     pub fn with_seal(mut self, seal: Option<SecretSeal>) -> Self {
         self.seal = seal;
-        self
-    }
-
-    #[must_use]
-    pub fn with_flow_window(mut self, window: Duration) -> Self {
-        self.flow_window = window;
         self
     }
 

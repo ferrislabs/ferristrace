@@ -6,8 +6,8 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Couriered, Crew, IncidentLedger, Inert, OncallLedger, PriceLedger, StatusLedger,
-    Untransacted,
+    AlertLedger, Bearers, Couriered, Crew, IncidentLedger, Inert, OncallLedger, PriceLedger,
+    StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, SignalReaders, Stack};
 use ferristrace_clickhouse::{
@@ -15,15 +15,14 @@ use ferristrace_clickhouse::{
     ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink,
 };
 use ferristrace_domain::{
-    AccountId, Agent, Aggregation, AlertRules, AlertSeverity, AlertStatus, Assigned, Author,
-    Change, Clock, CommentBody, Comparison, Condition, Created, Definition, DefinitionParts,
-    EntryKind, IncidentDraft, IncidentPatch, IncidentSeverity, IncidentStatus, Labels, LiveSession,
-    LogRecord, LogSignal, LogSink, Membership, Memberships, Metric, MetricData, MetricPoint,
-    MetricSignal, MetricSink, NoDataPolicy, NoPhotos, Observation, OrgRole, Project, ProjectId,
-    ProjectName, Projects, ProvisionPolicy, Reader, RuleDraft, RuleName, Scope, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, Severity, Signal,
-    SignalProbe, Span, SpanId, SpanKind, SpanSink, SpanStatus, StoreError, TeamId, TenantId, Tick,
-    TraceId, TraceMeasure, TraceSignal, UnixSeconds, WhoamiError, Window,
+    AccountId, Aggregation, AlertRules, AlertSeverity, AlertStatus, Assigned, Author, Change,
+    Clock, CommentBody, Comparison, Condition, Created, Definition, DefinitionParts, EntryKind,
+    IncidentDraft, IncidentPatch, IncidentSeverity, IncidentStatus, Labels, LogRecord, LogSignal,
+    LogSink, Membership, Memberships, Metric, MetricData, MetricPoint, MetricSignal, MetricSink,
+    NoDataPolicy, NoPhotos, Observation, OrgRole, Project, ProjectId, ProjectName, Projects,
+    Reader, RuleDraft, RuleName, Scope, Session, SessionError, SessionStore, SessionToken,
+    Severity, Signal, SignalProbe, Span, SpanId, SpanKind, SpanSink, SpanStatus, StoreError,
+    TeamId, TenantId, Tick, TraceId, TraceMeasure, TraceSignal, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -494,24 +493,15 @@ impl Projects for Nobody {
     }
 }
 
-const SESSION: &str = "ft_ss_on_call";
+const SESSION: &str = "ft.person.on_call";
 const ON_CALL: u128 = 9;
 
 #[derive(Clone)]
 struct OnCall;
 
 impl SessionStore for OnCall {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Err(SessionError::Unknown)
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != SESSION {
+        if token.identity().subject.as_str() != SESSION {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -522,32 +512,6 @@ impl SessionStore for OnCall {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OnCall {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -624,7 +588,7 @@ impl Stack for Watching {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -690,8 +654,7 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     );
 
@@ -806,11 +769,10 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     );
-    let me = Reader::Session(SessionToken::from_plaintext(SESSION));
+    let me = Reader::Session(SessionToken::for_subject(SESSION));
     for minute in [7, 9] {
         clock.to(minute * 60);
         app.evaluate_alerts().await.expect("a tick");
@@ -1308,8 +1270,7 @@ async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     );
 
@@ -1337,7 +1298,7 @@ impl Stack for Spending {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -1540,8 +1501,7 @@ async fn spec_l4_4_a_cost_rule_fires_when_the_priced_calls_cross_ten_dollars_and
             issue_store: Some(ClickhouseIssues::new(client)),
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     );
 

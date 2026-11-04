@@ -2,9 +2,17 @@ use core::fmt;
 
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub const SESSION_PREFIX: &str = "ft_ss_";
+use crate::clock::UnixSeconds;
+use crate::identity::ResolvedIdentity;
+#[cfg(any(test, feature = "testing"))]
+use crate::identity::{Email, Issuer, Subject};
+
+#[cfg(any(test, feature = "testing"))]
+const TESTING_ISSUER: &str = "https://issuer.ferristrace.test";
+
+#[cfg(any(test, feature = "testing"))]
+const TESTING_EXPIRY: u64 = 4_102_444_800;
 
 pub const KEY_PREFIX: &str = "ft_live_";
 
@@ -45,24 +53,40 @@ impl fmt::Debug for SecretHash {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-pub struct SessionToken(String);
+#[derive(Clone, PartialEq, Eq)]
+pub struct SessionToken {
+    identity: ResolvedIdentity,
+    expires_at: UnixSeconds,
+}
 
 impl SessionToken {
-    pub fn from_plaintext(plaintext: &str) -> Self {
-        Self(plaintext.to_owned())
+    pub fn verified(identity: ResolvedIdentity, expires_at: UnixSeconds) -> Self {
+        Self {
+            identity,
+            expires_at,
+        }
     }
 
-    pub fn exposed(&self) -> &str {
-        &self.0
+    pub fn identity(&self) -> &ResolvedIdentity {
+        &self.identity
     }
 
-    pub fn hash(&self) -> SecretHash {
-        SecretHash::of(&self.0)
+    pub fn expires_at(&self) -> UnixSeconds {
+        self.expires_at
     }
 
-    pub fn looks_like_one(&self) -> bool {
-        self.0.starts_with(SESSION_PREFIX) && self.0.len() > SESSION_PREFIX.len()
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_subject(subject: &str) -> Self {
+        Self::verified(
+            ResolvedIdentity {
+                issuer: Issuer::new(TESTING_ISSUER).expect("the testing issuer is not empty"),
+                subject: Subject::try_from(subject).expect("a testing subject is not empty"),
+                email: Email::try_from(format!("{subject}@ferristrace.test").as_str())
+                    .expect("a testing subject makes an address"),
+                email_verified: true,
+            },
+            UnixSeconds::new(TESTING_EXPIRY),
+        )
     }
 }
 
@@ -74,7 +98,7 @@ impl fmt::Debug for SessionToken {
 
 #[cfg(test)]
 mod tests {
-    use super::{SESSION_PREFIX, SecretHash, SessionToken};
+    use super::{SecretHash, SessionToken};
 
     #[test]
     fn the_same_secret_hashes_the_same_way() {
@@ -84,23 +108,19 @@ mod tests {
 
     #[test]
     fn neither_a_hash_nor_a_token_renders_itself() {
-        let token = SessionToken::from_plaintext("ft_ss_abcdef");
+        let token = SessionToken::for_subject("alice");
 
         assert_eq!(format!("{token:?}"), "SessionToken(redacted)");
-        assert_eq!(format!("{:?}", token.hash()), "SecretHash(..)");
+        assert_eq!(format!("{:?}", SecretHash::of("secret")), "SecretHash(..)");
     }
 
     #[test]
-    fn a_token_carries_its_prefix() {
-        assert!(SessionToken::from_plaintext("ft_ss_abcdef").looks_like_one());
-        assert!(!SessionToken::from_plaintext("abcdef").looks_like_one());
-        assert!(!SessionToken::from_plaintext(SESSION_PREFIX).looks_like_one());
-    }
+    fn a_token_names_the_person_it_was_verified_for() {
+        let token = SessionToken::for_subject("alice");
 
-    #[test]
-    fn a_token_hashes_to_the_digest_of_its_text() {
-        let token = SessionToken::from_plaintext("ft_ss_abcdef");
-
-        assert_eq!(token.hash(), SecretHash::of("ft_ss_abcdef"));
+        assert_eq!(token.identity().subject.as_str(), "alice");
+        assert_eq!(token.identity().email.as_str(), "alice@ferristrace.test");
+        assert_eq!(token, SessionToken::for_subject("alice"));
+        assert_ne!(token, SessionToken::for_subject("bob"));
     }
 }

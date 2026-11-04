@@ -1,22 +1,21 @@
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, catalogue_router};
+use ferristrace_api::{AppState, catalogue_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, Assigned, Created, LiveSession, Membership, Memberships, NoPhotos, OrgRole,
-    OwnerTeam, Project, ProjectId, ProjectName, Projects, ProvisionPolicy, Renamed, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId,
-    UnixSeconds, WhoamiError,
+    AccountId, Assigned, Created, Membership, Memberships, NoPhotos, OrgRole, OwnerTeam, Project,
+    ProjectId, ProjectName, Projects, Renamed, Session, SessionError, SessionStore, SessionToken,
+    StoreError, TeamId, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const STOREFRONT: u128 = 7;
@@ -30,17 +29,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: "person@example.com".try_into().expect("an address"),
@@ -52,32 +42,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -211,14 +175,11 @@ impl Projects for Kept {
     }
 }
 
-fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
         .uri(uri)
-        .header(COOKIE, format!("ft_session={TOKEN}"));
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     if body.is_some() {
         request = request.header("content-type", "application/json");
     }
@@ -278,7 +239,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -301,13 +262,9 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
@@ -341,7 +298,7 @@ async fn a_member_reads_the_projects_with_their_team_and_their_keys() {
     let (status, body) = served(
         OrgRole::Member,
         &kept,
-        asking(Method::GET, &projects_of(MINE), None, true),
+        asking(Method::GET, &projects_of(MINE), None),
     )
     .await;
 
@@ -364,26 +321,12 @@ async fn a_project_no_team_owns_carries_a_null_team() {
     let (status, body) = served(
         OrgRole::Member,
         &kept,
-        asking(Method::GET, &projects_of(MINE), None, true),
+        asking(Method::GET, &projects_of(MINE), None),
     )
     .await;
 
     assert_eq!(status, StatusCode::OK);
     assert!(read(&body)["projects"][0]["team"].is_null());
-}
-
-#[tokio::test]
-async fn a_request_from_another_origin_never_reaches_the_projects() {
-    let kept = Kept::holding();
-
-    let (status, _) = served(
-        OrgRole::Owner,
-        &kept,
-        asking(Method::GET, &projects_of(MINE), None, false),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -393,7 +336,7 @@ async fn the_projects_of_an_organisation_this_session_does_not_belong_to_are_not
     let (status, _) = served(
         OrgRole::Owner,
         &kept,
-        asking(Method::GET, &projects_of(THEIRS), None, true),
+        asking(Method::GET, &projects_of(THEIRS), None),
     )
     .await;
 
@@ -415,7 +358,6 @@ async fn an_administrator_creates_a_project_and_is_answered_with_the_catalogue()
             Method::POST,
             &projects_of(MINE),
             Some(r#"{"name":"payments-eu"}"#),
-            true,
         ),
     )
     .await;
@@ -439,7 +381,6 @@ async fn a_name_is_lowered_rather_than_refused_for_its_case() {
             Method::POST,
             &projects_of(MINE),
             Some(r#"{"name":"  Payments-EU  "}"#),
-            true,
         ),
     )
     .await;
@@ -459,7 +400,6 @@ async fn a_name_nothing_could_be_grepped_for_is_refused_with_the_rule() {
             Method::POST,
             &projects_of(MINE),
             Some(r#"{"name":"pay ments"}"#),
-            true,
         ),
     )
     .await;
@@ -483,7 +423,6 @@ async fn a_member_arranges_nothing() {
             Method::POST,
             &projects_of(MINE),
             Some(r#"{"name":"payments-eu"}"#),
-            true,
         ),
     )
     .await;
@@ -504,7 +443,6 @@ async fn a_name_the_organisation_already_holds_is_a_conflict() {
             Method::POST,
             &projects_of(MINE),
             Some(r#"{"name":"storefront"}"#),
-            true,
         ),
     )
     .await;
@@ -524,7 +462,6 @@ async fn an_administrator_renames_a_project() {
             Method::PATCH,
             &project_of(MINE, STOREFRONT),
             Some(r#"{"name":"shopfront"}"#),
-            true,
         ),
     )
     .await;
@@ -548,14 +485,12 @@ async fn a_project_this_organisation_does_not_hold_is_not_found() {
             Method::PATCH,
             &project_of(MINE, 404),
             Some(r#"{"name":"gone"}"#),
-            true,
         ),
-        asking(Method::DELETE, &project_of(MINE, 404), None, true),
+        asking(Method::DELETE, &project_of(MINE, 404), None),
         asking(
             Method::PUT,
             &format!("{}/team", project_of(MINE, 404)),
             Some(r#"{"team":null}"#),
-            true,
         ),
     ] {
         let (status, _) = served(OrgRole::Owner, &kept, request).await;
@@ -571,7 +506,7 @@ async fn an_administrator_forgets_a_project_and_reads_what_is_left() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
-        asking(Method::DELETE, &project_of(MINE, STOREFRONT), None, true),
+        asking(Method::DELETE, &project_of(MINE, STOREFRONT), None),
     )
     .await;
 
@@ -594,7 +529,6 @@ async fn a_project_is_handed_to_a_team() {
             Method::PUT,
             &format!("{}/team", project_of(MINE, STOREFRONT)),
             Some(&format!(r#"{{"team":"{}"}}"#, id(BACKEND))),
-            true,
         ),
     )
     .await;
@@ -620,7 +554,6 @@ async fn a_null_team_takes_the_project_back_from_whoever_held_it() {
             Method::PUT,
             &format!("{}/team", project_of(MINE, STOREFRONT)),
             Some(r#"{"team":null}"#),
-            true,
         ),
     )
     .await;
@@ -643,7 +576,6 @@ async fn a_team_of_another_organisation_cannot_be_handed_a_project() {
             Method::PUT,
             &format!("{}/team", project_of(MINE, STOREFRONT)),
             Some(&format!(r#"{{"team":"{}"}}"#, id(404))),
-            true,
         ),
     )
     .await;

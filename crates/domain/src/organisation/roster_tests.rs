@@ -9,7 +9,7 @@ use super::value_objects::{Invitation, OrgRole};
 use super::whoami::Whoami;
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
@@ -48,17 +48,8 @@ fn a_member(seed: u128, role: OrgRole) -> Member {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: an_account(ME),
                 email: an_address("me"),
@@ -70,10 +61,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -233,7 +220,7 @@ fn noting<'a>(
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[tokio::test]
@@ -269,7 +256,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let held = Held::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
 
     let refused = roster(OrgRole::Owner, &held)
-        .members(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+        .members(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(RosterError::NoSession));

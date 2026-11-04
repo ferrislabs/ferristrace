@@ -63,9 +63,6 @@ spec:
             {{- if $s.atRestKey.name }}
             {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_SECRETS__AT_REST_KEY" "ref" $s.atRestKey) | nindent 12 }}
             {{- end }}
-            {{- if .Values.config.oidc.enabled }}
-            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OIDC__CLIENT_SECRET" "ref" $s.oidcClientSecret) | nindent 12 }}
-            {{- end }}
             {{- if .Values.config.mail.enabled }}
             {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_MAIL__PASSWORD" "ref" $s.smtpPassword) | nindent 12 }}
             {{- end }}

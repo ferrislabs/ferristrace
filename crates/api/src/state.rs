@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use ferristrace_application::{Ferristrace, Stack};
 
-use crate::session_cookie::SessionCookie;
-
 const FALLBACK_RETENTION_DAYS: u64 = 30;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -15,7 +13,6 @@ pub struct McpSettings {
 
 pub struct AppState<S: Stack> {
     pub app: Arc<Ferristrace<S>>,
-    pub cookie: SessionCookie,
     pub default_retention_days: u64,
     pub agents_off_reason: Option<String>,
     pub reserved_client_id: Option<String>,
@@ -23,10 +20,9 @@ pub struct AppState<S: Stack> {
 }
 
 impl<S: Stack> AppState<S> {
-    pub fn new(app: Arc<Ferristrace<S>>, cookie: SessionCookie) -> Self {
+    pub fn new(app: Arc<Ferristrace<S>>) -> Self {
         Self {
             app,
-            cookie,
             default_retention_days: FALLBACK_RETENTION_DAYS,
             agents_off_reason: None,
             reserved_client_id: None,
@@ -62,7 +58,6 @@ impl<S: Stack> Clone for AppState<S> {
     fn clone(&self) -> Self {
         Self {
             app: Arc::clone(&self.app),
-            cookie: self.cookie,
             default_retention_days: self.default_retention_days,
             agents_off_reason: self.agents_off_reason.clone(),
             reserved_client_id: self.reserved_client_id.clone(),
@@ -75,7 +70,6 @@ impl<S: Stack> fmt::Debug for AppState<S> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AppState")
-            .field("cookie", &self.cookie)
             .field("default_retention_days", &self.default_retention_days)
             .finish_non_exhaustive()
     }

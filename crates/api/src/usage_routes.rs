@@ -69,7 +69,7 @@ async fn usage<S: Stack>(
 where
     S::Repos: UsageRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let window = Window::new(
         asked.from.saturating_mul(NANOS_PER_MILLI),
         asked.to.saturating_mul(NANOS_PER_MILLI),

@@ -98,7 +98,7 @@ async fn list<S: Stack>(
 where
     S::Repos: AccessRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let keys = state.app.list_keys(&token, TenantId::new(org)).await?;
     Ok(Json(Ring {
         keys: keys.into_iter().map(Held::from).collect(),
@@ -114,7 +114,7 @@ async fn issue<S: Stack>(
 where
     S::Repos: AccessRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = KeyName::try_from(asked.name.as_str())?;
     let scopes = KeyScopes::parse(&asked.scopes)?;
     let issued = state
@@ -139,7 +139,7 @@ async fn revoke<S: Stack>(
 where
     S::Repos: AccessRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .revoke_key(&token, TenantId::new(org), KeyId::new(key))

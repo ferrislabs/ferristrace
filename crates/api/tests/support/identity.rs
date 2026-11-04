@@ -1,35 +1,21 @@
 use core::marker::PhantomData;
 use std::sync::Arc;
 
-use ferristrace_api::{AppState, SessionCookie};
+use ferristrace_api::AppState;
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountDirectory, AccountId, AccountName, Accounts, Agent, AuthError, AuthProvider, Authorizer,
-    FlowError, LiveSession, Membership, Memberships, OidcFlows, PendingFlow, Photos, Portrait,
-    ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, SignInProof, StoreError, TenantId, WhoamiError,
+    AccountDirectory, AccountId, AccountName, Accounts, AuthError, Membership, Memberships, Photos,
+    Portrait, ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionStore, SessionToken,
+    StoreError, UserTokens, WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Nowhere;
 
 impl SessionStore for Nowhere {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Err(SessionError::StoreUnreachable)
-    }
-
     async fn resolve(&self, _token: &SessionToken) -> Result<Session, SessionError> {
-        Err(SessionError::StoreUnreachable)
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
         Err(SessionError::StoreUnreachable)
     }
 }
@@ -72,63 +58,12 @@ impl AccountDirectory for Nowhere {
     }
 }
 
-impl OidcFlows for Nowhere {
-    async fn begin(&self, _flow: &PendingFlow) -> Result<(), FlowError> {
-        Err(FlowError::StoreUnreachable)
-    }
-
-    async fn take(&self, _state: &str) -> Result<PendingFlow, FlowError> {
-        Err(FlowError::StoreUnreachable)
-    }
-}
-
-impl AuthProvider for Nowhere {
-    async fn sign_in(&self, _proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
-        Err(AuthError::ProviderUnreachable)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Sessioned<T>(T);
 
 impl<T: SessionStore + Send + Sync> SessionStore for Sessioned<T> {
-    async fn issue(
-        &self,
-        account: AccountId,
-        org: Option<TenantId>,
-        from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        self.0.issue(account, org, from).await
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
         self.0.resolve(token).await
-    }
-
-    async fn revoke(&self, token: &SessionToken) -> Result<(), SessionError> {
-        self.0.revoke(token).await
-    }
-}
-
-impl<T: Send + Sync> SessionRoll for Sessioned<T> {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Err(SessionError::StoreUnreachable)
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Err(SessionError::StoreUnreachable)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Err(SessionError::StoreUnreachable)
     }
 }
 
@@ -203,34 +138,31 @@ impl<T: Send + Sync> AccountDirectory for Profiled<T> {
 }
 
 #[derive(Debug)]
-pub struct Fakes<S, M, A, W> {
+pub struct Fakes<S, M, A> {
     pub sessions: S,
     pub memberships: M,
     pub accounts: A,
-    pub flows: W,
 }
 
-impl Fakes<Nowhere, Nowhere, Nowhere, Nowhere> {
+impl Fakes<Nowhere, Nowhere, Nowhere> {
     pub fn nowhere() -> Self {
         Self {
             sessions: Nowhere,
             memberships: Nowhere,
             accounts: Nowhere,
-            flows: Nowhere,
         }
     }
 }
 
-impl<S, M, A, W> Untransacted for Fakes<S, M, A, W>
+impl<S, M, A> Untransacted for Fakes<S, M, A>
 where
     S: Send + Sync + 'static,
     M: Send + Sync + 'static,
     A: Send + Sync + 'static,
-    W: Send + Sync + 'static,
 {
 }
 
-impl<S, M, A, W> RepoFor<domain::Sessions> for Fakes<S, M, A, W>
+impl<S, M, A> RepoFor<domain::Sessions> for Fakes<S, M, A>
 where
     S: SessionStore + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -242,7 +174,7 @@ where
     }
 }
 
-impl<S, M, A, W> RepoFor<domain::Memberships> for Fakes<S, M, A, W>
+impl<S, M, A> RepoFor<domain::Memberships> for Fakes<S, M, A>
 where
     M: Memberships + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -254,7 +186,7 @@ where
     }
 }
 
-impl<S, M, A, W> RepoFor<domain::Accounts> for Fakes<S, M, A, W>
+impl<S, M, A> RepoFor<domain::Accounts> for Fakes<S, M, A>
 where
     A: Accounts + AccountDirectory + Clone + Send + Sync + 'static,
     Self: Untransacted,
@@ -263,18 +195,6 @@ where
 
     fn build(&self, (): &()) -> Self::Repo {
         self.accounts.clone()
-    }
-}
-
-impl<S, M, A, W> RepoFor<domain::Flows> for Fakes<S, M, A, W>
-where
-    W: OidcFlows + Clone + Send + Sync + 'static,
-    Self: Untransacted,
-{
-    type Repo = W;
-
-    fn build(&self, (): &()) -> Self::Repo {
-        self.flows.clone()
     }
 }
 
@@ -288,7 +208,7 @@ where
     R: ferristrace_application::registry::UnitOfWork,
     M: ferristrace_domain::AlertMailer + ferristrace_domain::StatusMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
-    Z: Authorizer + AuthProvider + Send + Sync + 'static,
+    Z: UserTokens + Send + Sync + 'static,
 {
     type Repos = R;
     type Clock = Inert;
@@ -299,7 +219,7 @@ where
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Z;
+    type Users = Z;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -311,14 +231,13 @@ pub fn state<R, M, P, Z>(
     repos: R,
     mailer: M,
     photos: P,
-    oidc: Option<Z>,
-    cookie: SessionCookie,
+    users: Option<Z>,
 ) -> AppState<Wired<R, M, P, Z>>
 where
     R: ferristrace_application::registry::UnitOfWork,
     M: ferristrace_domain::AlertMailer + ferristrace_domain::StatusMailer + Send + Sync + 'static,
     P: Photos + Send + Sync + 'static,
-    Z: Authorizer + AuthProvider + Send + Sync + 'static,
+    Z: UserTokens + Send + Sync + 'static,
 {
     let adapters = Adapters {
         clock: Inert::default(),
@@ -330,8 +249,7 @@ where
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc,
-        provision: ProvisionPolicy::default(),
+        users,
     };
-    AppState::new(Arc::new(Ferristrace::new(repos, adapters)), cookie)
+    AppState::new(Arc::new(Ferristrace::new(repos, adapters)))
 }

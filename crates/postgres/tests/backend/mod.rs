@@ -101,10 +101,6 @@ pub fn decisions<C>(backend: &Postgres<C>) -> Each<'_, domain::Decisions, C> {
     Each::over(backend)
 }
 
-pub fn flows<C>(backend: &Postgres<C>) -> Each<'_, domain::Flows, C> {
-    Each::over(backend)
-}
-
 pub fn api_keys<C>(backend: &Postgres<C>) -> Each<'_, domain::ApiKeys, C> {
     Each::over(backend)
 }
@@ -142,19 +138,11 @@ macro_rules! forward {
 }
 
 forward!(Sessions: SessionStore {
-    fn issue(&self, account: AccountId, org: Option<TenantId>, from: Option<&Agent>) -> Result<SessionToken, SessionError>;
     fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError>;
-    fn revoke(&self, token: &SessionToken) -> Result<(), SessionError>;
 });
 
 forward!(Sessions: SessionSwitch {
     fn switch(&self, token: &SessionToken, org: TenantId) -> Result<(), SessionError>;
-});
-
-forward!(Sessions: SessionRoll {
-    fn live(&self, account: AccountId, current: &SessionToken) -> Result<Vec<LiveSession>, SessionError>;
-    fn revoke_one(&self, account: AccountId, id: SessionId) -> Result<bool, SessionError>;
-    fn revoke_others(&self, account: AccountId, current: &SessionToken) -> Result<u64, SessionError>;
 });
 
 forward!(Memberships: Memberships {
@@ -240,11 +228,6 @@ forward!(Decisions: IssueDecisions {
     fn assign(&self, project: ProjectId, print: Fingerprint, owner: Option<AccountId>, by: AccountId, at_unix_nanos: u64) -> Result<(), StoreError>;
 });
 
-forward!(Flows: OidcFlows {
-    fn begin(&self, flow: &PendingFlow) -> Result<(), FlowError>;
-    fn take(&self, state: &str) -> Result<PendingFlow, FlowError>;
-});
-
 forward!(ControlPlane: ControlPlane {
     fn founded(&self) -> Result<Option<TenantId>, ProvisionError>;
     fn found(&self, name: &OrgName, owner: &Email) -> Result<TenantId, ProvisionError>;
@@ -296,18 +279,6 @@ impl<C: Send + Sync + 'static> Each<'_, domain::Projects, C> {
     }
 }
 
-impl<C: Clock + Clone + Send + Sync + 'static> Each<'_, domain::Sessions, C> {
-    pub async fn prune(&self) -> Result<u64, SessionError> {
-        committed!((*self.backend), |repo: Sessions| repo.prune().await)
-    }
-}
-
-impl<C: Clock + Clone + Send + Sync + 'static> Each<'_, domain::Flows, C> {
-    pub async fn prune(&self) -> Result<u64, FlowError> {
-        committed!((*self.backend), |repo: Flows| repo.prune().await)
-    }
-}
-
 impl<C: Send + Sync + 'static> Each<'_, domain::Accounts, C> {
     pub async fn create(&self, email: &Email) -> Result<AccountId, AccountError> {
         committed!((*self.backend), |repo: Accounts| repo.create(email).await)
@@ -331,4 +302,41 @@ impl<C: Send + Sync + 'static> Each<'_, domain::Accounts, C> {
             .provision(identity, policy)
             .await)
     }
+}
+
+pub async fn signed_in(
+    pool: &sqlx::PgPool,
+    account: AccountId,
+    org: Option<TenantId>,
+) -> SessionToken {
+    let row: (String,) = sqlx::query_as("SELECT email FROM accounts WHERE id = $1")
+        .bind(account.as_uuid())
+        .fetch_one(pool)
+        .await
+        .expect("the account exists");
+    let identity = ResolvedIdentity {
+        issuer: Issuer::new("https://issuer.ferristrace.test").expect("an issuer"),
+        subject: Subject::try_from(account.to_string().as_str()).expect("a subject"),
+        email: Email::try_from(row.0.as_str()).expect("an address"),
+        email_verified: true,
+    };
+    sqlx::query(
+        "INSERT INTO identity_links (issuer, subject, account_id) VALUES ($1, $2, $3) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(identity.issuer.as_str())
+    .bind(identity.subject.as_str())
+    .bind(account.as_uuid())
+    .execute(pool)
+    .await
+    .expect("the identity links");
+    if let Some(org) = org {
+        sqlx::query("UPDATE accounts SET active_org_id = $2 WHERE id = $1")
+            .bind(account.as_uuid())
+            .bind(org.as_uuid())
+            .execute(pool)
+            .await
+            .expect("the organisation is active");
+    }
+    SessionToken::verified(identity, UnixSeconds::new(4_102_444_800))
 }

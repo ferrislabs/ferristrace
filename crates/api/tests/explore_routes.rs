@@ -2,24 +2,24 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, explore_router};
+use ferristrace_api::{AppState, explore_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, Placement,
-    PlacementName, PlacementReader, Placements, ProjectId, ProvisionPolicy, SeenPod, SeenWorkload,
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind,
-    SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId,
-    TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
+    AccountId, Membership, Memberships, NoPhotos, OrgRole, Placement, PlacementName,
+    PlacementReader, Placements, ProjectId, SeenPod, SeenWorkload, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
+    SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
+    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError,
+    Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const TRACE: &str = "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a";
@@ -27,17 +27,8 @@ const TRACE: &str = "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a";
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: an_email(),
@@ -49,32 +40,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -338,13 +303,10 @@ impl SpanReader for NoSpans {
     }
 }
 
-fn looking(uri: &str, cookie: Option<&str>, scripted: bool) -> Request<Body> {
+fn looking(uri: &str, cookie: Option<&str>) -> Request<Body> {
     let mut request = Request::builder().uri(uri);
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
     if let Some(cookie) = cookie {
-        request = request.header(COOKIE, cookie);
+        request = request.header(AUTHORIZATION, cookie);
     }
     request.body(Body::empty()).expect("a request")
 }
@@ -398,7 +360,7 @@ impl<
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -427,13 +389,9 @@ fn state<
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(Fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(Fakes, adapters)))
 }
 
 async fn served<R>(reader: R, request: Request<Body>) -> (StatusCode, String)
@@ -462,7 +420,7 @@ fn org(seed: u128) -> String {
 }
 
 fn session() -> String {
-    format!("ft_session={TOKEN}")
+    format!("Bearer {TOKEN}")
 }
 
 #[tokio::test]
@@ -472,7 +430,7 @@ async fn a_member_lists_the_traces_of_its_own_organisation() {
         org(MINE)
     );
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let found: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -493,7 +451,7 @@ async fn a_member_lists_the_traces_of_its_own_organisation() {
 async fn an_organisation_this_session_does_not_belong_to_is_not_found() {
     let uri = format!("/api/orgs/{}/traces?from=1&to=2", org(THEIRS));
 
-    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(
         status,
@@ -503,23 +461,10 @@ async fn an_organisation_this_session_does_not_belong_to_is_not_found() {
 }
 
 #[tokio::test]
-async fn a_request_without_a_session_is_refused() {
-    let uri = format!("/api/orgs/{}/traces?from=1&to=2", org(MINE));
-
-    let (no_cookie, _) = served(TwoSpans, looking(&uri, None, true)).await;
-    let (unknown, _) = served(TwoSpans, looking(&uri, Some("ft_session=ft_ss_nope"), true)).await;
-    let (unscripted, _) = served(TwoSpans, looking(&uri, Some(&session()), false)).await;
-
-    assert_eq!(no_cookie, StatusCode::UNAUTHORIZED);
-    assert_eq!(unknown, StatusCode::UNAUTHORIZED);
-    assert_eq!(unscripted, StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn a_window_that_ends_before_it_starts_is_refused() {
     let uri = format!("/api/orgs/{}/traces?from=20&to=10", org(MINE));
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body.contains("must end after it starts"), "{body}");
@@ -529,7 +474,7 @@ async fn a_window_that_ends_before_it_starts_is_refused() {
 async fn a_window_nobody_gave_is_refused() {
     let uri = format!("/api/orgs/{}/traces", org(MINE));
 
-    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
@@ -538,7 +483,7 @@ async fn a_window_nobody_gave_is_refused() {
 async fn one_trace_is_laid_out_for_a_waterfall() {
     let uri = format!("/api/orgs/{}/traces/{TRACE}", org(MINE));
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let trace: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -562,7 +507,7 @@ async fn a_trace_identifier_that_is_not_one_is_refused() {
     for candidate in ["nothex", "0a0a", "00000000000000000000000000000000"] {
         let uri = format!("/api/orgs/{}/traces/{candidate}", org(MINE));
 
-        let (status, _) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+        let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
         assert_eq!(
             status,
@@ -576,7 +521,7 @@ async fn a_trace_identifier_that_is_not_one_is_refused() {
 async fn a_trace_the_store_does_not_hold_is_not_found() {
     let uri = format!("/api/orgs/{}/traces/{TRACE}", org(MINE));
 
-    let (status, _) = served(NoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(NoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -585,7 +530,7 @@ async fn a_trace_the_store_does_not_hold_is_not_found() {
 async fn an_empty_list_is_an_answer_rather_than_an_error() {
     let uri = format!("/api/orgs/{}/traces?from=1&to=2", org(MINE));
 
-    let (status, body) = served(NoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(NoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, r#"{"traces":[]}"#);
@@ -602,7 +547,7 @@ async fn the_services_table_is_read_for_the_same_organisation() {
         org(MINE)
     );
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let found: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -624,7 +569,7 @@ async fn the_services_table_is_read_for_the_same_organisation() {
 async fn the_services_of_an_organisation_this_session_does_not_hold_are_not_found() {
     let uri = format!("/api/orgs/{}/services?from=1&to=2", org(THEIRS));
 
-    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -633,7 +578,7 @@ async fn the_services_of_an_organisation_this_session_does_not_hold_are_not_foun
 async fn a_services_window_that_ends_before_it_starts_is_refused() {
     let uri = format!("/api/orgs/{}/services?from=20&to=10", org(MINE));
 
-    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
@@ -642,7 +587,7 @@ async fn a_services_window_that_ends_before_it_starts_is_refused() {
 async fn an_exception_on_a_span_reaches_the_waterfall_with_its_place_in_it() {
     let uri = format!("/api/orgs/{}/traces/{TRACE}", org(MINE));
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let trace: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -788,7 +733,7 @@ async fn every_filter_the_screen_offers_reaches_the_store() {
         org(7)
     );
 
-    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let filter = asked.0.lock().expect("the lock").clone().expect("a filter");
@@ -811,7 +756,7 @@ async fn a_name_that_was_typed_and_cleared_is_not_a_filter() {
         org(MINE)
     );
 
-    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -831,7 +776,7 @@ async fn a_window_on_its_own_filters_nothing_and_orders_by_when_it_started() {
     let asked = Arc::new(Remembering::default());
     let uri = format!("/api/orgs/{}/traces?from=1000&to=2000", org(MINE));
 
-    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let filter = asked.0.lock().expect("the lock").clone().expect("a filter");
@@ -850,7 +795,7 @@ async fn the_operations_of_a_service_are_listed_with_their_measures_in_nanosecon
         org(MINE)
     );
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK, "{body}");
     let found: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -871,7 +816,7 @@ async fn a_service_series_has_sixty_steps_of_requests_errors_and_p95() {
         org(MINE)
     );
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK, "{body}");
     let found: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -898,7 +843,7 @@ async fn the_organisation_series_is_the_same_shape_over_every_service() {
         org(MINE)
     );
 
-    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK, "{body}");
     let found: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -916,9 +861,9 @@ async fn the_service_routes_refuse_strangers_bad_windows_and_missing_sessions() 
         let backwards = format!("/api/orgs/{}/{route}?from=20&to=10", org(MINE));
         let mine = format!("/api/orgs/{}/{route}?from=1&to=2", org(MINE));
 
-        let (stranger, _) = served(TwoSpans, looking(&theirs, Some(&session()), true)).await;
-        let (window, _) = served(TwoSpans, looking(&backwards, Some(&session()), true)).await;
-        let (anonymous, _) = served(TwoSpans, looking(&mine, None, true)).await;
+        let (stranger, _) = served(TwoSpans, looking(&theirs, Some(&session()))).await;
+        let (window, _) = served(TwoSpans, looking(&backwards, Some(&session()))).await;
+        let (anonymous, _) = served(TwoSpans, looking(&mine, None)).await;
 
         assert_eq!(stranger, StatusCode::NOT_FOUND, "{route}");
         assert_eq!(window, StatusCode::BAD_REQUEST, "{route}");
@@ -941,8 +886,7 @@ async fn the_service_routes_pass_the_project_environment_and_service_to_the_stor
             org(MINE)
         );
 
-        let (status, body) =
-            served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+        let (status, body) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
         assert_eq!(status, StatusCode::OK, "{route}: {body}");
     }
@@ -976,7 +920,7 @@ async fn an_empty_environment_is_no_filter() {
         org(MINE)
     );
 
-    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(asked.services_asked()[0].1.environment, None);
@@ -1006,8 +950,7 @@ async fn a_placement_reaches_the_store_from_every_explore_route() {
         format!("/api/orgs/{org}/services/checkout/series?from=1000&to=2000&{PLACED}"),
         format!("/api/orgs/{org}/series?from=1000&to=2000&{PLACED}"),
     ] {
-        let (status, body) =
-            served(Arc::clone(&asked), looking(&route, Some(&session()), true)).await;
+        let (status, body) = served(Arc::clone(&asked), looking(&route, Some(&session()))).await;
 
         assert_eq!(status, StatusCode::OK, "{route}: {body}");
     }
@@ -1029,7 +972,7 @@ async fn a_placement_left_blank_filters_nothing() {
         org(MINE)
     );
 
-    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, _) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert!(asked.services_asked()[0].1.placement.is_empty());
@@ -1064,8 +1007,7 @@ async fn a_placement_that_is_no_kubernetes_name_is_refused_before_the_store_is_a
             "project",
         ),
     ] {
-        let (status, body) =
-            served(Arc::clone(&asked), looking(&route, Some(&session()), true)).await;
+        let (status, body) = served(Arc::clone(&asked), looking(&route, Some(&session()))).await;
 
         assert_eq!(status, StatusCode::BAD_REQUEST, "{route}: {body}");
         if field != "project" {
@@ -1086,7 +1028,7 @@ async fn the_placements_seen_in_a_window_feed_the_pickers() {
         org(7)
     );
 
-    let (status, body) = served(Arc::clone(&asked), looking(&uri, Some(&session()), true)).await;
+    let (status, body) = served(Arc::clone(&asked), looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::OK, "{body}");
     let seen: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -1111,11 +1053,24 @@ async fn the_placements_of_a_stranger_or_a_backwards_window_are_refused() {
     let theirs = format!("/api/orgs/{}/placements?from=1000&to=2000", org(THEIRS));
     let backwards = format!("/api/orgs/{}/placements?from=2000&to=1000", org(MINE));
 
-    let (stranger, _) = served(NoSpans, looking(&theirs, Some(&session()), true)).await;
-    let (window, _) = served(NoSpans, looking(&backwards, Some(&session()), true)).await;
-    let (anonymous, _) = served(NoSpans, looking(&theirs, None, true)).await;
+    let (stranger, _) = served(NoSpans, looking(&theirs, Some(&session()))).await;
+    let (window, _) = served(NoSpans, looking(&backwards, Some(&session()))).await;
+    let (anonymous, _) = served(NoSpans, looking(&theirs, None)).await;
 
     assert_eq!(stranger, StatusCode::NOT_FOUND);
     assert_eq!(window, StatusCode::BAD_REQUEST);
     assert_eq!(anonymous, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_request_without_a_session_is_refused() {
+    let uri = format!("/api/orgs/{}/traces?from=1&to=2", org(MINE));
+
+    let (no_bearer, _) = served(TwoSpans, looking(&uri, None)).await;
+    let (unknown, _) = served(TwoSpans, looking(&uri, Some("Bearer ft.person.nope"))).await;
+    let (not_a_person, _) = served(TwoSpans, looking(&uri, Some("Bearer ft.agent.nope"))).await;
+
+    assert_eq!(no_bearer, StatusCode::UNAUTHORIZED);
+    assert_eq!(unknown, StatusCode::UNAUTHORIZED);
+    assert_eq!(not_a_person, StatusCode::UNAUTHORIZED);
 }

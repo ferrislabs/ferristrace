@@ -276,7 +276,7 @@ async fn a_stranger_is_told_there_is_no_such_organisation() {
     );
     assert_eq!(
         registry
-            .list(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+            .list(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
             .await,
         Err(AgentError::NoSession)
     );

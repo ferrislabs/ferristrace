@@ -1,6 +1,6 @@
 # 0021. A session is named by a public id
 
-Status: accepted
+Status: superseded by 0031
 Date: 2026-10-27
 
 ## Context

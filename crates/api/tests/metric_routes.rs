@@ -2,24 +2,23 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, COOKIE};
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, metric_router};
+use ferristrace_api::{AppState, metric_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
-    ClusterSnapshot, Exemplar, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership,
-    Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, OrgRole,
-    ProjectId, ProvisionPolicy, ReadGrant, Series, SeriesSet, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, SpanId, StoreError, TenantId, TraceId, UnixSeconds,
-    WhoamiError, Window,
+    AccountId, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
+    ClusterSnapshot, Exemplar, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships,
+    MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, OrgRole, ProjectId,
+    ReadGrant, Series, SeriesSet, Session, SessionError, SessionStore, SessionToken, SpanId,
+    StoreError, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const ORG_KEY: &str = "ft_rd_whole_org";
 const PROJECT_KEY: &str = "ft_rd_one_project";
 const MINE: u128 = 1;
@@ -34,17 +33,8 @@ const TO_MS: u64 = 1_700_000_060_000;
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: ferristrace_domain::Email::try_from("person@example.com")
@@ -57,32 +47,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -280,7 +244,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Store;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -299,13 +263,9 @@ fn state(shelf: Option<Arc<Shelf>>) -> AppState<TestStack> {
         issue_store: None,
         log_store: None,
         metric_store: shelf.map(Store),
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(Fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(Fakes, adapters)))
 }
 
 enum Who {
@@ -317,11 +277,9 @@ enum Who {
 fn looking(uri: &str, who: &Who) -> Request<Body> {
     let request = Request::builder().uri(uri);
     let request = match who {
-        Who::Session => request
-            .header("x-requested-with", "fetch")
-            .header(COOKIE, format!("ft_session={TOKEN}")),
+        Who::Session => request.header(AUTHORIZATION, format!("Bearer {TOKEN}")),
         Who::Key(key) => request.header(AUTHORIZATION, format!("Bearer {key}")),
-        Who::Nobody => request.header("x-requested-with", "fetch"),
+        Who::Nobody => request,
     };
     request.body(Body::empty()).expect("a request")
 }
@@ -598,16 +556,9 @@ async fn a_reader_nobody_vouches_for_is_refused() {
         looking(&series_of(MINE, ENCODED, ""), &Who::Key("ft_in_ingest")),
     )
     .await;
-    let unscripted = Request::builder()
-        .uri(catalogue_of(MINE, ""))
-        .header(COOKIE, format!("ft_session={TOKEN}"))
-        .body(Body::empty())
-        .expect("a request");
-    let (forged, _) = served(Some(Arc::clone(&shelf)), unscripted).await;
 
     assert_eq!(nobody, StatusCode::UNAUTHORIZED);
     assert_eq!(unknown, StatusCode::UNAUTHORIZED);
-    assert_eq!(forged, StatusCode::FORBIDDEN);
     assert!(shelf.listed().is_empty());
 }
 
@@ -665,8 +616,7 @@ async fn the_metric_routes_only_read() {
     let request = Request::builder()
         .method("POST")
         .uri(catalogue_of(MINE, ""))
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::empty())
         .expect("a request");
 

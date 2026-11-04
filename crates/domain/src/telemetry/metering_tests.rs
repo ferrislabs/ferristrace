@@ -6,7 +6,7 @@ use super::ports::{UsageHistory, UsageReader};
 use super::value_objects::{Consumed, DecompressedBytes, TenantId};
 use crate::clock::UnixSeconds;
 use crate::explore::{ExploreError, Window};
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -27,17 +27,8 @@ fn a_month() -> Window {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -49,10 +40,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -107,7 +94,7 @@ fn metering(live: u64, rolled: &Rolled) -> Metering<OneSession, MemberOfMine, Li
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[tokio::test]
@@ -168,7 +155,7 @@ async fn a_token_no_session_carries_reads_nothing() {
 
     let refused = metering(999, &rolled)
         .consumption(
-            &SessionToken::from_plaintext("ft_ss_nope"),
+            &SessionToken::for_subject("ft_ss_nope"),
             an_org(MINE),
             a_month(),
         )

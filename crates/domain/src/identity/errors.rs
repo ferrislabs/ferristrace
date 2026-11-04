@@ -20,45 +20,20 @@ pub enum AuthError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SessionError {
-    #[error("no live session carries this token")]
+    #[error("this token carries no account")]
     Unknown,
     #[error("the session store could not be reached")]
     StoreUnreachable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum RollError {
-    #[error("no live session carries this token")]
-    NoSession,
-    #[error("this account keeps no such session")]
-    NoSuchSession,
-    #[error("the sessions could not be reached")]
+pub enum UserRefusal {
+    #[error("signing in with an identity provider is not enabled")]
+    Off,
+    #[error("this token does not belong to a person")]
+    NotAPerson,
+    #[error("this token is not valid")]
+    Invalid,
+    #[error("the identity provider could not be reached")]
     Unavailable,
-}
-
-impl From<SessionError> for RollError {
-    fn from(error: SessionError) -> Self {
-        match error {
-            SessionError::Unknown => Self::NoSession,
-            SessionError::StoreUnreachable => Self::Unavailable,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum FederatedError {
-    #[error(transparent)]
-    Auth(#[from] AuthError),
-    #[error(transparent)]
-    Flow(#[from] FlowError),
-    #[error(transparent)]
-    Session(#[from] SessionError),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum FlowError {
-    #[error("no attempt is waiting under this state")]
-    Unknown,
-    #[error("the attempt store could not be reached")]
-    StoreUnreachable,
 }

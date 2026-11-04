@@ -193,9 +193,6 @@
         "logLevel": {
           "type": "string"
         },
-        "cookieSecure": {
-          "type": "boolean"
-        },
         "afterSignIn": {
           "type": "string"
         },
@@ -230,9 +227,6 @@
               "type": "string"
             },
             "clientId": {
-              "type": "string"
-            },
-            "redirectUri": {
               "type": "string"
             }
           }
@@ -350,22 +344,6 @@
           }
         },
         "atRestKey": {
-          "type": "object",
-          "required": [
-            "name",
-            "key"
-          ],
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "oidcClientSecret": {
           "type": "object",
           "required": [
             "name",

@@ -6,18 +6,18 @@ pub use ferristrace_domain::testing::{
 };
 use ferristrace_domain::{
     AccountId, Admission, AgentToken, AgentTokens, Aggregation, AlertMailer, ApiKey, ApiKeys,
-    ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, AuthError, AuthProvider, Authorizer,
-    Buckets, CallPage, CallQuery, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted,
-    DecompressedBytes, DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList,
-    Fingerprint, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
-    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
-    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
-    PageSize, PendingFlow, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail,
-    ReleaseFilter, ReleaseReader, ResolvedIdentity, Scope, SeenModel, SeriesSet, ServiceFilter,
-    ServiceSeries, ServiceSummary, SignInProof, SinkError, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory,
-    TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
-    UsageMeter, UsageReader, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl, Window,
+    ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, Buckets, CallPage, CallQuery, Clock,
+    ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
+    Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, IngestKey, IssueFilter,
+    IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter, LlmReader, LogBucket, LogPage,
+    LogQuery, LogReader, LogRecord, LogSink, Metric, MetricDescriptor, MetricKind, MetricQuery,
+    MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, ProjectId, QuotaPolicy,
+    ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, Scope, SeenModel, SeriesSet,
+    ServiceFilter, ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor,
+    SpanPage, SpanPages, SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError,
+    TenantDirectory, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret,
+    WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -193,15 +193,24 @@ impl UsageReader for Inert {
     }
 }
 
-impl Authorizer for Inert {
-    fn begin(&self) -> Result<(String, PendingFlow), AuthError> {
-        Err(AuthError::SourceDisabled)
+impl UserTokens for Inert {
+    async fn verify(&self, _token: &str) -> Result<SessionToken, UserRefusal> {
+        Err(UserRefusal::Off)
     }
 }
 
-impl AuthProvider for Inert {
-    async fn sign_in(&self, _proof: SignInProof) -> Result<ResolvedIdentity, AuthError> {
-        Err(AuthError::SourceDisabled)
+pub const PERSON_PREFIX: &str = "ft.person.";
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Bearers;
+
+impl UserTokens for Bearers {
+    async fn verify(&self, token: &str) -> Result<SessionToken, UserRefusal> {
+        if token.starts_with(PERSON_PREFIX) {
+            Ok(SessionToken::for_subject(token))
+        } else {
+            Err(UserRefusal::NotAPerson)
+        }
     }
 }
 

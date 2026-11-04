@@ -1,18 +1,18 @@
 use std::sync::atomic::Ordering;
 
 use ferristrace_domain::{
-    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditFilter, AuditPage,
+    AccountId, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditFilter, AuditPage,
     AuditTrail, ControlPlane, Created, Email, ExportSource, Fingerprint, IssueDecisions, IssuedKey,
-    KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships, Minted, NoPhotos, OrgName,
-    OrgRole, Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
-    ProvisionError, ProvisionPolicy, ReadGrant, Recorded, Renamed, RetentionDays, Revoked, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch, SessionToken, Snapshot,
-    Status, StoreError, TeamId, TenantId, UnixSeconds,
+    KeyId, KeyName, KeyScopes, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
+    Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
+    ProvisionError, ReadGrant, Recorded, Renamed, RetentionDays, Revoked, Session, SessionError,
+    SessionStore, SessionSwitch, SessionToken, Snapshot, Status, StoreError, TeamId, TenantId,
+    UnixSeconds,
 };
 use uuid::Uuid;
 
 use crate::recording::{Handle, Recording};
-use crate::testing::Inert;
+use crate::testing::{Bearers, Inert};
 use crate::{Stack, repository};
 
 pub fn the_org() -> TenantId {
@@ -40,7 +40,7 @@ impl Stack for Probing {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -62,15 +62,6 @@ impl FakeSessions {
 }
 
 impl SessionStore for FakeSessions {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Err(SessionError::Unknown)
-    }
-
     async fn resolve(&self, _token: &SessionToken) -> Result<Session, SessionError> {
         self.handle.attempt();
         Ok(Session {
@@ -82,38 +73,12 @@ impl SessionStore for FakeSessions {
             expires_at: UnixSeconds::new(1),
         })
     }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
 }
 
 impl SessionSwitch for FakeSessions {
     async fn switch(&self, _token: &SessionToken, _org: TenantId) -> Result<(), SessionError> {
         self.handle.write();
         Ok(())
-    }
-}
-
-impl SessionRoll for FakeSessions {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -394,12 +359,8 @@ impl ControlPlane for FakeControlPlane {
     }
 }
 
-pub fn the_policy() -> ProvisionPolicy {
-    ProvisionPolicy::default()
-}
-
 pub fn a_token() -> SessionToken {
-    SessionToken::from_plaintext("a-token")
+    SessionToken::for_subject("a-token")
 }
 
 pub fn a_name(of: &str) -> OrgName {

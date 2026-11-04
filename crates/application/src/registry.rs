@@ -4,8 +4,8 @@ use ferristrace_domain::{
     AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, ControlPlane, DeployMarks,
     ExportSource, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships,
-    ModelPrices as ModelPriceBook, OidcFlows, Orgs, Pages, Postmortems, Projects, Roll, Schedules,
-    SessionRoll, SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
+    ModelPrices as ModelPriceBook, Orgs, Pages, Postmortems, Projects, Roll, Schedules,
+    SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
     UsageHistory,
 };
 
@@ -67,8 +67,6 @@ pub mod domain {
     #[derive(Debug)]
     pub struct Export;
     #[derive(Debug)]
-    pub struct Flows;
-    #[derive(Debug)]
     pub struct IncidentAttachments;
     #[derive(Debug)]
     pub struct IncidentTimeline;
@@ -108,13 +106,12 @@ pub mod domain {
 }
 
 pub trait StandingRepos:
-    RepoFor<domain::Sessions, Repo: SessionStore + SessionRoll>
-    + RepoFor<domain::Memberships, Repo: Memberships>
+    RepoFor<domain::Sessions, Repo: SessionStore> + RepoFor<domain::Memberships, Repo: Memberships>
 {
 }
 
 impl<R> StandingRepos for R where
-    R: RepoFor<domain::Sessions, Repo: SessionStore + SessionRoll>
+    R: RepoFor<domain::Sessions, Repo: SessionStore>
         + RepoFor<domain::Memberships, Repo: Memberships>
 {
 }
@@ -229,20 +226,6 @@ pub trait ProfileRepos:
 
 impl<R> ProfileRepos for R where
     R: StandingRepos + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
-{
-}
-
-pub trait IdentityRepos:
-    StandingRepos
-    + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
-    + RepoFor<domain::Flows, Repo: OidcFlows>
-{
-}
-
-impl<R> IdentityRepos for R where
-    R: StandingRepos
-        + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
-        + RepoFor<domain::Flows, Repo: OidcFlows>
 {
 }
 
@@ -392,7 +375,6 @@ pub trait Repositories:
     + TeamRepos
     + UsageRepos
     + IssueRepos
-    + IdentityRepos
     + ProvisioningRepos
     + SwitchRepos
     + FoundRepos
@@ -418,7 +400,6 @@ impl<R> Repositories for R where
         + TeamRepos
         + UsageRepos
         + IssueRepos
-        + IdentityRepos
         + ProvisioningRepos
         + SwitchRepos
         + FoundRepos

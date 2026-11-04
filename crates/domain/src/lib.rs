@@ -73,10 +73,9 @@ pub use export::{
     Snapshot, SpanCursor, SpanPage, SpanPages,
 };
 pub use identity::{
-    AccountDirectory, AccountId, Agent, AuthError, AuthProvider, Authorizer, CodeVerifier, Email,
-    FederatedError, FederatedSignIn, FlowError, InvalidCredential, Issuer, LiveSession, OidcFlows,
-    PendingFlow, ProvisionPolicy, ResolvedIdentity, RollError, Session, SessionError, SessionId,
-    SessionLifetime, SessionRoll, SessionStore, SessionSwitch, Sessions, SignInProof, Subject,
+    AccountDirectory, AccountId, AuthError, Email, InvalidCredential, Issuer, ProvisionPolicy,
+    ResolvedIdentity, Session, SessionError, SessionStore, SessionSwitch, Subject, UserRefusal,
+    UserTokens,
 };
 pub use incidents::{
     AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,
@@ -143,7 +142,7 @@ pub use releases::{
     LATE_SECS, RELEASE_LIMIT, Release, ReleaseDetail, ReleaseError, ReleaseFilter, ReleaseReader,
     Releases, TRAFFIC_HOUR_NANOS, Traffic, Watch,
 };
-pub use secret::{KEY_PREFIX, SESSION_PREFIX, SecretHash, SessionToken};
+pub use secret::{KEY_PREFIX, SecretHash, SessionToken};
 pub use status::{
     ANNOUNCE_TICK_SECS, Accent, Announcement, BadStatusPage, Bulletin, CONFIRM_LIFETIME_SECS,
     ClaimedLetter, Component, ComponentDraft, ComponentId, ComponentName, ComponentPatch,

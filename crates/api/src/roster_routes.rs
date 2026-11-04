@@ -108,7 +108,7 @@ async fn members<S: Stack>(
 where
     S::Repos: RosterRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let roll = state.app.list_members(&token, TenantId::new(org)).await?;
     Ok(Json(Members {
         members: roll.into_iter().map(Listed::from).collect(),
@@ -124,7 +124,7 @@ async fn invite<S: Stack>(
 where
     S::Repos: RosterRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let email = Email::try_from(asked.email.as_str())?;
     let role = OrgRole::from(asked.role);
     let invitation = state
@@ -155,7 +155,7 @@ async fn grant<S: Stack>(
 where
     S::Repos: RosterRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let changed = state
         .app
         .grant_member_role(
@@ -177,7 +177,7 @@ async fn remove<S: Stack>(
 where
     S::Repos: RosterRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .remove_member(&token, TenantId::new(org), AccountId::new(account))

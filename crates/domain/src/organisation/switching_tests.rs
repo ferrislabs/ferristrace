@@ -7,9 +7,7 @@ use super::ports::Memberships;
 use super::switching::Switching;
 use super::value_objects::OrgRole;
 use crate::clock::UnixSeconds;
-use crate::identity::{
-    AccountId, Agent, Email, Session, SessionError, SessionStore, SessionSwitch,
-};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore, SessionSwitch};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
@@ -23,7 +21,7 @@ fn an_org(seed: u128) -> TenantId {
 }
 
 fn a_token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -33,17 +31,8 @@ struct OneSession {
 }
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(a_token())
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != TOKEN {
+        if token.identity().subject.as_str() != TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -54,10 +43,6 @@ impl SessionStore for OneSession {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -123,7 +108,7 @@ async fn an_unknown_token_is_refused() {
     let switching = Switching::new(OneSession::default(), belonging_to_two());
 
     let refused = switching
-        .to(&SessionToken::from_plaintext("ft_ss_other"), an_org(MINE))
+        .to(&SessionToken::for_subject("ft_ss_other"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(SwitchError::NoSession));

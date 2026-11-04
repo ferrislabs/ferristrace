@@ -6,7 +6,6 @@ config:
     enabled: true
     issuer: https://id.example.com/realms/ferris
     clientId: ferristrace
-    redirectUri: https://ferristrace.example.com/auth/oidc/callback
   agents:
     issuer: https://id.example.com/realms/ferris
     audience: ferristrace

@@ -12,7 +12,6 @@ hex.workspace = true
 hmac.workspace = true
 jsonwebtoken.workspace = true
 lettre.workspace = true
-openidconnect.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde = { workspace = true, features = ["derive"] }

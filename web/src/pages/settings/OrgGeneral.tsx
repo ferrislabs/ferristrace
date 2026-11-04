@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Field, Input, NativeSelect } from '@/components/ui/input'
 import { Avatar } from '@/components/ui/misc'
+import { download } from '@/auth/blob'
 import { because } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, timeZoneNames, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, useSetOrgTimezone, type OrgCard } from '@/data/orgs'
@@ -147,6 +148,7 @@ function TimeZone({ card, mayChange }: { card: OrgCard; mayChange: boolean }) {
 }
 
 function Export({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
+  const [exporting, setExporting] = useState(false)
   return (
     <Card className="flex flex-wrap items-center gap-3 p-4">
       <span className="flex min-w-0 flex-1 flex-col leading-5">
@@ -154,7 +156,7 @@ function Export({ card, isOwner }: { card: OrgCard; isOwner: boolean }) {
         <span className="text-caption text-muted-foreground">{isOwner ? 'A tar.gz holding the control plane (projects, teams, members, keys without secrets, issue decisions, audit log) and every span, one JSON object per line. Each export is recorded in the audit log.' : 'Only an owner can export the organisation.'}</span>
       </span>
       {isOwner ? (
-        <Button size="sm" asChild><a href={`/api/orgs/${card.id}/export`} download><Download />Export organisation data</a></Button>
+        <Button size="sm" loading={exporting} onClick={() => { setExporting(true); download(`/api/orgs/${card.id}/export`, `${card.id}.tar.gz`).catch((error) => toast.error(because(error, 'The export did not download'))).finally(() => setExporting(false)) }}><Download />Export organisation data</Button>
       ) : (
         <Button size="sm" disabled><Download />Export organisation data</Button>
       )}

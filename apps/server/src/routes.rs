@@ -1,11 +1,10 @@
 use axum::Router;
 use ferristrace_api::{
-    AppState, SessionCookie, SignInMethods, agent_router, alert_router, audit_router,
-    catalogue_router, cluster_router, explore_router, export_router, incident_router, issue_router,
-    key_router, llm_router, log_router, mark_routes, mcp_router, me_router, methods_router,
-    metric_router, oidc_router, oncall_router, org_router, postmortem_router, release_router,
-    roster_router, session_router, site_router, status_router, team_router, usage_router,
-    workspace_router,
+    AppState, SignInMethods, agent_router, alert_router, audit_router, catalogue_router,
+    cluster_router, explore_router, export_router, incident_router, issue_router, key_router,
+    llm_router, log_router, mark_routes, mcp_router, me_router, methods_router, metric_router,
+    oncall_router, org_router, postmortem_router, release_router, roster_router, site_router,
+    status_router, team_router, usage_router, workspace_router,
 };
 
 use crate::adapters::Production;
@@ -17,13 +16,6 @@ pub(crate) type State = AppState<Production>;
 pub(crate) struct Held {
     pub(crate) explore: bool,
     pub(crate) issues: bool,
-}
-
-pub(crate) fn cookie_of(config: &Config) -> SessionCookie {
-    SessionCookie {
-        secure: config.cookie_secure,
-        ..SessionCookie::default()
-    }
 }
 
 pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held) -> Router {
@@ -50,9 +42,7 @@ pub(crate) fn control_routes(config: &Config, state: Option<&State>, held: Held)
 }
 
 fn identity_routes(config: &Config, state: Option<&State>) -> Router {
-    let offered = methods_router(SignInMethods {
-        oidc: config.oidc.is_some() && state.is_some(),
-    });
+    let offered = methods_router(sign_in_methods(config, state.is_some()));
     let Some(state) = state else {
         if config.oidc.is_some() {
             tracing::warn!("no control plane is configured, so nobody can sign in");
@@ -61,18 +51,14 @@ fn identity_routes(config: &Config, state: Option<&State>) -> Router {
     };
     offered
         .merge(me_router(state.clone()))
-        .merge(session_router(state.clone()))
         .merge(workspace_router(state.clone()))
-        .merge(federated_routes(config, state))
 }
 
-fn federated_routes(config: &Config, state: &State) -> Router {
-    let Some(settings) = &config.oidc else {
-        tracing::warn!("no identity provider is configured, so nobody can sign in");
-        return Router::new();
-    };
-    tracing::info!(issuer = %settings.issuer, "federated sign in accepted");
-    oidc_router(state.clone(), config.after_sign_in.clone())
+fn sign_in_methods(config: &Config, control_plane: bool) -> SignInMethods {
+    match &config.oidc {
+        Some(oidc) if control_plane => SignInMethods::oidc(&oidc.issuer, &oidc.client_id),
+        _ => SignInMethods::off(),
+    }
 }
 
 fn explore_routes(state: Option<&State>, held: bool) -> Router {
@@ -169,16 +155,14 @@ mod tests {
     use axum::http::{Method, Request, StatusCode};
     use tower::ServiceExt;
 
-    use super::{Held, control_routes};
+    use super::{Held, control_routes, sign_in_methods};
     use crate::config::{Config, OidcConfig};
 
     fn with_provider() -> Config {
         Config {
             oidc: Some(OidcConfig {
                 issuer: "https://id.example/realms/ferristrace".to_owned(),
-                client_id: "ferristrace".to_owned(),
-                client_secret: "secret".to_owned(),
-                redirect_uri: "https://app.example/auth/oidc/callback".to_owned(),
+                client_id: "ferristrace-web".to_owned(),
             }),
             ..Config::default()
         }
@@ -213,7 +197,7 @@ mod tests {
         let (status, body) = answer(&Config::default(), Method::GET, "/auth/methods").await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, r#"{"oidc":false}"#);
+        assert_eq!(body, r#"{"oidc":false,"issuer":null,"client_id":null}"#);
     }
 
     #[tokio::test]
@@ -221,7 +205,19 @@ mod tests {
         let (status, body) = answer(&with_provider(), Method::GET, "/auth/methods").await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, r#"{"oidc":false}"#);
+        assert_eq!(body, r#"{"oidc":false,"issuer":null,"client_id":null}"#);
+    }
+
+    #[test]
+    fn a_provider_with_a_control_plane_names_its_issuer_and_the_web_client() {
+        let methods = sign_in_methods(&with_provider(), true);
+
+        assert!(methods.oidc);
+        assert_eq!(
+            methods.issuer.as_deref(),
+            Some("https://id.example/realms/ferristrace")
+        );
+        assert_eq!(methods.client_id.as_deref(), Some("ferristrace-web"));
     }
 
     #[tokio::test]
@@ -234,6 +230,14 @@ mod tests {
                 (Method::POST, "/auth/reset/confirm"),
                 (Method::GET, "/auth/2fa"),
                 (Method::POST, "/auth/2fa/verify"),
+                (Method::GET, "/auth/oidc/start"),
+                (Method::GET, "/auth/oidc/callback"),
+                (Method::POST, "/auth/sign-out"),
+                (Method::GET, "/auth/sessions"),
+                (
+                    Method::DELETE,
+                    "/auth/sessions/6f1d1f0e-0000-4000-8000-000000000001",
+                ),
             ] {
                 let (status, _) = answer(&config, method.clone(), uri).await;
 

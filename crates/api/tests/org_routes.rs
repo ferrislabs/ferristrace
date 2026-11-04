@@ -1,23 +1,22 @@
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
+use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, org_router};
+use ferristrace_api::{AppState, org_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, ApiKey, ApiKeys, ApiSecret, IssuedKey, KeyId, KeyName, KeyScopes,
-    LiveSession, Membership, Memberships, NoPhotos, OrgName, OrgRole, OrgTimezone, Organisation,
-    Orgs, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, ProjectId, ProvisionPolicy,
-    ReadGrant, RetentionDays, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, ApiKey, ApiKeys, ApiSecret, IssuedKey, KeyId, KeyName, KeyScopes, Membership,
+    Memberships, NoPhotos, OrgName, OrgRole, OrgTimezone, Organisation, Orgs, Photo, PhotoError,
+    PhotoKind, Photos, Pictured, Portrait, ProjectId, ReadGrant, RetentionDays, Session,
+    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const FOUNDED: u64 = 1_700_000_000_123_456_789;
@@ -26,17 +25,8 @@ const READ_KEY: &str = "ft_live_abcdef012345.secret";
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: "person@example.com".try_into().expect("an address"),
@@ -48,32 +38,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -263,7 +227,7 @@ impl<P: Photos + Send + Sync + 'static> Stack for TestStack<P> {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -290,13 +254,9 @@ fn state<P: Photos + Send + Sync + 'static>(
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
 fn org(seed: u128) -> String {
@@ -304,17 +264,14 @@ fn org(seed: u128) -> String {
 }
 
 fn session() -> String {
-    format!("ft_session={TOKEN}")
+    format!("Bearer {TOKEN}")
 }
 
-fn asking(method: Method, seed: u128, body: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(method: Method, seed: u128, body: Option<&str>) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
         .uri(format!("/api/orgs/{}", org(seed)))
-        .header(COOKIE, session());
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
+        .header(AUTHORIZATION, session());
     if body.is_some() {
         request = request.header("content-type", "application/json");
     }
@@ -363,8 +320,7 @@ fn asking_retention(seed: u128, body: &str) -> Request<Body> {
     Request::builder()
         .method(Method::PATCH)
         .uri(format!("/api/orgs/{}/retention", org(seed)))
-        .header(COOKIE, session())
-        .header("x-requested-with", "fetch")
+        .header(AUTHORIZATION, session())
         .header("content-type", "application/json")
         .body(Body::from(body.to_owned()))
         .expect("a request")
@@ -376,15 +332,11 @@ fn a_png() -> Vec<u8> {
     bytes
 }
 
-fn asking_logo(method: Method, seed: u128, body: Option<Vec<u8>>, scripted: bool) -> Request<Body> {
-    let mut request = Request::builder()
+fn asking_logo(method: Method, seed: u128, body: Option<Vec<u8>>) -> Request<Body> {
+    Request::builder()
         .method(method)
         .uri(format!("/api/orgs/{}/logo", org(seed)))
-        .header(COOKIE, session());
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
-    request
+        .header(AUTHORIZATION, session())
         .body(body.map_or_else(Body::empty, Body::from))
         .expect("a request")
 }
@@ -423,12 +375,7 @@ fn renaming(name: &str) -> String {
 async fn a_member_reads_the_card_of_its_own_organisation() {
     let kept = holding("Acme");
 
-    let (status, body) = served(
-        OrgRole::Member,
-        &kept,
-        asking(Method::GET, MINE, None, true),
-    )
-    .await;
+    let (status, body) = served(OrgRole::Member, &kept, asking(Method::GET, MINE, None)).await;
 
     assert_eq!(status, StatusCode::OK);
     let card: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -443,29 +390,10 @@ async fn a_member_reads_the_card_of_its_own_organisation() {
 }
 
 #[tokio::test]
-async fn a_request_from_another_origin_never_reaches_the_organisation() {
-    let kept = holding("Acme");
-
-    let (status, _) = served(
-        OrgRole::Owner,
-        &kept,
-        asking(Method::GET, MINE, None, false),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn an_organisation_this_session_does_not_belong_to_is_not_found() {
     let kept = holding("Acme");
 
-    let (status, _) = served(
-        OrgRole::Owner,
-        &kept,
-        asking(Method::GET, THEIRS, None, true),
-    )
-    .await;
+    let (status, _) = served(OrgRole::Owner, &kept, asking(Method::GET, THEIRS, None)).await;
 
     assert_eq!(
         status,
@@ -481,7 +409,7 @@ async fn an_administrator_renames_it_and_is_answered_with_the_card() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
-        asking(Method::PATCH, MINE, Some(&renaming("Acme Payments")), true),
+        asking(Method::PATCH, MINE, Some(&renaming("Acme Payments"))),
     )
     .await;
 
@@ -498,7 +426,7 @@ async fn a_member_is_told_plainly_that_renaming_is_not_its_to_do() {
     let (status, _) = served(
         OrgRole::Member,
         &kept,
-        asking(Method::PATCH, MINE, Some(&renaming("Mine Now")), true),
+        asking(Method::PATCH, MINE, Some(&renaming("Mine Now"))),
     )
     .await;
 
@@ -513,7 +441,7 @@ async fn a_blank_name_is_refused_with_the_rule_that_refused_it() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
-        asking(Method::PATCH, MINE, Some(&renaming("   ")), true),
+        asking(Method::PATCH, MINE, Some(&renaming("   "))),
     )
     .await;
 
@@ -529,7 +457,7 @@ async fn a_name_is_kept_without_the_space_around_it() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
-        asking(Method::PATCH, MINE, Some(&renaming("  Acme  ")), true),
+        asking(Method::PATCH, MINE, Some(&renaming("  Acme  "))),
     )
     .await;
 
@@ -547,7 +475,7 @@ async fn an_administrator_keeps_a_logo_and_the_card_carries_its_url() {
         OrgRole::Admin,
         &kept,
         &shelf,
-        asking_logo(Method::POST, MINE, Some(a_png()), true),
+        asking_logo(Method::POST, MINE, Some(a_png())),
     )
     .await;
 
@@ -570,7 +498,7 @@ async fn a_member_may_not_keep_a_logo() {
         OrgRole::Member,
         &kept,
         &shelf,
-        asking_logo(Method::POST, MINE, Some(a_png()), true),
+        asking_logo(Method::POST, MINE, Some(a_png())),
     )
     .await;
 
@@ -594,7 +522,6 @@ async fn a_script_announced_as_an_image_is_refused_with_the_rule_that_refused_it
             Method::POST,
             MINE,
             Some(b"<script>alert(1)</script>".to_vec()),
-            true,
         ),
     )
     .await;
@@ -606,72 +533,6 @@ async fn a_script_announced_as_an_image_is_refused_with_the_rule_that_refused_it
 }
 
 #[tokio::test]
-async fn an_image_element_fetches_the_logo_without_the_header_a_form_must_carry() {
-    let kept = holding("Acme");
-    let shelf = Arc::new(Shelf::default());
-    marked(
-        OrgRole::Admin,
-        &kept,
-        &shelf,
-        asking_logo(Method::POST, MINE, Some(a_png()), true),
-    )
-    .await;
-
-    let (status, body, kind, caching) = marked(
-        OrgRole::Member,
-        &kept,
-        &shelf,
-        asking_logo(Method::GET, MINE, None, false),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, a_png());
-    assert_eq!(kind.as_deref(), Some(PhotoKind::Png.as_str()));
-    assert_eq!(
-        caching.as_deref(),
-        Some("private, max-age=31536000, immutable"),
-        "the token in the url is what makes a year safe"
-    );
-}
-
-#[tokio::test]
-async fn an_organisation_that_keeps_no_logo_answers_that_there_is_none() {
-    let kept = holding("Acme");
-    let shelf = Arc::new(Shelf::default());
-
-    let (status, _, _, _) = marked(
-        OrgRole::Owner,
-        &kept,
-        &shelf,
-        asking_logo(Method::GET, MINE, None, false),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn a_stranger_is_not_told_whether_another_organisation_keeps_a_logo() {
-    let kept = holding("Acme");
-    let shelf = Arc::new(Shelf::default());
-
-    let (status, _, _, _) = marked(
-        OrgRole::Owner,
-        &kept,
-        &shelf,
-        asking_logo(Method::GET, THEIRS, None, false),
-    )
-    .await;
-
-    assert_eq!(
-        status,
-        StatusCode::NOT_FOUND,
-        "telling a stranger an organisation exists is itself a leak"
-    );
-}
-
-#[tokio::test]
 async fn a_logo_is_dropped_and_the_card_comes_back_without_one() {
     let kept = holding("Acme");
     let shelf = Arc::new(Shelf::default());
@@ -679,7 +540,7 @@ async fn a_logo_is_dropped_and_the_card_comes_back_without_one() {
         OrgRole::Admin,
         &kept,
         &shelf,
-        asking_logo(Method::POST, MINE, Some(a_png()), true),
+        asking_logo(Method::POST, MINE, Some(a_png())),
     )
     .await;
 
@@ -687,7 +548,7 @@ async fn a_logo_is_dropped_and_the_card_comes_back_without_one() {
         OrgRole::Admin,
         &kept,
         &shelf,
-        asking_logo(Method::DELETE, MINE, None, true),
+        asking_logo(Method::DELETE, MINE, None),
     )
     .await;
 
@@ -708,7 +569,7 @@ async fn a_deployment_with_no_object_store_says_which_part_is_missing() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
-        asking_logo(Method::POST, MINE, Some(a_png()), true),
+        asking_logo(Method::POST, MINE, Some(a_png())),
     )
     .await;
 
@@ -720,12 +581,7 @@ async fn a_deployment_with_no_object_store_says_which_part_is_missing() {
 async fn the_card_carries_the_retention_the_cap_and_the_deployment_default() {
     let kept = holding_under_cap("Acme", 90);
 
-    let (status, body) = served(
-        OrgRole::Member,
-        &kept,
-        asking(Method::GET, MINE, None, true),
-    )
-    .await;
+    let (status, body) = served(OrgRole::Member, &kept, asking(Method::GET, MINE, None)).await;
 
     assert_eq!(status, StatusCode::OK);
     let card: serde_json::Value = serde_json::from_str(&body).expect("json");
@@ -839,8 +695,7 @@ fn zoning(seed: u128, body: &str) -> Request<Body> {
     Request::builder()
         .method(Method::PATCH)
         .uri(format!("/api/orgs/{}/timezone", org(seed)))
-        .header(COOKIE, session())
-        .header("x-requested-with", "fetch")
+        .header(AUTHORIZATION, session())
         .header("content-type", "application/json")
         .body(Body::from(body.to_owned()))
         .expect("a request")
@@ -849,8 +704,7 @@ fn zoning(seed: u128, body: &str) -> Request<Body> {
 fn clock_of(seed: u128) -> Request<Body> {
     Request::builder()
         .uri(format!("/api/orgs/{}/clock", org(seed)))
-        .header(COOKIE, session())
-        .header("x-requested-with", "fetch")
+        .header(AUTHORIZATION, session())
         .body(Body::empty())
         .expect("a request")
 }
@@ -867,24 +721,14 @@ fn clock_by_key(seed: u128, secret: &str) -> Request<Body> {
 async fn the_card_carries_utc_until_an_administrator_picks_a_zone() {
     let kept = holding("Acme");
 
-    let (_, body) = served(
-        OrgRole::Member,
-        &kept,
-        asking(Method::GET, MINE, None, true),
-    )
-    .await;
+    let (_, body) = served(OrgRole::Member, &kept, asking(Method::GET, MINE, None)).await;
     let (status, changed) = served(
         OrgRole::Admin,
         &kept,
         zoning(MINE, r#"{"timezone":"Europe/Paris"}"#),
     )
     .await;
-    let (_, after) = served(
-        OrgRole::Member,
-        &kept,
-        asking(Method::GET, MINE, None, true),
-    )
-    .await;
+    let (_, after) = served(OrgRole::Member, &kept, asking(Method::GET, MINE, None)).await;
 
     assert_eq!(status, StatusCode::OK, "{changed}");
     let card = |text: &str| -> serde_json::Value { serde_json::from_str(text).expect("json") };
@@ -954,4 +798,70 @@ async fn the_clock_answers_the_zone_to_a_session_and_to_a_read_key() {
     assert_eq!(foreign, StatusCode::NOT_FOUND);
     assert_eq!(unknown, StatusCode::UNAUTHORIZED);
     assert_eq!(stranger, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_logo_is_fetched_with_the_bearer() {
+    let kept = holding("Acme");
+    let shelf = Arc::new(Shelf::default());
+    marked(
+        OrgRole::Admin,
+        &kept,
+        &shelf,
+        asking_logo(Method::POST, MINE, Some(a_png())),
+    )
+    .await;
+
+    let (status, body, kind, caching) = marked(
+        OrgRole::Member,
+        &kept,
+        &shelf,
+        asking_logo(Method::GET, MINE, None),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, a_png());
+    assert_eq!(kind.as_deref(), Some(PhotoKind::Png.as_str()));
+    assert_eq!(
+        caching.as_deref(),
+        Some("private, max-age=31536000, immutable"),
+        "the token in the url is what makes a year safe"
+    );
+}
+
+#[tokio::test]
+async fn an_organisation_that_keeps_no_logo_answers_that_there_is_none() {
+    let kept = holding("Acme");
+    let shelf = Arc::new(Shelf::default());
+
+    let (status, _, _, _) = marked(
+        OrgRole::Owner,
+        &kept,
+        &shelf,
+        asking_logo(Method::GET, MINE, None),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_stranger_is_not_told_whether_another_organisation_keeps_a_logo() {
+    let kept = holding("Acme");
+    let shelf = Arc::new(Shelf::default());
+
+    let (status, _, _, _) = marked(
+        OrgRole::Owner,
+        &kept,
+        &shelf,
+        asking_logo(Method::GET, THEIRS, None),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "telling a stranger an organisation exists is itself a leak"
+    );
 }

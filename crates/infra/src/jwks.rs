@@ -2,7 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferristrace_domain::{AgentToken, AgentTokens, Delegation, TokenRefusal, VerifiedToken};
+use ferristrace_domain::{
+    AgentToken, AgentTokens, Delegation, Email, Issuer, ResolvedIdentity, SessionToken, Subject,
+    TokenRefusal, UnixSeconds, UserRefusal, UserTokens, VerifiedToken,
+};
+use jsonwebtoken::dangerous::insecure_decode_claims;
 use jsonwebtoken::jwk::{AlgorithmParameters, EllipticCurve, Jwk, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
@@ -33,6 +37,7 @@ pub enum JwksError {
 #[derive(Debug)]
 pub struct JwksVerifier {
     settings: JwksSettings,
+    web_client: Option<Box<str>>,
     http: reqwest::Client,
     live_for: Duration,
     refetch_gap: Duration,
@@ -78,6 +83,8 @@ struct Claims {
     #[serde(default)]
     email: Option<String>,
     #[serde(default)]
+    email_verified: Option<bool>,
+    #[serde(default)]
     act: Option<serde_json::Value>,
 }
 
@@ -107,6 +114,16 @@ fn delegation_of(
         act_sub: named("sub"),
         act_client_id: named("client_id"),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct Addressed {
+    #[serde(default)]
+    iss: Option<String>,
+    #[serde(default)]
+    azp: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,12 +158,19 @@ impl JwksVerifier {
                 issuer: issuer.to_owned(),
                 audience: settings.audience.filter(|audience| !audience.is_empty()),
             },
+            web_client: None,
             http,
             live_for: KEYS_LIVE_FOR,
             refetch_gap: REFETCH_AT_MOST_EVERY,
             state: Mutex::new(Keys::default()),
             flight: Mutex::new(()),
         })
+    }
+
+    #[must_use]
+    pub fn accepting_people_of(mut self, web_client_id: &str) -> Self {
+        self.web_client = (!web_client_id.is_empty()).then(|| web_client_id.into());
+        self
     }
 
     #[must_use]
@@ -303,9 +327,9 @@ fn held_from(listed: &serde_json::Value) -> Option<(String, Arc<Held>)> {
     Some((kid, Arc::new(Held { key, algorithm })))
 }
 
-impl AgentTokens for JwksVerifier {
-    async fn verify(&self, token: &AgentToken) -> Result<VerifiedToken, TokenRefusal> {
-        let header = decode_header(token.exposed()).map_err(|_| TokenRefusal::Invalid)?;
+impl JwksVerifier {
+    async fn claims_of(&self, token: &str, audience: Option<&str>) -> Result<Claims, TokenRefusal> {
+        let header = decode_header(token).map_err(|_| TokenRefusal::Invalid)?;
         if !matches!(header.alg, Algorithm::RS256 | Algorithm::ES256) {
             return Err(TokenRefusal::Invalid);
         }
@@ -320,14 +344,14 @@ impl AgentTokens for JwksVerifier {
         validation.validate_nbf = true;
         validation.set_issuer(&[&self.settings.issuer]);
         validation.set_required_spec_claims(&["exp", "iss"]);
-        match &self.settings.audience {
+        match audience {
             Some(audience) => {
                 validation.set_audience(&[audience]);
                 validation.required_spec_claims.insert("aud".to_owned());
             }
             None => validation.validate_aud = false,
         }
-        let claims = decode::<Claims>(token.exposed(), &held.key, &validation)
+        let claims = decode::<Claims>(token, &held.key, &validation)
             .map_err(|_| TokenRefusal::Invalid)?
             .claims;
 
@@ -338,6 +362,15 @@ impl AgentTokens for JwksVerifier {
         {
             return Err(TokenRefusal::Invalid);
         }
+        Ok(claims)
+    }
+}
+
+impl AgentTokens for JwksVerifier {
+    async fn verify(&self, token: &AgentToken) -> Result<VerifiedToken, TokenRefusal> {
+        let claims = self
+            .claims_of(token.exposed(), self.settings.audience.as_deref())
+            .await?;
         let jti = claims
             .jti
             .filter(|jti| !jti.is_empty())
@@ -355,5 +388,55 @@ impl AgentTokens for JwksVerifier {
             expires_at_unix_secs: claims.exp,
             delegated,
         })
+    }
+}
+
+impl UserTokens for JwksVerifier {
+    async fn verify(&self, token: &str) -> Result<SessionToken, UserRefusal> {
+        let Some(web_client) = self.web_client.as_deref() else {
+            return Err(UserRefusal::Off);
+        };
+        let addressed: Addressed =
+            insecure_decode_claims(token).map_err(|_| UserRefusal::Invalid)?;
+        if addressed
+            .iss
+            .as_deref()
+            .map(|iss| iss.trim_end_matches('/'))
+            != Some(self.settings.issuer.as_str())
+            || addressed.azp.as_deref() != Some(web_client)
+            || addressed.client_id.is_some()
+        {
+            return Err(UserRefusal::NotAPerson);
+        }
+        let claims = self
+            .claims_of(token, None)
+            .await
+            .map_err(|refusal| match refusal {
+                TokenRefusal::Unavailable => UserRefusal::Unavailable,
+                TokenRefusal::Off | TokenRefusal::Invalid => UserRefusal::Invalid,
+            })?;
+        if claims.azp.as_deref() != Some(web_client) || claims.client_id.is_some() {
+            return Err(UserRefusal::NotAPerson);
+        }
+        let subject = claims
+            .sub
+            .as_deref()
+            .and_then(|sub| Subject::try_from(sub).ok())
+            .ok_or(UserRefusal::Invalid)?;
+        let email = claims
+            .email
+            .as_deref()
+            .and_then(|email| Email::try_from(email).ok())
+            .ok_or(UserRefusal::Invalid)?;
+        let issuer = Issuer::new(&self.settings.issuer).map_err(|_| UserRefusal::Invalid)?;
+        Ok(SessionToken::verified(
+            ResolvedIdentity {
+                issuer,
+                subject,
+                email,
+                email_verified: claims.email_verified.unwrap_or(false),
+            },
+            UnixSeconds::new(claims.exp),
+        ))
     }
 }

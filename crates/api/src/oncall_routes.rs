@@ -406,7 +406,7 @@ async fn create<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let draft = body.draft()?;
     let made = state
         .app
@@ -441,7 +441,7 @@ async fn update<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let patch = body.patch()?;
     let changed = state
         .app
@@ -458,7 +458,7 @@ async fn remove<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .delete_schedule(&token, TenantId::new(org), ScheduleId::new(id))
@@ -514,7 +514,7 @@ async fn add_override<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let cover = state
         .app
         .add_override(
@@ -537,7 +537,7 @@ async fn remove_override<S: Stack>(
 where
     S::Repos: OncallRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .remove_override(

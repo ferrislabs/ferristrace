@@ -2,23 +2,22 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, audit_router, key_router};
+use ferristrace_api::{AppState, audit_router, key_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Notebook, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Notebook, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Actor, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, Created, IssuedKey, KeyId,
-    KeyName, KeyScopes, LiveSession, Membership, Memberships, NoPhotos, OrgRole, Project,
-    ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant, Renamed, Session, SessionError,
-    SessionId, SessionRoll, SessionStore, SessionToken, StoreError, TeamId, TenantId, UnixSeconds,
-    WhoamiError,
+    AccountId, Actor, ApiKey, ApiKeys, ApiSecret, Assigned, Created, IssuedKey, KeyId, KeyName,
+    KeyScopes, Membership, Memberships, NoPhotos, OrgRole, Project, ProjectId, ProjectName,
+    Projects, ReadGrant, Renamed, Session, SessionError, SessionStore, SessionToken, StoreError,
+    TeamId, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const ME: u128 = 9;
@@ -31,17 +30,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(ME)),
                 email: EMAIL.try_into().expect("an address"),
@@ -53,32 +43,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -257,7 +221,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -291,20 +255,16 @@ impl Harness {
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         };
-        let state = AppState::new(
-            Arc::new(Ferristrace::<TestStack>::new(
-                Fakes {
-                    role,
-                    vault: Arc::clone(&self.vault),
-                    notebook: self.notebook.clone(),
-                },
-                adapters,
-            )),
-            SessionCookie::default(),
-        );
+        let state = AppState::new(Arc::new(Ferristrace::<TestStack>::new(
+            Fakes {
+                role,
+                vault: Arc::clone(&self.vault),
+                notebook: self.notebook.clone(),
+            },
+            adapters,
+        )));
         key_router(state.clone()).merge(audit_router(state))
     }
 
@@ -357,8 +317,7 @@ fn as_session(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let request = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"));
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     match body {
         Some(json) => request
             .header(CONTENT_TYPE, "application/json")
@@ -459,7 +418,6 @@ async fn a_read_key_is_no_session_for_the_audit_log() {
             Request::builder()
                 .method(Method::GET)
                 .uri(format!("/api/orgs/{}/audit", id(MINE)))
-                .header("x-requested-with", "fetch")
                 .header(AUTHORIZATION, format!("Bearer {secret}"))
                 .body(Body::empty())
                 .expect("a request"),
