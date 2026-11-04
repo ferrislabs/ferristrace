@@ -41,18 +41,6 @@ pub struct Config {
     pub secrets: Option<SecretsConfig>,
     #[serde(default)]
     pub alerts: AlertsConfig,
-    #[serde(default = "yes")]
-    pub cookie_secure: bool,
-    #[serde(default = "landing")]
-    pub after_sign_in: String,
-}
-
-fn yes() -> bool {
-    true
-}
-
-fn landing() -> String {
-    "/".to_owned()
 }
 
 fn a_month() -> u64 {
@@ -208,8 +196,6 @@ impl Config {
 pub struct OidcConfig {
     pub issuer: String,
     pub client_id: String,
-    pub client_secret: String,
-    pub redirect_uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,8 +241,6 @@ impl Default for Config {
             objects: None,
             secrets: None,
             alerts: AlertsConfig::default(),
-            cookie_secure: true,
-            after_sign_in: landing(),
         }
     }
 }
@@ -275,7 +259,7 @@ pub fn load() -> anyhow::Result<Config> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{AgentSetup, Config, FILE, McpConfig, TenantAllowance, figment};
+    use super::{AgentSetup, Config, FILE, McpConfig, OidcConfig, TenantAllowance, figment};
 
     #[test]
     fn the_default_ports_are_the_otlp_ones() {
@@ -566,8 +550,6 @@ mod tests {
                 [oidc]
                 issuer = "https://id.example.com/realms/ferris"
                 client_id = "ferristrace"
-                client_secret = "secret"
-                redirect_uri = "https://app.example.com/callback"
                 "#,
             )?;
 
@@ -590,8 +572,6 @@ mod tests {
                 [oidc]
                 issuer = "https://id.example.com/realms/ferris"
                 client_id = "ferristrace"
-                client_secret = "secret"
-                redirect_uri = "https://app.example.com/callback"
                 "#,
             )?;
             jail.set_env(
@@ -632,8 +612,6 @@ mod tests {
                 [oidc]
                 issuer = "https://id.example.com/realms/ferris"
                 client_id = "ferristrace"
-                client_secret = "secret"
-                redirect_uri = "https://app.example.com/callback"
                 "#,
             )?;
 
@@ -681,6 +659,42 @@ mod tests {
             let config: Config = figment().extract()?;
 
             assert_eq!(config.agent_setup(), AgentSetup::NoIssuer);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_keys_of_the_confidential_client_are_ignored_so_an_old_deployment_still_boots() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                cookie_secure = false
+                after_sign_in = "/home"
+
+                [oidc]
+                issuer = "https://id.example.com/realms/ferris"
+                client_id = "ferristrace-web"
+                client_secret = "secret"
+                redirect_uri = "https://app.example.com/callback"
+                "#,
+            )?;
+            jail.set_env("FERRISTRACE_OIDC__CLIENT_SECRET", "other");
+            jail.set_env(
+                "FERRISTRACE_OIDC__REDIRECT_URI",
+                "https://elsewhere.example.com",
+            );
+            jail.set_env("FERRISTRACE_COOKIE_SECURE", "false");
+
+            let config: Config = figment().extract()?;
+
+            assert_eq!(
+                config.oidc,
+                Some(OidcConfig {
+                    issuer: "https://id.example.com/realms/ferris".to_owned(),
+                    client_id: "ferristrace-web".to_owned(),
+                })
+            );
             Ok(())
         });
     }

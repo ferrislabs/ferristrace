@@ -1,9 +1,8 @@
 use ferristrace_domain::{
-    AckKey, AgentTokens, AlertMailer, AuthProvider, Authorizer, Clock, ClusterReader,
-    CulpritReader, DeployFeed, ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader,
-    LogSink, MetricReader, MetricSink, Photos, PlacementReader, ProvisionPolicy, QuotaPolicy,
-    ReleaseReader, SpanPages, SpanReader, SpanSink, StatusMailer, TenantDirectory, UsageMeter,
-    UsageReader, WebhookSender,
+    AckKey, AgentTokens, AlertMailer, Clock, ClusterReader, CulpritReader, DeployFeed,
+    ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader, LogSink, MetricReader,
+    MetricSink, Photos, PlacementReader, QuotaPolicy, ReleaseReader, SpanPages, SpanReader,
+    SpanSink, StatusMailer, TenantDirectory, UsageMeter, UsageReader, UserTokens, WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -18,7 +17,7 @@ pub trait Stack: Send + Sync + 'static {
     type LogStore: LogReader + CulpritReader + Send + Sync + 'static;
     type MetricStore: MetricReader + ClusterReader + Send + Sync + 'static;
     type Meter: UsageMeter + UsageReader + Send + Sync + 'static;
-    type Oidc: Authorizer + AuthProvider + Send + Sync + 'static;
+    type Users: UserTokens + Send + Sync + 'static;
     type Agents: AgentTokens + Send + Sync + 'static;
     type Sink: SpanSink + LogSink + MetricSink + Send + Sync + 'static;
     type Quota: QuotaPolicy + Send + Sync + 'static;
@@ -37,8 +36,7 @@ pub struct Adapters<S: Stack> {
     pub issue_store: Option<S::IssueStore>,
     pub log_store: Option<S::LogStore>,
     pub metric_store: Option<S::MetricStore>,
-    pub oidc: Option<S::Oidc>,
-    pub provision: ProvisionPolicy,
+    pub users: Option<S::Users>,
 }
 
 #[derive(Debug)]
@@ -53,9 +51,8 @@ pub struct Ferristrace<S: Stack> {
     pub(crate) issue_store: Option<S::IssueStore>,
     pub(crate) log_store: Option<S::LogStore>,
     pub(crate) metric_store: Option<S::MetricStore>,
-    pub(crate) oidc: Option<S::Oidc>,
+    pub(crate) users: Option<S::Users>,
     pub(crate) agents: Option<S::Agents>,
-    pub(crate) provision: ProvisionPolicy,
     pub(crate) ack_key: Option<AckKey>,
     pub(crate) status_key: Option<LinkKey>,
     pub(crate) escalate_after_secs: u64,
@@ -98,9 +95,8 @@ impl<S: Stack> Ferristrace<S> {
             issue_store: adapters.issue_store,
             log_store: adapters.log_store,
             metric_store: adapters.metric_store,
-            oidc: adapters.oidc,
+            users: adapters.users,
             agents: None,
-            provision: adapters.provision,
             ack_key: None,
             status_key: None,
             escalate_after_secs: ESCALATE_AFTER_SECS,

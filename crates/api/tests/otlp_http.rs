@@ -5,7 +5,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use ferristrace_api::router;
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Ingestion, Stack};
 use ferristrace_domain::{Allowance, StaticQuota};
 use ferristrace_domain::{DecompressedBytes, NoPhotos, QuotaPolicy, TenantId, Unmetered};
@@ -41,7 +41,7 @@ impl<Q: QuotaPolicy + Send + Sync + 'static> Stack for TestStack<Q> {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Arc<MemoryMeter>;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Arc<MemorySink>;
     type Quota = Q;

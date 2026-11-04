@@ -6,7 +6,6 @@ mod alerts;
 #[cfg(test)]
 mod alerts_llm_tests;
 mod audit;
-mod borrowed;
 mod catalogue;
 mod explore;
 mod export;

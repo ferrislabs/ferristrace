@@ -7,7 +7,6 @@ metadata:
     {{- include "ferristrace.labels" . | nindent 4 }}
 data:
   RUST_LOG: {{ $c.logLevel | quote }}
-  FERRISTRACE_COOKIE_SECURE: {{ $c.cookieSecure | quote }}
   FERRISTRACE_AFTER_SIGN_IN: {{ $c.afterSignIn | quote }}
   FERRISTRACE_ALERTS__ALLOW_PRIVATE_WEBHOOKS: {{ $c.alerts.allowPrivateWebhooks | quote }}
   {{- with $c.alerts.baseUrl }}
@@ -27,7 +26,6 @@ data:
   {{- if $c.oidc.enabled }}
   FERRISTRACE_OIDC__ISSUER: {{ required "config.oidc.issuer is required when config.oidc.enabled" $c.oidc.issuer | quote }}
   FERRISTRACE_OIDC__CLIENT_ID: {{ required "config.oidc.clientId is required when config.oidc.enabled" $c.oidc.clientId | quote }}
-  FERRISTRACE_OIDC__REDIRECT_URI: {{ required "config.oidc.redirectUri is required when config.oidc.enabled" $c.oidc.redirectUri | quote }}
   {{- end }}
   {{- with $c.agents.issuer }}
   FERRISTRACE_AGENTS__ISSUER: {{ . | quote }}

@@ -17,7 +17,3 @@ Reach it from your machine with:
 {{- end }}
 
 OTLP/HTTP is on /v1/traces ({{ .Values.service.httpPort }}), OTLP/gRPC on {{ .Values.service.grpcPort }}.
-{{- if not .Values.config.cookieSecure }}
-
-WARNING: config.cookieSecure is false; session cookies travel in the clear.
-{{- end }}

@@ -1,21 +1,21 @@
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, team_router};
+use ferristrace_api::{AppState, team_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, Named, NoPhotos, OrgRole, Owned,
-    ProjectId, ProvisionPolicy, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, Squads, StoreError, Team, TeamId, TeamName, TenantId, UnixSeconds, WhoamiError,
+    AccountId, Membership, Memberships, Named, NoPhotos, OrgRole, Owned, ProjectId, Session,
+    SessionError, SessionStore, SessionToken, Squads, StoreError, Team, TeamId, TeamName, TenantId,
+    UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const BACKEND: u128 = 11;
@@ -28,17 +28,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: "person@example.com".try_into().expect("an address"),
@@ -50,32 +41,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -226,14 +191,11 @@ fn backend() -> Team {
     }
 }
 
-fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
         .uri(uri)
-        .header(COOKIE, format!("ft_session={TOKEN}"));
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     if body.is_some() {
         request = request.header("content-type", "application/json");
     }
@@ -293,7 +255,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -316,13 +278,9 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
@@ -356,7 +314,7 @@ async fn a_member_reads_the_teams_with_who_is_on_them_and_what_they_own() {
     let (status, body) = served(
         OrgRole::Member,
         &kept,
-        asking(Method::GET, &teams_of(MINE), None, true),
+        asking(Method::GET, &teams_of(MINE), None),
     )
     .await;
 
@@ -373,27 +331,13 @@ async fn a_member_reads_the_teams_with_who_is_on_them_and_what_they_own() {
 }
 
 #[tokio::test]
-async fn a_request_from_another_origin_never_reaches_the_teams() {
-    let kept = Kept::of(vec![backend()]);
-
-    let (status, _) = served(
-        OrgRole::Owner,
-        &kept,
-        asking(Method::GET, &teams_of(MINE), None, false),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn the_teams_of_an_organisation_this_session_does_not_belong_to_are_not_found() {
     let kept = Kept::of(vec![backend()]);
 
     let (status, _) = served(
         OrgRole::Owner,
         &kept,
-        asking(Method::GET, &teams_of(THEIRS), None, true),
+        asking(Method::GET, &teams_of(THEIRS), None),
     )
     .await;
 
@@ -415,7 +359,6 @@ async fn an_administrator_creates_a_team_and_is_answered_with_them_all() {
             Method::POST,
             &teams_of(MINE),
             Some(r#"{"name":"Payments"}"#),
-            true,
         ),
     )
     .await;
@@ -444,7 +387,6 @@ async fn a_member_arranges_nothing() {
             Method::POST,
             &teams_of(MINE),
             Some(r#"{"name":"Payments"}"#),
-            true,
         ),
     )
     .await;
@@ -461,12 +403,7 @@ async fn a_blank_name_is_refused_with_the_rule_that_refused_it() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
-        asking(
-            Method::POST,
-            &teams_of(MINE),
-            Some(r#"{"name":"  "}"#),
-            true,
-        ),
+        asking(Method::POST, &teams_of(MINE), Some(r#"{"name":"  "}"#)),
     )
     .await;
 
@@ -482,12 +419,7 @@ async fn a_name_the_organisation_already_holds_is_a_conflict() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
-        asking(
-            Method::POST,
-            &teams_of(MINE),
-            Some(r#"{"name":"Backend"}"#),
-            true,
-        ),
+        asking(Method::POST, &teams_of(MINE), Some(r#"{"name":"Backend"}"#)),
     )
     .await;
 
@@ -506,7 +438,6 @@ async fn an_administrator_renames_a_team() {
             Method::PATCH,
             &team_of(MINE, BACKEND),
             Some(r#"{"name":"Platform"}"#),
-            true,
         ),
     )
     .await;
@@ -525,7 +456,7 @@ async fn an_administrator_disbands_a_team_and_reads_what_is_left() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
-        asking(Method::DELETE, &team_of(MINE, BACKEND), None, true),
+        asking(Method::DELETE, &team_of(MINE, BACKEND), None),
     )
     .await;
 
@@ -545,7 +476,7 @@ async fn a_team_this_organisation_does_not_hold_is_not_found() {
     let (status, _) = served(
         OrgRole::Owner,
         &kept,
-        asking(Method::DELETE, &team_of(MINE, 404), None, true),
+        asking(Method::DELETE, &team_of(MINE, 404), None),
     )
     .await;
 
@@ -563,7 +494,6 @@ async fn who_is_on_a_team_is_put_whole() {
             Method::PUT,
             &format!("{}/members", team_of(MINE, BACKEND)),
             Some(&format!(r#"{{"members":["{}","{}"]}}"#, id(9), id(10))),
-            true,
         ),
     )
     .await;
@@ -592,7 +522,6 @@ async fn seating_nobody_empties_the_team_rather_than_being_refused() {
             Method::PUT,
             &format!("{}/members", team_of(MINE, BACKEND)),
             Some(r#"{"members":[]}"#),
-            true,
         ),
     )
     .await;
@@ -615,7 +544,6 @@ async fn what_a_team_owns_is_put_whole() {
             Method::PUT,
             &format!("{}/projects", team_of(MINE, BACKEND)),
             Some(&format!(r#"{{"projects":["{}"]}}"#, id(7))),
-            true,
         ),
     )
     .await;
@@ -641,7 +569,6 @@ async fn a_member_seats_nobody() {
             Method::PUT,
             &format!("{}/members", team_of(MINE, BACKEND)),
             Some(r#"{"members":[]}"#),
-            true,
         ),
     )
     .await;

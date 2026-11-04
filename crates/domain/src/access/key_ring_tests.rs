@@ -10,7 +10,7 @@ use crate::agents::registry_tests::Book;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{Assigned, Created, Project, ProjectId, ProjectName, Projects, Renamed};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, TeamId, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -33,7 +33,7 @@ pub(crate) fn a_project(seed: u128) -> ProjectId {
 }
 
 pub(crate) fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 fn a_name(spelling: &str) -> KeyName {
@@ -47,17 +47,8 @@ pub(crate) fn scopes(of: &[KeyScope]) -> KeyScopes {
 pub(crate) struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(token())
-    }
-
     async fn resolve(&self, offered: &SessionToken) -> Result<Session, SessionError> {
-        if offered.exposed() == TOKEN {
+        if offered.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(ACCOUNT)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -69,10 +60,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -312,7 +299,7 @@ async fn a_token_no_session_carries_lists_nothing() {
     let keys = Ring::default();
 
     let listed = ring(OrgRole::Owner, &keys)
-        .list(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+        .list(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(listed, Err(KeyError::NoSession));

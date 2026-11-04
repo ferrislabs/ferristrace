@@ -117,7 +117,7 @@ async fn list<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let agents = state.app.list_agents(&token, TenantId::new(org)).await?;
     Ok(Json(Roll {
         enabled: state.app.agents_enabled(),
@@ -135,7 +135,7 @@ async fn register<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let client_id = ClientId::try_from(asked.client_id.as_str())?;
     if state.reserved_client_id.as_deref() == Some(client_id.as_str()) {
         return Err(AgentRefused::ReservedClientId);
@@ -162,7 +162,7 @@ async fn revoke<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .revoke_agent(&token, TenantId::new(org), AgentId::new(agent))

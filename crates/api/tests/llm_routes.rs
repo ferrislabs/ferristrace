@@ -2,28 +2,28 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
+use axum::http::header::AUTHORIZATION;
 use axum::http::header::CONTENT_TYPE;
-use axum::http::header::{AUTHORIZATION, COOKIE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, llm_router};
+use ferristrace_api::{AppState, llm_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Notebook, PriceLedger, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Notebook, PriceLedger, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Action, Agent, ApiKey, ApiKeys, ApiSecret, BucketTotals, Call, CallCursor, CallPage,
+    AccountId, Action, ApiKey, ApiKeys, ApiSecret, BucketTotals, Call, CallCursor, CallPage,
     CallQuery, Counted, Deploy, DeployFeed, Deployed, Fingerprint, GroupBy, GroupLatency,
-    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, LlmReader,
-    Membership, Memberships, NoPhotos, Occurrence, OrgRole, PricedCall, ProjectId, PromptMarker,
-    ProvisionPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, SeenModel,
-    Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken, SpanId, SpendQuery,
-    SpendRead, StoreError, TargetKind, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
+    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LlmReader, Membership,
+    Memberships, NoPhotos, Occurrence, OrgRole, PricedCall, ProjectId, PromptMarker, ReadGrant,
+    Release, ReleaseDetail, ReleaseFilter, ReleaseReader, SeenModel, Session, SessionError,
+    SessionStore, SessionToken, SpanId, SpendQuery, SpendRead, StoreError, TargetKind, TenantId,
+    TraceId, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const ORG_KEY: &str = "ft_rd_whole_org";
 const PROJECT_KEY: &str = "ft_rd_one_project";
 const MINE: u128 = 1;
@@ -35,17 +35,8 @@ const NOW: u64 = 1_700_000_600;
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: ferristrace_domain::Email::try_from("person@example.com")
@@ -58,32 +49,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -395,7 +360,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -433,20 +398,16 @@ impl Harness {
             issue_store: with_store.then(|| Store(self.shelf.clone())),
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         };
-        llm_router(AppState::new(
-            Arc::new(Ferristrace::<TestStack>::new(
-                Fakes {
-                    role,
-                    notebook: self.notebook.clone(),
-                    prices: self.prices.clone(),
-                },
-                adapters,
-            )),
-            SessionCookie::default(),
-        ))
+        llm_router(AppState::new(Arc::new(Ferristrace::<TestStack>::new(
+            Fakes {
+                role,
+                notebook: self.notebook.clone(),
+                prices: self.prices.clone(),
+            },
+            adapters,
+        ))))
     }
 
     async fn send(
@@ -492,8 +453,7 @@ fn as_session(method: Method, uri: &str, body: Option<Value>) -> Request<Body> {
     let builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"));
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     match body {
         Some(body) => builder
             .header(CONTENT_TYPE, "application/json")
@@ -745,7 +705,7 @@ async fn spec_l4_2_a_read_key_reads_prices_calls_and_unpriced_but_cannot_write()
     assert_eq!(prices, StatusCode::OK);
     assert_eq!(calls, StatusCode::OK);
     assert_eq!(unpriced, StatusCode::OK);
-    assert_eq!(written, StatusCode::FORBIDDEN);
+    assert_eq!(written, StatusCode::UNAUTHORIZED);
     assert!(harness.prices.prices(org_id(MINE)).is_empty());
 }
 
@@ -910,7 +870,6 @@ async fn spec_l4_1_an_unauthenticated_request_and_a_dead_store_are_refused() {
     let harness = Harness::new();
     let anonymous = Request::builder()
         .uri(calls_of(MINE, ""))
-        .header("x-requested-with", "fetch")
         .body(Body::empty())
         .expect("a request");
     let broken = Harness::over(Shelf {

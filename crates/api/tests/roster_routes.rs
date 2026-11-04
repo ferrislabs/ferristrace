@@ -2,22 +2,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, roster_router};
+use ferristrace_api::{AppState, roster_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::organisation::{Holder, Joined};
 use ferristrace_domain::{
-    AccountId, Agent, Email, LiveSession, Member, Membership, Memberships, NoPhotos, OrgRole,
-    ProvisionPolicy, Roll, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, Email, Member, Membership, Memberships, NoPhotos, OrgRole, Roll, Session,
+    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const ME: u128 = 9;
@@ -46,17 +45,8 @@ fn a_member(seed: u128, role: OrgRole) -> Member {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: an_account(ME),
                 email: an_address("me"),
@@ -68,32 +58,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -220,14 +184,11 @@ fn org(seed: u128) -> String {
     Uuid::from_u128(seed).to_string()
 }
 
-fn asking(method: Method, uri: &str, body: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let mut request = Request::builder()
         .method(method)
         .uri(uri)
-        .header(COOKIE, format!("ft_session={TOKEN}"));
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     if body.is_some() {
         request = request.header("content-type", "application/json");
     }
@@ -287,7 +248,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -310,13 +271,9 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
 async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
@@ -349,7 +306,6 @@ async fn a_member_reads_the_whole_roll_of_its_own_organisation() {
             Method::GET,
             &format!("/api/orgs/{}/members", org(MINE)),
             None,
-            true,
         ),
     )
     .await;
@@ -370,25 +326,6 @@ async fn a_member_reads_the_whole_roll_of_its_own_organisation() {
 }
 
 #[tokio::test]
-async fn a_request_from_another_origin_never_reaches_the_members() {
-    let kept = Kept::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
-
-    let (status, _) = served(
-        OrgRole::Owner,
-        &kept,
-        asking(
-            Method::GET,
-            &format!("/api/orgs/{}/members", org(MINE)),
-            None,
-            false,
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn the_members_of_an_organisation_this_session_does_not_belong_to_are_not_found() {
     let kept = Kept::of(vec![a_member(SOMEBODY, OrgRole::Member)]);
 
@@ -399,7 +336,6 @@ async fn the_members_of_an_organisation_this_session_does_not_belong_to_are_not_
             Method::GET,
             &format!("/api/orgs/{}/members", org(THEIRS)),
             None,
-            true,
         ),
     )
     .await;
@@ -422,7 +358,6 @@ async fn an_administrator_changes_a_role_and_is_answered_with_the_member() {
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
             Some(r#"{"role":"admin"}"#),
-            true,
         ),
     )
     .await;
@@ -443,7 +378,6 @@ async fn a_member_is_told_plainly_that_changing_a_role_is_not_its_to_do() {
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
             Some(r#"{"role":"admin"}"#),
-            true,
         ),
     )
     .await;
@@ -464,7 +398,6 @@ async fn an_administrator_is_refused_the_owner_role_in_either_direction() {
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
             Some(r#"{"role":"member"}"#),
-            true,
         ),
     )
     .await;
@@ -485,7 +418,6 @@ async fn the_last_owner_stays_an_owner_however_it_asks() {
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
             Some(r#"{"role":"member"}"#),
-            true,
         ),
     )
     .await;
@@ -509,7 +441,6 @@ async fn an_owner_steps_down_from_its_own_row_once_another_owner_stays() {
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
             Some(r#"{"role":"admin"}"#),
-            true,
         ),
     )
     .await;
@@ -532,7 +463,6 @@ async fn an_administrator_walks_out_of_an_organisation_it_does_not_own() {
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
             None,
-            true,
         ),
     )
     .await;
@@ -553,7 +483,6 @@ async fn an_administrator_shows_a_member_the_door_and_the_answer_carries_no_body
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
             None,
-            true,
         ),
     )
     .await;
@@ -574,7 +503,6 @@ async fn an_account_this_organisation_never_held_is_no_member_to_remove() {
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(404)),
             None,
-            true,
         ),
     )
     .await;
@@ -594,7 +522,6 @@ async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
             Some(r#"{"email":"new@example.com","role":"member"}"#),
-            true,
         ),
     )
     .await;
@@ -618,7 +545,6 @@ async fn an_address_that_already_has_an_account_joins_the_account_it_holds() {
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
             Some(r#"{"email":"known@example.com","role":"admin"}"#),
-            true,
         ),
     )
     .await;
@@ -641,7 +567,6 @@ async fn an_address_already_on_the_roll_is_a_conflict_rather_than_a_second_invit
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
             Some(r#"{"email":"already@example.com","role":"member"}"#),
-            true,
         ),
     )
     .await;
@@ -661,7 +586,6 @@ async fn an_administrator_cannot_invite_an_owner_and_no_account_is_made_for_one(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
             Some(r#"{"email":"new@example.com","role":"owner"}"#),
-            true,
         ),
     )
     .await;
@@ -681,7 +605,6 @@ async fn something_that_is_not_an_address_is_refused_before_anybody_is_admitted(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
             Some(r#"{"email":"nobody","role":"member"}"#),
-            true,
         ),
     )
     .await;

@@ -1,22 +1,21 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, usage_router};
+use ferristrace_api::{AppState, usage_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, Consumed, DecompressedBytes, LiveSession, Membership, Memberships, NoPhotos,
-    OrgRole, ProvisionPolicy, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, StoreError, TenantId, UnixSeconds, UsageHistory, UsageMeter, UsageReader,
-    WhoamiError, Window,
+    AccountId, Consumed, DecompressedBytes, Membership, Memberships, NoPhotos, OrgRole, Session,
+    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, UsageHistory,
+    UsageMeter, UsageReader, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const AN_HOUR_MS: u64 = 3_600_000;
@@ -28,17 +27,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: "person@example.com".try_into().expect("an address"),
@@ -50,32 +40,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -121,13 +85,10 @@ impl UsageHistory for Rolled {
     }
 }
 
-fn asking(org: u128, query: &str, session: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(org: u128, query: &str, session: Option<&str>) -> Request<Body> {
     let mut request = Request::builder().uri(format!("/api/orgs/{}/usage?{query}", id(org)));
     if let Some(token) = session {
-        request = request.header(COOKIE, format!("ft_session={token}"));
-    }
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
+        request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
     request.body(Body::empty()).expect("a request")
 }
@@ -176,7 +137,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Live;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -196,13 +157,9 @@ fn state(live: u64, included: Option<u64>) -> AppState<TestStack> {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    AppState::new(
-        Arc::new(Ferristrace::new(fakes, adapters)),
-        SessionCookie::default(),
-    )
+    AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
 async fn served(live: u64, included: Option<u64>, request: Request<Body>) -> (StatusCode, String) {
@@ -230,7 +187,7 @@ async fn a_member_reads_what_its_organisation_ingested() {
     let (status, body) = served(
         9_999,
         Some(1_073_741_824),
-        asking(MINE, &a_month(), Some(TOKEN), true),
+        asking(MINE, &a_month(), Some(TOKEN)),
     )
     .await;
 
@@ -247,7 +204,7 @@ async fn a_member_reads_what_its_organisation_ingested() {
 
 #[tokio::test]
 async fn a_plan_with_no_ceiling_answers_null_rather_than_zero() {
-    let (status, body) = served(9_999, None, asking(MINE, &a_month(), Some(TOKEN), true)).await;
+    let (status, body) = served(9_999, None, asking(MINE, &a_month(), Some(TOKEN))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert!(read(&body)["included_bytes"].is_null());
@@ -255,7 +212,7 @@ async fn a_plan_with_no_ceiling_answers_null_rather_than_zero() {
 
 #[tokio::test]
 async fn an_organisation_this_session_does_not_belong_to_is_not_found() {
-    let (status, _) = served(0, None, asking(THEIRS, &a_month(), Some(TOKEN), true)).await;
+    let (status, _) = served(0, None, asking(THEIRS, &a_month(), Some(TOKEN))).await;
 
     assert_eq!(
         status,
@@ -266,12 +223,7 @@ async fn an_organisation_this_session_does_not_belong_to_is_not_found() {
 
 #[tokio::test]
 async fn a_window_that_ends_before_it_starts_is_refused() {
-    let (status, body) = served(
-        0,
-        None,
-        asking(MINE, "from=2000&to=1000", Some(TOKEN), true),
-    )
-    .await;
+    let (status, body) = served(0, None, asking(MINE, "from=2000&to=1000", Some(TOKEN))).await;
 
     assert_eq!(
         status,
@@ -283,14 +235,7 @@ async fn a_window_that_ends_before_it_starts_is_refused() {
 
 #[tokio::test]
 async fn a_request_carrying_no_session_is_told_to_sign_in() {
-    let (status, _) = served(0, None, asking(MINE, &a_month(), None, true)).await;
+    let (status, _) = served(0, None, asking(MINE, &a_month(), None)).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn a_request_from_another_origin_never_reaches_the_usage() {
-    let (status, _) = served(0, None, asking(MINE, &a_month(), Some(TOKEN), false)).await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }

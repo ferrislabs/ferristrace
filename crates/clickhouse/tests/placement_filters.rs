@@ -3,24 +3,23 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
 use clickhouse::Client;
-use ferristrace_api::{AppState, SessionCookie, explore_router, log_router, metric_router};
+use ferristrace_api::{AppState, explore_router, log_router, metric_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_clickhouse::{
     BatchLimits, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
     ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, MIGRATIONS,
 };
 use ferristrace_domain::{
-    AccountId, Agent, Aggregation, Buckets, LiveSession, LogQuery, LogReader, LogSink, Membership,
-    Memberships, MetricKind, MetricQuery, MetricReader, MetricSink, NoPhotos, OrgRole, Placement,
-    PlacementName, PlacementReader, ProjectId, ProvisionPolicy, Scope, SeenPod, SeenWorkload,
-    ServiceFilter, Session, SessionError, SessionId, SessionRoll, SessionStore, SessionToken,
-    SpanReader, SpanSink, TenantId, TraceFilter, UnixSeconds, WhoamiError, Window, Workload,
-    WorkloadKind,
+    AccountId, Aggregation, Buckets, LogQuery, LogReader, LogSink, Membership, Memberships,
+    MetricKind, MetricQuery, MetricReader, MetricSink, NoPhotos, OrgRole, Placement, PlacementName,
+    PlacementReader, ProjectId, Scope, SeenPod, SeenWorkload, ServiceFilter, Session, SessionError,
+    SessionStore, SessionToken, SpanReader, SpanSink, TenantId, TraceFilter, UnixSeconds,
+    WhoamiError, Window, Workload, WorkloadKind,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::{logs_of, metrics_of, spans_of};
@@ -44,7 +43,7 @@ const BASE: u64 = 1_700_000_000_000_000_000;
 const SECOND: u64 = 1_000_000_000;
 const MILLI: u64 = 1_000_000;
 const HOUR: u64 = 3_600 * SECOND;
-const TOKEN: &str = "ft_ss_placement";
+const TOKEN: &str = "ft.person.placement";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const PLACEMENT_VERSION: u32 = 9;
@@ -643,17 +642,8 @@ async fn the_placements_seen_in_a_window_list_every_cluster_namespace_workload_p
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != TOKEN {
+        if token.identity().subject.as_str() != TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -664,32 +654,6 @@ impl SessionStore for OneSession {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -745,7 +709,7 @@ impl Stack for Placing {
     type LogStore = ClickhouseLogReader;
     type MetricStore = ClickhouseMetricReader;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -764,13 +728,9 @@ fn routes(client: &Client) -> Router {
         issue_store: None,
         log_store: Some(ClickhouseLogReader::new(client.clone())),
         metric_store: Some(ClickhouseMetricReader::new(client.clone())),
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    let state = AppState::<Placing>::new(
-        Arc::new(Ferristrace::new(Fakes, adapters)),
-        SessionCookie::default(),
-    );
+    let state = AppState::<Placing>::new(Arc::new(Ferristrace::new(Fakes, adapters)));
     explore_router(state.clone())
         .merge(log_router(state.clone()))
         .merge(metric_router(state))
@@ -779,8 +739,7 @@ fn routes(client: &Client) -> Router {
 async fn asked(client: &Client, uri: &str) -> serde_json::Value {
     let request = Request::builder()
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::empty())
         .expect("a request");
     let response = routes(client).oneshot(request).await.expect("a response");

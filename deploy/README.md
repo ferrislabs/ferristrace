@@ -14,9 +14,12 @@ Postgres and ClickHouse migrations itself, and then listens on 4317 for
 OTLP over gRPC and 4318 for everything else: OTLP over HTTP, the API, and
 the web application at <http://localhost:4318>. Beside it, FerrisKey comes
 up with its own database, runs its own migration, and is provisioned by
-`ferriskey-init`: a realm named `ferristrace`, a confidential client named
-the same, its redirect uri, and the client secret FerrisKey generated, read
-back and handed to the server — nothing of that is created by hand.
+`ferriskey-init`: a realm named `ferristrace`, a public client named the
+same (code flow with PKCE, no secret), its redirect uri and its web origin —
+nothing of that is created by hand. The web application signs in with that
+client and sends the access token it gets as `Authorization: Bearer`; the
+server keeps no session and no client secret, and verifies the token against
+the realm's keys.
 
 ## Before the first sign-in
 
@@ -242,9 +245,6 @@ cosign verify ghcr.io/ferrislabs/ferristrace:1.2.3 \
   whoever holds it, so that default must not face a network. Change
   `FERRISKEY_ADMIN_PASSWORD` before widening `FERRISKEY_API_BIND` or
   `FERRISKEY_WEBAPP_BIND`, which is what would put either on the network.
-- **`COOKIE_SECURE`.** It defaults to `false` because this compose file
-  serves plain HTTP. Put the server behind TLS and set it to `true`, or
-  session cookies travel in the clear.
 - **`RETENTION_DAYS`.** Spans carry a TTL of 30 days by default. ClickHouse
   drops them on its own schedule once past it. An owner can set a different
   retention for one organisation in Settings, Organisation, General, between
@@ -300,7 +300,6 @@ stores inside its own network rather than something to choose.
 | `POSTGRES_PASSWORD` | `ferristrace` | The control plane password |
 | `CLICKHOUSE_PASSWORD` | `ferristrace` | The span store password |
 | `RETENTION_DAYS` | `30` | How long a span is kept |
-| `COOKIE_SECURE` | `false` | Whether a session cookie demands HTTPS |
 | `OTLP_GRPC_PORT` | `4317` | Host port for OTLP over gRPC |
 | `OTLP_HTTP_PORT` | `4318` | Host port for OTLP over HTTP |
 | `RUST_LOG` | `info` | Log filter |
@@ -323,21 +322,47 @@ stores inside its own network rather than something to choose.
 | `FERRISTRACE_MCP_ORGS` | unset | Organisation ids (comma separated) whose MCP address the realm allows; read by `ferriskey-init` |
 | `MCP_GATEWAY_BIND`, `MCP_GATEWAY_PORT` | `127.0.0.1`, `8080` | Where the MCP gateway answers |
 
-The four `FERRISTRACE_OIDC__*` settings are not in that table because this
+The two `FERRISTRACE_OIDC__*` settings are not in that table because this
 compose file writes them for you: `ferriskey-init` provisions the bundled
 FerrisKey and drops them into `deploy/ferriskey/ferriskey.env`, which
 `server` reads before `.env`, so a line you write there for a different
-identity provider — see the next section — still wins. `docker compose
-config` and `docker inspect` print that generated client secret in
-plaintext, the same way they already print `POSTGRES_PASSWORD`, so do not
-paste either into a support ticket.
+identity provider — see the next section — still wins. No client secret is
+involved: the web client is public.
+
+`FERRISKEY_EXTRA_APP_ORIGINS` (space separated, unset by default) makes
+`ferriskey-init` register more app origins on the client, each as a
+redirect uri (with a trailing slash) and a web origin. Set it to
+`http://localhost:5173` to sign in through the web dev server.
+
+### An existing deployment
+
+`ferriskey-init` never changes a client that already exists. A stack
+started before the bearer change holds a confidential `ferristrace` client,
+and the web cannot sign in with it. Either:
+
+- open the FerrisKey console at <http://ferriskey:5555>, select the
+  `ferristrace` realm, open the client `ferristrace`, turn client
+  authentication off (a public client), keep PKCE on, then run
+  `docker compose up --detach` again so the redirect uri
+  (`http://localhost:4318/`) and the web origin are registered; or
+- set `FERRISKEY_CLIENT_ID=ferristrace-web` in `.env`
+  to have a new public client created beside the old one, and delete the
+  old one when you are done.
+
+The server no longer reads `FERRISTRACE_OIDC__CLIENT_SECRET`,
+`FERRISTRACE_OIDC__REDIRECT_URI` or `FERRISTRACE_COOKIE_SECURE`; remove them
+from `.env`. On a deployment with its own FerrisKey, make `CLIENT_ID` a
+public client whose redirect uri is the app origin with a trailing slash
+(`https://ferristrace.example.com/`) and whose web origin is the app origin.
 
 ## Signing in with an identity provider instead
 
 The previous section is what the bundled FerrisKey already does for you.
 Set the OIDC block in `.env` instead to point at a different provider, or
 at a FerrisKey running somewhere else, and it wins over what
-`ferriskey-init` wrote. Before you do, check that realm's client does not
+`ferriskey-init` wrote. The client is public: code flow with PKCE, no
+secret, its redirect uri the app origin with a trailing slash and its web
+origin the app origin. Before you do, check that realm's client does not
 assert `email_verified` for an address it has not actually verified:
 FerrisTrace trusts that claim to decide whether an unlinked identity may
 adopt an existing account by address, and has no way to check it itself.
@@ -345,8 +370,6 @@ adopt an existing account by address, and has no way to check it itself.
 ```sh
 FERRISTRACE_OIDC__ISSUER=https://id.example.com
 FERRISTRACE_OIDC__CLIENT_ID=ferristrace
-FERRISTRACE_OIDC__CLIENT_SECRET=...
-FERRISTRACE_OIDC__REDIRECT_URI=https://ferristrace.example.com/auth/oidc/callback
 ```
 
 An account is provisioned the first time somebody signs in, or adopted by
@@ -470,8 +493,9 @@ requiring a second factor, both set on the realm in FerrisKey's console. A
 person who had a password, an authenticator app or recovery codes here
 starts again there; there is no import.
 
-Settings > Login & security keeps the one thing that stays here: the list of
-sessions, where each can be signed out and the others at once.
+There is no session list here either: the web holds the access token and the
+server keeps no session. Signing out sends the person to FerrisKey's end
+session endpoint; ending the others is done in FerrisKey.
 
 `FERRISTRACE_SECRETS__AT_REST_KEY` stays, for webhook secrets (see Alerts).
 Keep it where the database password is kept. It is not derivable and it is
@@ -718,7 +742,7 @@ ClickHouse applies it on its own schedule.
 
 An owner downloads everything the organisation holds from Settings,
 Organisation, General, Export organisation data, or with
-`GET /api/orgs/{org}/export` and the session cookie (an API key does not
+`GET /api/orgs/{org}/export` with the signed-in bearer (an API key does not
 open it). The answer is a streamed `application/gzip` named
 `ferristrace-<org-id>-<YYYYMMDD>.tar.gz`: nothing is written to disk on the
 server and no more than one page of spans is held in memory at a time. Each
@@ -923,9 +947,10 @@ cd ../web && pnpm install && pnpm dev
 ```
 
 Then open <http://localhost:5173>. Every change appears without a reload,
-and `/auth`, `/api`, `/health` and `/v1` go to the real server on 4318. A
-session cookie is set for `localhost` and ignores the port, so signing in
-on either one signs you in on both.
+and `/auth`, `/api`, `/health` and `/v1` go to the real server on 4318.
+Signing in from 5173 needs that origin registered on the client: set
+`FERRISKEY_EXTRA_APP_ORIGINS=http://localhost:5173` in `.env` and run
+`docker compose up --detach` again.
 
 `FERRISTRACE_SERVER` points the proxy somewhere other than
 `http://localhost:4318`.

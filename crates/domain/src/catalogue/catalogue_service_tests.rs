@@ -8,7 +8,7 @@ use super::ports::Projects;
 use super::value_objects::{Assigned, Created, MAX_NAME_BYTES, ProjectId, ProjectName, Renamed};
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, TeamId, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -41,17 +41,8 @@ fn a_name(spelling: &str) -> ProjectName {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -63,10 +54,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -195,7 +182,7 @@ fn noting<'a>(
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[tokio::test]
@@ -231,7 +218,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let held = Held::default();
 
     let refused = cataloguing(OrgRole::Owner, &held)
-        .projects(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+        .projects(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(CatalogueError::NoSession));

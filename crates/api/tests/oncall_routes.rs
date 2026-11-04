@@ -2,31 +2,30 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, LOCATION};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, LOCATION};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, mark_routes, oncall_router};
+use ferristrace_api::{AppState, mark_routes, oncall_router};
 use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{
-    AlertLedger, Bench, Couriered, Crew, IncidentLedger, Inert, Notebook, OncallLedger,
+    AlertLedger, Bearers, Bench, Couriered, Crew, IncidentLedger, Inert, Notebook, OncallLedger,
     PriceLedger, StatusLedger, Untransacted,
 };
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, AckClaim, AckKey, Action, Actor, Agent, AgentId, AgentScope, AgentScopes,
-    AgentToken, AgentTokens, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Created,
-    Day, Delegation, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession,
-    Membership, Memberships, NoPhotos, OrgRole, PageSource, Paging, Project, ProjectId,
-    ProjectName, Projects, ProvisionPolicy, ReadGrant, RegisteredAgent, Renamed, Rotation,
-    RotationLength, Schedule, ScheduleId, ScheduleName, Session, SessionError, SessionId,
-    SessionRoll, SessionStore, SessionToken, StoreError, TargetKind, TeamId, TenantId, TimeOfDay,
-    Timezone, TokenRefusal, UnixSeconds, VerifiedToken, Weekday, WhoamiError,
+    AccountId, AckClaim, AckKey, Action, Actor, AgentId, AgentScope, AgentScopes, AgentToken,
+    AgentTokens, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Created, Day,
+    Delegation, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships,
+    NoPhotos, OrgRole, PageSource, Paging, Project, ProjectId, ProjectName, Projects, ReadGrant,
+    RegisteredAgent, Renamed, Rotation, RotationLength, Schedule, ScheduleId, ScheduleName,
+    Session, SessionError, SessionStore, SessionToken, StoreError, TargetKind, TeamId, TenantId,
+    TimeOfDay, Timezone, TokenRefusal, UnixSeconds, VerifiedToken, Weekday, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const ME: u128 = 9;
@@ -54,17 +53,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: account(ME),
                 email: "me@example.com".try_into().expect("an address"),
@@ -76,32 +66,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -351,7 +315,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Gateway;
     type Sink = Inert;
     type Quota = Inert;
@@ -419,23 +383,19 @@ impl Harness {
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         };
-        mark_routes(oncall_router(AppState::new(
-            Arc::new(
-                Ferristrace::<TestStack>::new(
-                    Fakes {
-                        role,
-                        harness: self.0.clone(),
-                    },
-                    adapters,
-                )
-                .with_ack_key(Some(ack_key()))
-                .with_agent_tokens(Some(Gateway)),
-            ),
-            SessionCookie::default(),
-        )))
+        mark_routes(oncall_router(AppState::new(Arc::new(
+            Ferristrace::<TestStack>::new(
+                Fakes {
+                    role,
+                    harness: self.0.clone(),
+                },
+                adapters,
+            )
+            .with_ack_key(Some(ack_key()))
+            .with_agent_tokens(Some(Gateway)),
+        ))))
     }
 
     async fn served(&self, role: OrgRole, request: Request<Body>) -> (StatusCode, Value) {
@@ -497,8 +457,7 @@ fn as_session(method: Method, uri: &str, body: Option<Value>) -> Request<Body> {
     let builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"));
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     match body {
         Some(body) => builder
             .header(CONTENT_TYPE, "application/json")
@@ -512,7 +471,6 @@ fn as_key(method: Method, uri: &str, body: Option<Value>) -> Request<Body> {
     let builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
         .header(AUTHORIZATION, format!("Bearer {WHOLE_KEY}"));
     match body {
         Some(body) => builder
@@ -1060,7 +1018,7 @@ impl Stack for Watching {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -1130,8 +1088,7 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         },
     )
     .with_ack_key(Some(ack_key()));
@@ -1146,7 +1103,7 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
     app.escalate_pages().await.expect("a page tick");
     let page = harness.0.oncall.pages()[0].clone();
     app.acknowledge_page(
-        &ferristrace_domain::Reader::Session(SessionToken::from_plaintext(TOKEN)),
+        &ferristrace_domain::Reader::Session(SessionToken::for_subject(TOKEN)),
         org(MINE),
         page.id,
     )
@@ -1193,7 +1150,6 @@ fn as_agent(method: Method, uri: &str, token: &str, body: Option<Value>) -> Requ
     let builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
         .header(AUTHORIZATION, format!("Bearer head.{token}.sig"));
     match body {
         Some(body) => builder

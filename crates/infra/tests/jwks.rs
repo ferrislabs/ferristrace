@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::routing::get;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use ferristrace_domain::{AgentToken, AgentTokens, TokenRefusal};
+use ferristrace_domain::{AgentToken, AgentTokens, SessionToken, TokenRefusal, UserRefusal};
 use ferristrace_infra::{JwksSettings, JwksVerifier};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use p256::SecretKey;
@@ -25,6 +25,7 @@ const SECOND: &str = "second-rsa";
 const ELLIPTIC: &str = "the-ec-key";
 const CLIENT: &str = "triage-bot";
 const AUDIENCE: &str = "ferristrace";
+const WEB: &str = "ferristrace-web";
 
 static FIRST_KEY: LazyLock<RsaPrivateKey> =
     LazyLock::new(|| RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).expect("a key"));
@@ -1039,4 +1040,229 @@ async fn an_act_claim_that_is_not_an_object_or_has_no_subject_is_refused() {
             Err(TokenRefusal::Invalid)
         );
     }
+}
+
+fn person_claims(issuer: &str) -> Value {
+    json!({
+        "iss": issuer,
+        "sub": "9d1c0000-0000-4000-8000-000000000009",
+        "aud": ["account"],
+        "azp": WEB,
+        "email": "Ada@Example.com",
+        "email_verified": true,
+        "scope": "openid email",
+        "jti": "6b1d4a52-0000-4000-8000-000000000003",
+        "typ": "Bearer",
+        "iat": now(),
+        "exp": now() + 300
+    })
+}
+
+fn people_verifier(server: &Server) -> JwksVerifier {
+    verifier(server, None).accepting_people_of(WEB)
+}
+
+async fn person(verifier: &JwksVerifier, claims: &Value) -> Result<SessionToken, UserRefusal> {
+    let token = sign(
+        Algorithm::RS256,
+        Some(FIRST),
+        claims,
+        &rsa_signer(&FIRST_KEY),
+    );
+    ferristrace_domain::UserTokens::verify(verifier, token.exposed()).await
+}
+
+#[tokio::test]
+async fn a_token_of_the_web_client_verifies_as_a_person() {
+    let server = issuer_with_keys().await;
+    let claims = person_claims(&server.issuer());
+
+    let session = person(&people_verifier(&server), &claims)
+        .await
+        .expect("a person's token");
+
+    let identity = session.identity();
+    assert_eq!(identity.issuer.as_str(), server.issuer());
+    assert_eq!(
+        identity.subject.as_str(),
+        "9d1c0000-0000-4000-8000-000000000009"
+    );
+    assert_eq!(identity.email.as_str(), "ada@example.com");
+    assert!(identity.email_verified);
+    assert_eq!(session.expires_at().get(), claims["exp"].as_u64().unwrap());
+}
+
+#[tokio::test]
+async fn an_unverified_or_silent_email_claim_leaves_the_address_unverified() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims
+        .as_object_mut()
+        .expect("an object")
+        .remove("email_verified");
+
+    let session = person(&people_verifier(&server), &claims)
+        .await
+        .expect("a person's token");
+
+    assert!(!session.identity().email_verified);
+}
+
+#[tokio::test]
+async fn a_token_of_another_client_is_not_a_person() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims["azp"] = json!("someone-elses-app");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::NotAPerson)
+    );
+}
+
+#[tokio::test]
+async fn a_token_without_azp_is_not_a_person() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims.as_object_mut().expect("an object").remove("azp");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::NotAPerson)
+    );
+}
+
+#[tokio::test]
+async fn a_client_credentials_token_of_the_web_client_is_not_a_person() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims["client_id"] = json!(WEB);
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::NotAPerson)
+    );
+}
+
+#[tokio::test]
+async fn an_agent_token_is_not_a_person() {
+    let server = issuer_with_keys().await;
+    let claims = default_claims(&server.issuer());
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::NotAPerson)
+    );
+}
+
+#[tokio::test]
+async fn a_person_without_an_email_is_refused() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims.as_object_mut().expect("an object").remove("email");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn a_person_without_a_subject_is_refused() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims["sub"] = json!("");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn a_token_from_another_issuer_is_not_a_person() {
+    let server = issuer_with_keys().await;
+    let claims = person_claims("https://elsewhere.example.com/realms/ferris");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::NotAPerson)
+    );
+}
+
+#[tokio::test]
+async fn a_token_that_is_not_a_jwt_payload_is_refused() {
+    let server = issuer_with_keys().await;
+
+    assert_eq!(
+        ferristrace_domain::UserTokens::verify(&people_verifier(&server), "a.b.c").await,
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn an_expired_person_token_is_refused() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims["exp"] = json!(now() - 3600);
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn a_person_token_of_another_type_is_refused() {
+    let server = issuer_with_keys().await;
+    let mut claims = person_claims(&server.issuer());
+    claims["typ"] = json!("ID");
+
+    assert_eq!(
+        person(&people_verifier(&server), &claims).await.map(|_| ()),
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn a_person_token_signed_by_another_key_is_refused() {
+    let server = issuer_with_keys().await;
+    let token = sign(
+        Algorithm::RS256,
+        Some(FIRST),
+        &person_claims(&server.issuer()),
+        &rsa_signer(&SECOND_KEY),
+    );
+
+    assert_eq!(
+        ferristrace_domain::UserTokens::verify(&people_verifier(&server), token.exposed())
+            .await
+            .map(|_| ()),
+        Err(UserRefusal::Invalid)
+    );
+}
+
+#[tokio::test]
+async fn a_verifier_not_told_about_people_turns_them_away() {
+    let server = issuer_with_keys().await;
+
+    assert_eq!(
+        person(&verifier(&server, None), &person_claims(&server.issuer()))
+            .await
+            .map(|_| ()),
+        Err(UserRefusal::Off)
+    );
+}
+
+#[tokio::test]
+async fn an_issuer_that_cannot_be_reached_makes_people_wait() {
+    let server = issuer_with_keys().await;
+    server.failing.store(true, Ordering::SeqCst);
+
+    assert_eq!(
+        person(&people_verifier(&server), &person_claims(&server.issuer()))
+            .await
+            .map(|_| ()),
+        Err(UserRefusal::Unavailable)
+    );
 }

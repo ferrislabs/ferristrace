@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react'
+import { useAuthorisedUrl } from '@/auth/blob'
 import { cn } from '@/lib/utils'
 
 export const Kbd = ({ className, ...p }: ComponentProps<'kbd'>) => (
@@ -37,9 +38,12 @@ export const Td = ({ className, numeric, ...p }: ComponentProps<'td'> & { numeri
 )
 export const Tr = ({ className, ...p }: ComponentProps<'tr'>) => <tr className={cn('hover:[&>td]:bg-row-hover', className)} {...p} />
 
-export const Avatar = ({ initials, src, className }: { initials: string; src?: string | null; className?: string }) => (
+export const Avatar = ({ initials, src, className }: { initials: string; src?: string | null; className?: string }) => {
+  const shown = useAuthorisedUrl(src)
+  return (
   <span aria-hidden className={cn('relative inline-flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-subtle text-[12px] font-bold text-accent-text', className)}>
     {initials}
-    {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} /> : null}
+    {shown ? <img src={shown} alt="" className="absolute inset-0 size-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} /> : null}
   </span>
-)
+  )
+}

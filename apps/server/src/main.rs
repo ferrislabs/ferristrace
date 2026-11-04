@@ -27,9 +27,9 @@ use ferristrace_domain::{
     LinkKey, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
 };
 use ferristrace_infra::{
-    HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink, OidcProvider,
-    OidcSettings, PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory,
-    SystemClock, WebhookSettings, ack_key_from_hex, status_key_from_hex,
+    HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink,
+    PhotoStoreSettings, S3Photos, SecretSeal, SmtpMailer, StaticDirectory, SystemClock,
+    WebhookSettings, ack_key_from_hex, status_key_from_hex,
 };
 use ferristrace_postgres::{CONTROL_PLANE, Postgres, PostgresDirectory, load_allowances};
 use ferristrace_redis::RedisMeter;
@@ -45,7 +45,7 @@ use tracing_subscriber::EnvFilter;
 use crate::adapters::{Directory, Gallery, Meter, Production, Relay, Sink, Stored};
 use crate::cli::{Cli, Command, health, run_command};
 use crate::config::{AgentSetup, Config, default_retention_days};
-use crate::routes::{Held, State, control_routes, cookie_of};
+use crate::routes::{Held, State, control_routes};
 
 const SECONDS_PER_HOUR: u64 = 3600;
 const FLUSH_FALLBACK: Duration = Duration::from_secs(5);
@@ -62,7 +62,7 @@ struct Optional {
     issue_store: Option<ClickhouseIssues>,
     log_store: Option<ClickhouseLogReader>,
     metric_store: Option<ClickhouseMetricReader>,
-    oidc: Option<OidcProvider>,
+    users: Option<JwksVerifier>,
     agents: Option<JwksVerifier>,
 }
 
@@ -112,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
                 issue_store: grouping,
                 log_store: logs,
                 metric_store: metrics,
-                oidc: oidc_of(&config).await?,
+                users: users_of(&config)?,
                 agents: agents_of(&config)?,
             };
             Some(control_plane(
@@ -193,7 +193,9 @@ fn control_plane(
     let ack = ack_key_of(config)?;
     let links = status_key_of(config)?;
     let mailer = relay_of(config)?;
-    let repos = Postgres::new(pool.clone(), SystemClock).with_seal(seal);
+    let repos = Postgres::new(pool.clone(), SystemClock)
+        .with_seal(seal)
+        .with_provision_policy(PROVISIONING);
     let agents = optional.agents.take();
     let adapters = adapters_of(mailer, webhooks_of(config), gallery, meter, optional);
     let app = Arc::new(
@@ -202,7 +204,7 @@ fn control_plane(
             .with_status_key(links)
             .with_agent_tokens(agents),
     );
-    Ok(AppState::new(app, cookie_of(config))
+    Ok(AppState::new(app)
         .with_agent_policy(
             config.agent_setup().off_reason(),
             config.reserved_client_id().map(str::to_owned),
@@ -231,13 +233,14 @@ fn adapters_of(
         issue_store: optional.issue_store,
         log_store: optional.log_store,
         metric_store: optional.metric_store,
-        oidc: optional.oidc,
-        provision: ProvisionPolicy {
-            auto_provision: true,
-            link_by_email: true,
-        },
+        users: optional.users,
     }
 }
+
+const PROVISIONING: ProvisionPolicy = ProvisionPolicy {
+    auto_provision: true,
+    link_by_email: true,
+};
 
 const DIRECTORY_CONNECTIONS: u32 = 2;
 
@@ -428,19 +431,23 @@ async fn flush_once(sink: &Sink) {
     }
 }
 
-async fn oidc_of(config: &Config) -> anyhow::Result<Option<OidcProvider>> {
+fn users_of(config: &Config) -> anyhow::Result<Option<JwksVerifier>> {
     let Some(settings) = &config.oidc else {
+        tracing::warn!("no [oidc] block is configured, so every person's bearer is refused");
         return Ok(None);
     };
-    let provider = OidcProvider::discover(OidcSettings {
+    let verifier = JwksVerifier::new(JwksSettings {
         issuer: settings.issuer.clone(),
-        client_id: settings.client_id.clone(),
-        client_secret: settings.client_secret.clone(),
-        redirect_uri: settings.redirect_uri.clone(),
+        audience: None,
     })
-    .await
-    .context("reaching the identity provider")?;
-    Ok(Some(provider))
+    .context("preparing the person token verifier")?
+    .accepting_people_of(&settings.client_id);
+    tracing::info!(
+        issuer = %settings.issuer,
+        client_id = %settings.client_id,
+        "people's access tokens are verified against the issuer's keys"
+    );
+    Ok(Some(verifier))
 }
 
 fn agents_of(config: &Config) -> anyhow::Result<Option<JwksVerifier>> {

@@ -85,8 +85,6 @@ networkPolicy:
 # Non-secret settings, handed to the server as FERRISTRACE_* variables.
 config:
   logLevel: info
-  # -- Keep true behind TLS. Set false only for plain HTTP.
-  cookieSecure: true
   afterSignIn: /
   # -- Empty keeps the web root baked into the image.
   webRoot: ""
@@ -99,8 +97,8 @@ config:
   oidc:
     enabled: false
     issuer: ""
+    # -- FerrisKey public web client (code flow with PKCE, no secret). Its redirect URI is the app origin with a trailing slash, its web origin the app origin.
     clientId: ""
-    redirectUri: ""
   agents:
     # -- Issuer whose access tokens AI agents present. Empty means the OIDC issuer, or no agents when OIDC is off.
     issuer: ""
@@ -141,10 +139,6 @@ secrets:
   atRestKey:
     name: ""
     key: at-rest-key
-  # -- Read when config.oidc.enabled.
-  oidcClientSecret:
-    name: ferristrace-oidc
-    key: client-secret
   # -- Read when config.mail.enabled.
   smtpPassword:
     name: ferristrace-smtp

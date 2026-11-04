@@ -5,7 +5,7 @@ use super::entities::AuditEntry;
 use super::errors::AuditError;
 use super::value_objects::{Action, Actor, AuditFilter, Detail, PageSize, Target};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, WhoamiError};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
@@ -26,17 +26,8 @@ fn an_account(seed: u128) -> AccountId {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: an_account(9),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -48,10 +39,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -75,7 +62,7 @@ fn log(role: OrgRole, notebook: &Notebook) -> AuditLog<OneSession, MemberOfMine,
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 fn renamed(org: TenantId, to: &str) -> AuditEntry {
@@ -165,7 +152,7 @@ async fn an_unknown_session_is_refused() {
 
     let refused = log(OrgRole::Owner, &notebook)
         .read(
-            &SessionToken::from_plaintext("ft_ss_other"),
+            &SessionToken::for_subject("ft_ss_other"),
             an_org(MINE),
             &AuditFilter::default(),
             PageSize::new(None),

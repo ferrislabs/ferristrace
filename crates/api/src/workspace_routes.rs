@@ -48,7 +48,7 @@ async fn switch<S: Stack>(
 where
     S::Repos: SwitchRepos + FoundRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .switch_org(&token, TenantId::new(asked.org))
@@ -65,7 +65,7 @@ async fn found<S: Stack>(
 where
     S::Repos: SwitchRepos + FoundRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = OrgName::try_from(asked.name.as_str())?;
     let founded = state.app.found_org(&token, &name).await?;
     tracing::info!(org = %founded.org, "an account founded an organisation");

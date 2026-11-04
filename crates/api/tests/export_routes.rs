@@ -3,25 +3,24 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE};
+use axum::http::header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, export_router, key_router};
+use ferristrace_api::{AppState, export_router, key_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Notebook, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Notebook, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Action, Actor, Agent, ApiKey, ApiKeys, ApiSecret, Assigned, Created, ExportSource,
-    ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, LiveSession, Membership, Memberships,
-    NoPhotos, OrgRole, Organisation, Project, ProjectId, ProjectName, Projects, ProvisionPolicy,
-    ReadGrant, Renamed, ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError,
-    SessionId, SessionRoll, SessionStore, SessionToken, Snapshot, Span, SpanCursor, SpanEvent,
-    SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TeamId, TenantId,
-    TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
+    AccountId, Action, Actor, ApiKey, ApiKeys, ApiSecret, Assigned, Created, ExportSource,
+    ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships, NoPhotos, OrgRole,
+    Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, ServiceFilter,
+    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Snapshot,
+    Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
+    StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const ME: u128 = 9;
@@ -34,17 +33,8 @@ fn id(seed: u128) -> String {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(ME)),
                 email: EMAIL.try_into().expect("an address"),
@@ -56,32 +46,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -417,7 +381,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -488,20 +452,16 @@ impl Harness {
             issue_store: None,
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         };
-        let state = AppState::new(
-            Arc::new(Ferristrace::<TestStack>::new(
-                Fakes {
-                    role,
-                    vault: Arc::clone(&self.vault),
-                    notebook: self.notebook.clone(),
-                },
-                adapters,
-            )),
-            SessionCookie::default(),
-        );
+        let state = AppState::new(Arc::new(Ferristrace::<TestStack>::new(
+            Fakes {
+                role,
+                vault: Arc::clone(&self.vault),
+                notebook: self.notebook.clone(),
+            },
+            adapters,
+        )));
         key_router(state.clone()).merge(export_router(state))
     }
 
@@ -558,8 +518,7 @@ fn as_session(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let request = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"));
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     match body {
         Some(json) => request
             .header(CONTENT_TYPE, "application/json")
@@ -573,7 +532,7 @@ fn downloading(org: u128) -> Request<Body> {
     Request::builder()
         .method(Method::GET)
         .uri(format!("/api/orgs/{}/export", id(org)))
-        .header(COOKIE, format!("ft_session={TOKEN}"))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::empty())
         .expect("a request")
 }
@@ -785,12 +744,18 @@ async fn someone_who_is_not_a_member_finds_no_such_organisation() {
 }
 
 #[tokio::test]
-async fn only_the_session_cookie_opens_an_export() {
+async fn only_a_persons_bearer_opens_an_export() {
     let harness = Harness::new();
-    let bearer = Request::builder()
+    let key = Request::builder()
         .method(Method::GET)
         .uri(format!("/api/orgs/{}/export", id(MINE)))
-        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(AUTHORIZATION, "Bearer ft_live_0123456789")
+        .body(Body::empty())
+        .expect("a request");
+    let agent = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/orgs/{}/export", id(MINE)))
+        .header(AUTHORIZATION, "Bearer ft.agent.0123456789")
         .body(Body::empty())
         .expect("a request");
     let bare = Request::builder()
@@ -800,7 +765,11 @@ async fn only_the_session_cookie_opens_an_export() {
         .expect("a request");
 
     assert_eq!(
-        harness.served(OrgRole::Owner, bearer).await.status,
+        harness.served(OrgRole::Owner, key).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        harness.served(OrgRole::Owner, agent).await.status,
         StatusCode::UNAUTHORIZED
     );
     assert_eq!(

@@ -702,7 +702,7 @@ async fn create<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let draft = body.draft()?;
     let watched = state
         .app
@@ -721,7 +721,7 @@ async fn update<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let patch = body.patch()?;
     let watched = state
         .app
@@ -738,7 +738,7 @@ async fn delete<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .delete_alert(&token, TenantId::new(org), RuleId::new(id))
@@ -798,7 +798,7 @@ async fn test<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let deliveries = state
         .app
         .test_alert(&token, TenantId::new(org), RuleId::new(id))
@@ -832,7 +832,7 @@ async fn create_channel<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = ChannelName::try_from(asked.name.as_str())?;
     let kind = ChannelKind::parse(asked.kind.trim()).ok_or(AlertRefused::Malformed("kind"))?;
     let destination = Destination::parse(kind, &asked.target)?;
@@ -853,7 +853,7 @@ async fn update_channel<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = asked
         .name
         .as_deref()
@@ -880,7 +880,7 @@ async fn delete_channel<S: Stack>(
 where
     S::Repos: AlertRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .delete_channel(&token, TenantId::new(org), ChannelId::new(id))

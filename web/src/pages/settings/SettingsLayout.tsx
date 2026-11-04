@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 const ADMINISTERED = new Set(['audit', 'agents', 'mcp'])
 
 const GROUPS: { label: string; items: [string, string][] }[] = [
-  { label: 'Personal', items: [['profile', 'Profile'], ['security', 'Login & security'], ['preferences', 'Preferences']] },
+  { label: 'Personal', items: [['profile', 'Profile'], ['preferences', 'Preferences']] },
   { label: 'Organisation', items: [['general', 'General'], ['members', 'Members'], ['teams', 'Teams'], ['projects', 'Projects'], ['usage', 'Usage'], ['agents', 'Agents'], ['mcp', 'MCP'], ['audit', 'Audit log'], ['llm-prices', 'LLM prices'], ['billing', 'Billing']] },
   { label: 'Project', items: [['project/general', 'General'], ['project/alerts', 'Exception alerts'], ['project/api-keys', 'Api keys']] },
 ]

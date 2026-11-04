@@ -2,17 +2,16 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::{AppState, SessionCookie, me_router, workspace_router};
+use ferristrace_api::{AppState, me_router, workspace_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Agent, ControlPlane, Email, LiveSession, Membership, Memberships, Minted, NoPhotos,
-    OrgName, OrgRole, ProjectId, ProjectName, ProvisionError, ProvisionPolicy, Revoked, Session,
-    SessionError, SessionId, SessionRoll, SessionStore, SessionSwitch, SessionToken, TenantId,
-    UnixSeconds, WhoamiError,
+    AccountId, ControlPlane, Email, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
+    ProjectId, ProjectName, ProvisionError, Revoked, Session, SessionError, SessionStore,
+    SessionSwitch, SessionToken, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -23,7 +22,7 @@ mod identity;
 
 use identity::Nowhere;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const ACCOUNT: u128 = 9;
 const ACME: u128 = 1;
 const GLOBEX: u128 = 2;
@@ -67,17 +66,8 @@ fn the_account() -> AccountId {
 struct Sessions(Arc<Mutex<World>>);
 
 impl SessionStore for Sessions {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != TOKEN {
+        if token.identity().subject.as_str() != TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -89,38 +79,12 @@ impl SessionStore for Sessions {
             expires_at: UnixSeconds::new(0),
         })
     }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
 }
 
 impl SessionSwitch for Sessions {
     async fn switch(&self, _token: &SessionToken, org: TenantId) -> Result<(), SessionError> {
         self.0.lock().expect("the lock").active = Some(org);
         Ok(())
-    }
-}
-
-impl SessionRoll for Sessions {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -244,7 +208,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -263,13 +227,12 @@ fn app(world: &Arc<Mutex<World>>) -> Router {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    let state: AppState<TestStack> = AppState::new(
-        Arc::new(Ferristrace::new(Fakes(Arc::clone(world)), adapters)),
-        SessionCookie::default(),
-    );
+    let state: AppState<TestStack> = AppState::new(Arc::new(Ferristrace::new(
+        Fakes(Arc::clone(world)),
+        adapters,
+    )));
     me_router(state.clone()).merge(workspace_router(state))
 }
 
@@ -279,7 +242,7 @@ fn request(method: Method, uri: &str, body: Option<String>, signed_in: bool) -> 
         .uri(uri)
         .header("x-requested-with", "fetch");
     if signed_in {
-        request = request.header(COOKIE, format!("ft_session={TOKEN}"));
+        request = request.header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     }
     if body.is_some() {
         request = request.header("content-type", "application/json");
@@ -356,24 +319,6 @@ async fn switching_without_a_session_is_unauthorised() {
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(world.lock().expect("the lock").active, Some(an_org(ACME)));
-}
-
-#[tokio::test]
-async fn switching_from_a_page_that_no_script_sent_is_forbidden() {
-    let world = a_world();
-    let unscripted = Request::builder()
-        .method(Method::PUT)
-        .uri("/auth/session/org")
-        .header(COOKIE, format!("ft_session={TOKEN}"))
-        .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::json!({ "org": Uuid::from_u128(GLOBEX) }).to_string(),
-        ))
-        .expect("a request");
-
-    let (status, _) = answer(&app(&world), unscripted).await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

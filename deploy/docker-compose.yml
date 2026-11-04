@@ -82,9 +82,9 @@ services:
     env_file:
       - path: .env
         required: false
-    # ferriskey-init writes the realm, client and redirect uri it provisioned,
-    # and the client secret it read back, into ferriskey/ferriskey.env, so
-    # that nobody has to copy anything into .env. Compose reads env_file
+    # ferriskey-init writes the issuer and the public web client id it
+    # provisioned into ferriskey/ferriskey.env, so that nobody has to copy
+    # anything into .env. Compose reads env_file
     # entries before any container runs, so on a first `up` that file does
     # not exist yet; the server reads it itself when it starts instead,
     # after ferriskey-init has finished. A setting in .env still wins.
@@ -101,7 +101,6 @@ services:
       FERRISTRACE_SPANS__USER: ferristrace
       FERRISTRACE_SPANS__PASSWORD: ${CLICKHOUSE_PASSWORD:-ferristrace}
       FERRISTRACE_SPANS__RETENTION_DAYS: ${RETENTION_DAYS:-30}
-      FERRISTRACE_COOKIE_SECURE: ${COOKIE_SECURE:-false}
       FERRISTRACE_AGENTS__AUDIENCE: ${FERRISTRACE_AGENTS__AUDIENCE:-ferristrace-agents}
       FERRISTRACE_MCP__GATEWAY_CLIENT_ID: ${FERRISKEY_MCP_GATEWAY_CLIENT_ID:-ferristrace-mcp-gateway}
       FERRISTRACE_MCP__PUBLIC_URL: ${FERRISTRACE_MCP_PUBLIC_URL:-http://localhost:8080}
@@ -248,9 +247,9 @@ services:
     depends_on:
       - ferriskey-api
 
-  # Creates the realm, the confidential client and its redirect uri through
-  # FerrisKey's admin api, reads back the client secret FerrisKey generated,
-  # and writes the four FERRISTRACE_OIDC__* settings `server` reads into
+  # Creates the realm, the public web client, its redirect uri and its web
+  # origin through FerrisKey's admin api, and writes the two
+  # FERRISTRACE_OIDC__* settings `server` reads into
   # ferriskey/ferriskey.env — the second env_file entry on `server`, above.
   # Runs once per `up` and exits; see ferriskey-init.sh for what makes a
   # second run safe.
@@ -269,8 +268,9 @@ services:
       ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${FERRISKEY_ADMIN_PASSWORD:-admin}
       FERRISKEY_REALM: ferristrace
-      FERRISKEY_CLIENT_ID: ferristrace
-      FERRISKEY_REDIRECT_URI: http://localhost:${OTLP_HTTP_PORT:-4318}/auth/oidc/callback
+      FERRISKEY_CLIENT_ID: ${FERRISKEY_CLIENT_ID:-ferristrace}
+      FERRISKEY_APP_ORIGIN: http://localhost:${OTLP_HTTP_PORT:-4318}
+      FERRISKEY_EXTRA_APP_ORIGINS: ${FERRISKEY_EXTRA_APP_ORIGINS:-}
       # The name the server and the browser both resolve to FerrisKey;
       # see the comment on `server`.
       FERRISKEY_ISSUER_BASE_URL: http://ferriskey:3333

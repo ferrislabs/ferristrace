@@ -1,11 +1,12 @@
 import { queryOptions } from '@tanstack/react-query'
-import { get, json, patch, post } from './client'
+import { get, json, patch } from './client'
+import { leave } from './oidc'
 import { forgetStoredData } from '@/lib/offline'
 
 export type Role = 'owner' | 'admin' | 'member'
 export type Membership = { org: string; name: string; role: Role }
 export type Account = { account: string; email: string; name: string | null; photo: string | null; active_org: string | null; memberships: Membership[] }
-export type Methods = { oidc: boolean }
+export type Methods = { oidc: boolean; issuer: string | null; client_id: string | null }
 
 export const accountQuery = queryOptions({
   queryKey: ['auth', 'me'],
@@ -20,7 +21,7 @@ export const methodsQuery = queryOptions({
     try {
       return await json<Methods>(await get('/auth/methods'))
     } catch {
-      return { oidc: false }
+      return { oidc: false, issuer: null, client_id: null }
     }
   },
   retry: false,
@@ -36,11 +37,9 @@ export const healthQuery = queryOptions({
 
 export const signOut = async () => {
   forgetStoredData()
-  return post('/auth/sign-out')
+  await leave()
 }
 
 export const renameMe = (name: string) => patch('/auth/me', { name })
-
-export const OIDC_START = '/auth/oidc/start'
 
 export const roleRank: Record<Role, number> = { owner: 0, admin: 1, member: 2 }

@@ -240,7 +240,7 @@ async fn decide<S: Stack>(
 where
     S::Repos: IssueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let org = TenantId::new(org);
     let project = ProjectId::new(decided.project);
     let print = a_print(&print)?;

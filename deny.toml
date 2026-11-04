@@ -1,8 +1,8 @@
 [advisories]
 yanked = "warn"
 ignore = [
-    { id = "RUSTSEC-2023-0071", reason = "rsa 0.9.10 reaches the tree only through openidconnect, which uses it to verify an identity provider's RS256 signature against a public key from the provider's JWKS. The Marvin attack recovers a private key from the timing of private-key operations, and this process holds no RSA private key: sessions and ingest keys are random tokens kept as SHA-256 digests, passwords use Argon2, and jsonwebtoken is a dev-dependency. There is no patch and the advisory says so intentionally. Revisit the day anything here signs or decrypts with RSA." },
-    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 arrives under p256 and p384 through openidconnect, for the same public-key verification. Its secret-dependent branches matter when the operands are secret; in a verification the key, the signature and the message are all public. Revisit if an elliptic-curve private key ever lives in this process." },
+    { id = "RUSTSEC-2023-0071", reason = "rsa 0.9.10 reaches the tree only through jsonwebtoken, which uses it to verify FerrisKey's RS256 signatures on access tokens against a public key from the issuer's JWKS. The Marvin attack recovers a private key from the timing of private-key operations, and this process holds no RSA private key: ingest keys are random tokens kept as SHA-256 digests and no session or password is kept. There is no patch and the advisory says so intentionally. Revisit the day anything here signs or decrypts with RSA." },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 arrives under the elliptic-curve crates through jsonwebtoken, for the same public-key verification. Its secret-dependent branches matter when the operands are secret; in a verification the key, the signature and the message are all public. Revisit if an elliptic-curve private key ever lives in this process." },
 ]
 
 [licenses]

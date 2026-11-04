@@ -3,19 +3,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
 use clickhouse::Client;
-use ferristrace_api::{AppState, SessionCookie, explore_router};
+use ferristrace_api::{AppState, explore_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AccountId, Agent, LiveSession, Membership, Memberships, NoPhotos, OrgRole, PlacementReader,
-    ProjectId, ProvisionPolicy, Scope, ServiceFilter, ServicePoint, Session, SessionError,
-    SessionId, SessionRoll, SessionStore, SessionToken, Span, SpanId, SpanKind, SpanReader,
-    SpanSink, SpanStatus, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
+    AccountId, Membership, Memberships, NoPhotos, OrgRole, PlacementReader, ProjectId, Scope,
+    ServiceFilter, ServicePoint, Session, SessionError, SessionStore, SessionToken, Span, SpanId,
+    SpanKind, SpanReader, SpanSink, SpanStatus, TenantId, TraceId, UnixSeconds, WhoamiError,
+    Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -34,7 +34,7 @@ const SECOND: u64 = 1_000_000_000;
 const MILLI: u64 = 1_000_000;
 const MINUTE: u64 = 60 * SECOND;
 const HOUR: u64 = 60 * MINUTE;
-const TOKEN: &str = "ft_ss_views";
+const TOKEN: &str = "ft.person.views";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 
@@ -464,17 +464,8 @@ async fn operations_and_series_never_cross_organisations_or_projects() {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() != TOKEN {
+        if token.identity().subject.as_str() != TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -485,32 +476,6 @@ impl SessionStore for OneSession {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -566,7 +531,7 @@ impl Stack for Views {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -585,17 +550,12 @@ async fn asked(reader: ClickhouseReader, uri: &str) -> serde_json::Value {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    let state = AppState::<Views>::new(
-        Arc::new(Ferristrace::new(Fakes, adapters)),
-        SessionCookie::default(),
-    );
+    let state = AppState::<Views>::new(Arc::new(Ferristrace::new(Fakes, adapters)));
     let request = Request::builder()
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::empty())
         .expect("a request");
     let response = explore_router(state)

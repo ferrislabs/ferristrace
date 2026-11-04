@@ -93,7 +93,7 @@ async fn projects<S: Stack>(
 where
     S::Repos: CatalogueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     Ok(held(
         state.app.list_projects(&token, TenantId::new(org)).await?,
     ))
@@ -108,7 +108,7 @@ async fn create<S: Stack>(
 where
     S::Repos: CatalogueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = ProjectName::try_from(asked.name.as_str())?;
     let kept = state
         .app
@@ -127,7 +127,7 @@ async fn rename<S: Stack>(
 where
     S::Repos: CatalogueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = ProjectName::try_from(asked.name.as_str())?;
     let kept = state
         .app
@@ -145,7 +145,7 @@ async fn forget<S: Stack>(
 where
     S::Repos: CatalogueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let kept = state
         .app
         .forget_project(&token, TenantId::new(org), ProjectId::new(project))
@@ -163,7 +163,7 @@ async fn assign<S: Stack>(
 where
     S::Repos: CatalogueRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let team = asked.team.map(TeamId::new);
     let kept = state
         .app

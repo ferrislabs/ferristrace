@@ -3,30 +3,29 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{Method, Request, StatusCode};
 use ferristrace_api::{
-    AppState, McpSettings, SessionCookie, agent_router, explore_router, key_router, mark_routes,
-    mcp_router, site_router,
+    AppState, McpSettings, agent_router, explore_router, key_router, mark_routes, mcp_router,
+    site_router,
 };
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Notebook, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Notebook, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Action, Actor, Agent, AgentEnrolment, AgentId, AgentScope, AgentScopes, AgentToken,
+    AccountId, Action, Actor, AgentEnrolment, AgentId, AgentScope, AgentScopes, AgentToken,
     AgentTokens, Agents, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Counted,
     Created, Delegation, Fingerprint, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
-    KeyScopes, LiveSession, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project,
-    ProjectId, ProjectName, Projects, ProvisionPolicy, ReadGrant, RegisteredAgent, Renamed,
-    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionId, SessionRoll,
-    SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, StoreError,
-    TeamId, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, VerifiedToken,
-    WhoamiError, Window,
+    KeyScopes, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
+    ProjectName, Projects, ReadGrant, RegisteredAgent, Renamed, ServiceFilter, ServiceSeries,
+    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage,
+    SpanPages, SpanReader, StoreError, TeamId, TenantId, TokenRefusal, TraceFilter, TraceId,
+    TraceSummary, UnixSeconds, VerifiedToken, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const STOREFRONT: u128 = 7;
@@ -43,17 +42,8 @@ fn a_project(seed: u128) -> ProjectId {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: "person@example.com".try_into().expect("an address"),
@@ -65,32 +55,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -604,7 +568,7 @@ impl Stack for TestStack {
     type LogStore = Inert;
     type MetricStore = Inert;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Arc<Tokens>;
     type Sink = Inert;
     type Quota = Inert;
@@ -662,8 +626,7 @@ impl Harness {
             issue_store: Some(self.looked.clone()),
             log_store: None,
             metric_store: None,
-            oidc: None,
-            provision: ProvisionPolicy::default(),
+            users: Some(Bearers),
         };
         let app = Ferristrace::<TestStack>::new(
             Fakes {
@@ -673,7 +636,7 @@ impl Harness {
             adapters,
         )
         .with_agent_tokens(self.agents_on.then(|| Arc::clone(&self.tokens)));
-        let state = AppState::new(Arc::new(app), SessionCookie::default())
+        let state = AppState::new(Arc::new(app))
             .with_agent_policy(self.reason.clone(), Some("ui-client".to_owned()))
             .with_mcp(self.mcp.clone());
         mark_routes(
@@ -729,8 +692,7 @@ fn as_session(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
     let request = Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"));
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
     match body {
         Some(json) => request
             .header(CONTENT_TYPE, "application/json")
@@ -746,17 +708,6 @@ fn as_agent(method: Method, uri: &str, token: &str) -> Request<Body> {
         .uri(uri)
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
-        .expect("a request")
-}
-
-fn as_agent_from_the_app(method: Method, uri: &str, token: &str, body: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(AUTHORIZATION, format!("Bearer {token}"))
-        .header("x-requested-with", "fetch")
-        .header(CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_owned()))
         .expect("a request")
 }
 
@@ -1080,15 +1031,8 @@ async fn an_agent_never_reaches_session_only_or_admin_routes() {
                     .expect("a request"),
             )
             .await;
-        let from_the_app = harness
-            .served(
-                OrgRole::Admin,
-                as_agent_from_the_app(method.clone(), &uri, &token, body),
-            )
-            .await;
 
-        assert_eq!(plain.0, StatusCode::FORBIDDEN, "{method} {uri}");
-        assert_eq!(from_the_app.0, StatusCode::UNAUTHORIZED, "{method} {uri}");
+        assert_eq!(plain.0, StatusCode::UNAUTHORIZED, "{method} {uri}");
     }
     assert_eq!(
         harness
@@ -1266,7 +1210,6 @@ async fn a_member_may_not_register_list_or_revoke_and_a_stranger_finds_no_organi
             Request::builder()
                 .method(Method::GET)
                 .uri(agents_of(MINE))
-                .header("x-requested-with", "fetch")
                 .body(Body::empty())
                 .expect("a request"),
         )

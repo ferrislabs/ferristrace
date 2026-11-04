@@ -1,15 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE};
+use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{Method, Request, StatusCode};
-use ferristrace_api::SessionCookie;
 use ferristrace_api::me_router;
-use ferristrace_application::testing::Inert;
+use ferristrace_application::testing::{Bearers, Inert};
 use ferristrace_domain::{
-    AccountId, AccountName, Accounts, Agent, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos,
-    OrgRole, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Session, SessionError,
-    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, AccountName, Accounts, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos, OrgRole,
+    Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Session, SessionError, SessionStore,
+    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -18,9 +17,9 @@ use uuid::Uuid;
 #[path = "support/identity.rs"]
 mod identity;
 
-use identity::{Fakes, Nowhere, Profiled, state};
+use identity::{Fakes, Profiled, state};
 
-const TOKEN: &str = "ft_ss_0123456789";
+const TOKEN: &str = "ft.person.0123456789";
 const ACCOUNT: u128 = 7;
 const ACTIVE: u128 = 11;
 const OTHER: u128 = 12;
@@ -133,18 +132,8 @@ struct OneSession {
 }
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        account: AccountId,
-        org: Option<TenantId>,
-        from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        let _ = (account, org, from);
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(ACCOUNT)),
                 email: an_email(),
@@ -162,10 +151,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -207,27 +192,21 @@ fn a_png() -> Vec<u8> {
     bytes
 }
 
-fn asking(cookie: Option<&str>, scripted: bool) -> Request<Body> {
+fn asking(cookie: Option<&str>) -> Request<Body> {
     let mut request = Request::builder().uri("/auth/me");
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
     if let Some(cookie) = cookie {
-        request = request.header(COOKIE, cookie);
+        request = request.header(AUTHORIZATION, cookie);
     }
     request.body(Body::empty()).expect("a request")
 }
 
-fn naming(spelling: &str, cookie: Option<&str>, scripted: bool) -> Request<Body> {
+fn naming(spelling: &str, cookie: Option<&str>) -> Request<Body> {
     let mut request = Request::builder()
         .method(Method::PATCH)
         .uri("/auth/me")
         .header(CONTENT_TYPE, "application/json");
-    if scripted {
-        request = request.header("x-requested-with", "fetch");
-    }
     if let Some(cookie) = cookie {
-        request = request.header(COOKIE, cookie);
+        request = request.header(AUTHORIZATION, cookie);
     }
     let body = serde_json::json!({ "name": spelling }).to_string();
     request.body(Body::from(body)).expect("a request")
@@ -237,8 +216,7 @@ fn offering(bytes: Vec<u8>) -> Request<Body> {
     Request::builder()
         .method(Method::POST)
         .uri("/auth/me/photo")
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, mine())
+        .header(AUTHORIZATION, mine())
         .header(CONTENT_TYPE, "application/octet-stream")
         .body(Body::from(bytes))
         .expect("a request")
@@ -248,8 +226,7 @@ fn dropping() -> Request<Body> {
     Request::builder()
         .method(Method::DELETE)
         .uri("/auth/me/photo")
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, mine())
+        .header(AUTHORIZATION, mine())
         .body(Body::empty())
         .expect("a request")
 }
@@ -258,13 +235,13 @@ fn looking(at: u128, cookie: Option<&str>) -> Request<Body> {
     let account = Uuid::from_u128(at);
     let mut request = Request::builder().uri(format!("/auth/accounts/{account}/photo?v=token1"));
     if let Some(cookie) = cookie {
-        request = request.header(COOKIE, cookie);
+        request = request.header(AUTHORIZATION, cookie);
     }
     request.body(Body::empty()).expect("a request")
 }
 
 fn mine() -> String {
-    format!("ft_session={TOKEN}")
+    format!("Bearer {TOKEN}")
 }
 
 async fn answered<G, P>(
@@ -284,15 +261,8 @@ where
         },
         memberships,
         accounts: Profiled(Arc::clone(kept)),
-        flows: Nowhere,
     };
-    let me = state(
-        fakes,
-        Inert::default(),
-        photos,
-        None::<Inert>,
-        SessionCookie::default(),
-    );
+    let me = state(fakes, Inert::default(), photos, Some(Bearers));
     let response = me_router(me).oneshot(request).await.expect("a response");
     let status = response.status();
     let headers = response.headers().clone();
@@ -337,7 +307,7 @@ fn standing_in(body: &str) -> serde_json::Value {
 async fn a_live_session_is_answered_with_its_account_and_its_roles() {
     let kept = Arc::new(Kept::default());
 
-    let (status, body) = served(&kept, TwoOrgs, asking(Some(&mine()), true)).await;
+    let (status, body) = served(&kept, TwoOrgs, asking(Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let standing = standing_in(&body);
@@ -384,17 +354,17 @@ async fn a_live_session_is_answered_with_its_account_and_its_roles() {
 async fn an_account_that_carries_a_name_is_answered_with_it() {
     let kept = Arc::new(Kept::named("Ines Martin"));
 
-    let (status, body) = served(&kept, TwoOrgs, asking(Some(&mine()), true)).await;
+    let (status, body) = served(&kept, TwoOrgs, asking(Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(standing_in(&body)["name"], "Ines Martin");
 }
 
 #[tokio::test]
-async fn a_request_without_a_session_cookie_is_refused() {
+async fn a_request_without_a_bearer_is_refused() {
     let kept = Arc::new(Kept::default());
 
-    let (status, _) = served(&kept, TwoOrgs, asking(None, true)).await;
+    let (status, _) = served(&kept, TwoOrgs, asking(None)).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
@@ -403,29 +373,16 @@ async fn a_request_without_a_session_cookie_is_refused() {
 async fn a_cookie_the_store_does_not_know_is_refused() {
     let kept = Arc::new(Kept::default());
 
-    let (status, _) = served(&kept, TwoOrgs, asking(Some("ft_session=ft_ss_nope"), true)).await;
+    let (status, _) = served(&kept, TwoOrgs, asking(Some("ft_session=ft_ss_nope"))).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn a_request_that_no_script_sent_is_refused() {
-    let kept = Arc::new(Kept::default());
-
-    let (status, _) = served(&kept, TwoOrgs, asking(Some(&mine()), false)).await;
-
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "the standing must not be readable by a plain cross site navigation"
-    );
 }
 
 #[tokio::test]
 async fn an_unreachable_control_plane_is_not_reported_as_a_missing_session() {
     let kept = Arc::new(Kept::default());
 
-    let (status, _) = served(&kept, NoControlPlane, asking(Some(&mine()), true)).await;
+    let (status, _) = served(&kept, NoControlPlane, asking(Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }
@@ -434,12 +391,7 @@ async fn an_unreachable_control_plane_is_not_reported_as_a_missing_session() {
 async fn a_chosen_name_is_written_and_the_whole_standing_comes_back() {
     let kept = Arc::new(Kept::default());
 
-    let (status, body) = served(
-        &kept,
-        TwoOrgs,
-        naming("  Ines Martin  ", Some(&mine()), true),
-    )
-    .await;
+    let (status, body) = served(&kept, TwoOrgs, naming("  Ines Martin  ", Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::OK);
     let standing = standing_in(&body);
@@ -459,7 +411,7 @@ async fn a_chosen_name_is_written_and_the_whole_standing_comes_back() {
 async fn an_emptied_name_is_taken_off_the_account() {
     let kept = Arc::new(Kept::named("Ines Martin"));
 
-    let (status, body) = served(&kept, TwoOrgs, naming("", Some(&mine()), true)).await;
+    let (status, body) = served(&kept, TwoOrgs, naming("", Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(standing_in(&body)["name"], serde_json::Value::Null);
@@ -470,7 +422,7 @@ async fn an_emptied_name_is_taken_off_the_account() {
 async fn a_name_of_nothing_but_space_is_taken_off_too() {
     let kept = Arc::new(Kept::named("Ines Martin"));
 
-    let (status, _) = served(&kept, TwoOrgs, naming("   \t ", Some(&mine()), true)).await;
+    let (status, _) = served(&kept, TwoOrgs, naming("   \t ", Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(kept.writes(), vec![None]);
@@ -481,7 +433,7 @@ async fn a_name_past_the_ceiling_is_refused_and_nothing_is_written() {
     let kept = Arc::new(Kept::default());
     let long = "a".repeat(MAX_NAME_BYTES + 1);
 
-    let (status, body) = served(&kept, TwoOrgs, naming(&long, Some(&mine()), true)).await;
+    let (status, body) = served(&kept, TwoOrgs, naming(&long, Some(&mine()))).await;
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(
@@ -495,28 +447,9 @@ async fn a_name_past_the_ceiling_is_refused_and_nothing_is_written() {
 async fn renaming_without_a_session_writes_nothing() {
     let kept = Arc::new(Kept::default());
 
-    let (status, _) = served(&kept, TwoOrgs, naming("Somebody Else", None, true)).await;
+    let (status, _) = served(&kept, TwoOrgs, naming("Somebody Else", None)).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(kept.writes().is_empty());
-}
-
-#[tokio::test]
-async fn a_rename_no_script_sent_is_refused() {
-    let kept = Arc::new(Kept::named("Ines Martin"));
-
-    let (status, _) = served(
-        &kept,
-        TwoOrgs,
-        naming("Somebody Else", Some(&mine()), false),
-    )
-    .await;
-
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "a cross site form must not be able to rename somebody"
-    );
     assert!(kept.writes().is_empty());
 }
 

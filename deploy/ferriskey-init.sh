@@ -1,7 +1,9 @@
 #!/bin/sh
-# Provisions the realm, confidential client and redirect uri that let the
-# self-hosted stack sign somebody in without anybody opening the FerrisKey
-# console. Runs once, as the `ferriskey-init` service, before `server`
+# Provisions the realm, the public web client, its redirect uri and its web
+# origin that let the self-hosted stack sign somebody in without anybody
+# opening the FerrisKey console. The client is public (code flow with PKCE,
+# no secret): the web signs in with it and the server only verifies the
+# tokens it issues, so no client secret exists for the web client. Runs once, as the `ferriskey-init` service, before `server`
 # starts: compose waits for this script to exit zero
 # (depends_on: service_completed_successfully) because `env_file` is read
 # when a container is created, and the file this script writes has to
@@ -9,11 +11,13 @@
 #
 # Idempotent: a realm FerrisKey already holds answers 200 on the GET below
 # and is left alone; same for the client, found by its client_id instead of
-# created again; the redirect uri is only posted when it is not already in
-# the client's list, because FerrisKey does not reject a duplicate one on
-# its own. A second `docker compose up` therefore finds everything already
-# provisioned, re-reads the same client secret, and rewrites the same env
-# file: no error, no duplicate, no new secret.
+# created again; the redirect uri and the web origin are only posted when
+# they are not already in the client's lists, because FerrisKey does not
+# reject a duplicate redirect uri on its own and refuses a duplicate origin.
+# A second `docker compose up` therefore finds everything already
+# provisioned and rewrites the same env file: no error, no duplicate.
+# A client that already exists is never modified, so one created confidential
+# by an earlier version stays confidential: see deploy/README.md.
 set -eu
 
 API_URL="${FERRISKEY_API_URL:-http://ferriskey-api:3333}"
@@ -23,7 +27,8 @@ REALM="${FERRISKEY_REALM:-ferristrace}"
 REALM_DISPLAY_NAME="${FERRISKEY_REALM_DISPLAY_NAME:-FerrisTrace}"
 CLIENT_ID="${FERRISKEY_CLIENT_ID:-ferristrace}"
 CLIENT_NAME="${FERRISKEY_CLIENT_NAME:-FerrisTrace}"
-REDIRECT_URI="${FERRISKEY_REDIRECT_URI:-http://localhost:4318/auth/oidc/callback}"
+APP_ORIGIN="${FERRISKEY_APP_ORIGIN:-http://localhost:4318}"
+EXTRA_APP_ORIGINS="${FERRISKEY_EXTRA_APP_ORIGINS:-}"
 ISSUER_BASE_URL="${FERRISKEY_ISSUER_BASE_URL:-http://ferriskey:3333}"
 OUT_FILE="${OUT_FILE:-/out/ferriskey.env}"
 MAX_WAIT_SECONDS="${FERRISKEY_INIT_MAX_WAIT_SECONDS:-60}"
@@ -134,7 +139,7 @@ if [ -n "$CLIENT_UUID" ]; then
 else
   echo "ferriskey-init: creating client $CLIENT_ID"
   http -X POST "$API_URL/realms/$REALM/clients" -H "$AUTH" -H 'content-type: application/json' \
-    -d "{\"client_id\":\"$CLIENT_ID\",\"name\":\"$CLIENT_NAME\",\"client_type\":\"confidential\",\"protocol\":\"openid-connect\",\"enabled\":true,\"public_client\":false,\"require_pkce\":true}"
+    -d "{\"client_id\":\"$CLIENT_ID\",\"name\":\"$CLIENT_NAME\",\"client_type\":\"public\",\"protocol\":\"openid-connect\",\"enabled\":true,\"public_client\":true,\"require_pkce\":true}"
   status=$(cat /tmp/status)
   if [ "$status" != "201" ]; then
     echo "ferriskey-init: client creation failed with status $status: $(cat /tmp/body)" >&2
@@ -147,38 +152,35 @@ else
   fi
 fi
 
-echo "ferriskey-init: reading the client secret"
-http "$API_URL/realms/$REALM/clients/$CLIENT_UUID/client-secret" -H "$AUTH"
-status=$(cat /tmp/status)
-if [ "$status" != "200" ]; then
-  echo "ferriskey-init: reading the client secret failed with status $status: $(cat /tmp/body)" >&2
-  exit 1
-fi
-CLIENT_SECRET=$(json_field client_secret /tmp/body)
-if [ -z "$CLIENT_SECRET" ]; then
-  echo "ferriskey-init: client-secret answered 200 with no client_secret: $(cat /tmp/body)" >&2
-  exit 1
-fi
-
-echo "ferriskey-init: checking the redirect uri"
-http "$API_URL/realms/$REALM/clients/$CLIENT_UUID" -H "$AUTH"
-status=$(cat /tmp/status)
-if [ "$status" != "200" ]; then
-  echo "ferriskey-init: reading the client failed with status $status: $(cat /tmp/body)" >&2
-  exit 1
-fi
-if grep -qF "\"value\":\"$REDIRECT_URI\"" /tmp/body; then
-  echo "ferriskey-init: redirect uri already registered, leaving it alone"
-else
-  echo "ferriskey-init: registering the redirect uri"
-  http -X POST "$API_URL/realms/$REALM/clients/$CLIENT_UUID/redirects" -H "$AUTH" -H 'content-type: application/json' \
-    -d "{\"value\":\"$REDIRECT_URI\",\"enabled\":true}"
-  status=$(cat /tmp/status)
-  if [ "$status" != "201" ]; then
-    echo "ferriskey-init: redirect uri registration failed with status $status: $(cat /tmp/body)" >&2
-    exit 1
+ensure_app_origin() {
+  origin=${1%/}
+  redirect_uri="$origin/"
+  http "$API_URL/realms/$REALM/clients/$CLIENT_UUID" -H "$AUTH"
+  expect "reading client $CLIENT_ID" 200
+  if grep -qF "\"value\":\"$redirect_uri\"" /tmp/body; then
+    echo "ferriskey-init: redirect uri $redirect_uri already registered, leaving it alone"
+  else
+    echo "ferriskey-init: registering the redirect uri $redirect_uri"
+    http -X POST "$API_URL/realms/$REALM/clients/$CLIENT_UUID/redirects" -H "$AUTH" -H 'content-type: application/json' \
+      -d "{\"value\":\"$redirect_uri\",\"enabled\":true}"
+    expect "registering the redirect uri $redirect_uri" 201
   fi
-fi
+  http "$API_URL/realms/$REALM/clients/$CLIENT_UUID/web-origins" -H "$AUTH"
+  expect "listing the web origins of client $CLIENT_ID" 200
+  if grep -qF "\"value\":\"$origin\"" /tmp/body; then
+    echo "ferriskey-init: web origin $origin already registered, leaving it alone"
+  else
+    echo "ferriskey-init: registering the web origin $origin"
+    http -X POST "$API_URL/realms/$REALM/clients/$CLIENT_UUID/web-origins" -H "$AUTH" -H 'content-type: application/json' \
+      -d "{\"value\":\"$origin\"}"
+    expect "registering the web origin $origin" 201
+  fi
+}
+
+ensure_app_origin "$APP_ORIGIN"
+for extra in $EXTRA_APP_ORIGINS; do
+  ensure_app_origin "$extra"
+done
 
 if [ "${FERRISKEY_MCP:-true}" != "true" ]; then
   echo "ferriskey-init: FERRISKEY_MCP is not true, skipping the MCP gateway"
@@ -413,12 +415,9 @@ echo "ferriskey-init: writing $OUT_FILE"
 cat > "$OUT_FILE.tmp" <<EOF
 FERRISTRACE_OIDC__ISSUER=$ISSUER_BASE_URL/realms/$REALM
 FERRISTRACE_OIDC__CLIENT_ID=$CLIENT_ID
-FERRISTRACE_OIDC__CLIENT_SECRET=$CLIENT_SECRET
-FERRISTRACE_OIDC__REDIRECT_URI=$REDIRECT_URI
 EOF
-# Owner-only before it ever lands at its final name, so the client secret
-# is never briefly world-readable on the host bind mount. The owner is the
-# user the server and the gateway run as, since they read it themselves.
+# The owner is the user the server and the gateway run as, since they read
+# it themselves.
 chmod 600 "$OUT_FILE.tmp"
 chown "$READER" "$OUT_FILE.tmp"
 mv "$OUT_FILE.tmp" "$OUT_FILE"

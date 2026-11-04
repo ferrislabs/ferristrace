@@ -454,7 +454,7 @@ async fn add_price<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let draft = asked.draft()?;
     let price = state
         .app
@@ -472,7 +472,7 @@ async fn remove_price<S: Stack>(
 where
     S::Repos: LlmRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     state
         .app
         .remove_llm_price(&token, TenantId::new(org), PriceId::new(id))

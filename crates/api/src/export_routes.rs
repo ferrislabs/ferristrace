@@ -25,8 +25,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
-use crate::carried::NotCarried;
-use crate::session_cookie;
+use crate::carried::{NotCarried, carried};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -55,8 +54,7 @@ async fn export<S: Stack>(
 where
     S::Repos: ExportRepos,
 {
-    let token =
-        session_cookie::carried(&headers).ok_or(ExportRefused::Reaching(NotCarried::NoSession))?;
+    let token = carried(&state, &headers).await?;
     let prepared = state.app.begin_export(&token, TenantId::new(org)).await?;
     tracing::info!(org = %org, "an organisation is being exported");
 

@@ -6,7 +6,7 @@ use super::ports::{Accounts, NoPhotos, Photos};
 use super::profile_service::Profile;
 use super::value_objects::{AccountName, MAX_NAME_BYTES, Photo, PhotoKind, Pictured, Portrait};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -25,7 +25,7 @@ fn a_name(spelling: &str) -> AccountName {
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 fn a_png() -> Photo {
@@ -175,17 +175,8 @@ impl Photos for &Shelf {
 struct SessionOf<'a>(&'a Kept);
 
 impl SessionStore for SessionOf<'_> {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(token())
-    }
-
     async fn resolve(&self, asked: &SessionToken) -> Result<Session, SessionError> {
-        if asked.exposed() != TOKEN {
+        if asked.identity().subject.as_str() != TOKEN {
             return Err(SessionError::Unknown);
         }
         Ok(Session {
@@ -202,10 +193,6 @@ impl SessionStore for SessionOf<'_> {
             org: None,
             expires_at: UnixSeconds::new(0),
         })
-    }
-
-    async fn revoke(&self, _asked: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -274,7 +261,7 @@ async fn a_token_no_session_carries_writes_nothing() {
 
     let refused = profile(&kept, &shelf)
         .rename(
-            &SessionToken::from_plaintext("ft_ss_nope"),
+            &SessionToken::for_subject("ft_ss_nope"),
             Some(&a_name("Somebody Else")),
         )
         .await;
@@ -405,7 +392,7 @@ async fn a_photo_is_not_served_to_a_token_no_session_carries() {
 
     let refused = profile(&kept, &shelf)
         .photo(
-            &SessionToken::from_plaintext("ft_ss_nope"),
+            &SessionToken::for_subject("ft_ss_nope"),
             an_account(ACCOUNT),
         )
         .await;

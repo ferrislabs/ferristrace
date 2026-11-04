@@ -1,4 +1,5 @@
 import { noteResponse } from '@/lib/offline'
+import { accessToken } from './oidc'
 
 export class ApiError extends Error {
   constructor(
@@ -15,10 +16,11 @@ export const isUnauthorized = (error: unknown) => error instanceof ApiError && e
 export const because = (error: unknown, otherwise: string) =>
   error instanceof ApiError && error.body.length > 0 ? error.body : otherwise
 
-const REQUESTED_WITH = { 'x-requested-with': 'ferristrace-web' }
-
 async function send(path: string, init: RequestInit): Promise<Response> {
-  const response = await fetch(path, { credentials: 'include', ...init, headers: { ...REQUESTED_WITH, ...init.headers } })
+  const headers = new Headers(init.headers)
+  const token = await accessToken()
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  const response = await fetch(path, { ...init, credentials: 'omit', headers })
   noteResponse(response)
   if (!response.ok) throw new ApiError(response.status, (await response.text()).trim())
   return response

@@ -51,7 +51,7 @@ async fn a_session_reads_nothing_of_an_organisation_it_does_not_belong_to() {
         .await;
     let unknown = readers(&keys)
         .grant(
-            &Reader::Session(SessionToken::from_plaintext("ft_ss_nope")),
+            &Reader::Session(SessionToken::for_subject("ft_ss_nope")),
             an_org(MINE),
         )
         .await;

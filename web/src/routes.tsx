@@ -28,7 +28,6 @@ import { SignIn } from '@/pages/auth/SignIn'
 import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
-import { Security } from '@/pages/settings/Security'
 import { Preferences } from '@/pages/settings/Preferences'
 import { OrgGeneral } from '@/pages/settings/OrgGeneral'
 import { Agents } from '@/pages/settings/Agents'
@@ -120,7 +119,6 @@ const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: '/se
 const settingsChildren = [
   createRoute({ getParentRoute: () => settingsRoute, path: '/', beforeLoad: () => { throw redirect({ to: '/settings/general' }) } }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'profile', component: Profile, staticData: real }),
-  createRoute({ getParentRoute: () => settingsRoute, path: 'security', component: Security, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'preferences', component: Preferences, staticData: mock }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'general', component: OrgGeneral, staticData: real }),
   createRoute({ getParentRoute: () => settingsRoute, path: 'members', component: Members, staticData: real }),

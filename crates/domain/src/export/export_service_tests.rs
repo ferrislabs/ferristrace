@@ -8,7 +8,7 @@ use super::export_service::Exporter;
 use super::ports::ExportSource;
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Organisation, Whoami, WhoamiError};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -27,17 +27,8 @@ fn an_org(seed: u128) -> TenantId {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(ME)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -49,10 +40,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -114,7 +101,7 @@ fn exporter(
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 fn at() -> UnixSeconds {
@@ -187,7 +174,7 @@ async fn an_unknown_session_is_refused() {
 
     let refused = exporter(OrgRole::Owner, true, &notebook)
         .begin(
-            &SessionToken::from_plaintext("ft_ss_other"),
+            &SessionToken::for_subject("ft_ss_other"),
             an_org(MINE),
             at(),
         )

@@ -11,7 +11,7 @@ use crate::access::{KeyScope, KeyScopes, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::explore::{ExploreError, Window};
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::placement::{Placement, PlacementName};
 use crate::secret::SessionToken;
@@ -35,17 +35,8 @@ fn a_project(seed: u128) -> ProjectId {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -57,10 +48,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -186,7 +173,7 @@ fn searching<R: MetricReader>(
 }
 
 fn session() -> Reader {
-    Reader::Session(SessionToken::from_plaintext(TOKEN))
+    Reader::Session(SessionToken::for_subject(TOKEN))
 }
 
 fn a_query(name: &str) -> MetricQuery {

@@ -2,7 +2,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -10,15 +10,13 @@ use ferristrace_application::Stack;
 use ferristrace_application::registry::ProfileRepos;
 use ferristrace_domain::{
     AccountId, AccountName, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, Photo, PhotoError, Portrait,
-    ProfileError, SessionToken, TenantId, Who,
+    ProfileError, TenantId, Who,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::session_cookie;
+use crate::carried::{NotCarried, carried};
 use crate::state::AppState;
-
-const REQUESTED_WITH: HeaderName = HeaderName::from_static("x-requested-with");
 
 const FOR_EVER: &str = "private, max-age=31536000, immutable";
 
@@ -95,7 +93,7 @@ async fn standing<S: Stack>(
 where
     S::Repos: ProfileRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
 
     Ok(Json(state.app.profile(&token).await?.into()))
 }
@@ -108,7 +106,7 @@ async fn rename<S: Stack>(
 where
     S::Repos: ProfileRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let chosen = asked.name.trim();
     let name = if chosen.is_empty() {
         None
@@ -129,7 +127,7 @@ async fn keep<S: Stack>(
 where
     S::Repos: ProfileRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let photo = Photo::examined(body.to_vec())?;
     let kind = photo.kind();
 
@@ -145,7 +143,7 @@ async fn forget<S: Stack>(
 where
     S::Repos: ProfileRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
 
     let who = state.app.remove_profile_photo(&token).await?;
     tracing::info!(account = %who.account, "an account dropped its photo");
@@ -160,7 +158,7 @@ async fn served<S: Stack>(
 where
     S::Repos: ProfileRepos,
 {
-    let token = session_cookie::carried(&headers).ok_or(StandingRefused::NoSession)?;
+    let token = carried(&state, &headers).await?;
     let (kind, bytes) = state
         .app
         .profile_photo(&token, AccountId::new(account))
@@ -173,19 +171,12 @@ where
         .into_response())
 }
 
-fn carried(headers: &HeaderMap) -> Result<SessionToken, StandingRefused> {
-    if !headers.contains_key(&REQUESTED_WITH) {
-        return Err(StandingRefused::NotFromOurOrigin);
-    }
-    session_cookie::carried(headers).ok_or(StandingRefused::NoSession)
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum StandingRefused {
-    #[error("the request carries no x-requested-with header")]
-    NotFromOurOrigin,
     #[error("the request carries no live session")]
     NoSession,
+    #[error(transparent)]
+    Reaching(#[from] NotCarried),
     #[error(transparent)]
     Name(#[from] BadAccountName),
     #[error(transparent)]
@@ -212,8 +203,8 @@ impl From<ProfileError> for StandingRefused {
 impl IntoResponse for StandingRefused {
     fn into_response(self) -> Response {
         let status = match self {
-            Self::NotFromOurOrigin => StatusCode::FORBIDDEN,
             Self::NoSession => StatusCode::UNAUTHORIZED,
+            Self::Reaching(ref reaching) => return reaching.into_response(),
             Self::Name(_) | Self::Picture(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoPhoto => StatusCode::NOT_FOUND,
             Self::NoStore(_) | Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,

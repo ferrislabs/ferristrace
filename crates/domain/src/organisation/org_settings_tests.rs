@@ -9,7 +9,7 @@ use super::value_objects::{MAX_ORG_NAME_BYTES, OrgName, OrgRole, OrgTimezone};
 use super::whoami::Whoami;
 use crate::audit::{Action, Actor, Target};
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::profile::{NoPhotos, Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
@@ -32,17 +32,8 @@ fn a_name(spelling: &str) -> OrgName {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -54,10 +45,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -284,7 +271,7 @@ fn a_png() -> Photo {
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[tokio::test]
@@ -327,7 +314,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let kept = Kept::holding("Acme");
 
     let refused = settings(OrgRole::Owner, &kept)
-        .read(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+        .read(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(SettingError::NoSession));

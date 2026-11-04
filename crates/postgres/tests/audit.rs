@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
     AccountId, Action, Actor, ApiKeys, AuditEntry, AuditFilter, AuditTrail, Detail, KeyName,
-    KeyScopes, NoPhotos, OrgName, OrgRole, OrgSettings, Organisation, Orgs, PageSize, SessionStore,
-    SessionToken, SettingError, Target, TenantId, Whoami,
+    KeyScopes, NoPhotos, OrgName, OrgRole, OrgSettings, Organisation, Orgs, PageSize, SessionToken,
+    SettingError, Target, TenantId, Whoami,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -393,10 +393,7 @@ async fn renaming_an_organisation_through_the_real_repositories_leaves_exactly_o
     };
     let pg = backend_of(&pool);
     let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
-    let token = backend::sessions(&pg)
-        .issue(owner, Some(org), None)
-        .await
-        .expect("a session");
+    let token = backend::signed_in(&pool, owner, Some(org)).await;
 
     let card = rename_through_the_repositories(&pg, &token, org, "Acme Inc")
         .await
@@ -428,10 +425,7 @@ async fn a_rename_refused_to_a_member_leaves_no_entry_and_the_old_name() {
         .grant(org, "member@example.com", OrgRole::Member)
         .await
         .expect("a member");
-    let token = backend::sessions(&pg)
-        .issue(member, Some(org), None)
-        .await
-        .expect("a session");
+    let token = backend::signed_in(&pool, member, Some(org)).await;
 
     let refused = rename_through_the_repositories(&pg, &token, org, "Mine Now").await;
 

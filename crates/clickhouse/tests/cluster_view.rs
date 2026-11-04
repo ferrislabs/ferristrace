@@ -3,21 +3,20 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::header::COOKIE;
+use axum::http::header::AUTHORIZATION;
 use axum::http::{Request, StatusCode};
 use clickhouse::Client;
-use ferristrace_api::{AppState, SessionCookie, cluster_router};
+use ferristrace_api::{AppState, cluster_router};
 use ferristrace_application::registry::{RepoFor, domain};
-use ferristrace_application::testing::{Inert, Untransacted};
+use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_clickhouse::{
     BatchLimits, ClickhouseMetricReader, ClickhouseMetricSink, ClickhouseMigrator, ClickhouseSink,
 };
 use ferristrace_domain::{
-    AccountId, Agent, ClusterFilter, ClusterReader, ClusterSnapshot, LiveSession, Membership,
-    Memberships, MetricSink, NoPhotos, OrgRole, PlacementName, Pod, PodPhase, PodReason,
-    ProvisionPolicy, Scope, Session, SessionError, SessionId, SessionRoll, SessionStore,
-    SessionToken, SpanSink, TenantId, UnixSeconds, WhoamiError, Window, WorkloadKind,
+    AccountId, ClusterFilter, ClusterReader, ClusterSnapshot, Membership, Memberships, MetricSink,
+    NoPhotos, OrgRole, PlacementName, Pod, PodPhase, PodReason, Scope, Session, SessionError,
+    SessionStore, SessionToken, SpanSink, TenantId, UnixSeconds, WhoamiError, Window, WorkloadKind,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::{metrics_of, spans_of};
@@ -40,7 +39,7 @@ const MINUTE: u64 = 60 * SECOND;
 const MILLI: u64 = 1_000_000;
 const NOW_SECS: u64 = 1_700_003_600;
 const NOW: u64 = NOW_SECS * SECOND;
-const TOKEN: &str = "ft_ss_cluster";
+const TOKEN: &str = "ft.person.cluster";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 
@@ -780,17 +779,8 @@ async fn an_organisation_sees_only_its_own_cluster() {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: ferristrace_domain::Email::try_from("person@example.com")
@@ -803,32 +793,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
-    }
-}
-
-impl SessionRoll for OneSession {
-    async fn live(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<Vec<LiveSession>, SessionError> {
-        Ok(Vec::new())
-    }
-
-    async fn revoke_one(&self, _account: AccountId, _id: SessionId) -> Result<bool, SessionError> {
-        Ok(false)
-    }
-
-    async fn revoke_others(
-        &self,
-        _account: AccountId,
-        _current: &SessionToken,
-    ) -> Result<u64, SessionError> {
-        Ok(0)
     }
 }
 
@@ -884,7 +848,7 @@ impl Stack for Clustered {
     type LogStore = Inert;
     type MetricStore = ClickhouseMetricReader;
     type Meter = Inert;
-    type Oidc = Inert;
+    type Users = Bearers;
     type Agents = Inert;
     type Sink = Inert;
     type Quota = Inert;
@@ -903,20 +867,17 @@ fn routes(client: &Client) -> Router {
         issue_store: None,
         log_store: None,
         metric_store: Some(ClickhouseMetricReader::new(client.clone())),
-        oidc: None,
-        provision: ProvisionPolicy::default(),
+        users: Some(Bearers),
     };
-    cluster_router(AppState::<Clustered>::new(
-        Arc::new(Ferristrace::new(Fakes, adapters)),
-        SessionCookie::default(),
-    ))
+    cluster_router(AppState::<Clustered>::new(Arc::new(Ferristrace::new(
+        Fakes, adapters,
+    ))))
 }
 
 async fn asked(client: &Client, uri: &str) -> serde_json::Value {
     let request = Request::builder()
         .uri(uri)
-        .header("x-requested-with", "fetch")
-        .header(COOKIE, format!("ft_session={TOKEN}"))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::empty())
         .expect("a request");
     let response = routes(client).oneshot(request).await.expect("a response");

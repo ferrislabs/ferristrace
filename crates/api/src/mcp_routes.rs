@@ -77,7 +77,7 @@ async fn shown<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let agents = state.app.list_agents(&token, TenantId::new(org)).await?;
     let gateway = gateway_of(&state).ok();
     let agent = gateway
@@ -104,7 +104,7 @@ async fn turn_on<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let (gateway, _) = gateway_of(&state)?;
     if state.reserved_client_id.as_deref() == Some(gateway) {
         return Err(AgentRefused::ReservedClientId.into());
@@ -141,7 +141,7 @@ async fn turn_off<S: Stack>(
 where
     S::Repos: AgentRepos + ReadRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let (gateway, _) = gateway_of(&state)?;
     let org_id = TenantId::new(org);
     let held = state.app.list_agents(&token, org_id).await?;

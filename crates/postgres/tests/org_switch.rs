@@ -1,7 +1,8 @@
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
-    ControlPlane, Email, FoundError, Founded, Founding, Membership, Memberships, OrgName, OrgRole,
-    SessionError, SessionStore, SessionSwitch, SessionToken, Switching, TenantId,
+    AccountId, ControlPlane, Email, FoundError, Founded, Founding, Membership, Memberships,
+    OrgName, OrgRole, ProvisionPolicy, SessionError, SessionStore, SessionSwitch, SessionToken,
+    Switching, TenantId,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -55,7 +56,7 @@ async fn migrated(schema: &str) -> Option<PgPool> {
     Some(scoped)
 }
 
-async fn an_account(pool: &PgPool, email: &str) -> ferristrace_domain::AccountId {
+async fn an_account(pool: &PgPool, email: &str) -> AccountId {
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO accounts (id, email) VALUES ($1, $2)")
         .bind(id)
@@ -63,7 +64,7 @@ async fn an_account(pool: &PgPool, email: &str) -> ferristrace_domain::AccountId
         .execute(pool)
         .await
         .expect("an account");
-    ferristrace_domain::AccountId::new(id)
+    AccountId::new(id)
 }
 
 async fn an_org_of(pg: &Postgres<FixedClock>, name: &str, owner: &str) -> TenantId {
@@ -75,13 +76,13 @@ async fn an_org_of(pg: &Postgres<FixedClock>, name: &str, owner: &str) -> Tenant
         .expect("an organisation")
 }
 
-async fn active_org(pool: &PgPool, token: &SessionToken) -> Option<Uuid> {
-    sqlx::query("SELECT org_id FROM sessions WHERE hash = $1")
-        .bind(token.hash().as_bytes().as_slice())
+async fn active_org(pool: &PgPool, account: AccountId) -> Option<Uuid> {
+    sqlx::query("SELECT active_org_id FROM accounts WHERE id = $1")
+        .bind(account.as_uuid())
         .fetch_one(pool)
         .await
-        .expect("the session row")
-        .get("org_id")
+        .expect("the account row")
+        .get("active_org_id")
 }
 
 async fn found(
@@ -108,8 +109,8 @@ async fn found(
 }
 
 #[tokio::test]
-async fn switching_moves_only_the_current_session_to_the_organisation() {
-    let Some(pool) = migrated("switch_current_only").await else {
+async fn switching_moves_the_account_and_every_token_of_it_follows() {
+    let Some(pool) = migrated("switch_per_account").await else {
         return;
     };
     let pg = Postgres::new(pool.clone(), FixedClock::at(NOW));
@@ -117,19 +118,21 @@ async fn switching_moves_only_the_current_session_to_the_organisation() {
     let first = an_org_of(&pg, "First", "person@example.com").await;
     let second = an_org_of(&pg, "Second", "person@example.com").await;
     let sessions = backend::sessions(&pg);
-    let here = sessions
-        .issue(account, Some(first), None)
-        .await
-        .expect("a session");
-    let elsewhere = sessions
-        .issue(account, Some(first), None)
-        .await
-        .expect("another session");
+    let here = backend::signed_in(&pool, account, Some(first)).await;
+    let later = backend::signed_in(&pool, account, None).await;
+    assert_eq!(
+        sessions.resolve(&later).await.expect("it resolves").org,
+        Some(first),
+        "a new token for the same person lands in the organisation last chosen"
+    );
 
     sessions.switch(&here, second).await.expect("it switches");
 
-    assert_eq!(active_org(&pool, &here).await, Some(second.as_uuid()));
-    assert_eq!(active_org(&pool, &elsewhere).await, Some(first.as_uuid()));
+    assert_eq!(active_org(&pool, account).await, Some(second.as_uuid()));
+    assert_eq!(
+        sessions.resolve(&later).await.expect("it resolves").org,
+        Some(second)
+    );
     assert_eq!(
         sessions.resolve(&here).await.expect("it resolves").org,
         Some(second)
@@ -137,22 +140,18 @@ async fn switching_moves_only_the_current_session_to_the_organisation() {
 }
 
 #[tokio::test]
-async fn a_revoked_session_cannot_be_switched() {
-    let Some(pool) = migrated("switch_revoked").await else {
+async fn an_identity_nobody_linked_cannot_be_switched() {
+    let Some(pool) = migrated("switch_unlinked").await else {
         return;
     };
     let pg = Postgres::new(pool.clone(), FixedClock::at(NOW));
-    let account = an_account(&pool, "person@example.com").await;
+    an_account(&pool, "person@example.com").await;
     let org = an_org_of(&pg, "First", "person@example.com").await;
-    let sessions = backend::sessions(&pg);
-    let token = sessions
-        .issue(account, None, None)
-        .await
-        .expect("a session");
-    sessions.revoke(&token).await.expect("it revokes");
 
     assert_eq!(
-        sessions.switch(&token, org).await,
+        backend::sessions(&pg)
+            .switch(&SessionToken::for_subject("stranger"), org)
+            .await,
         Err(SessionError::Unknown)
     );
 }
@@ -168,17 +167,14 @@ async fn switching_is_refused_for_an_organisation_the_account_is_not_in() {
     let mine = an_org_of(&pg, "Mine", "person@example.com").await;
     let theirs = an_org_of(&pg, "Theirs", "other@example.com").await;
     let sessions = backend::sessions(&pg);
-    let token = sessions
-        .issue(account, Some(mine), None)
-        .await
-        .expect("a session");
+    let token = backend::signed_in(&pool, account, Some(mine)).await;
 
     let refused = Switching::new(sessions, backend::memberships(&pg))
         .to(&token, theirs)
         .await;
 
     assert_eq!(refused, Err(ferristrace_domain::SwitchError::NotYours));
-    assert_eq!(active_org(&pool, &token).await, Some(mine.as_uuid()));
+    assert_eq!(active_org(&pool, account).await, Some(mine.as_uuid()));
 }
 
 #[tokio::test]
@@ -188,15 +184,15 @@ async fn founding_from_a_session_makes_an_owned_org_with_a_default_project_and_s
     };
     let pg = Postgres::new(pool.clone(), FixedClock::at(NOW));
     let account = an_account(&pool, "person@example.com").await;
-    let token = backend::sessions(&pg)
-        .issue(account, None, None)
-        .await
-        .expect("a session");
+    let token = backend::signed_in(&pool, account, None).await;
 
     let founded = found(&pg, &token, "Acme").await.expect("a founded org");
 
     assert_eq!(founded.project_name.as_str(), "default");
-    assert_eq!(active_org(&pool, &token).await, Some(founded.org.as_uuid()));
+    assert_eq!(
+        active_org(&pool, account).await,
+        Some(founded.org.as_uuid())
+    );
     let memberships: Vec<Membership> = backend::memberships(&pg)
         .of(account)
         .await
@@ -222,14 +218,18 @@ async fn founding_from_a_session_makes_an_owned_org_with_a_default_project_and_s
 }
 
 #[tokio::test]
-async fn a_founding_by_a_dead_session_leaves_no_organisation() {
+async fn a_founding_by_an_identity_that_provisioning_refuses_leaves_no_organisation() {
     let Some(pool) = migrated("switch_founding_dead").await else {
         return;
     };
-    let pg = Postgres::new(pool.clone(), FixedClock::at(NOW));
+    let pg =
+        Postgres::new(pool.clone(), FixedClock::at(NOW)).with_provision_policy(ProvisionPolicy {
+            auto_provision: false,
+            link_by_email: false,
+        });
     an_account(&pool, "person@example.com").await;
 
-    let refused = found(&pg, &SessionToken::from_plaintext("ft_ss_dead"), "Acme").await;
+    let refused = found(&pg, &SessionToken::for_subject("stranger"), "Acme").await;
 
     assert_eq!(refused, Err(FoundError::NoSession));
     let orgs: i64 = sqlx::query("SELECT count(*) AS n FROM orgs")

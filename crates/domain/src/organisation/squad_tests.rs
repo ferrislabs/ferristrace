@@ -10,7 +10,7 @@ use super::whoami::Whoami;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::secret::SessionToken;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
@@ -45,17 +45,8 @@ fn a_name(spelling: &str) -> TeamName {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: an_account(9),
                 email: Email::try_from("person@example.com").expect("an address"),
@@ -67,10 +58,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -237,7 +224,7 @@ fn noting<'a>(
 }
 
 fn token() -> SessionToken {
-    SessionToken::from_plaintext(TOKEN)
+    SessionToken::for_subject(TOKEN)
 }
 
 #[tokio::test]
@@ -268,7 +255,7 @@ async fn a_token_no_session_carries_reads_nothing() {
     let held = Held::of(vec![backend()]);
 
     let refused = squad(OrgRole::Owner, &held)
-        .teams(&SessionToken::from_plaintext("ft_ss_nope"), an_org(MINE))
+        .teams(&SessionToken::for_subject("ft_ss_nope"), an_org(MINE))
         .await;
 
     assert_eq!(refused, Err(TeamError::NoSession));

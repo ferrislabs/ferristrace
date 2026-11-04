@@ -2,13 +2,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferristrace_domain::{
     Action, Actor, Bootstrapped, ExportError, Fingerprint, IssueError, KeyError, KeyName,
-    KeyScopes, ProjectId, ProvisionError, SettingError, Status, SwitchError, Target,
+    KeyScopes, ProjectId, ProvisionError, SessionToken, SettingError, Status, SwitchError, Target,
+    UserRefusal,
 };
 
 use crate::IssueRuling;
-use crate::fakes::{Probing, a_name, a_token, the_account, the_email, the_org, the_policy};
+use crate::fakes::{Probing, a_name, a_token, the_account, the_email, the_org};
 use crate::recording::{Handle, Recording};
-use crate::testing::Inert;
+use crate::testing::{Bearers, Inert};
 use crate::{Adapters, Ferristrace, Stack, repository, transactional};
 
 fn adapters() -> Adapters<Probing> {
@@ -22,8 +23,7 @@ fn adapters() -> Adapters<Probing> {
         issue_store: None,
         log_store: None,
         metric_store: None,
-        oidc: None,
-        provision: the_policy(),
+        users: None,
     }
 }
 
@@ -389,4 +389,27 @@ async fn founding_interrupted_at_the_default_project_rolls_the_organisation_back
     assert_eq!(count(&repos.0.commits), 0);
     assert_eq!(count(&repos.0.writes), 0);
     assert!(repos.0.committed().is_empty());
+}
+
+#[tokio::test]
+async fn a_server_with_no_person_verifier_refuses_every_bearer_as_off() {
+    let repos = Recording::default();
+
+    let refused = app(&repos).verify_person("header.payload.signature").await;
+
+    assert_eq!(refused, Err(UserRefusal::Off));
+}
+
+#[tokio::test]
+async fn a_bearer_is_handed_to_the_person_verifier_when_there_is_one() {
+    let repos = Recording::default();
+    let mut adapters = adapters();
+    adapters.users = Some(Bearers);
+    let app = Ferristrace::<Probing>::new(repos.clone(), adapters);
+
+    let person = app.verify_person("ft.person.alice").await;
+    let stranger = app.verify_person("header.payload.signature").await;
+
+    assert_eq!(person, Ok(SessionToken::for_subject("ft.person.alice")));
+    assert_eq!(stranger, Err(UserRefusal::NotAPerson));
 }

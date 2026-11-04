@@ -100,7 +100,7 @@ async fn teams<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     Ok(arranged(
         state.app.list_teams(&token, TenantId::new(org)).await?,
     ))
@@ -115,7 +115,7 @@ async fn create<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = TeamName::try_from(asked.name.as_str())?;
     let teams = state
         .app
@@ -134,7 +134,7 @@ async fn rename<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let name = TeamName::try_from(asked.name.as_str())?;
     let teams = state
         .app
@@ -152,7 +152,7 @@ async fn disband<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let teams = state
         .app
         .disband_team(&token, TenantId::new(org), TeamId::new(team))
@@ -170,7 +170,7 @@ async fn seat<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let members: Vec<AccountId> = asked.members.into_iter().map(AccountId::new).collect();
     let teams = state
         .app
@@ -189,7 +189,7 @@ async fn own<S: Stack>(
 where
     S::Repos: TeamRepos,
 {
-    let token = carried(&headers)?;
+    let token = carried(&state, &headers).await?;
     let projects: Vec<ProjectId> = asked.projects.into_iter().map(ProjectId::new).collect();
     let teams = state
         .app

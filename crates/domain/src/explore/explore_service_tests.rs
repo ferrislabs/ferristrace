@@ -13,7 +13,7 @@ use crate::access::key_ring_tests::Ring;
 use crate::access::{KeyScope, KeyScopes, Reader, Readers};
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
-use crate::identity::{AccountId, Agent, Email, Session, SessionError, SessionStore};
+use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
 use crate::placement::{
     MAX_PLACEMENTS, Placement, PlacementName, PlacementReader, Placements, Sighting, Workload,
@@ -41,17 +41,8 @@ fn a_trace_id() -> TraceId {
 struct OneSession;
 
 impl SessionStore for OneSession {
-    async fn issue(
-        &self,
-        _account: AccountId,
-        _org: Option<TenantId>,
-        _from: Option<&Agent>,
-    ) -> Result<SessionToken, SessionError> {
-        Ok(SessionToken::from_plaintext(TOKEN))
-    }
-
     async fn resolve(&self, token: &SessionToken) -> Result<Session, SessionError> {
-        if token.exposed() == TOKEN {
+        if token.identity().subject.as_str() == TOKEN {
             Ok(Session {
                 account: AccountId::new(Uuid::from_u128(9)),
                 email: an_email(),
@@ -63,10 +54,6 @@ impl SessionStore for OneSession {
         } else {
             Err(SessionError::Unknown)
         }
-    }
-
-    async fn revoke(&self, _token: &SessionToken) -> Result<(), SessionError> {
-        Ok(())
     }
 }
 
@@ -324,7 +311,7 @@ type NoKeys = &'static Ring;
 static NO_KEYS: std::sync::LazyLock<Ring> = std::sync::LazyLock::new(Ring::default);
 
 fn session(plaintext: &str) -> Reader {
-    Reader::Session(SessionToken::from_plaintext(plaintext))
+    Reader::Session(SessionToken::for_subject(plaintext))
 }
 
 const OURS: u128 = 30;
