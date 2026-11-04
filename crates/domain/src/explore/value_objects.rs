@@ -86,6 +86,7 @@ pub struct TraceSummary {
     pub trace_id: TraceId,
     pub root_service: Box<str>,
     pub root_name: Box<str>,
+    pub status_code: Option<u16>,
     pub started_unix_nanos: u64,
     pub duration_nanos: u64,
     pub spans: u64,

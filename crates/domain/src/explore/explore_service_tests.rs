@@ -209,6 +209,7 @@ impl SpanReader for &Asked {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
             root_name: "pay".into(),
+            status_code: None,
             started_unix_nanos: 1,
             duration_nanos: 2,
             spans: 3,

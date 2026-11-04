@@ -925,6 +925,55 @@ async fn a_name_and_a_service_both_have_to_match() {
     );
 }
 
+#[tokio::test]
+async fn the_trace_list_carries_the_http_code_of_the_root_span() {
+    let Some((url, reader)) = a_written_store("read_trace_code").await else {
+        return;
+    };
+    let store = open_span_store(&settings_for(&url, "read_trace_code"), FixedClock::at(NOW))
+        .await
+        .expect("a sink")
+        .sink;
+    let tenant = TenantId::new(Uuid::from_u128(1));
+    let mut root = a_span(1, "checkout");
+    root.attributes
+        .insert("http.status_code".into(), "503".into());
+    let child = a_child(
+        2,
+        "payments",
+        &root,
+        root.start_unix_nanos + 1_000,
+        root.end_unix_nanos,
+    );
+    let mut queued = a_span(3, "mailer");
+    queued.attributes.remove("http.status_code");
+    store
+        .accept(Scope::of(tenant), vec![root.clone(), child, queued.clone()])
+        .await
+        .expect("a batch is accepted");
+    store.flush().await.expect("the batch commits");
+
+    let found = reader
+        .traces(tenant, &a_wide_filter())
+        .await
+        .expect("a read");
+    let coded = found
+        .iter()
+        .find(|summary| summary.trace_id == root.trace_id)
+        .expect("the trace with a code");
+    let uncoded = found
+        .iter()
+        .find(|summary| summary.trace_id == queued.trace_id)
+        .expect("the trace without a code");
+
+    assert_eq!(
+        coded.status_code,
+        Some(503),
+        "the root's code, not a child's"
+    );
+    assert_eq!(uncoded.status_code, None);
+}
+
 fn a_wide_filter() -> TraceFilter {
     TraceFilter::over(
         Window::new(1_600_000_000_000_000_000, 1_800_000_000_000_000_000).expect("a window"),

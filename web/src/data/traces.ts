@@ -5,13 +5,14 @@ import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
 import { NOWHERE, placed, type Placement } from '@/data/placement'
 
-export type TraceRow = { id: string; root: string; svc: string; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
+export type TraceRow = { id: string; root: string; svc: string; code: number | null; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
 
 type Listed = {
   trace_id: string
   root_service: string
   root_name: string
+  status_code: number | null
   started_at_ms: number
   duration_us: number
   spans: number
@@ -40,6 +41,8 @@ export type Thrown = { type: string; message: string; stack: string | null }
 
 const EXCEPTION = 'exception'
 
+const HTTP_STATUS_CODE = 'http.status_code'
+
 function thrown(name: string, attributes: Record<string, string>): Thrown | null {
   if (name !== EXCEPTION) return null
   const type = attributes['exception.type']
@@ -62,11 +65,19 @@ function happened(event: Happened): Happening {
 
 const FRESH_MS = 15_000
 
+const codeOf = (attrs: [string, string][]): number | null => {
+  const found = attrs.find(([key]) => key === HTTP_STATUS_CODE)
+  if (!found) return null
+  const code = Number(found[1])
+  return Number.isFinite(code) ? code : null
+}
+
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8) + `.${String(ms % 1000).padStart(3, '0')}`
 
 export const listed = (trace: Listed): TraceRow => ({
   id: trace.trace_id,
   root: trace.root_name,
+  code: trace.status_code,
   svc: trace.root_service,
   start: clock(trace.started_at_ms),
   startedAtMs: trace.started_at_ms,
@@ -184,6 +195,7 @@ export function useTrace(id: string | undefined): { row: TraceRow | undefined; s
     row: {
       id: data.trace_id,
       root: spans[0]?.name ?? '',
+      code: codeOf(spans[0]?.attrs ?? []),
       svc: spans[0]?.svc ?? '',
       start: clock(data.started_at_ms),
       startedAtMs: data.started_at_ms,

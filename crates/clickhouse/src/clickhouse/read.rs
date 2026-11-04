@@ -53,6 +53,8 @@ const SUMMARIES: &str = "SELECT \
      lower(hex(trace_id)) AS trace_hex, \
      argMin(service_name, (parent_span_id IS NOT NULL, start_time)) AS root_service, \
      argMin(name, (parent_span_id IS NOT NULL, start_time)) AS root_name, \
+     argMin(ifNull(http_status_code, 0), (parent_span_id IS NOT NULL, start_time)) \
+       AS status_code, \
      toUnixTimestamp64Nano(min(start_time)) AS started_at, \
      toUnixTimestamp64Nano(max(end_time)) - toUnixTimestamp64Nano(min(start_time)) AS duration, \
      count() AS spans, \
@@ -130,6 +132,7 @@ struct SummaryRow {
     trace_hex: String,
     root_service: String,
     root_name: String,
+    status_code: u16,
     started_at: i64,
     duration: i64,
     spans: u64,
@@ -398,6 +401,7 @@ fn read_summary(row: SummaryRow) -> Result<TraceSummary, StoreError> {
         trace_id: a_trace(&row.trace_hex)?,
         root_service: row.root_service.into(),
         root_name: row.root_name.into(),
+        status_code: (row.status_code != 0).then_some(row.status_code),
         started_unix_nanos: unsigned(row.started_at),
         duration_nanos: unsigned(row.duration),
         spans: row.spans,
