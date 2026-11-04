@@ -212,6 +212,7 @@ impl SpanReader for TwoSpans {
             trace_id: a_trace_id(),
             root_service: "checkout".into(),
             root_name: "pay".into(),
+            status_code: Some(500),
             started_unix_nanos: 1_700_000_000_123_456_789,
             duration_nanos: 2_500_000,
             spans: 2,
@@ -478,6 +479,7 @@ async fn a_member_lists_the_traces_of_its_own_organisation() {
     let listed = &found["traces"][0];
     assert_eq!(listed["trace_id"], TRACE);
     assert_eq!(listed["root_service"], "checkout");
+    assert_eq!(listed["status_code"], 500);
     assert_eq!(listed["spans"], 2);
     assert_eq!(listed["errors"], 1);
     assert_eq!(
