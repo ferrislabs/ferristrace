@@ -165,6 +165,16 @@ ensure_app_origin() {
       -d "{\"value\":\"$redirect_uri\",\"enabled\":true}"
     expect "registering the redirect uri $redirect_uri" 201
   fi
+  http "$API_URL/realms/$REALM/clients/$CLIENT_UUID/post-logout-redirects" -H "$AUTH"
+  expect "listing the post-logout redirect uris of client $CLIENT_ID" 200
+  if grep -qF "\"value\":\"$redirect_uri\"" /tmp/body; then
+    echo "ferriskey-init: post-logout redirect uri $redirect_uri already registered, leaving it alone"
+  else
+    echo "ferriskey-init: registering the post-logout redirect uri $redirect_uri"
+    http -X POST "$API_URL/realms/$REALM/clients/$CLIENT_UUID/post-logout-redirects" -H "$AUTH" -H 'content-type: application/json' \
+      -d "{\"value\":\"$redirect_uri\",\"enabled\":true}"
+    expect "registering the post-logout redirect uri $redirect_uri" 201
+  fi
   http "$API_URL/realms/$REALM/clients/$CLIENT_UUID/web-origins" -H "$AUTH"
   expect "listing the web origins of client $CLIENT_ID" 200
   if grep -qF "\"value\":\"$origin\"" /tmp/body; then
