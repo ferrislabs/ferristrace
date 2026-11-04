@@ -393,7 +393,7 @@ FERRISTRACE_MCP_API_URL=http://localhost:3333 cargo run -p ferristrace-mcp
 or build the image:
 
 ```sh
-docker build -f Dockerfile.mcp -t ferristrace-mcp .
+docker build --target mcp -t ferristrace-mcp .
 docker run --rm -p 8081:8081 -e FERRISTRACE_MCP_API_URL=http://ferristrace:3333 ferristrace-mcp
 ```
 
@@ -456,7 +456,7 @@ permitted, exchanges the token for one addressed to FerrisTrace and forwards
 to `ferristrace-mcp`. See ADR 0029.
 
 ```sh
-docker build -f Dockerfile.mcp-gateway -t ferristrace-mcp-gateway .
+docker build --target mcp-gateway -t ferristrace-mcp-gateway .
 ```
 
 Settings are read from the environment, prefix `FERRISTRACE_MCP_GATEWAY_`,

@@ -56,7 +56,7 @@ services:
   server:
     build:
       context: ..
-      dockerfile: Dockerfile
+      target: server
     image: ${FERRISTRACE_IMAGE:-ferristrace:local}
     depends_on:
       postgres:
@@ -117,7 +117,7 @@ services:
   mcp:
     build:
       context: ..
-      dockerfile: Dockerfile.mcp
+      target: mcp
     image: ${FERRISTRACE_MCP_IMAGE:-ferristrace-mcp:local}
     environment:
       FERRISTRACE_MCP_API_URL: http://server:4318
@@ -130,7 +130,7 @@ services:
   mcp-gateway:
     build:
       context: ..
-      dockerfile: Dockerfile.mcp-gateway
+      target: mcp-gateway
     image: ${FERRISTRACE_MCP_GATEWAY_IMAGE:-ferristrace-mcp-gateway:local}
     env_file:
       - path: .env
