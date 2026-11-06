@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, json, post, put } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
-import { validChips, type Chip } from '@/lib/traceQuery'
+import { itemsText, normalise } from '@/lib/queryLang'
+import { validChips } from '@/lib/traceQuery'
 import type { Order } from '@/data/traces'
 
 export type { Order }
 
 export type Visibility = 'private' | 'org'
 
-export type Definition = { q: Chip[]; o: Order }
+export type Definition = { q: string; o: Order }
 
 export type SavedView = {
   id: string
@@ -22,14 +23,14 @@ export type SavedView = {
 export type BuiltIn = { key: string; name: string; hint: string; definition: Definition }
 
 export const BUILT_IN: BuiltIn[] = [
-  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: [], o: 'started' } },
+  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started' } },
   {
     key: 'errors',
     name: 'Errors',
     hint: 'Spans that failed',
-    definition: { q: [{ field: { built: 'status' }, op: 'eq', value: 'error' }], o: 'started' },
+    definition: { q: 'status = error', o: 'started' },
   },
-  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: [], o: 'duration' } },
+  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration' } },
 ]
 
 const ORDERS: Order[] = ['started', 'duration', 'spans']
@@ -38,10 +39,11 @@ export const orderOf = (raw: unknown): Order => (ORDERS.includes(raw as Order) ?
 
 export function definitionOf(raw: unknown): Definition {
   const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
-  return { q: validChips(body.q), o: orderOf(body.o) }
+  const q = typeof body.q === 'string' ? normalise(body.q) : itemsText(validChips(body.q))
+  return { q, o: orderOf(body.o) }
 }
 
-export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && JSON.stringify(a.q) === JSON.stringify(b.q)
+export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && normalise(a.q) === normalise(b.q)
 
 type Wire = {
   id: string

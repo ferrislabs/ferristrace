@@ -4,7 +4,7 @@ import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
 import { NOWHERE, placed, type Placement } from '@/data/placement'
-import { toBody, type Chip } from '@/lib/traceQuery'
+import { bodyOf, type Node } from '@/lib/queryLang'
 
 export type TraceRow = { id: string; root: string; svc: string; code: number | null; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
@@ -177,15 +177,15 @@ function searched(sift: Sift, project: string | undefined, placement: Placement)
   return body
 }
 
-export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, chips: Chip[] = []): { rows: TraceRow[]; loading: boolean; failed: unknown } {
+export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, items: Node[] = []): { rows: TraceRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['traces', active?.org, project, sift, placement, chips],
+    queryKey: ['traces', active?.org, project, sift, placement, items],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const query = toBody(chips)
+      const query = bodyOf(items)
       const path = `/api/orgs/${active?.org}/traces`
       const found = await json<{ traces: Listed[] }>(
         query === undefined

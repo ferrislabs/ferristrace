@@ -87,7 +87,7 @@ export function parsedValue(text: string, kind: Kind, list: boolean): Scalar | S
   return parts as Scalar[]
 }
 
-const toWire = (chip: Chip) => {
+export const toWire = (chip: Chip) => {
   const base = 'built' in chip.field ? { field: chip.field.built } : { attr: chip.field.attr }
   const timed = 'built' in chip.field && chip.field.built === 'duration'
   const nanos = (scalar: Scalar): Scalar => (timed && typeof scalar === 'number' ? scalar * 1_000_000 : scalar)

@@ -26,7 +26,6 @@ import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
 import { Traces } from '@/pages/Traces'
 import { BUILT_IN } from '@/data/views'
-import { encode } from '@/lib/traceQuery'
 import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
@@ -116,7 +115,7 @@ const oldTracesView = (view: 'errors' | 'slow' | 'explore') =>
     path: `/traces/${view}`,
     beforeLoad: () => {
       const built = BUILT_IN.find((one) => one.key === view)
-      const search = built ? { view, q: encode(built.definition.q), o: built.definition.o === 'started' ? undefined : built.definition.o } : {}
+      const search = built ? { view, q: built.definition.q || undefined, o: built.definition.o === 'started' ? undefined : built.definition.o } : {}
       throw redirect({ to: '/traces' as never, search: search as never })
     },
   })
