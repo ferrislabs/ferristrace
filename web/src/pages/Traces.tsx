@@ -1,4 +1,4 @@
-import { CircleX, Copy, SlidersHorizontal } from 'lucide-react'
+import { Boxes, CircleX, Copy, ListFilter, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
 import { Link, useNavigate, useSearchParam } from '@/lib/router'
@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Views } from '@/components/ft/Views'
+import { ViewsPanel, ViewsToggle, useViewsState } from '@/components/ft/Views'
+import { Facets } from '@/components/ft/Facets'
 import { FilterBar } from '@/components/ft/FilterBar'
 import { decode, encode, type Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
@@ -16,7 +17,6 @@ import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
 import { orderOf, type Definition, type Order } from '@/data/views'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
-import { Filters } from '@/components/ft/Filters'
 import { because } from '@/auth/client'
 import { shortId } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -41,6 +41,8 @@ export function Traces() {
   const { placement, place } = usePlacement()
   const { rows, loading, failed } = useTraces(sift, placement, chips)
   const current = useMemo<Definition>(() => ({ q: chips, o: order }), [chips, order])
+  const [panel, setPanel] = useState<'facets' | 'views'>('facets')
+  const [mobileOpen, setMobileOpen] = useState(false)
   const show = (next: Partial<{ q: Chip[]; o: Order; view: string | undefined }>) => {
     const was = { q: chips, o: order, view: viewParam }
     const merged = { ...was, ...next }
@@ -58,6 +60,7 @@ export function Traces() {
   }
   const setChips = (next: Chip[]) => show({ q: next })
   const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, view: key })
+  const viewsState = useViewsState(current, viewKey, select)
   const clear = () => { show({ q: [], o: 'started', view: undefined }); place(NOWHERE) }
   const sifting = chips.length > 0 || order !== 'started' || isPlaced(placement)
 
@@ -78,12 +81,23 @@ export function Traces() {
   return (
     <>
       <PageHeader title="Traces" meta={`Last ${windowLabel}`}>
-        <Views current={current} viewKey={viewKey} onSelect={select} />
+        <ViewsToggle state={viewsState} on={panel === 'views'} onToggle={() => { setPanel((was) => (was === 'views' ? 'facets' : 'views')); setMobileOpen(true) }} />
+        <Button size="sm" variant="ghost" className="md:hidden" aria-expanded={mobileOpen} onClick={() => setMobileOpen((was) => !was)}>
+          <ListFilter />Filters{chips.length > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{chips.length}</span> : null}
+        </Button>
         <Popover>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="sm" aria-label="Display options"><SlidersHorizontal />Display</Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="flex w-[280px] flex-col gap-3 p-3">
+            <div className="flex items-center justify-between gap-2 text-control">
+              Order
+              <NativeSelect aria-label="Order" value={order} onChange={(e) => show({ o: orderOf(e.target.value) })} className="h-7 w-[150px]">
+                <option value="started">Newest first</option>
+                <option value="duration">Slowest first</option>
+                <option value="spans">Most spans first</option>
+              </NativeSelect>
+            </div>
             <div className="flex items-center justify-between gap-2 text-control">
               Row density
               <Segmented label="Row density" size="sm" value={density} onChange={setDensity} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfortable' }]} />
@@ -98,20 +112,28 @@ export function Traces() {
           </PopoverContent>
         </Popover>
       </PageHeader>
-      <Filters active={chips.length + placedCount(placement)}>
-        <div className="flex flex-col gap-2" role="search">
-          <FilterBar chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect aria-label="Order" value={order} onChange={(e) => show({ o: orderOf(e.target.value) })} className="w-[160px]">
-              <option value="started">Newest first</option>
-              <option value="duration">Slowest first</option>
-              <option value="spans">Most spans first</option>
-            </NativeSelect>
-            <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Reset</Button>
+      {viewsState.dialog}
+      <div className="grid gap-4 md:grid-cols-[264px_minmax(0,1fr)]">
+        <aside className={cn('min-w-0 md:sticky md:top-[100px] md:max-h-[calc(100vh-116px)] md:self-start md:overflow-y-auto md:pr-1', !mobileOpen && 'max-md:hidden')}>
+          {panel === 'views' ? (
+            <ViewsPanel state={viewsState} viewKey={viewKey} onSelect={select} onClose={() => setPanel('facets')} />
+          ) : (
+            <Facets chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
+          )}
+        </aside>
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2" role="search">
+            <FilterBar chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" aria-label="Kubernetes placement"><Boxes />Kubernetes{placedCount(placement) > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{placedCount(placement)}</span> : null}</Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(560px,calc(100vw-32px))] p-3">
+                <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
+              </PopoverContent>
+            </Popover>
+            {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
-          <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
-        </div>
-      </Filters>
       {failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
       ) : rows.length === 0 ? (
@@ -119,7 +141,7 @@ export function Traces() {
           {loading ? 'Asking the span store.' : sifting ? 'Try fewer filters, a wider window or no placement.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
         </EmptyState>
       ) : (
-        <div className="-mx-4 overflow-x-auto border-t md:-mx-5">
+        <div className="overflow-x-auto rounded-lg border">
           <Table aria-label="Traces">
             <thead><tr><Th className="w-[130px] max-md:w-[96px]">Started</Th><Th className="w-[150px] max-md:hidden">Service</Th><Th>Root span</Th><Th numeric className="w-[80px] max-md:w-[64px]">Code</Th><Th numeric className="w-[100px] max-md:w-[80px]">Duration</Th><Th className="w-[170px] max-md:hidden">Trace id</Th></tr></thead>
             <tbody>
@@ -146,13 +168,15 @@ export function Traces() {
               ))}
             </tbody>
           </Table>
-          <div className="flex flex-wrap items-center gap-3 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-3 px-3 py-2.5">
             <span className="text-caption text-muted-foreground">
               {rows.length === sift.limit ? `The newest ${sift.limit} of this window.` : `${rows.length} trace${rows.length === 1 ? '' : 's'} in this window.`}
             </span>
           </div>
         </div>
       )}
+        </div>
+      </div>
     </>
   )
 }
