@@ -1,5 +1,5 @@
 use ferristrace_domain::{
-    AttributeKey, BadQuery, Clause, Expr, Field, Number, Op, Query, Scalar, Value,
+    AttributeKey, BadQuery, Clause, Expr, Field, Number, Op, Query, Scalar, Stream, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,8 @@ enum FieldBody {
     HttpStatusCode,
     TraceId,
     SpanId,
+    Severity,
+    Body,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -126,6 +128,8 @@ impl From<FieldBody> for Field {
             FieldBody::HttpStatusCode => Self::HttpStatusCode,
             FieldBody::TraceId => Self::TraceId,
             FieldBody::SpanId => Self::SpanId,
+            FieldBody::Severity => Self::Severity,
+            FieldBody::Body => Self::Body,
         }
     }
 }
@@ -155,11 +159,16 @@ pub struct FieldRefBody {
 }
 
 impl FieldRefBody {
-    pub fn field(self) -> Result<Field, BadQuery> {
-        match (self.field, self.attr) {
-            (Some(field), None) => Ok(field.into()),
-            (None, Some(key)) => Ok(Field::Attribute(AttributeKey::new(&key)?)),
-            _ => Err(BadQuery::Shape),
+    pub fn field(self, stream: Stream) -> Result<Field, BadQuery> {
+        let field = match (self.field, self.attr) {
+            (Some(field), None) => Field::from(field),
+            (None, Some(key)) => Field::Attribute(AttributeKey::new(&key)?),
+            _ => return Err(BadQuery::Shape),
+        };
+        if field.belongs_to(stream) {
+            Ok(field)
+        } else {
+            Err(BadQuery::Field)
         }
     }
 }
@@ -183,6 +192,8 @@ impl From<&Field> for FieldRefOut {
             Field::HttpStatusCode => built("http_status_code"),
             Field::TraceId => built("trace_id"),
             Field::SpanId => built("span_id"),
+            Field::Severity => built("severity"),
+            Field::Body => built("body"),
             Field::Attribute(key) => Self::Attribute {
                 attr: key.as_str().to_owned(),
             },
@@ -204,8 +215,10 @@ impl ExprBody {
         parts.into_iter().map(Self::expr).collect()
     }
 
-    pub fn query(self) -> Result<Query, BadQuery> {
-        Query::new(self.expr()?)
+    pub fn query(self, stream: Stream) -> Result<Query, BadQuery> {
+        let query = Query::new(self.expr()?)?;
+        query.fits(stream)?;
+        Ok(query)
     }
 }
 
@@ -216,7 +229,7 @@ mod tests {
     fn parsed(json: &str) -> Result<Query, BadQuery> {
         serde_json::from_str::<ExprBody>(json)
             .expect("the shape is valid json for the body")
-            .query()
+            .query(Stream::Spans)
     }
 
     #[test]

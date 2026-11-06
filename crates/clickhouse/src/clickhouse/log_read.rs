@@ -1,15 +1,19 @@
 use clickhouse::query::Query;
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    Buckets, CulpritPod, CulpritReader, Culprits, Labels, LogBucket, LogCursor, LogPage, LogQuery,
-    LogReader, LogRecord, MAX_CULPRIT_FACETS, MAX_CULPRIT_PODS, ProjectId, Severity, Signal,
-    SpanId, StoreError, TenantId, TraceId, Window,
+    AttributeFilter, AttributeKey, Buckets, CulpritPod, CulpritReader, Culprits, FACET_VALUES,
+    FacetFilter, FacetValues, Facets, Labels, LogBucket, LogCursor, LogPage, LogQuery, LogReader,
+    LogRecord, MAX_ATTRIBUTES, MAX_CULPRIT_FACETS, MAX_CULPRIT_PODS, MAX_VALUES, ProjectId,
+    SeenAttribute, SeenValue, Severity, Signal, SpanId, StoreError, TenantId, TraceId, Window,
 };
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::clickhouse::placement::{Held, Placed};
-use crate::clickhouse::read::{held, map_of, nanos, refused, unsigned};
+use crate::clickhouse::query::{Compiled, Param, Table};
+use crate::clickhouse::read::{
+    AttributeRow, ValueRow, held, map_of, nanos, refused, unsigned, uuid_of,
+};
 
 const TIEBREAK: &str = "cityHash64(observed_time, body, trace_id, span_id, attributes)";
 
@@ -54,6 +58,30 @@ const CULPRIT_NODES: &str = "SELECT k8s_node AS value, '' AS node, count() AS hi
 const CULPRIT_VERSIONS: &str = "SELECT resource['service.version'] AS value, '' AS node, count() AS hits \
    FROM logs WHERE {filters} AND resource['service.version'] != '' \
    GROUP BY value ORDER BY hits DESC, value LIMIT {facets}";
+
+const ATTRIBUTES: &str = "SELECT key, count() AS spans, \
+     countIf(toFloat64OrNull(value) IS NOT NULL) AS numbers \
+   FROM logs \
+   ARRAY JOIN mapKeys(mapUpdate(resource, attributes)) AS key, \
+              mapValues(mapUpdate(resource, attributes)) AS value \
+   WHERE tenant_id = ? \
+     AND time >= fromUnixTimestamp64Nano(?) AND time < fromUnixTimestamp64Nano(?) \
+     AND (? = 0 OR project_id = ?) \
+     AND (? = '' OR positionCaseInsensitive(key, ?) > 0) \
+   GROUP BY key \
+   ORDER BY spans DESC, key \
+   LIMIT ?";
+
+const ATTRIBUTE_VALUES: &str = "SELECT mapUpdate(resource, attributes)[?] AS value, count() AS spans \
+   FROM logs \
+   WHERE tenant_id = ? \
+     AND time >= fromUnixTimestamp64Nano(?) AND time < fromUnixTimestamp64Nano(?) \
+     AND (? = 0 OR project_id = ?) \
+     AND (mapContains(attributes, ?) OR mapContains(resource, ?)) \
+   GROUP BY value \
+   HAVING (? = '' OR positionCaseInsensitive(value, ?) > 0) \
+   ORDER BY spans DESC, value \
+   LIMIT ?";
 
 const ZERO_TRACE: &str = "00000000000000000000000000000000";
 const ZERO_SPAN: &str = "0000000000000000";
@@ -110,6 +138,7 @@ enum Bound<'a> {
     Text(&'a str),
     Texts(Vec<&'a str>),
     Hex(String),
+    Param(&'a Param),
 }
 
 struct Filters<'a> {
@@ -118,7 +147,7 @@ struct Filters<'a> {
 }
 
 impl<'a> Filters<'a> {
-    fn of(org: TenantId, query: &'a LogQuery, paged: bool) -> Self {
+    fn of(org: TenantId, query: &'a LogQuery, compiled: &'a Compiled, paged: bool) -> Self {
         let mut filters = Self {
             clauses: Vec::new(),
             bound: Vec::new(),
@@ -158,6 +187,12 @@ impl<'a> Filters<'a> {
         for (clause, value) in placed.clauses().iter().zip(placed.values()) {
             filters.push(clause, [Bound::Text(value)]);
         }
+        if !compiled.is_empty() {
+            filters.clauses.push(format!("({})", compiled.expression()));
+            filters
+                .bound
+                .extend(compiled.params().iter().map(Bound::Param));
+        }
         if let Some(trace) = query.trace {
             filters.push(
                 "trace_id = unhex(?)",
@@ -196,6 +231,7 @@ impl<'a> Filters<'a> {
                 Bound::Text(text) => query.bind(text),
                 Bound::Texts(texts) => query.bind(texts),
                 Bound::Hex(spelling) => query.bind(spelling),
+                Bound::Param(param) => query.bind(param),
             };
         }
         query
@@ -209,7 +245,8 @@ impl ClickhouseLogReader {
         org: TenantId,
         query: &LogQuery,
     ) -> Result<Vec<CulpritRow>, StoreError> {
-        let filters = Filters::of(org, query, false);
+        let compiled = Compiled::of_logs(&query.query);
+        let filters = Filters::of(org, query, &compiled, false);
         let sql = filters
             .sql(template)
             .replace("{pods}", &MAX_CULPRIT_PODS.to_string())
@@ -222,7 +259,8 @@ impl ClickhouseLogReader {
     }
 
     async fn pods_seen(&self, org: TenantId, query: &LogQuery) -> Result<u64, StoreError> {
-        let filters = Filters::of(org, query, false);
+        let compiled = Compiled::of_logs(&query.query);
+        let filters = Filters::of(org, query, &compiled, false);
         let sql = filters.sql(CULPRIT_PODS_SEEN);
         let seen: SeenRow = filters
             .bind(self.client.query(&sql))
@@ -269,7 +307,8 @@ impl CulpritReader for ClickhouseLogReader {
 
 impl LogReader for ClickhouseLogReader {
     async fn search(&self, org: TenantId, query: &LogQuery) -> Result<LogPage, StoreError> {
-        let filters = Filters::of(org, query, true);
+        let compiled = Compiled::of_logs(&query.query);
+        let filters = Filters::of(org, query, &compiled, true);
         let sql = filters.sql(RECORDS);
         let limit = query.limit();
         let rows: Vec<RecordRow> = filters
@@ -302,7 +341,8 @@ impl LogReader for ClickhouseLogReader {
         buckets: Buckets,
     ) -> Result<Vec<LogBucket>, StoreError> {
         let width = buckets.width_over(query.window);
-        let filters = Filters::of(org, query, false);
+        let compiled = Compiled::of_logs(&query.query);
+        let filters = Filters::of(org, query, &compiled, false);
         let sql = filters.sql(COUNTS);
         let rows: Vec<CountRow> = filters
             .bind(
@@ -326,6 +366,107 @@ impl LogReader for ClickhouseLogReader {
             bucket.add(read_severity(&row.level), row.hits);
         }
         Ok(laid)
+    }
+
+    async fn attributes(
+        &self,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let rows: Vec<AttributeRow> = self
+            .client
+            .query(ATTRIBUTES)
+            .bind(org.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(prefix)
+            .bind(prefix)
+            .bind(MAX_ATTRIBUTES)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenAttribute {
+                numeric: row.numbers == row.spans,
+                key: row.key.into(),
+                spans: row.spans,
+            })
+            .collect())
+    }
+
+    async fn attribute_values(
+        &self,
+        org: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let rows: Vec<ValueRow> = self
+            .client
+            .query(ATTRIBUTE_VALUES)
+            .bind(key.as_str())
+            .bind(org.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(key.as_str())
+            .bind(key.as_str())
+            .bind(prefix)
+            .bind(prefix)
+            .bind(MAX_VALUES)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenValue {
+                value: row.value.into(),
+                spans: row.spans,
+            })
+            .collect())
+    }
+
+    async fn facets(&self, org: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
+        let mut fields = Vec::with_capacity(filter.fields().len());
+        for field in filter.fields() {
+            let (sql, params) = Compiled::facet_in(
+                Table::Logs,
+                field,
+                &filter.query,
+                org,
+                filter.window,
+                filter.project,
+                FACET_VALUES,
+                true,
+            );
+            let mut statement = self.client.query(&sql);
+            for param in &params {
+                statement = statement.bind(param);
+            }
+            let rows: Vec<ValueRow> = statement
+                .fetch_all()
+                .await
+                .map_err(|error| refused(&error))?;
+            fields.push(FacetValues {
+                field: field.clone(),
+                values: rows
+                    .into_iter()
+                    .map(|row| SeenValue {
+                        value: row.value.into(),
+                        spans: row.spans,
+                    })
+                    .collect(),
+            });
+        }
+        Ok(Facets {
+            fields,
+            duration: None,
+        })
     }
 }
 

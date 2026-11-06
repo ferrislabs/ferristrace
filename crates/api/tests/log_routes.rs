@@ -633,3 +633,58 @@ async fn a_placement_reaches_the_log_store_from_both_routes() {
         );
     }
 }
+
+fn posting(path: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(format!("/api/orgs/{}/logs/{path}", Uuid::from_u128(MINE)))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("a request")
+}
+
+#[tokio::test]
+async fn a_query_tree_reaches_the_log_store() {
+    let shelf = Arc::new(Shelf::default());
+    let body = format!(
+        r#"{{"from":{FROM_MS},"to":{TO_MS},"limit":20,"query":{{"all":[
+            {{"field":"severity","op":"in","value":["error","fatal"]}},
+            {{"not":{{"field":"body","op":"contains","value":"health"}}}},
+            {{"attr":"http.route","op":"eq","value":"/pay"}}]}}}}"#
+    );
+
+    let (status, text) = served(Some(Arc::clone(&shelf)), posting("search", &body)).await;
+
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let (_, query, _) = &shelf.asked()[0];
+    assert!(!query.query.is_anything());
+    assert_eq!(query.limit(), 20);
+}
+
+#[tokio::test]
+async fn a_span_field_in_a_log_query_is_refused_before_the_store() {
+    let shelf = Arc::new(Shelf::default());
+    let body = format!(
+        r#"{{"from":{FROM_MS},"to":{TO_MS},"query":{{"field":"duration","op":"gt","value":5}}}}"#
+    );
+
+    let (status, _) = served(Some(Arc::clone(&shelf)), posting("search", &body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(shelf.asked().is_empty());
+}
+
+#[tokio::test]
+async fn the_series_route_counts_per_severity_for_a_query() {
+    let shelf = Arc::new(Shelf::default());
+    let body = format!(
+        r#"{{"from":{FROM_MS},"to":{TO_MS},"query":{{"field":"service","op":"eq","value":"checkout"}}}}"#
+    );
+
+    let (status, text) = served(Some(Arc::clone(&shelf)), posting("series", &body)).await;
+
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(text.contains("buckets"));
+    assert!(!shelf.asked()[0].1.query.is_anything());
+}

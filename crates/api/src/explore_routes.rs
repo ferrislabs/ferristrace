@@ -12,8 +12,8 @@ use ferristrace_domain::{
     AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ListedSpan,
     Measure, ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
     ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder,
-    SpanStatus, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
-    Window,
+    SpanStatus, Stream, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder,
+    TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -276,7 +276,7 @@ where
 {
     let who = reading(&state, &headers).await?;
     let query = match searched.query {
-        Some(body) => body.query()?,
+        Some(body) => body.query(Stream::Spans)?,
         None => TraceQuery::anything(),
     };
     let filter = filtered(searched.asked, query)?;
@@ -364,7 +364,7 @@ where
     .map_err(|_| LookRefused::Window)?;
     let mut filter = SpanFilter::over(window);
     if let Some(body) = asked.query {
-        filter.query = body.query()?;
+        filter.query = body.query(Stream::Spans)?;
     }
     filter.project = asked.project.map(ProjectId::new);
     filter.order = match asked.order {
@@ -461,7 +461,7 @@ where
     )
     .map_err(|_| LookRefused::Window)?;
     let query = match asked.query {
-        Some(body) => body.query()?,
+        Some(body) => body.query(Stream::Spans)?,
         None => TraceQuery::anything(),
     };
     let measure = match asked.measure {
@@ -473,7 +473,10 @@ where
         Measuring::P95 => Measure::P95,
         Measuring::P99 => Measure::P99,
     };
-    let group = asked.group_by.map(FieldRefBody::field).transpose()?;
+    let group = asked
+        .group_by
+        .map(|field| field.field(Stream::Spans))
+        .transpose()?;
     let mut filter = SeriesFilter::new(window, query, measure, group)?;
     filter.project = asked.project.map(ProjectId::new);
 
@@ -549,7 +552,7 @@ where
     )
     .map_err(|_| LookRefused::Window)?;
     let query = match asked.query {
-        Some(body) => body.query()?,
+        Some(body) => body.query(Stream::Spans)?,
         None => TraceQuery::anything(),
     };
     let order = match asked.order {
@@ -561,7 +564,7 @@ where
         Measuring::P95 => Measure::P95,
         Measuring::P99 => Measure::P99,
     };
-    let mut filter = TableFilter::new(window, query, asked.group_by.field()?, order)?;
+    let mut filter = TableFilter::new(window, query, asked.group_by.field(Stream::Spans)?, order)?;
     filter.project = asked.project.map(ProjectId::new);
     if let Some(limit) = asked.limit {
         filter = filter.at_most(limit);
@@ -578,16 +581,16 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct Faceting {
-    from: u64,
-    to: u64,
+    pub(crate) from: u64,
+    pub(crate) to: u64,
     #[serde(default)]
-    project: Option<Uuid>,
+    pub(crate) project: Option<Uuid>,
     #[serde(default)]
-    query: Option<ExprBody>,
+    pub(crate) query: Option<ExprBody>,
     #[serde(default)]
-    facets: Vec<FieldRefBody>,
+    pub(crate) facets: Vec<FieldRefBody>,
     #[serde(default)]
-    duration: bool,
+    pub(crate) duration: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -644,13 +647,13 @@ where
     )
     .map_err(|_| LookRefused::Window)?;
     let query = match asked.query {
-        Some(body) => body.query()?,
+        Some(body) => body.query(Stream::Spans)?,
         None => TraceQuery::anything(),
     };
     let fields = asked
         .facets
         .into_iter()
-        .map(FieldRefBody::field)
+        .map(|field| field.field(Stream::Spans))
         .collect::<Result<Vec<_>, _>>()?;
     let mut filter = FacetFilter::new(window, query, fields, asked.duration)?;
     filter.project = asked.project.map(ProjectId::new);
@@ -750,16 +753,16 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct Catalogued {
-    from: u64,
-    to: u64,
+    pub(crate) from: u64,
+    pub(crate) to: u64,
     #[serde(default)]
-    project: Option<Uuid>,
+    pub(crate) project: Option<Uuid>,
     #[serde(default)]
-    prefix: Option<String>,
+    pub(crate) prefix: Option<String>,
 }
 
 impl Catalogued {
-    fn filter(self) -> Result<AttributeFilter, LookRefused> {
+    pub(crate) fn filter(self) -> Result<AttributeFilter, LookRefused> {
         let window = Window::new(
             self.from.saturating_mul(NANOS_PER_MILLI),
             self.to.saturating_mul(NANOS_PER_MILLI),
@@ -778,6 +781,14 @@ impl Catalogued {
 #[derive(Debug, Serialize)]
 pub struct Keys {
     attributes: Vec<Attribute>,
+}
+
+impl Keys {
+    pub(crate) fn of(seen: Vec<SeenAttribute>) -> Self {
+        Self {
+            attributes: seen.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -819,6 +830,14 @@ where
 #[derive(Debug, Serialize)]
 pub struct Values {
     values: Vec<Valued>,
+}
+
+impl Values {
+    pub(crate) fn of(seen: Vec<SeenValue>) -> Self {
+        Self {
+            values: seen.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

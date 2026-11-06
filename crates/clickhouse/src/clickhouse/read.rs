@@ -130,10 +130,10 @@ pub struct ClickhouseReader {
 }
 
 #[derive(Debug, Row, Deserialize)]
-struct AttributeRow {
-    key: String,
-    spans: u64,
-    numbers: u64,
+pub(crate) struct AttributeRow {
+    pub(crate) key: String,
+    pub(crate) spans: u64,
+    pub(crate) numbers: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -173,9 +173,9 @@ struct RangeRow {
 }
 
 #[derive(Debug, Row, Deserialize)]
-struct ValueRow {
-    value: String,
-    spans: u64,
+pub(crate) struct ValueRow {
+    pub(crate) value: String,
+    pub(crate) spans: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]

@@ -1,7 +1,9 @@
 use super::ports::LogReader;
 use super::value_objects::{Buckets, LogBucket, LogPage, LogQuery};
 use crate::access::{ApiKeys, Reader, Readers};
-use crate::explore::ExploreError;
+use crate::explore::{
+    AttributeFilter, AttributeKey, ExploreError, FacetFilter, Facets, SeenAttribute, SeenValue,
+};
 use crate::identity::SessionStore;
 use crate::organisation::Memberships;
 use crate::telemetry::TenantId;
@@ -52,5 +54,51 @@ where
         let mut narrowed = query.clone();
         narrowed.project = project;
         Ok(self.reader.histogram(org, &narrowed, buckets).await?)
+    }
+
+    pub async fn facets(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &FacetFilter,
+    ) -> Result<Facets, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        let mut narrowed = filter.clone();
+        narrowed.project = project;
+        Ok(self.reader.facets(org, &narrowed).await?)
+    }
+
+    pub async fn attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.attributes(org, &filter).await?)
+    }
+
+    pub async fn attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.attribute_values(org, key, &filter).await?)
+    }
+
+    async fn narrowed(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<AttributeFilter, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        Ok(AttributeFilter {
+            project,
+            ..filter.clone()
+        })
     }
 }

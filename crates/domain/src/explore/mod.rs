@@ -11,7 +11,7 @@ pub use explore_service::Explore;
 pub use ports::SpanReader;
 pub use query::{
     AttributeKey, Clause, Expr, Field, MAX_CONDITIONS, MAX_DEPTH, MAX_LIST, Number, Op, Query,
-    Scalar, Test, Value,
+    Scalar, Stream, Test, Value,
 };
 pub use value_objects::{
     AttributeFilter, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan,
