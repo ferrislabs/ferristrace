@@ -403,17 +403,17 @@ impl Catalogued {
 
 #[derive(Debug, Serialize)]
 pub struct Keys {
-    attributes: Vec<Key>,
+    attributes: Vec<Attribute>,
 }
 
 #[derive(Debug, Serialize)]
-struct Key {
+struct Attribute {
     key: String,
     spans: u64,
     numeric: bool,
 }
 
-impl From<SeenAttribute> for Key {
+impl From<SeenAttribute> for Attribute {
     fn from(seen: SeenAttribute) -> Self {
         Self {
             key: seen.key.into_string(),
