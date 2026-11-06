@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { get, json } from '@/auth/client'
+import { get, json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
 import { NOWHERE, placed, type Placement } from '@/data/placement'
+import { toBody, type Chip } from '@/lib/traceQuery'
 
 export type TraceRow = { id: string; root: string; svc: string; code: number | null; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
@@ -162,16 +163,34 @@ function asked(sift: Sift, project: string | undefined, placement: Placement): s
   return placed(query, placement).toString()
 }
 
-export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE): { rows: TraceRow[]; loading: boolean; failed: unknown } {
+function searched(sift: Sift, project: string | undefined, placement: Placement): Record<string, unknown> {
+  const to = Date.now()
+  const body: Record<string, unknown> = { from: to - sift.rangeMs, to }
+  if (project) body.project = project
+  if (sift.service) body.service = sift.service
+  if (sift.name.trim()) body.name = sift.name.trim()
+  if (sift.errorsOnly) body.errors = true
+  if (sift.atLeastMs > 0) body.at_least_us = sift.atLeastMs * 1000
+  if (sift.order !== 'started') body.order = sift.order
+  if (sift.limit !== ANY.limit) body.limit = sift.limit
+  for (const [key, value] of placed(new URLSearchParams(), placement)) body[key] = value
+  return body
+}
+
+export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, chips: Chip[] = []): { rows: TraceRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['traces', active?.org, project, sift, placement],
+    queryKey: ['traces', active?.org, project, sift, placement, chips],
     enabled: Boolean(active),
     staleTime: FRESH_MS,
     queryFn: async () => {
+      const query = toBody(chips)
+      const path = `/api/orgs/${active?.org}/traces`
       const found = await json<{ traces: Listed[] }>(
-        await get(`/api/orgs/${active?.org}/traces?${asked(sift, project, placement)}`),
+        query === undefined
+          ? await get(`${path}?${asked(sift, project, placement)}`)
+          : await post(`${path}/search`, { ...searched(sift, project, placement), query }),
       )
       return found.traces.map(listed)
     },
