@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useTrace, type Span } from '@/data/traces'
 import { formatCost, formatTokens, modelTimeMs, useTraceCalls, type LlmCall } from '@/data/llm'
-import { msOf, traceLogsFilter, useTraceLogs, type LogRecord } from '@/data/logs'
+import { msOf, traceWindow, useTraceLogs, type LogRecord } from '@/data/logs'
 import { because } from '@/auth/client'
 import { dur, num, stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -37,7 +37,8 @@ export function TraceDetail() {
   if (!t) return <NotFound />
   const s = spans.find((x) => x.id === picked) ?? spans.find((x) => x.err) ?? spans[0]
   const services = [...new Set(spans.map((x) => x.svc))]
-  const logsFilter = { f: traceLogsFilter(t.id, t.startedAtMs, t.durationMs) }
+  const around = traceWindow(t.startedAtMs, t.durationMs)
+  const logsFilter = { q: `trace_id = "${t.id}"`, from: String(around.fromMs), to: String(around.toMs) }
   const callOf = new Map(llm.calls.map((call) => [call.spanId, call]))
   const modelMs = modelTimeMs(llm.calls)
   const modelCost = llm.calls.reduce((sum, call) => sum + (call.cost ?? 0), 0)
@@ -128,7 +129,7 @@ export function TraceDetail() {
   )
 }
 
-function SpanDetails({ span: s, call, logs, filter, onPick, onOnlySpan }: { span: Span; call: LlmCall | undefined; logs: LogRecord[]; filter: { f: string }; onPick: (part: Partial<Placement>) => void; onOnlySpan: () => void }) {
+function SpanDetails({ span: s, call, logs, filter, onPick, onOnlySpan }: { span: Span; call: LlmCall | undefined; logs: LogRecord[]; filter: Record<string, string>; onPick: (part: Partial<Placement>) => void; onOnlySpan: () => void }) {
   return (
     <>
       <div className="flex flex-wrap gap-2"><Badge variant="outline" mono>{s.kind}</Badge>{s.err ? <Badge variant="destructive">ERROR</Badge> : <Badge variant="success">OK</Badge>}<Badge variant="outline" mono>{s.dur}</Badge></div>
@@ -232,7 +233,7 @@ function clock(ns: number): string {
   return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}.${pad(ms % 1000, 3)}`
 }
 
-function LogLine({ record, filter, wide = false }: { record: LogRecord; filter: { f: string }; wide?: boolean }) {
+function LogLine({ record, filter, wide = false }: { record: LogRecord; filter: Record<string, string>; wide?: boolean }) {
   return (
     <Link to="/logs" search={filter} className={cn('grid items-center gap-2.5 text-foreground no-underline hover:bg-row-hover', wide ? 'grid-cols-[96px_62px_140px_minmax(0,1fr)] border-b border-border-subtle px-4 py-1.5' : 'grid-cols-[62px_minmax(0,1fr)] rounded-sm py-0.5')}>
       {wide ? <time className="font-mono text-caption text-muted-foreground">{clock(record.time_ns)}</time> : null}
