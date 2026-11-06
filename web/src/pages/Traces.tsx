@@ -12,12 +12,13 @@ import { Facets } from '@/components/ft/Facets'
 import { FilterBar } from '@/components/ft/FilterBar'
 import { QueryBar } from '@/components/ft/QueryBar'
 import { isChip, itemsText, normalise, parse, queryTextOf, type Node } from '@/lib/queryLang'
-import type { Chip } from '@/lib/traceQuery'
+import { withValue, type Chip, type FieldRef } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
 import { groupOf, measureOf, orderOf, tabOf, TABS, TAB_LABELS, type Definition, type Measure, type Order, type Tab } from '@/data/views'
 import { SeriesPanel } from '@/components/ft/SeriesPanel'
+import { TABLE_DEFAULT_GROUP, TablePanel } from '@/components/ft/TablePanel'
 import { useSpans } from '@/data/spans'
 import { SpansTable } from '@/components/ft/SpansTable'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
@@ -76,6 +77,11 @@ export function Traces() {
   }
   const setItems = (next: Node[]) => show({ q: itemsText(next) })
   const setChips = (next: Chip[]) => setItems([...others, ...next])
+  const pickGroup = (value: string) => {
+    const by = group === '' ? TABLE_DEFAULT_GROUP : group
+    const field: FieldRef = by.startsWith('attr:') ? { attr: by.slice(5) } : { built: by as never }
+    setChips(withValue(chips, field, value, true, by === 'http_status_code'))
+  }
   const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, t: definition.t, m: definition.m, g: definition.g, view: key })
   const viewsState = useViewsState(current, viewKey, select)
   const clear = () => { show({ q: '', o: 'started', view: undefined }); place(NOWHERE) }
@@ -85,7 +91,7 @@ export function Traces() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return
-      const count = tab === 'series' ? 0 : tab === 'spans' ? spans.rows.length : rows.length
+      const count = tab === 'series' || tab === 'table' ? 0 : tab === 'spans' ? spans.rows.length : rows.length
       if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(count - 1, c + 1)) }
       if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)) }
       if (e.key === 'Enter') {
@@ -171,7 +177,9 @@ export function Traces() {
             </Popover>
             {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
-      {tab === 'series' ? (
+      {tab === 'table' ? (
+        <TablePanel items={items} rangeMs={windowMs} order={measure} group={group} onChange={(part) => show(part)} onPick={pickGroup} />
+      ) : tab === 'series' ? (
         <SeriesPanel items={items} rangeMs={windowMs} measure={measure} group={group} onChange={(part) => show(part)} />
       ) : tab === 'spans' ? (
         <SpansTable rows={spans.rows} loading={spans.loading} failed={spans.failed} sifting={sifting} limit={limit} cursor={cursor} density={density} onOpen={(row) => navigate(`/traces/${row.traceId}`)} onCopy={copy} onClear={clear} />

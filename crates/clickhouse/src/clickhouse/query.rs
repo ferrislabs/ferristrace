@@ -1,7 +1,7 @@
 use clickhouse::query::Query as Statement;
 use ferristrace_domain::{
-    Clause, Expr, Field, Measure, Number, ProjectId, Query, Scalar, SeriesFilter, TenantId, Test,
-    Window,
+    Clause, Expr, Field, Measure, Number, ProjectId, Query, Scalar, SeriesFilter, TableFilter,
+    TenantId, Test, Window,
 };
 use serde::{Serialize, Serializer};
 use uuid::Uuid;
@@ -194,6 +194,41 @@ impl Compiled {
             sql.push(')');
         }
         sql.push_str(" GROUP BY grp, slot ORDER BY slot");
+        (sql, compiled.params)
+    }
+
+    pub(crate) fn table(filter: &TableFilter, tenant: TenantId) -> (String, Vec<Param>) {
+        let mut compiled = Self::default();
+        let column = Column::of(filter.group());
+        let selected = compiled.text_of(&column);
+        compiled.scoped(tenant, filter.window, filter.project);
+        let present = compiled.present_of(&column);
+        let mut sql = format!(
+            "SELECT {selected} AS grp, count() AS spans, countIf(status = 'error') AS errors, \
+                    avg({DURATION}) AS average, \
+                    quantiles(0.5, 0.95, 0.99)({DURATION}) AS latency \
+             FROM spans FINAL \
+             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
+               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?) \
+               AND ({present})"
+        );
+        if let Some(query) = filter.query.filter().map(|expr| compiled.expr(expr)) {
+            sql.push_str(" AND (");
+            sql.push_str(&query);
+            sql.push(')');
+        }
+        sql.push_str(" GROUP BY grp ORDER BY ");
+        sql.push_str(match filter.order {
+            Measure::Count => "spans",
+            Measure::Errors => "errors",
+            Measure::ErrorRate => "errors / spans",
+            Measure::Average => "average",
+            Measure::P50 => "latency[1]",
+            Measure::P95 => "latency[2]",
+            Measure::P99 => "latency[3]",
+        });
+        sql.push_str(" DESC, grp LIMIT ?");
+        compiled.params.push(Param::Whole(i64::from(filter.rows())));
         (sql, compiled.params)
     }
 

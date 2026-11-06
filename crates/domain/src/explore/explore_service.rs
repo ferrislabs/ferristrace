@@ -6,8 +6,8 @@ use super::query::AttributeKey;
 use super::value_objects::Window;
 use super::value_objects::{
     AttributeFilter, FacetFilter, Facets, ListedSpan, SeenAttribute, SeenValue, SeriesFilter,
-    SeriesResult, ServiceFilter, ServiceSeries, ServiceSummary, SpanFilter, TraceFilter,
-    TraceSummary,
+    SeriesResult, ServiceFilter, ServiceSeries, ServiceSummary, SpanFilter, TableFilter, TableRow,
+    TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -142,6 +142,18 @@ where
         let mut narrowed = filter.clone();
         narrowed.project = project;
         Ok(self.reader.span_series(org, &narrowed).await?)
+    }
+
+    pub async fn span_table(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &TableFilter,
+    ) -> Result<Vec<TableRow>, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        let mut narrowed = filter.clone();
+        narrowed.project = project;
+        Ok(self.reader.span_table(org, &narrowed).await?)
     }
 
     pub async fn facets(

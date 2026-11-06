@@ -245,6 +245,66 @@ impl SeriesResult {
     }
 }
 
+pub const DEFAULT_ROWS: u32 = 20;
+
+pub const MAX_ROWS: u32 = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub query: Query,
+    pub order: Measure,
+    group: Field,
+    rows: u32,
+}
+
+impl TableFilter {
+    pub fn new(
+        window: Window,
+        query: Query,
+        group: Field,
+        order: Measure,
+    ) -> Result<Self, super::errors::BadQuery> {
+        if matches!(group, Field::Duration | Field::TraceId | Field::SpanId) {
+            return Err(super::errors::BadQuery::Shape);
+        }
+        Ok(Self {
+            window,
+            project: None,
+            query,
+            order,
+            group,
+            rows: DEFAULT_ROWS,
+        })
+    }
+
+    #[must_use]
+    pub fn at_most(mut self, asked: u32) -> Self {
+        self.rows = asked.clamp(1, MAX_ROWS);
+        self
+    }
+
+    pub fn group(&self) -> &Field {
+        &self.group
+    }
+
+    pub fn rows(&self) -> u32 {
+        self.rows
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    pub group: Box<str>,
+    pub spans: u64,
+    pub errors: u64,
+    pub average_nanos: f64,
+    pub p50_nanos: f64,
+    pub p95_nanos: f64,
+    pub p99_nanos: f64,
+}
+
 pub const MAX_FACETS: usize = 12;
 
 pub const FACET_VALUES: u32 = 10;
