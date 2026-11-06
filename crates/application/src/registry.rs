@@ -3,9 +3,9 @@ use core::future::Future;
 use ferristrace_domain::{
     AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, ControlPlane, DeployMarks,
-    ExportSource, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions, Memberships,
-    ModelPrices as ModelPriceBook, Orgs, Pages, Postmortems, Projects, Roll, Schedules,
-    SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
+    ExplorerViews, ExportSource, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions,
+    Memberships, ModelPrices as ModelPriceBook, Orgs, Pages, Postmortems, Projects, Roll,
+    Schedules, SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
     UsageHistory,
 };
 
@@ -103,6 +103,8 @@ pub mod domain {
     #[cfg(test)]
     #[derive(Debug)]
     pub struct Probe;
+    #[derive(Debug)]
+    pub struct Views;
 }
 
 pub trait StandingRepos:
@@ -204,6 +206,10 @@ impl<R> TeamRepos for R where
     R: StandingRepos + RecordingRepos + RepoFor<domain::Teams, Repo: Squads>
 {
 }
+
+pub trait ViewRepos: StandingRepos + RepoFor<domain::Views, Repo: ExplorerViews> {}
+
+impl<R> ViewRepos for R where R: StandingRepos + RepoFor<domain::Views, Repo: ExplorerViews> {}
 
 pub trait UsageRepos: StandingRepos + RepoFor<domain::UsageHistory, Repo: UsageHistory> {}
 
@@ -373,6 +379,7 @@ pub trait Repositories:
     + CatalogueRepos
     + RosterRepos
     + TeamRepos
+    + ViewRepos
     + UsageRepos
     + IssueRepos
     + ProvisioningRepos
@@ -398,6 +405,7 @@ impl<R> Repositories for R where
         + CatalogueRepos
         + RosterRepos
         + TeamRepos
+        + ViewRepos
         + UsageRepos
         + IssueRepos
         + ProvisioningRepos

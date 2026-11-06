@@ -25,6 +25,7 @@ pub mod provisioning;
 pub mod releases;
 pub mod status;
 pub mod telemetry;
+pub mod views;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -166,4 +167,8 @@ pub use telemetry::{
     SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, StaticQuota,
     TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered, UsageHistory, UsageLedger,
     UsageMeter, UsageReader, UsageSyncError,
+};
+pub use views::{
+    BadViewDefinition, BadViewName, Creation, ExplorerViews, NewView, Saving, View, ViewChange,
+    ViewDefinition, ViewDesk, ViewError, ViewId, ViewName, ViewSignal, Visibility,
 };

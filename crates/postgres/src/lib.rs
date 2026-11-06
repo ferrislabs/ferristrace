@@ -26,6 +26,7 @@ mod sessions;
 mod status;
 mod teams;
 mod unit_of_work;
+mod views;
 
 pub use accounts::{AccountError, PostgresAccounts};
 pub use agents::PostgresAgents;
@@ -55,3 +56,4 @@ pub use sessions::PostgresSessions;
 pub use status::{PostgresStatusOutbox, PostgresStatusPages, PostgresStatusSubscribers};
 pub use teams::PostgresTeams;
 pub use unit_of_work::{Postgres, SharedTx};
+pub use views::PostgresViews;
