@@ -28,6 +28,8 @@ pub enum BadQuery {
     Large,
     #[error("a group holds at least one condition")]
     Empty,
+    #[error("this field does not exist on this signal")]
+    Field,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

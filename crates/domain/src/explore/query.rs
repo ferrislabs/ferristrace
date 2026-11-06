@@ -7,6 +7,7 @@ const MAX_TEXT: usize = 512;
 const MAX_KEY: usize = 128;
 
 const STATUSES: [&str; 3] = ["unset", "ok", "error"];
+const SEVERITIES: [&str; 6] = ["trace", "debug", "info", "warn", "error", "fatal"];
 const KINDS: [&str; 6] = [
     "unspecified",
     "internal",
@@ -68,7 +69,27 @@ pub enum Field {
     HttpStatusCode,
     TraceId,
     SpanId,
+    Severity,
+    Body,
     Attribute(AttributeKey),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Spans,
+    Logs,
+}
+
+impl Field {
+    pub fn belongs_to(&self, stream: Stream) -> bool {
+        match self {
+            Self::Service | Self::TraceId | Self::SpanId | Self::Attribute(_) => true,
+            Self::Name | Self::Status | Self::Kind | Self::Duration | Self::HttpStatusCode => {
+                stream == Stream::Spans
+            }
+            Self::Severity | Self::Body => stream == Stream::Logs,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +181,8 @@ impl Clause {
         match &self.field {
             Field::Attribute(_) => Ok(()),
             Field::Duration | Field::HttpStatusCode => self.numeric(),
-            Field::Service | Field::Name => self.textual(),
+            Field::Service | Field::Name | Field::Body => self.textual(),
+            Field::Severity => self.among(&SEVERITIES),
             Field::Status => self.among(&STATUSES),
             Field::Kind => self.among(&KINDS),
             Field::TraceId => self.hex(32),
@@ -277,6 +299,20 @@ impl Query {
 
     pub fn filter(&self) -> Option<&Expr> {
         self.filter.as_ref()
+    }
+
+    pub fn fits(&self, stream: Stream) -> Result<(), BadQuery> {
+        fn walk(expr: &Expr, stream: Stream) -> bool {
+            match expr {
+                Expr::Is(clause) => clause.field().belongs_to(stream),
+                Expr::Not(inner) => walk(inner, stream),
+                Expr::All(parts) | Expr::Any(parts) => parts.iter().all(|part| walk(part, stream)),
+            }
+        }
+        match &self.filter {
+            Some(expr) if !walk(expr, stream) => Err(BadQuery::Field),
+            _ => Ok(()),
+        }
     }
 
     pub fn is_anything(&self) -> bool {
@@ -519,5 +555,37 @@ mod tests {
     fn the_empty_query_asks_for_everything() {
         assert!(Query::anything().is_anything());
         assert!(Query::new(eq("a", "1")).unwrap().filter().is_some());
+    }
+
+    #[test]
+    fn severity_takes_a_known_level_and_body_takes_text() {
+        assert!(Clause::new(Field::Severity, Op::Eq, Value::One(text("error"))).is_ok());
+        assert_eq!(
+            Clause::new(Field::Severity, Op::Eq, Value::One(text("loud"))),
+            Err(BadQuery::Value)
+        );
+        assert!(Clause::new(Field::Body, Op::Contains, Value::One(text("declined"))).is_ok());
+        assert_eq!(
+            Clause::new(Field::Body, Op::Gt, Value::One(number(1.0))),
+            Err(BadQuery::Shape)
+        );
+    }
+
+    #[test]
+    fn a_query_only_holds_fields_its_stream_has() {
+        let level = Query::new(is(Field::Severity, Op::Eq, Value::One(text("error")))).unwrap();
+        let named = Query::new(is(Field::Name, Op::Eq, Value::One(text("pay")))).unwrap();
+        let shared = Query::new(Expr::All(vec![
+            is(Field::Service, Op::Eq, Value::One(text("checkout"))),
+            eq("order.id", "o-1"),
+        ]))
+        .unwrap();
+
+        assert_eq!(level.fits(Stream::Logs), Ok(()));
+        assert_eq!(level.fits(Stream::Spans), Err(BadQuery::Field));
+        assert_eq!(named.fits(Stream::Spans), Ok(()));
+        assert_eq!(named.fits(Stream::Logs), Err(BadQuery::Field));
+        assert_eq!(shared.fits(Stream::Logs), Ok(()));
+        assert_eq!(shared.fits(Stream::Spans), Ok(()));
     }
 }

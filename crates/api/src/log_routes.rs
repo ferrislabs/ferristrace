@@ -5,18 +5,21 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    BadLogQuery, Buckets, ExploreError, LogBucket, LogCursor, LogPage, LogQuery, LogRecord,
-    ProjectId, Severity, TenantId, TraceId, Window,
+    AttributeKey, BadLogQuery, BadQuery, Buckets, ExploreError, FacetFilter, LogBucket, LogCursor,
+    LogPage, LogQuery, LogRecord, ProjectId, Query as LogFilter, Severity, Stream, TenantId,
+    TraceId, Window,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
+use crate::explore_routes::{Catalogued, Counted as FacetCounts, Faceting, Keys, Values};
 use crate::placement::{Misplaced, PlacementBody};
+use crate::query_body::ExprBody;
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -28,6 +31,14 @@ where
     Router::new()
         .route("/api/orgs/{org}/logs", get(search::<S>))
         .route("/api/orgs/{org}/logs/histogram", get(histogram::<S>))
+        .route("/api/orgs/{org}/logs/search", post(search_by_query::<S>))
+        .route("/api/orgs/{org}/logs/series", post(histogram_by_query::<S>))
+        .route("/api/orgs/{org}/logs/facets", post(facets::<S>))
+        .route("/api/orgs/{org}/log-attributes", get(attributes::<S>))
+        .route(
+            "/api/orgs/{org}/log-attributes/{key}/values",
+            get(attribute_values::<S>),
+        )
         .with_state(state)
 }
 
@@ -297,6 +308,8 @@ pub enum LogRefused {
     Placement(#[from] Misplaced),
     #[error(transparent)]
     OutOfRange(#[from] BadLogQuery),
+    #[error(transparent)]
+    Query(#[from] BadQuery),
     #[error("the logs could not be read")]
     Unavailable,
 }
@@ -318,7 +331,9 @@ impl IntoResponse for LogRefused {
             Self::Reaching(refused) => return refused.into_response(),
             Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg => StatusCode::NOT_FOUND,
-            Self::Window | Self::Malformed(_) | Self::Placement(_) => StatusCode::BAD_REQUEST,
+            Self::Window | Self::Malformed(_) | Self::Placement(_) | Self::Query(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::OutOfRange(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
@@ -327,4 +342,155 @@ impl IntoResponse for LogRefused {
         }
         (status, self.to_string()).into_response()
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Searching {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    trace: Option<String>,
+    #[serde(default)]
+    before: Option<String>,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    buckets: Option<u32>,
+}
+
+impl Searching {
+    fn log_query(self, paged: bool) -> Result<(LogQuery, Option<u32>), LogRefused> {
+        let window = Window::new(
+            self.from.saturating_mul(NANOS_PER_MILLI),
+            self.to.saturating_mul(NANOS_PER_MILLI),
+        )
+        .map_err(|_| LogRefused::Window)?;
+        let mut query = LogQuery::over(window);
+        query.query = match self.query {
+            Some(body) => body.query(Stream::Logs)?,
+            None => LogFilter::anything(),
+        };
+        query.project = self.project.map(ProjectId::new);
+        query.trace = self.trace.as_deref().map(trace_of).transpose()?;
+        if paged {
+            query.before = self.before.as_deref().map(cursor_of).transpose()?;
+            if let Some(limit) = self.limit {
+                query = query.at_most(limit)?;
+            }
+        }
+        Ok((query, self.buckets))
+    }
+}
+
+async fn search_by_query<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<Searching>,
+) -> Result<Json<Records>, LogRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let (query, _) = asked.log_query(true)?;
+    let page = state
+        .app
+        .search_logs(&who, TenantId::new(org), &query)
+        .await?;
+    Ok(Json(page.into()))
+}
+
+async fn histogram_by_query<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<Searching>,
+) -> Result<Json<Histogram>, LogRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let (query, buckets) = asked.log_query(false)?;
+    let buckets = buckets.map_or(Ok(Buckets::default()), Buckets::try_from)?;
+    let counted = state
+        .app
+        .log_histogram(&who, TenantId::new(org), &query, buckets)
+        .await?;
+    Ok(Json(Histogram {
+        buckets: counted.into_iter().map(Into::into).collect(),
+    }))
+}
+
+async fn facets<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<Faceting>,
+) -> Result<Json<FacetCounts>, LogRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let window = Window::new(
+        asked.from.saturating_mul(NANOS_PER_MILLI),
+        asked.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LogRefused::Window)?;
+    let query = match asked.query {
+        Some(body) => body.query(Stream::Logs)?,
+        None => LogFilter::anything(),
+    };
+    let fields = asked
+        .facets
+        .into_iter()
+        .map(|field| field.field(Stream::Logs))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut filter = FacetFilter::new(window, query, fields, false)?;
+    filter.project = asked.project.map(ProjectId::new);
+    let found = state
+        .app
+        .log_facets(&who, TenantId::new(org), &filter)
+        .await?;
+    Ok(Json(found.into()))
+}
+
+async fn attributes<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Keys>, LogRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let filter = catalogued.filter().map_err(|_| LogRefused::Window)?;
+    let seen = state
+        .app
+        .log_attributes(&who, TenantId::new(org), &filter)
+        .await?;
+    Ok(Json(Keys::of(seen)))
+}
+
+async fn attribute_values<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, key)): Path<(Uuid, String)>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Values>, LogRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let key = AttributeKey::new(&key)?;
+    let filter = catalogued.filter().map_err(|_| LogRefused::Window)?;
+    let seen = state
+        .app
+        .log_attribute_values(&who, TenantId::new(org), &key, &filter)
+        .await?;
+    Ok(Json(Values::of(seen)))
 }

@@ -36,10 +36,34 @@ impl Serialize for Param {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Table {
+    #[default]
+    Spans,
+    Logs,
+}
+
+impl Table {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Spans => "spans",
+            Self::Logs => "logs",
+        }
+    }
+
+    fn time(self) -> &'static str {
+        match self {
+            Self::Spans => "start_time",
+            Self::Logs => "time",
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct Compiled {
     expression: String,
     params: Vec<Param>,
+    table: Table,
 }
 
 impl Compiled {
@@ -49,6 +73,25 @@ impl Compiled {
             compiled.expression = compiled.expr(expr);
         }
         compiled
+    }
+
+    pub(crate) fn of_logs(query: &Query) -> Self {
+        let mut compiled = Self {
+            table: Table::Logs,
+            ..Self::default()
+        };
+        if let Some(expr) = query.filter() {
+            compiled.expression = compiled.expr(expr);
+        }
+        compiled
+    }
+
+    pub(crate) fn expression(&self) -> &str {
+        &self.expression
+    }
+
+    pub(crate) fn params(&self) -> &[Param] {
+        &self.params
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -93,8 +136,34 @@ impl Compiled {
         limit: u32,
         ignore_own: bool,
     ) -> (String, Vec<Param>) {
-        let mut compiled = Self::default();
-        let column = Column::of(field);
+        Self::facet_in(
+            Table::Spans,
+            field,
+            query,
+            tenant,
+            window,
+            project,
+            limit,
+            ignore_own,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn facet_in(
+        table: Table,
+        field: &Field,
+        query: &Query,
+        tenant: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+        limit: u32,
+        ignore_own: bool,
+    ) -> (String, Vec<Param>) {
+        let mut compiled = Self {
+            table,
+            ..Self::default()
+        };
+        let column = Column::of(field, table);
         let value = compiled.text_of(&column);
         compiled.scoped(tenant, window, project);
         let present = compiled.present_of(&column);
@@ -105,10 +174,12 @@ impl Compiled {
         };
         let filter = narrowed.filter().map(|expr| compiled.expr(expr));
         let mut sql = format!(
-            "SELECT {value} AS value, count() AS spans FROM spans \
-             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
-               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?) \
-               AND ({present})"
+            "SELECT {value} AS value, count() AS spans FROM {name} \
+             WHERE tenant_id = ? AND {time} >= fromUnixTimestamp64Nano(?) \
+               AND {time} < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?) \
+               AND ({present})",
+            name = table.name(),
+            time = table.time(),
         );
         if let Some(filter) = filter {
             sql.push_str(" AND (");
@@ -153,7 +224,7 @@ impl Compiled {
         let (group, measure, query) = (filter.group(), filter.measure, &filter.query);
         let (window, project, step_nanos) = (filter.window, filter.project, filter.step_nanos());
         let mut compiled = Self::default();
-        let column = group.map(Column::of);
+        let column = group.map(|field| Column::of(field, Table::Spans));
         let selected = column
             .as_ref()
             .map_or_else(|| "''".to_owned(), |column| compiled.text_of(column));
@@ -199,7 +270,7 @@ impl Compiled {
 
     pub(crate) fn table(filter: &TableFilter, tenant: TenantId) -> (String, Vec<Param>) {
         let mut compiled = Self::default();
-        let column = Column::of(filter.group());
+        let column = Column::of(filter.group(), Table::Spans);
         let selected = compiled.text_of(&column);
         compiled.scoped(tenant, filter.window, filter.project);
         let present = compiled.present_of(&column);
@@ -302,7 +373,7 @@ impl Compiled {
     }
 
     fn condition(&mut self, condition: &Clause) -> String {
-        let column = Column::of(condition.field());
+        let column = Column::of(condition.field(), self.table);
         match condition.test() {
             Test::Eq(scalar) => self.equals(&column, scalar),
             Test::Ne(scalar) => format!("NOT ({})", self.equals(&column, scalar)),
@@ -357,7 +428,7 @@ impl Compiled {
             Column::Plain(sql) => (*sql).to_owned(),
             Column::Measured(sql) => format!("toString({sql})"),
             Column::HttpStatus => "toString(http_status_code)".to_owned(),
-            Column::Attribute(key) => format!("attributes[{}]", self.text(key)),
+            Column::Attribute(key, table) => format!("{}[{}]", held(*table), self.text(key)),
         }
     }
 
@@ -366,7 +437,9 @@ impl Compiled {
             Column::Plain(sql) => format!("toFloat64OrNull({sql})"),
             Column::Measured(sql) => (*sql).to_owned(),
             Column::HttpStatus => "http_status_code".to_owned(),
-            Column::Attribute(key) => format!("toFloat64OrNull(attributes[{}])", self.text(key)),
+            Column::Attribute(key, table) => {
+                format!("toFloat64OrNull({}[{}])", held(*table), self.text(key))
+            }
         }
     }
 
@@ -375,8 +448,22 @@ impl Compiled {
             Column::Plain(sql) => format!("{sql} != ''"),
             Column::Measured(_) => "1".to_owned(),
             Column::HttpStatus => "http_status_code IS NOT NULL".to_owned(),
-            Column::Attribute(key) => format!("mapContains(attributes, {})", self.text(key)),
+            Column::Attribute(key, Table::Spans) => {
+                format!("mapContains(attributes, {})", self.text(key))
+            }
+            Column::Attribute(key, Table::Logs) => {
+                let first = self.text(key);
+                let second = self.text(key);
+                format!("(mapContains(attributes, {first}) OR mapContains(resource, {second}))")
+            }
         }
+    }
+}
+
+fn held(table: Table) -> &'static str {
+    match table {
+        Table::Spans => "attributes",
+        Table::Logs => "mapUpdate(resource, attributes)",
     }
 }
 
@@ -398,11 +485,22 @@ enum Column {
     Plain(&'static str),
     Measured(&'static str),
     HttpStatus,
-    Attribute(String),
+    Attribute(String, Table),
 }
 
 impl Column {
-    fn of(field: &Field) -> Self {
+    fn of(field: &Field, table: Table) -> Self {
+        if table == Table::Logs {
+            return match field {
+                Field::Service => Self::Plain("service_name"),
+                Field::Severity => Self::Plain("toString(severity)"),
+                Field::Body => Self::Plain("body"),
+                Field::TraceId => Self::Plain("lower(hex(trace_id))"),
+                Field::SpanId => Self::Plain("lower(hex(span_id))"),
+                Field::Attribute(key) => Self::Attribute(key.as_str().to_owned(), table),
+                _ => Self::Plain("''"),
+            };
+        }
         match field {
             Field::Service => Self::Plain("service_name"),
             Field::Name => Self::Plain("name"),
@@ -412,7 +510,8 @@ impl Column {
             Field::SpanId => Self::Plain("lower(hex(span_id))"),
             Field::Duration => Self::Measured(DURATION),
             Field::HttpStatusCode => Self::HttpStatus,
-            Field::Attribute(key) => Self::Attribute(key.as_str().to_owned()),
+            Field::Attribute(key) => Self::Attribute(key.as_str().to_owned(), table),
+            Field::Severity | Field::Body => Self::Plain("''"),
         }
     }
 }

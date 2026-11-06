@@ -7,8 +7,9 @@ use ferristrace_clickhouse::{
     open_span_store,
 };
 use ferristrace_domain::{
-    Buckets, LogBucket, LogQuery, LogReader, LogRecord, LogSink, ProjectId, RetentionDays, Scope,
-    Severity, SpanId, TenantId, TraceId, Window,
+    AttributeFilter, AttributeKey, Buckets, Clause, Expr, FacetFilter, Field, LogBucket, LogQuery,
+    LogReader, LogRecord, LogSink, Op, ProjectId, Query, RetentionDays, Scalar, Scope, Severity,
+    SpanId, TenantId, TraceId, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -424,4 +425,136 @@ async fn an_opened_span_store_writes_and_reads_logs_too() {
         .await
         .expect("a page");
     assert_eq!(bodies(&page.records), vec!["hello"]);
+}
+
+fn tree(expr: Expr) -> Query {
+    Query::new(expr).expect("a valid query")
+}
+
+fn is(field: Field, op: Op, value: Value) -> Expr {
+    Expr::Is(Clause::new(field, op, value).expect("a valid clause"))
+}
+
+fn text(word: &str) -> Value {
+    Value::One(Scalar::Text(word.into()))
+}
+
+fn key(name: &str) -> Field {
+    Field::Attribute(AttributeKey::new(name).expect("a valid key"))
+}
+
+async fn found(client: &Client, query: Query) -> Vec<String> {
+    let mut asked = LogQuery::over(the_hour());
+    asked.query = query;
+    let page = ClickhouseLogReader::new(client.clone())
+        .search(org(1), &asked)
+        .await
+        .expect("the logs read");
+    page.records.iter().map(|r| r.body.to_string()).collect()
+}
+
+#[tokio::test]
+async fn a_query_tree_filters_on_severity_body_and_attributes() {
+    let Some(client) = prepared("ferristrace_logs_tree").await else {
+        return;
+    };
+    a_mixed_day(&client).await;
+
+    let errors = found(&client, tree(is(Field::Severity, Op::Eq, text("error")))).await;
+    let either = found(
+        &client,
+        tree(Expr::Any(vec![
+            is(Field::Severity, Op::Eq, text("fatal")),
+            is(Field::Body, Op::Contains, text("declined")),
+        ])),
+    )
+    .await;
+    let routed = found(&client, tree(is(key("http.route"), Op::Eq, text("/pay")))).await;
+    let resource = found(
+        &client,
+        tree(Expr::All(vec![
+            is(key("host.name"), Op::Eq, text("web-1")),
+            Expr::Not(Box::new(is(Field::Service, Op::Eq, text("checkout")))),
+        ])),
+    )
+    .await;
+    let absent = found(
+        &client,
+        tree(Expr::Not(Box::new(is(
+            key("http.route"),
+            Op::Exists,
+            Value::Nothing,
+        )))),
+    )
+    .await;
+
+    assert_eq!(errors, ["Card DECLINED by issuer", "cart lost"]);
+    assert_eq!(either, ["out of memory", "Card DECLINED by issuer"]);
+    assert_eq!(routed, ["Card DECLINED by issuer"]);
+    assert_eq!(resource, ["Card DECLINED by issuer", "retrying the issuer"]);
+    assert!(!absent.contains(&"Card DECLINED by issuer".to_owned()));
+    assert_eq!(absent.len(), 4);
+}
+
+#[tokio::test]
+async fn a_key_with_a_quote_is_bound_as_data() {
+    let Some(client) = prepared("ferristrace_logs_inject").await else {
+        return;
+    };
+    a_mixed_day(&client).await;
+
+    let none = found(&client, tree(is(key("x' OR 1=1 --"), Op::Eq, text("y")))).await;
+
+    assert!(none.is_empty());
+}
+
+#[tokio::test]
+async fn facets_count_values_without_the_clauses_on_their_own_field() {
+    let Some(client) = prepared("ferristrace_logs_facets").await else {
+        return;
+    };
+    a_mixed_day(&client).await;
+    let filter = FacetFilter::new(
+        the_hour(),
+        tree(is(Field::Severity, Op::Eq, text("error"))),
+        vec![Field::Service, Field::Severity],
+        false,
+    )
+    .expect("a valid filter");
+
+    let facets = ClickhouseLogReader::new(client)
+        .facets(org(1), &filter)
+        .await
+        .expect("the facets read");
+
+    let services = &facets.fields[0].values;
+    let levels = &facets.fields[1].values;
+    assert_eq!(services.len(), 2);
+    assert!(services.iter().all(|seen| seen.spans == 1));
+    assert!(levels.len() > 1, "severity ignores its own clause");
+}
+
+#[tokio::test]
+async fn attributes_list_both_log_and_resource_keys_with_their_values() {
+    let Some(client) = prepared("ferristrace_logs_attributes").await else {
+        return;
+    };
+    a_mixed_day(&client).await;
+    let reader = ClickhouseLogReader::new(client);
+    let filter = AttributeFilter::over(the_hour());
+
+    let keys = reader.attributes(org(1), &filter).await.expect("keys");
+    let values = reader
+        .attribute_values(
+            org(1),
+            &AttributeKey::new("host.name").expect("a key"),
+            &filter,
+        )
+        .await
+        .expect("values");
+
+    let names: Vec<&str> = keys.iter().map(|seen| &*seen.key).collect();
+    assert!(names.contains(&"host.name") && names.contains(&"http.route"));
+    assert_eq!(values.len(), 1);
+    assert_eq!(&*values[0].value, "web-1");
 }

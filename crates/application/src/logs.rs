@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    Buckets, ExploreError, LogBucket, LogPage, LogQuery, LogSearch, Reader, Readers, TenantId,
-    Whoami,
+    AttributeFilter, AttributeKey, Buckets, ExploreError, FacetFilter, Facets, LogBucket, LogPage,
+    LogQuery, LogSearch, Reader, Readers, SeenAttribute, SeenValue, TenantId, Whoami,
 };
 
 use crate::registry::ReadRepos;
@@ -44,6 +44,61 @@ where
             reader,
         )
         .histogram(who, org, query, buckets)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn log_facets(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &FacetFilter,
+    ) -> Result<Facets, ExploreError> {
+        let Some(reader) = &self.log_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        LogSearch::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .facets(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn log_attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let Some(reader) = &self.log_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        LogSearch::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attributes(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn log_attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let Some(reader) = &self.log_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        LogSearch::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attribute_values(who, org, key, filter)
         .await
     }
 }
