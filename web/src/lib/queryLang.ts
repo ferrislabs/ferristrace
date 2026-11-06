@@ -1,5 +1,5 @@
 import {
-  BUILT_INS, KINDS, STATUSES, decode, kindOf, opsFor, toWire,
+  BUILT_INS, CHOICES, decode, kindOf, opsFor, toWire,
   type BuiltIn, type Chip, type FieldRef, type Op, type Scalar,
 } from './traceQuery'
 
@@ -226,8 +226,8 @@ class Parser {
   }
 
   private checkBuiltIn(name: BuiltIn, scalars: Scalar[], start: number): void {
-    if (name === 'status' || name === 'kind') {
-      const known = name === 'status' ? STATUSES : KINDS
+    const known = CHOICES[name]
+    if (known) {
       const wrong = scalars.find((one) => !known.includes(String(one)))
       if (wrong !== undefined) throw new Failure(`${name} is one of ${known.join(', ')}`, start)
     }

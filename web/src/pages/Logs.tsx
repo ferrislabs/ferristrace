@@ -1,81 +1,31 @@
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
-import { Braces, ChevronRight, Copy, Plus, Radio, Search, Waypoints, X } from 'lucide-react'
+import { Boxes, Braces, ChevronRight, Copy, ListFilter, Radio, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParam } from '@/lib/router'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { InputGroup, NativeSelect } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Kbd } from '@/components/ui/misc'
 import { EmptyState, PageHeader, SeverityBadge } from '@/components/ft/bits'
 import { AttachToIncident } from '@/components/ft/AttachToIncident'
-import {
-  ANY,
-  SEVERITIES,
-  isPinned,
-  msOf,
-  useLogHistogram,
-  useLogs,
-  type Bucket,
-  type LogQuery,
-  type LogRecord,
-} from '@/data/logs'
-import { useServiceNames } from '@/data/services'
-import { isPlaced, usePlacement, type Placement } from '@/data/placement'
+import { Facets } from '@/components/ft/Facets'
+import { FilterBar } from '@/components/ft/FilterBar'
+import { LogHistogram } from '@/components/ft/Histogram'
 import { PlacementChips, PlacementPicker, placedCount } from '@/components/ft/Placement'
-import { Filters } from '@/components/ft/Filters'
+import { QueryBar } from '@/components/ft/QueryBar'
+import { ViewsPanel, ViewsToggle, useViewsState } from '@/components/ft/Views'
+import { legacyText, legacyZoom, msOf, useLogExplorer, type LogRecord } from '@/data/logs'
+import { isPlaced, NOWHERE, usePlacement, type Placement } from '@/data/placement'
+import type { Definition } from '@/data/views'
 import { ApiError, because } from '@/auth/client'
-import { shortId, stamp } from '@/lib/format'
-import { useSettled } from '@/lib/settle'
-import type { Sev } from '@/lib/otel'
+import { useZoom } from '@/lib/bounds'
+import { shortId } from '@/lib/format'
+import { isChip, itemsText, normalise, parse, queryTextOf, type Node } from '@/lib/queryLang'
+import { SignalProvider } from '@/lib/signal'
+import type { Chip } from '@/lib/traceQuery'
 import { cn } from '@/lib/utils'
 import { useWindow } from '@/lib/window'
-
-const BAR: Record<Sev, string> = {
-  trace: 'bg-sev-trace-bd',
-  debug: 'bg-sev-debug-fg',
-  info: 'bg-sev-info-fg',
-  warn: 'bg-sev-warn-bd',
-  error: 'bg-sev-error-fg',
-  fatal: 'bg-sev-fatal-bg',
-}
-
-function decode(raw: string | undefined): LogQuery {
-  if (!raw) return ANY
-  const p = new URLSearchParams(raw)
-  const number = (key: string) => {
-    const value = Number(p.get(key))
-    return p.get(key) && Number.isFinite(value) && value > 0 ? value : null
-  }
-  const from = number('from')
-  const to = number('to')
-  const pinned = from !== null && to !== null && from < to
-  return {
-    ...ANY,
-    fromMs: pinned ? from : null,
-    toMs: pinned ? to : null,
-    services: p.getAll('service'),
-    severities: p.getAll('severity').filter((s): s is Sev => (SEVERITIES as string[]).includes(s)),
-    q: p.get('q') ?? '',
-    attrs: p.getAll('attr'),
-    trace: p.get('trace') ?? '',
-  }
-}
-
-function encode(query: LogQuery): string | undefined {
-  const p = new URLSearchParams()
-  if (isPinned(query)) {
-    p.set('from', String(query.fromMs))
-    p.set('to', String(query.toMs))
-  }
-  for (const service of query.services) p.append('service', service)
-  for (const severity of query.severities) p.append('severity', severity)
-  if (query.q) p.set('q', query.q)
-  for (const attr of query.attrs) p.append('attr', attr)
-  if (query.trace) p.set('trace', query.trace)
-  const out = p.toString()
-  return out || undefined
-}
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0')
 
@@ -88,37 +38,6 @@ function clock(ns: number, withDate: boolean): string {
   return withDate ? `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}` : time
 }
 
-const total = (bucket: Bucket) => SEVERITIES.reduce((sum, level) => sum + bucket.counts[level], 0)
-
-function Histogram({ buckets, windowMs, onPick }: { buckets: Bucket[]; windowMs: number; onPick: (from: number, to: number) => void }) {
-  const peak = Math.max(1, ...buckets.map(total))
-  const width = buckets.length > 1 ? msOf(buckets[1].start_ns - buckets[0].start_ns) : Math.max(1, Math.round(windowMs / 60))
-  return (
-    <div className="flex h-24 items-end gap-px rounded-md border bg-card px-2 pt-2" role="group" aria-label="Log volume by severity, select a bar to narrow the window">
-      {buckets.map((bucket) => {
-        const sum = total(bucket)
-        const start = msOf(bucket.start_ns)
-        const label = `${stamp(start)}, ${sum} record${sum === 1 ? '' : 's'}`
-        return (
-          <button
-            key={bucket.start_ns}
-            type="button"
-            title={label}
-            aria-label={label}
-            disabled={sum === 0}
-            onClick={() => onPick(start, start + width)}
-            className="flex h-full min-w-0 flex-1 cursor-pointer flex-col justify-end rounded-sm hover:bg-row-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
-          >
-            <span className="flex w-full flex-col-reverse" style={{ height: `${(sum / peak) * 100}%` }}>
-              {SEVERITIES.map((level) => bucket.counts[level] > 0 ? <span key={level} className={BAR[level]} style={{ height: `${(bucket.counts[level] / sum) * 100}%` }} /> : null)}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function Row({ record, index, open, focused, onToggle, dated, onPlace, onAttr }: { record: LogRecord; index: number; open: boolean; focused: boolean; onToggle: () => void; dated: boolean; onPlace: (part: Partial<Placement>) => void; onAttr: (pair: string) => void }) {
   const hot = record.severity === 'error' || record.severity === 'fatal'
   const attributes = Object.entries(record.attributes)
@@ -129,7 +48,7 @@ function Row({ record, index, open, focused, onToggle, dated, onPlace, onAttr }:
   }
   return (
     <div role="listitem" data-row={index} className="border-b border-border-subtle">
-      <button type="button" aria-expanded={open} onClick={onToggle} className={cn('grid w-full cursor-pointer grid-cols-[16px_128px_70px_140px_minmax(0,1fr)] items-center gap-3 px-5 py-1.5 text-left hover:bg-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-md:grid-cols-[16px_70px_minmax(0,1fr)]', open && 'bg-accent-subtle', focused && 'outline-2 -outline-offset-2 outline-ring')}>
+      <button type="button" aria-expanded={open} onClick={onToggle} className={cn('grid w-full cursor-pointer grid-cols-[16px_128px_70px_140px_minmax(0,1fr)] items-center gap-3 px-3 py-1.5 text-left hover:bg-row-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-md:grid-cols-[16px_70px_minmax(0,1fr)]', open && 'bg-accent-subtle', focused && 'outline-2 -outline-offset-2 outline-ring')}>
         <ChevronRight className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />
         <time className="font-mono text-caption text-muted-foreground max-md:hidden" dateTime={new Date(msOf(record.time_ns)).toISOString()}>{clock(record.time_ns, dated)}</time>
         <SeverityBadge level={record.severity} />
@@ -137,7 +56,7 @@ function Row({ record, index, open, focused, onToggle, dated, onPlace, onAttr }:
         <span className={cn('truncate font-mono text-[12.5px]', hot && 'text-destructive-text')}>{record.body}</span>
       </button>
       {open ? (
-        <div className="flex flex-col gap-2 bg-sidebar px-5 py-3 pl-[52px]">
+        <div className="flex flex-col gap-2 bg-sidebar px-3 py-3 pl-[40px]">
           <pre className="m-0 whitespace-pre-wrap break-all font-mono text-[12.5px]">{record.body}</pre>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => copy(false)}><Copy aria-hidden />Copy body</Button>
@@ -176,48 +95,84 @@ function Pairs({ title, pairs, onPick }: { title: string; pairs: [string, string
   )
 }
 
-function Chip({ children, onRemove, label }: { children: React.ReactNode; onRemove: () => void; label: string }) {
+export function Logs() {
   return (
-    <span className="inline-flex h-6 items-center gap-1 rounded-sm border bg-muted pl-2 pr-1 font-mono text-caption">
-      {children}
-      <button type="button" aria-label={label} onClick={onRemove} className="inline-flex size-4 cursor-pointer items-center justify-center rounded-sm hover:bg-border-subtle focus-visible:outline-2 focus-visible:outline-ring"><X className="size-3" aria-hidden /></button>
-    </span>
+    <SignalProvider value="logs">
+      <LogsPage />
+    </SignalProvider>
   )
 }
 
-export function Logs() {
-  const navigate = useRouterNavigate()
-  const raw = useSearchParam('f')
-  const span = useWindow()
-  const query = useMemo(() => ({ ...decode(raw), rangeMs: span.ms }), [raw, span.ms])
-  const [typed, setTyped] = useState(query.q)
-  const [attr, setAttr] = useState('')
+const FIRST_PAGE = 100
+
+function LogsPage() {
+  const goTo = useRouterNavigate()
+  const { ms: windowMs, label: windowLabel } = useWindow()
+  const rawQuery = useSearchParam('q')
+  const legacy = useSearchParam('f')
+  const viewParam = useSearchParam('view')
+  const zoom = useZoom()
+  const text = useMemo(() => (rawQuery !== undefined ? queryTextOf(rawQuery) : legacyText(legacy)), [rawQuery, legacy])
+  const parsed = useMemo(() => parse(text), [text])
+  const items = useMemo<Node[]>(() => (parsed.ok ? parsed.items : []), [parsed])
+  const chips = useMemo(() => items.filter(isChip), [items])
+  const others = useMemo(() => items.filter((item) => !isChip(item)), [items])
+  const { placement, place } = usePlacement()
   const [live, setLive] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [cursor, setCursor] = useState(-1)
+  const [panel, setPanel] = useState<'facets' | 'views'>('facets')
+  const [mobileOpen, setMobileOpen] = useState(false)
   const list = useRef<HTMLDivElement>(null)
-  const settled = useSettled(typed)
 
-  const { placement, place } = usePlacement()
-  const apply = (part: Partial<LogQuery>, keepPlacement = true) => {
-    const f = encode({ ...query, ...part })
-    void navigate({ to: '/logs' as never, search: (keepPlacement ? (was: Record<string, unknown>) => ({ ...was, f }) : { f }) as never, replace: true })
+  useEffect(() => {
+    if (legacy === undefined) return
+    const was = legacyZoom(legacy)
+    void goTo({
+      to: '.' as never,
+      search: ((search: Record<string, unknown>) => ({
+        ...search,
+        f: undefined,
+        q: search.q ?? (legacyText(legacy) || undefined),
+        from: was ? was.from : search.from,
+        to: was ? was.to : search.to,
+      })) as never,
+      replace: true,
+    })
+  }, [legacy, goTo])
+
+  const viewKey = viewParam ?? (items.length === 0 ? 'recent' : undefined)
+  const current = useMemo<Definition>(() => ({ q: normalise(text), o: 'started', t: 'traces', m: 'count', g: '' }), [text])
+  const show = (next: Partial<{ q: string; view: string | undefined }>) => {
+    const merged = { q: text, view: viewParam, ...next }
+    void goTo({
+      to: '.' as never,
+      search: ((search: Record<string, unknown>) => ({ ...search, f: undefined, q: merged.q.trim() === '' ? undefined : merged.q, view: merged.view })) as never,
+      replace: true,
+    })
     setOpen(null)
     setCursor(-1)
   }
+  const zoomTo = (from: number, to: number | undefined) => {
+    void goTo({
+      to: '.' as never,
+      search: ((search: Record<string, unknown>) => ({ ...search, from: to === undefined ? undefined : Math.round(from), to: to === undefined ? undefined : Math.round(to) })) as never,
+      replace: true,
+    })
+    setOpen(null)
+    setCursor(-1)
+  }
+  const setItems = (next: Node[]) => show({ q: itemsText(next) })
+  const setChips = (next: Chip[]) => setItems([...others, ...next])
+  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, view: key })
+  const viewsState = useViewsState(current, viewKey, select)
   const placeHere = (part: Partial<Placement>) => { place(part); setOpen(null); setCursor(-1) }
+  const pickAttr = (pair: string) => {
+    const at = pair.indexOf('=')
+    if (at > 0) setItems([...items, { field: { attr: pair.slice(0, at) }, op: 'eq', value: pair.slice(at + 1) }])
+  }
 
-  useEffect(() => {
-    if (settled === typed && settled !== query.q) apply({ q: settled })
-  }, [settled])
-
-  useEffect(() => {
-    setTyped(query.q)
-  }, [query.q])
-
-  const { records, loading, pending, failed, more, older, loadingOlder } = useLogs(query, live, placement)
-  const histogram = useLogHistogram(query, live, placement)
-  const { names } = useServiceNames(query.rangeMs)
+  const { records, loading, pending, failed, more, older, loadingOlder } = useLogExplorer(items, windowMs, FIRST_PAGE, live, placement)
   const ids = useMemo(() => {
     const seen = new Map<string, number>()
     return records.map((record) => {
@@ -227,7 +182,6 @@ export function Logs() {
       return nth === 0 ? base : `${base}#${nth}`
     })
   }, [records])
-  const pickAttr = (pair: string) => { if (!query.attrs.includes(pair)) apply({ attrs: [...query.attrs, pair] }) }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -253,92 +207,92 @@ export function Logs() {
     list.current?.querySelector<HTMLElement>(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
 
-  const windowMs = isPinned(query) ? (query.toMs as number) - (query.fromMs as number) : query.rangeMs
-  const dated = windowMs > 24 * 60 * 60 * 1000
-  const sifting = Boolean(query.services.length || query.severities.length || query.q || query.attrs.length || query.trace || isPlaced(placement))
-  const clear = () => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '' }, false) }
-  const toggle = <T,>(list: T[], one: T) => (list.includes(one) ? list.filter((x) => x !== one) : [...list, one])
-  const addAttr = () => {
-    const value = attr.trim()
-    if (!value.includes('=') || value.startsWith('=') || query.attrs.includes(value)) return
-    apply({ attrs: [...query.attrs, value] })
-    setAttr('')
-  }
-  const range = isPinned(query) ? `${stamp(query.fromMs as number)} to ${stamp(query.toMs as number)}` : `last ${span.label}`
+  const spanMs = zoom ? zoom.to - zoom.from : windowMs
+  const dated = spanMs > 24 * 60 * 60 * 1000
+  const sifting = items.length > 0 || isPlaced(placement)
+  const clear = () => { show({ q: '', view: undefined }); place(NOWHERE) }
   const unconfigured = failed instanceof ApiError && failed.status === 503
-  const pinnedNow = () => (isPinned(query) ? query : { ...query, fromMs: Date.now() - query.rangeMs, toMs: Date.now() })
+  const invalid = failed instanceof ApiError && (failed.status === 422 || failed.status === 400)
+  const range = zoom ? `${new Date(zoom.from).toLocaleString()} to ${new Date(zoom.to).toLocaleString()}` : `last ${windowLabel}`
+  const pinnedNow = () => {
+    const to = zoom ? zoom.to : Date.now()
+    const from = zoom ? zoom.from : to - windowMs
+    return { from, to }
+  }
   const attachment = {
     kind: 'logs' as const,
-    reference: encode(pinnedNow()) ?? '',
-    label: ['Logs', query.services.join(', '), query.severities.join(', '), query.q ? `"${query.q}"` : '', query.trace ? `trace ${query.trace.slice(0, 8)}` : ''].filter(Boolean).join(' · ').slice(0, 200),
+    reference: new URLSearchParams({ query: text, from: String(pinnedNow().from), to: String(pinnedNow().to) }).toString(),
+    label: `Logs · ${text || 'everything'}`.slice(0, 200),
   }
-  const invalid = failed instanceof ApiError && failed.status === 422
 
   return (
     <>
       <PageHeader title="Logs" meta={`Newest first · ${range}${live ? ' · live' : ''}`}>
         <span className="hidden items-center gap-1 text-caption text-muted-foreground lg:inline-flex"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>expand</span>
+        <ViewsToggle state={viewsState} on={panel === 'views'} onToggle={() => { setPanel((was) => (was === 'views' ? 'facets' : 'views')); setMobileOpen(true) }} />
+        <Button size="sm" variant="ghost" className="md:hidden" aria-expanded={mobileOpen} onClick={() => setMobileOpen((was) => !was)}>
+          <ListFilter />Filters{items.length > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{items.length}</span> : null}
+        </Button>
         <AttachToIncident attachment={attachment} />
         <Switch checked={live} onCheckedChange={setLive} label={<span className="inline-flex items-center gap-1.5"><Radio className="size-3.5" aria-hidden />Live</span>} />
       </PageHeader>
-      <Filters active={query.services.length + query.attrs.length + (query.q ? 1 : 0) + (query.trace ? 1 : 0) + placedCount(placement)}>
-      <div className="flex flex-wrap items-center gap-2" role="search">
-        {isPinned(query) ? <Button size="sm" onClick={() => apply({ fromMs: null, toMs: null })}><X aria-hidden />Back to the last {span.label}</Button> : null}
-        <NativeSelect aria-label="Add a service" value="" onChange={(e) => e.target.value && apply({ services: toggle(query.services, e.target.value) })} className="w-[170px]">
-          <option value="">Service: add…</option>
-          {names.filter((n) => !query.services.includes(n)).map((n) => <option key={n} value={n}>{n}</option>)}
-        </NativeSelect>
-        <InputGroup className="w-[300px] max-w-full"><Search aria-hidden /><input aria-label="Search log bodies" placeholder='Search bodies, e.g. "timeout"' value={typed} onChange={(e) => setTyped(e.target.value)} /></InputGroup>
-        <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); addAttr() }}>
-          <InputGroup className="w-[240px] max-w-full"><input aria-label="Attribute filter" placeholder="attribute key=value" className="font-mono" value={attr} onChange={(e) => setAttr(e.target.value)} /></InputGroup>
-          <Button type="submit" variant="outline" size="icon" aria-label="Add attribute filter" disabled={!attr.includes('=')}><Plus aria-hidden /></Button>
-        </form>
-        <Button variant="ghost" size="sm" disabled={!sifting && !isPinned(query)} onClick={() => { setTyped(''); apply({ services: [], severities: [], q: '', attrs: [], trace: '', fromMs: null, toMs: null }, false) }}>Clear</Button>
-      </div>
-      <PlacementPicker placement={placement} onChange={placeHere} windowMs={windowMs} />
-      </Filters>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Severities">
-          {SEVERITIES.map((level) => {
-            const on = query.severities.includes(level)
-            return (
-              <button key={level} type="button" aria-pressed={on} onClick={() => apply({ severities: toggle(query.severities, level) })} className={cn('cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring', query.severities.length > 0 && !on && 'opacity-45')}>
-                <SeverityBadge level={level} />
-              </button>
-            )
-          })}
-        </div>
-        {query.services.map((s) => <Chip key={s} label={`Remove service ${s}`} onRemove={() => apply({ services: query.services.filter((x) => x !== s) })}>service:{s}</Chip>)}
-        {query.attrs.map((a) => <Chip key={a} label={`Remove attribute ${a}`} onRemove={() => apply({ attrs: query.attrs.filter((x) => x !== a) })}>{a}</Chip>)}
-        {query.trace ? <Chip label="Remove trace filter" onRemove={() => apply({ trace: '' })}>trace:{shortId(query.trace)}</Chip> : null}
-      </div>
-      {!unconfigured && !invalid && !histogram.failed && histogram.buckets.length > 0 ? (
-        <Histogram buckets={histogram.buckets} windowMs={windowMs} onPick={(from, to) => apply({ fromMs: from, toMs: to })} />
-      ) : null}
-      {unconfigured ? (
-        <EmptyState title="Logs are not configured">This deployment has no span store, so there are no logs to read. Configure one to see log records here.</EmptyState>
-      ) : invalid ? (
-        <EmptyState title="That search is not valid" actions={<Button size="sm" onClick={clear}>Clear filters</Button>}>{because(failed, 'Check the attribute filters and the trace id.')}</EmptyState>
-      ) : failed ? (
-        <EmptyState title="The logs could not be read">{because(failed, 'The log store did not answer.')}</EmptyState>
-      ) : records.length === 0 ? (
-        <EmptyState title={pending || loading ? 'Reading the logs…' : sifting ? 'No log records match' : 'No logs in this window'} actions={sifting && !pending ? <Button size="sm" onClick={clear}>Clear filters</Button> : null}>
-          {pending || loading ? 'Asking the log store.' : sifting ? 'Try fewer filters, a shorter search, or a wider window.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
-        </EmptyState>
-      ) : (
-        <div className="-mx-4 border-t md:-mx-5">
-          <div role="list" aria-label="Log records" ref={list}>
-            {records.map((record, i) => {
-              const id = ids[i]
-              return <Row key={id} record={record} index={i} dated={dated} open={open === id} focused={i === cursor} onToggle={() => { setOpen(open === id ? null : id); setCursor(i) }} onPlace={placeHere} onAttr={pickAttr} />
-            })}
+      {viewsState.dialog}
+      <div className="grid gap-4 md:grid-cols-[264px_minmax(0,1fr)]">
+        <aside className={cn('min-w-0 md:sticky md:top-[100px] md:max-h-[calc(100vh-116px)] md:self-start md:overflow-y-auto md:pr-1', !mobileOpen && 'max-md:hidden')}>
+          {panel === 'views' ? (
+            <ViewsPanel state={viewsState} viewKey={viewKey} onSelect={select} onClose={() => setPanel('facets')} />
+          ) : (
+            <Facets chips={chips} query={items} onChange={setChips} rangeMs={windowMs} />
+          )}
+        </aside>
+        <div className="flex min-w-0 flex-col gap-3">
+          <QueryBar text={text} onCommit={(next) => show({ q: next })} rangeMs={windowMs} />
+          {!parsed.ok ? <p role="alert" className="m-0 text-caption text-destructive-text">The query in this link is not valid, so nothing is filtered: {parsed.error}.</p> : null}
+          <div className="flex flex-wrap items-center gap-2" role="search">
+            <FilterBar items={items} onChange={setItems} rangeMs={windowMs} />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" aria-label="Kubernetes placement"><Boxes />Kubernetes{placedCount(placement) > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{placedCount(placement)}</span> : null}</Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(560px,calc(100vw-32px))] p-3">
+                <PlacementPicker placement={placement} onChange={placeHere} windowMs={windowMs} />
+              </PopoverContent>
+            </Popover>
+            {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
-          <div className="flex flex-wrap items-center gap-3 px-5 py-3">
-            <span className={cn('text-caption', loading ? 'text-sev-info-fg' : 'text-muted-foreground')}>{records.length} record{records.length === 1 ? '' : 's'} loaded{live ? ', refreshing every 5 s' : ''}.</span>
-            {more ? <Button size="sm" onClick={older} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load older'}</Button> : null}
-          </div>
+          {zoom ? (
+            <div className="flex items-center gap-2 text-caption text-muted-foreground">
+              <span>Zoomed on a period of {Math.max(1, Math.round(spanMs / 1000))} s.</span>
+              <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {windowLabel}</Button>
+            </div>
+          ) : null}
+          {!unconfigured && !invalid ? <LogHistogram items={items} rangeMs={windowMs} onZoom={(from, to) => zoomTo(from, to)} placement={placement} live={live} /> : null}
+          {unconfigured ? (
+            <EmptyState title="Logs are not configured">This deployment has no span store, so there are no logs to read. Configure one to see log records here.</EmptyState>
+          ) : invalid ? (
+            <EmptyState title="That search is not valid" actions={<Button size="sm" onClick={clear}>Clear filters</Button>}>{because(failed, 'Check the query and the filters.')}</EmptyState>
+          ) : failed ? (
+            <EmptyState title="The logs could not be read">{because(failed, 'The log store did not answer.')}</EmptyState>
+          ) : records.length === 0 ? (
+            <EmptyState title={pending || loading ? 'Reading the logs…' : sifting ? 'No log records match' : 'No logs in this window'} actions={sifting && !pending ? <Button size="sm" onClick={clear}>Clear filters</Button> : null}>
+              {pending || loading ? 'Asking the log store.' : sifting ? 'Try fewer filters, a shorter search, or a wider window.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
+            </EmptyState>
+          ) : (
+            <div className="overflow-hidden rounded-lg border">
+              <div role="list" aria-label="Log records" ref={list}>
+                {records.map((record, i) => {
+                  const id = ids[i]
+                  return <Row key={id} record={record} index={i} dated={dated} open={open === id} focused={i === cursor} onToggle={() => { setOpen(open === id ? null : id); setCursor(i) }} onPlace={placeHere} onAttr={pickAttr} />
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                <span className={cn('text-caption', loading ? 'text-sev-info-fg' : 'text-muted-foreground')}>{records.length} record{records.length === 1 ? '' : 's'} loaded{live ? ', refreshing every 5 s' : ''}.</span>
+                {more ? <Button size="sm" onClick={older} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load older'}</Button> : null}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </>
   )
 }

@@ -4,8 +4,9 @@ import { Input } from '@/components/ui/input'
 import { useAttributeKeys, useAttributeValues } from '@/data/attributes'
 import { useServiceNames } from '@/data/services'
 import { opText, parse, suggestAt, valueText, normalise } from '@/lib/queryLang'
-import { BUILT_INS, KINDS, STATUSES, kindOf, opsFor } from '@/lib/traceQuery'
+import { builtInsFor, CHOICES, kindOf, opsFor } from '@/lib/traceQuery'
 import { useSettled } from '@/lib/settle'
+import { useSignal } from '@/lib/signal'
 import { cn } from '@/lib/utils'
 
 type Option = { label: string; insert: string; hint?: string }
@@ -13,6 +14,7 @@ type Option = { label: string; insert: string; hint?: string }
 const LOGIC: Option[] = [{ label: 'AND', insert: 'AND' }, { label: 'OR', insert: 'OR' }]
 
 export function QueryBar({ text, onCommit, rangeMs }: { text: string; onCommit: (text: string) => void; rangeMs: number }) {
+  const signal = useSignal()
   const [draft, setDraft] = useState(text)
   const [cursor, setCursor] = useState(text.length)
   const [focused, setFocused] = useState(false)
@@ -46,7 +48,7 @@ export function QueryBar({ text, onCommit, rangeMs }: { text: string; onCommit: 
     const starts = (label: string) => label.toLowerCase().includes(wanted)
     if (hint.kind === 'field') {
       return [
-        ...BUILT_INS.map<Option>((one) => ({ label: one.name, insert: one.name, hint: one.label })).filter((one) => starts(one.label)),
+        ...builtInsFor(signal).map<Option>((one) => ({ label: one.name, insert: one.name, hint: one.label })).filter((one) => starts(one.label)),
         ...keys.map<Option>((key) => ({ label: key.key, insert: key.key.includes(' ') ? `"${key.key}"` : key.key, hint: key.numeric ? 'number' : 'text' })).filter((one) => starts(one.label)),
       ].slice(0, 14)
     }
@@ -55,7 +57,7 @@ export function QueryBar({ text, onCommit, rangeMs }: { text: string; onCommit: 
     }
     if (hint.kind === 'value' && field) {
       const pool = 'built' in field
-        ? field.built === 'service' ? names : field.built === 'status' ? STATUSES : field.built === 'kind' ? KINDS : []
+        ? field.built === 'service' ? names : CHOICES[field.built] ?? []
         : values.map((one) => one.value)
       const numeric = kindOf(field, false) === 'number'
       return pool.filter(starts).slice(0, 12).map<Option>((value) => ({ label: value, insert: numeric ? value : valueText(value, field) }))

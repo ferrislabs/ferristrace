@@ -41,7 +41,15 @@ Design (10a, server)
 Design (10b, web)
   The Logs page takes the trace explorer's parts: query bar, filter
   chips, facets panel, views panel (signal logs), histogram with brush
-  (stacked by severity). The list keeps its paging and live tail.
+  (total records, the error and fatal share in red). The list keeps its
+  paging and live tail. The query is the url's `q`, the zoom is `from`
+  and `to`, the view is `view`, as on traces. A `SignalProvider` tells
+  the shared parts which signal they serve: its attribute routes, its
+  facet route, its built-in fields and its saved views (`signal=logs`).
+  Built-in views: Recent, Errors, Warnings. The older `f` parameter
+  (incident attachments, alert links, trace pages, the overview) is read
+  once and rewritten as `q`, `from` and `to`. The search and series
+  routes also take the Kubernetes placement fields.
 
 Design (10c)
   A log with a trace id links to the trace; a trace shows its logs.

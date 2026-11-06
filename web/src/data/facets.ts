@@ -3,6 +3,7 @@ import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { boundsOf, useZoom, zoomKey } from '@/lib/bounds'
 import { useScope } from '@/lib/scope'
+import { useSignal } from '@/lib/signal'
 import { bodyOf, type Node } from '@/lib/queryLang'
 import type { FieldRef } from '@/lib/traceQuery'
 
@@ -29,12 +30,13 @@ export function useFacets(
   wanted: FieldRef[],
   duration: boolean,
 ): { facets: Map<string, FacetValue[]>; spread: Spread | null; loading: boolean; failed: unknown } {
+  const signal = useSignal()
   const { active } = useOrganisations()
   const { project } = useScope()
   const zoom = useZoom()
   const asked = wanted.map(key).join('|')
   const { data, isFetching, error } = useQuery({
-    queryKey: ['facets', active?.org, project, rangeMs, items, asked, duration, zoomKey(zoom)],
+    queryKey: ['facets', signal, active?.org, project, rangeMs, items, asked, duration, zoomKey(zoom)],
     enabled: Boolean(active) && (wanted.length > 0 || duration),
     staleTime: STALE_MS,
     placeholderData: keepPreviousData,
@@ -49,7 +51,7 @@ export function useFacets(
       if (project) body.project = project
       const query = bodyOf(items)
       if (query !== undefined) body.query = query
-      const found = await json<{ facets: WireFacet[]; duration: Wire['duration'] }>(await post(`/api/orgs/${active?.org}/traces/facets`, body))
+      const found = await json<{ facets: WireFacet[]; duration: Wire['duration'] }>(await post(`/api/orgs/${active?.org}/${signal === 'logs' ? 'logs' : 'traces'}/facets`, body))
       return {
         facets: new Map(found.facets.map((facet) => [key(fieldOf(facet)), facet.values])),
         spread: found.duration ? { minUs: found.duration.min_us, maxUs: found.duration.max_us } : null,

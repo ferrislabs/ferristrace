@@ -1,3 +1,4 @@
+import { useSignal } from '@/lib/signal'
 import { Building2, Check, Lock, PanelLeft, Pencil, Save, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -8,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import {
-  BUILT_IN, sameDefinition, useChangeView, useDeleteView, useSaveView, useViews,
+  builtInFor, sameDefinition, useChangeView, useDeleteView, useSaveView, useViews,
   type Definition, type SavedView, type Visibility,
 } from '@/data/views'
 import { cn } from '@/lib/utils'
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils'
 type Editing = { kind: 'new' } | { kind: 'edit'; view: SavedView }
 
 export function useViewsState(current: Definition, viewKey: string | undefined, onSelect: (key: string | undefined, definition: Definition) => void) {
+  const signal = useSignal()
   const { views } = useViews()
   const account = useAccount()
   const { active } = useOrganisations()
@@ -23,7 +25,7 @@ export function useViewsState(current: Definition, viewKey: string | undefined, 
   const change = useChangeView()
   const remove = useDeleteView()
 
-  const builtIn = BUILT_IN.find((one) => one.key === viewKey)
+  const builtIn = builtInFor(signal).find((one) => one.key === viewKey)
   const saved = views.find((one) => one.id === viewKey)
   const base = builtIn?.definition ?? saved?.definition
   const dirty = base !== undefined && !sameDefinition(base, current)
@@ -91,10 +93,11 @@ export function ViewsToggle({ state, on, onToggle }: { state: ViewsState; on: bo
 }
 
 export function ViewsPanel({ state, viewKey, onSelect, onClose }: { state: ViewsState; viewKey: string | undefined; onSelect: (key: string | undefined, definition: Definition) => void; onClose: () => void }) {
+  const signal = useSignal()
   const [search, setSearch] = useState('')
   const wanted = search.trim().toLowerCase()
   const matches = <T extends { name: string }>(rows: T[]) => rows.filter((row) => row.name.toLowerCase().includes(wanted))
-  const builtIn = matches(BUILT_IN)
+  const builtIn = matches(builtInFor(signal))
   const shared = matches(state.views.filter((one) => one.visibility === 'org'))
   const mine = matches(state.views.filter((one) => one.visibility === 'private'))
   const nothing = builtIn.length + shared.length + mine.length === 0

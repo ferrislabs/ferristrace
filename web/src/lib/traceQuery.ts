@@ -1,6 +1,8 @@
 export type Scalar = string | number | boolean
 
-export type BuiltIn = 'service' | 'name' | 'status' | 'kind' | 'duration' | 'http_status_code' | 'trace_id' | 'span_id'
+export type Signal = 'traces' | 'logs'
+
+export type BuiltIn = 'service' | 'name' | 'status' | 'kind' | 'duration' | 'http_status_code' | 'trace_id' | 'span_id' | 'severity' | 'body'
 
 export type FieldRef = { built: BuiltIn } | { attr: string }
 
@@ -19,7 +21,13 @@ export const STATUSES = ['ok', 'error', 'unset']
 
 export const KINDS = ['server', 'client', 'internal', 'producer', 'consumer', 'unspecified']
 
-export const BUILT_INS: { name: BuiltIn; label: string; kind: Kind; unit?: string }[] = [
+export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal']
+
+export const CHOICES: Partial<Record<BuiltIn, string[]>> = { status: STATUSES, kind: KINDS, severity: LEVELS }
+
+type Described = { name: BuiltIn; label: string; kind: Kind; unit?: string; only?: Signal }
+
+export const BUILT_INS: Described[] = [
   { name: 'service', label: 'Service', kind: 'text' },
   { name: 'name', label: 'Span name', kind: 'text' },
   { name: 'status', label: 'Status', kind: 'choice' },
@@ -28,7 +36,14 @@ export const BUILT_INS: { name: BuiltIn; label: string; kind: Kind; unit?: strin
   { name: 'http_status_code', label: 'HTTP status code', kind: 'number' },
   { name: 'trace_id', label: 'Trace ID', kind: 'text' },
   { name: 'span_id', label: 'Span ID', kind: 'text' },
+  { name: 'severity', label: 'Severity', kind: 'choice', only: 'logs' },
+  { name: 'body', label: 'Body', kind: 'text', only: 'logs' },
 ]
+
+const SPAN_ONLY: BuiltIn[] = ['name', 'status', 'kind', 'duration', 'http_status_code']
+
+export const builtInsFor = (signal: Signal): Described[] =>
+  BUILT_INS.filter((field) => (signal === 'logs' ? !SPAN_ONLY.includes(field.name) : field.only !== 'logs'))
 
 export const OPS: Record<Op, { label: string; list?: boolean; bare?: boolean }> = {
   eq: { label: 'is' },

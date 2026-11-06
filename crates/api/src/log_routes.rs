@@ -360,6 +360,8 @@ pub struct Searching {
     limit: Option<u32>,
     #[serde(default)]
     buckets: Option<u32>,
+    #[serde(flatten)]
+    placement: PlacementBody,
 }
 
 impl Searching {
@@ -374,6 +376,7 @@ impl Searching {
             Some(body) => body.query(Stream::Logs)?,
             None => LogFilter::anything(),
         };
+        query.placement = self.placement.placement()?;
         query.project = self.project.map(ProjectId::new);
         query.trace = self.trace.as_deref().map(trace_of).transpose()?;
         if paged {
