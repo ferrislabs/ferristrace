@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId,
-    SpanKind, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder,
-    TraceSummary,
+    AttributeFilter, AttributeKey, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue,
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId, SpanKind,
+    SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;

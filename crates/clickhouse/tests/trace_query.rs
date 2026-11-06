@@ -3,8 +3,8 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, Clause, Expr, Field, Number, Op, Query, Scalar, Scope, SpanReader, SpanSink,
-    TenantId, TraceFilter, Value, Window,
+    AttributeFilter, AttributeKey, Clause, Expr, Field, Number, Op, Query, Scalar, Scope,
+    SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -420,7 +420,9 @@ async fn a_text_attribute_compares_as_a_number_and_a_list_matches_any() {
 
 #[tokio::test]
 async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
-    let Some(reader) = reader("ferristrace_query_catalogue").await else { return };
+    let Some(reader) = reader("ferristrace_query_catalogue").await else {
+        return;
+    };
     let mut narrowed = AttributeFilter::over(the_hour());
     narrowed.prefix = Some("RPC".into());
 
@@ -433,7 +435,11 @@ async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
         .await
         .expect("the keys read");
     let values = reader
-        .attribute_values(tenant(MINE), &AttributeKey::new("rpc.method").expect("a key"), &AttributeFilter::over(the_hour()))
+        .attribute_values(
+            tenant(MINE),
+            &AttributeKey::new("rpc.method").expect("a key"),
+            &AttributeFilter::over(the_hour()),
+        )
         .await
         .expect("the values read");
     let theirs = reader
@@ -442,7 +448,10 @@ async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
         .expect("the keys read");
 
     let named = |seen: &[ferristrace_domain::SeenAttribute]| -> Vec<(String, bool)> {
-        let mut pairs: Vec<_> = seen.iter().map(|k| (k.key.to_string(), k.numeric)).collect();
+        let mut pairs: Vec<_> = seen
+            .iter()
+            .map(|k| (k.key.to_string(), k.numeric))
+            .collect();
         pairs.sort();
         pairs
     };
@@ -451,7 +460,10 @@ async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
     assert!(named(&keys).contains(&("db.system".to_owned(), false)));
     assert_eq!(named(&prefixed), vec![("rpc.method".to_owned(), false)]);
     assert_eq!(
-        values.iter().map(|v| (v.value.to_string(), v.spans)).collect::<Vec<_>>(),
+        values
+            .iter()
+            .map(|v| (v.value.to_string(), v.spans))
+            .collect::<Vec<_>>(),
         vec![("Pay".to_owned(), 3), ("Refund".to_owned(), 1)]
     );
     assert!(named(&theirs).iter().all(|(key, _)| key != "db.system"));

@@ -2,8 +2,8 @@ use super::errors::ExploreError;
 use super::ports::SpanReader;
 use std::borrow::Cow;
 
-use super::value_objects::Window;
 use super::query::AttributeKey;
+use super::value_objects::Window;
 use super::value_objects::{
     AttributeFilter, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
     TraceFilter, TraceSummary,
