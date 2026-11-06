@@ -134,7 +134,15 @@ Design
     percent and the durations in microseconds. A group is one of the 8
     most used values of the field in the window; ids and the duration
     cannot be grouped. The tab, the measure (`m`) and the group (`g`) are
-    in the url and in a view.
+    in the url and in a view. Table (9d-3):
+    `POST /api/orgs/{org}/spans/table` takes `{from, to, project?,
+    query?, group_by: {field}|{attr}, order?, limit?}` (`order` one of the
+    measures, default `count`, at most 100 rows, default 20) and answers
+    `{rows: [{group, spans, errors, error_rate, average_us, p50_us,
+    p95_us, p99_us}]}`, one row per value of the field that the matching
+    spans hold, most first. In the web the order is the measure
+    (`m`), the group is `g` (service when empty), and a row adds the
+    clause `group is value` to the query.
     Lot 9e (web only, no new route): the query is kept in the url as
     text, parsed in the web to the same tree the API takes.
     Grammar: `expr := or; or := and (OR and)*; and := not (AND not)*;

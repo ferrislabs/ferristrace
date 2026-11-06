@@ -4,8 +4,8 @@ use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, Clause, Expr, FacetFilter, Field, Measure, Number, Op, Query,
-    Scalar, Scope, SeriesFilter, SpanFilter, SpanOrder, SpanReader, SpanSink, TenantId,
-    TraceFilter, Value, Window,
+    Scalar, Scope, SeriesFilter, SpanFilter, SpanOrder, SpanReader, SpanSink, TableFilter,
+    TenantId, TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -937,4 +937,139 @@ fn a_series_cannot_be_grouped_by_an_id_or_the_duration() {
     assert!(
         SeriesFilter::new(window, Query::anything(), Measure::Count, Some(Field::Kind)).is_ok()
     );
+}
+
+fn table_filter(query: Query, group: Field, order: Measure, rows: u32) -> TableFilter {
+    TableFilter::new(the_hour(), query, group, order)
+        .expect("a valid table request")
+        .at_most(rows)
+}
+
+#[tokio::test]
+async fn the_table_has_a_row_per_group_with_its_counts_and_latencies() {
+    let Some(reader) = reader("ferristrace_query_table").await else {
+        return;
+    };
+
+    let rows = reader
+        .span_table(
+            tenant(MINE),
+            &table_filter(Query::anything(), Field::Service, Measure::Count, 20),
+        )
+        .await
+        .expect("the table reads");
+
+    assert_eq!(
+        rows.iter().map(|row| &*row.group).collect::<Vec<_>>(),
+        vec!["checkout", "payments"]
+    );
+    let checkout = &rows[0];
+    assert_eq!((checkout.spans, checkout.errors), (3, 1));
+    assert!((checkout.average_nanos - 307_333_333.0).abs() < 1_000.0);
+    assert!(checkout.p50_nanos <= checkout.p95_nanos && checkout.p95_nanos <= checkout.p99_nanos);
+    assert!(
+        checkout.p99_nanos > checkout.p50_nanos && checkout.p99_nanos <= 900.0 * MILLI as f64 + 1.0
+    );
+    let payments = &rows[1];
+    assert_eq!((payments.spans, payments.errors), (2, 0));
+}
+
+#[tokio::test]
+async fn the_table_sorts_by_the_measure_and_stops_at_the_limit() {
+    let Some(reader) = reader("ferristrace_query_table_order").await else {
+        return;
+    };
+    let by = |order| table_filter(Query::anything(), Field::Service, order, 20);
+
+    let by_rate = reader
+        .span_table(tenant(MINE), &by(Measure::ErrorRate))
+        .await
+        .expect("read");
+    let by_errors = reader
+        .span_table(tenant(MINE), &by(Measure::Errors))
+        .await
+        .expect("read");
+    let by_p95 = reader
+        .span_table(tenant(MINE), &by(Measure::P95))
+        .await
+        .expect("read");
+    let first_only = reader
+        .span_table(
+            tenant(MINE),
+            &table_filter(Query::anything(), Field::Service, Measure::Average, 1),
+        )
+        .await
+        .expect("read");
+
+    for rows in [&by_rate, &by_errors, &by_p95] {
+        assert_eq!(&*rows[0].group, "checkout");
+    }
+    assert_eq!(first_only.len(), 1);
+    assert_eq!(&*first_only[0].group, "checkout");
+}
+
+#[tokio::test]
+async fn the_table_follows_the_query_groups_by_an_attribute_and_stays_in_its_organisation() {
+    let Some(reader) = reader("ferristrace_query_table_scope").await else {
+        return;
+    };
+    let errors = Query::new(is(Field::Status, Op::Eq, Value::One(word("error")))).expect("a query");
+
+    let failed = reader
+        .span_table(
+            tenant(MINE),
+            &table_filter(errors, Field::Service, Measure::Count, 20),
+        )
+        .await
+        .expect("read");
+    let by_method = reader
+        .span_table(
+            tenant(MINE),
+            &table_filter(Query::anything(), key("rpc.method"), Measure::Count, 20),
+        )
+        .await
+        .expect("read");
+    let theirs = reader
+        .span_table(
+            tenant(THEIRS),
+            &table_filter(Query::anything(), Field::Service, Measure::Count, 20),
+        )
+        .await
+        .expect("read");
+    let hostile = reader
+        .span_table(
+            tenant(MINE),
+            &table_filter(Query::anything(), key("a'] OR 1=1 --"), Measure::Count, 20),
+        )
+        .await
+        .expect("read");
+
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        (&*failed[0].group, failed[0].spans, failed[0].errors),
+        ("checkout", 1, 1)
+    );
+    assert_eq!(
+        by_method
+            .iter()
+            .map(|row| (&*row.group, row.spans))
+            .collect::<Vec<_>>(),
+        vec![("Pay", 3), ("Refund", 1)]
+    );
+    assert_eq!(theirs.iter().map(|row| row.spans).sum::<u64>(), 1);
+    assert!(hostile.is_empty());
+}
+
+#[test]
+fn a_table_is_bounded_and_cannot_be_grouped_by_an_id_or_the_duration() {
+    let window = the_hour();
+
+    for field in [Field::TraceId, Field::SpanId, Field::Duration] {
+        assert!(TableFilter::new(window, Query::anything(), field, Measure::Count).is_err());
+    }
+    let filter =
+        TableFilter::new(window, Query::anything(), Field::Service, Measure::Count).expect("valid");
+    assert_eq!(filter.rows(), 20);
+    assert_eq!(filter.clone().at_most(0).rows(), 1);
+    assert_eq!(filter.at_most(10_000).rows(), 100);
 }

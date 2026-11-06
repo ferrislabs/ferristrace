@@ -9,11 +9,11 @@ export type { Order }
 
 export type Visibility = 'private' | 'org'
 
-export type Tab = 'traces' | 'spans' | 'series'
+export type Tab = 'traces' | 'spans' | 'series' | 'table'
 
-export const TABS: Tab[] = ['traces', 'spans', 'series']
+export const TABS: Tab[] = ['traces', 'spans', 'series', 'table']
 
-export const TAB_LABELS: Record<Tab, string> = { traces: 'Traces', spans: 'Spans', series: 'Time series' }
+export const TAB_LABELS: Record<Tab, string> = { traces: 'Traces', spans: 'Spans', series: 'Time series', table: 'Table' }
 
 export type Measure = 'count' | 'errors' | 'error_rate' | 'average' | 'p50' | 'p95' | 'p99'
 

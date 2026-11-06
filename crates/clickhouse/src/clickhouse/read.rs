@@ -6,7 +6,7 @@ use ferristrace_domain::{
     ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, SeenAttribute, SeenValue,
     SeriesFilter, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span,
     SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine,
-    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    StoreError, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -147,6 +147,15 @@ struct ListedRow {
     status_code: u16,
     started_at: i64,
     duration: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct GroupRow {
+    grp: String,
+    spans: u64,
+    errors: u64,
+    average: f64,
+    latency: Vec<f64>,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -485,6 +494,37 @@ impl SpanReader for ClickhouseReader {
                 })
             })
             .collect()
+    }
+
+    async fn span_table(
+        &self,
+        tenant: TenantId,
+        filter: &TableFilter,
+    ) -> Result<Vec<TableRow>, StoreError> {
+        let (sql, params) = Compiled::table(filter, tenant);
+        let mut statement = self.client.query(&sql);
+        for param in &params {
+            statement = statement.bind(param);
+        }
+        let rows: Vec<GroupRow> = statement
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let at = |index: usize| row.latency.get(index).copied().unwrap_or_default();
+                TableRow {
+                    p50_nanos: at(0),
+                    p95_nanos: at(1),
+                    p99_nanos: at(2),
+                    group: row.grp.into(),
+                    spans: row.spans,
+                    errors: row.errors,
+                    average_nanos: row.average,
+                }
+            })
+            .collect())
     }
 
     async fn span_series(

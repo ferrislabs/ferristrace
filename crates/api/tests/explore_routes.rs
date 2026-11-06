@@ -15,8 +15,8 @@ use ferristrace_domain::{
     SeenWorkload, SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint,
     ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
     SpanCursor, SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages,
-    SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter, TraceId, TraceOrder,
-    TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
+    SpanReader, SpanStatus, StoreError, TableFilter, TableRow, TenantId, Test, TraceFilter,
+    TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -616,6 +616,7 @@ struct Remembering(
     Mutex<Option<FacetFilter>>,
     Mutex<Option<SpanFilter>>,
     Mutex<Option<SeriesFilter>>,
+    Mutex<Option<TableFilter>>,
 );
 
 impl PlacementReader for Remembering {
@@ -726,6 +727,23 @@ impl SpanReader for Remembering {
         _project: Option<ProjectId>,
     ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn span_table(
+        &self,
+        _tenant: TenantId,
+        filter: &TableFilter,
+    ) -> Result<Vec<TableRow>, StoreError> {
+        *self.7.lock().expect("the lock") = Some(filter.clone());
+        Ok(vec![TableRow {
+            group: "checkout".into(),
+            spans: 8,
+            errors: 2,
+            average_nanos: 2_500_000.0,
+            p50_nanos: 1_000_000.0,
+            p95_nanos: 9_000_499.0,
+            p99_nanos: 12_000_000.0,
+        }])
     }
 
     async fn span_series(
@@ -1470,6 +1488,63 @@ async fn a_series_request_the_domain_refuses_is_a_bad_request() {
         .uri(&uri)
         .header("content-type", "application/json")
         .body(Body::from(r#"{"from":1000,"to":2000}"#))
+        .expect("a request");
+    let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_table_request_reaches_the_store_and_rows_come_back_in_microseconds_and_percent() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/spans/table", org(MINE));
+    let body = r#"{"from":1000,"to":2000,"group_by":{"attr":"rpc.method"},"order":"error_rate","limit":5,
+        "query":{"field":"service","op":"eq","value":"checkout"}}"#;
+
+    let (status, found) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let row = &serde_json::from_str::<serde_json::Value>(&found).expect("json")["rows"][0];
+    assert_eq!(row["group"], "checkout");
+    assert_eq!(row["spans"], 8);
+    assert_eq!(row["errors"], 2);
+    assert_eq!(row["error_rate"], 25.0);
+    assert_eq!(row["average_us"], 2_500.0);
+    assert_eq!(row["p95_us"], 9_000.0);
+    let filter = asked.7.lock().expect("the lock").clone().expect("asked");
+    assert_eq!(filter.order, Measure::ErrorRate);
+    assert_eq!(filter.rows(), 5);
+    assert!(!filter.query.is_anything());
+}
+
+#[tokio::test]
+async fn a_table_request_the_domain_refuses_is_a_bad_request() {
+    let uri = format!("/api/orgs/{}/spans/table", org(MINE));
+    let refused = [
+        r#"{"from":1000,"to":2000}"#,
+        r#"{"from":1000,"to":2000,"group_by":{"field":"trace_id"}}"#,
+        r#"{"from":1000,"to":2000,"group_by":{"field":"duration"}}"#,
+        r#"{"from":1000,"to":2000,"group_by":{"field":"service"},"query":{"all":[]}}"#,
+        r#"{"from":2000,"to":1000,"group_by":{"field":"service"}}"#,
+    ];
+
+    for body in refused {
+        let asked = Arc::new(Remembering::default());
+
+        let (status, _) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+        assert!(
+            status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
+            "{body} gave {status}"
+        );
+        assert!(asked.7.lock().expect("the lock").is_none(), "{body}");
+    }
+    let unsigned = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"from":1000,"to":2000,"group_by":{"field":"service"}}"#,
+        ))
         .expect("a request");
     let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);

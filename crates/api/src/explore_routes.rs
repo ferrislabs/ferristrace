@@ -12,7 +12,8 @@ use ferristrace_domain::{
     AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ListedSpan,
     Measure, ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
     ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder,
-    SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    SpanStatus, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -223,6 +224,7 @@ where
         .route("/api/orgs/{org}/traces/facets", post(facets::<S>))
         .route("/api/orgs/{org}/spans/search", post(span_search::<S>))
         .route("/api/orgs/{org}/spans/series", post(span_series::<S>))
+        .route("/api/orgs/{org}/spans/table", post(span_table::<S>))
         .route("/api/orgs/{org}/attributes", get(attributes::<S>))
         .route(
             "/api/orgs/{org}/attributes/{key}/values",
@@ -480,6 +482,98 @@ where
         .span_series(&who, TenantId::new(org), &filter)
         .await?;
     Ok(Json(plotted.into()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TableAsked {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    order: Measuring,
+    group_by: FieldRefBody,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Tabled {
+    rows: Vec<Row>,
+}
+
+#[derive(Debug, Serialize)]
+struct Row {
+    group: String,
+    spans: u64,
+    errors: u64,
+    error_rate: f64,
+    average_us: f64,
+    p50_us: f64,
+    p95_us: f64,
+    p99_us: f64,
+}
+
+#[allow(clippy::cast_precision_loss)]
+impl From<TableRow> for Row {
+    fn from(row: TableRow) -> Self {
+        let micros = |nanos: f64| (nanos / 1_000.0).round();
+        Self {
+            error_rate: ratio(row.errors, row.spans) * 100.0,
+            average_us: micros(row.average_nanos),
+            p50_us: micros(row.p50_nanos),
+            p95_us: micros(row.p95_nanos),
+            p99_us: micros(row.p99_nanos),
+            group: row.group.into_string(),
+            spans: row.spans,
+            errors: row.errors,
+        }
+    }
+}
+
+async fn span_table<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<TableAsked>,
+) -> Result<Json<Tabled>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let window = Window::new(
+        asked.from.saturating_mul(NANOS_PER_MILLI),
+        asked.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LookRefused::Window)?;
+    let query = match asked.query {
+        Some(body) => body.query()?,
+        None => TraceQuery::anything(),
+    };
+    let order = match asked.order {
+        Measuring::Count => Measure::Count,
+        Measuring::Errors => Measure::Errors,
+        Measuring::ErrorRate => Measure::ErrorRate,
+        Measuring::Average => Measure::Average,
+        Measuring::P50 => Measure::P50,
+        Measuring::P95 => Measure::P95,
+        Measuring::P99 => Measure::P99,
+    };
+    let mut filter = TableFilter::new(window, query, asked.group_by.field()?, order)?;
+    filter.project = asked.project.map(ProjectId::new);
+    if let Some(limit) = asked.limit {
+        filter = filter.at_most(limit);
+    }
+
+    let rows = state
+        .app
+        .span_table(&who, TenantId::new(org), &filter)
+        .await?;
+    Ok(Json(Tabled {
+        rows: rows.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
