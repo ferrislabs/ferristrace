@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { SubNav } from './SubNav'
 import { MobileTabs } from './MobileTabs'
 import { useGlobalShortcuts } from './useGlobalShortcuts'
 import { CommandPalette, ShortcutsDialog } from './CommandPalette'
@@ -63,6 +64,7 @@ export function AppShell() {
       <Sidebar onOpenShortcuts={() => setShortcuts(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onPalette={() => setPalette(true)} mock={mock} timed={timed} />
+        <SubNav />
         <OfflineBanner />
         <UnavailableBanner />
         <main className="flex min-w-0 flex-1 flex-col gap-4 px-[max(16px,env(safe-area-inset-left))] pb-[calc(84px+env(safe-area-inset-bottom))] pt-4 md:px-5 md:pb-10">
