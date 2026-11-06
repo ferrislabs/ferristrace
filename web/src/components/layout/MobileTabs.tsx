@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Segmented } from '@/components/ui/segmented'
 import { Avatar } from '@/components/ui/misc'
-import { ALL_NAV, NAV } from './nav'
+import { ALL_NAV, AXES } from './nav'
 import { useIncidents } from '@/data/incidents'
 import { useAlerts } from '@/data/alerts'
 import { initialsOf, nameOf } from '@/data/profile'
@@ -12,10 +12,10 @@ import { useTheme, type ThemePref } from '@/lib/theme'
 import { Link, NavLink, isActivePath, useLocation } from '@/lib/router'
 import { cn } from '@/lib/utils'
 
-const FIRST = ['Reliability', 'Infrastructure']
-const ORDERED = [...NAV].sort((a, b) => {
-  const rank = (label: string | null) => (label && FIRST.includes(label) ? FIRST.indexOf(label) : FIRST.length)
-  return rank(a.label) - rank(b.label)
+const FIRST = ['reliability', 'infra']
+const ORDERED = [...AXES].sort((a, b) => {
+  const rank = (key: string) => (FIRST.includes(key) ? FIRST.indexOf(key) : FIRST.length)
+  return rank(a.key) - rank(b.key)
 })
 
 const tab = 'relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold text-muted-foreground no-underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
@@ -70,10 +70,10 @@ export function MobileTabs() {
         <SheetContent title="Menu">
           <nav aria-label="All pages" className="flex flex-col pb-2">
             {ORDERED.map((group) => (
-              <div key={group.label ?? 'top'} className="flex flex-col">
-                {group.label ? <span className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[.05em] text-muted-foreground">{group.label}</span> : null}
+              <div key={group.key} className="flex flex-col">
+                <span className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[.05em] text-muted-foreground">{group.label}</span>
                 <div className="grid grid-cols-2 gap-1">
-                  {group.items.map((item) => (
+                  {group.tabs.map((item) => (
                     <NavLink
                       key={item.to}
                       to={item.to}

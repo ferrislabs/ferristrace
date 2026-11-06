@@ -1,103 +1,61 @@
-import { ChevronDown, ChevronsUpDown, Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
-import { useState } from 'react'
+import { Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Avatar } from '@/components/ui/misc'
 import { Badge } from '@/components/ui/badge'
-import { NAV } from './nav'
-import { useIssues } from '@/data/issues'
-import { useAlerts } from '@/data/alerts'
-import { useIncidents } from '@/data/incidents'
+import { AXES } from './nav'
+import { useNavCounts } from './useNavCounts'
 import { initialsOf, nameOf } from '@/data/profile'
 import { useAccount, useOrganisations, useSignOut } from '@/auth/session'
 import { useTheme, type ThemePref } from '@/lib/theme'
-import { Link, NavLink, isActivePath, useLocation, useNavigate } from '@/lib/router'
+import { Link, isActivePath, useLocation, useNavigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
 import { Logo } from '@/components/ft/Logo'
 
+const item = 'relative flex w-14 flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[10.5px] font-semibold text-muted-foreground no-underline hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring'
+
 export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const { pathname } = useLocation()
-  const [open, setOpen] = useState<Record<string, boolean>>({})
-  const { issues } = useIssues()
-  const { alerts } = useAlerts()
+  const counts = useNavCounts()
   const account = useAccount()
   const { active } = useOrganisations()
   const signingOut = useSignOut()
-  const newIssues = issues.filter((x) => x.status === 'unresolved' || x.regressed).length
-  const firing = (alerts ?? []).filter((r) => r.enabled && r.state.status === 'firing').length
-  const ongoing = useIncidents('open').incidents?.length ?? 0
   const { pref, setPref } = useTheme()
   const navigate = useNavigate()
   const who = account ? nameOf(account) : null
   const initials = who ? initialsOf(who) : '??'
+  const onSettings = isActivePath(pathname, '/settings')
   return (
-    <aside className="sticky top-0 hidden h-screen w-[224px] shrink-0 flex-col border-r bg-sidebar md:flex" aria-label="Primary">
-      <Link to="/" className="flex h-12 shrink-0 items-center gap-2 border-b px-4 text-[15px] font-bold text-foreground no-underline">
-        <Logo className="size-7" /> FerrisTrace
+    <aside className="sticky top-0 hidden h-screen w-[72px] shrink-0 flex-col items-center border-r bg-sidebar md:flex" aria-label="Primary">
+      <Link to="/" className="flex h-12 w-full shrink-0 items-center justify-center border-b text-foreground no-underline" aria-label="FerrisTrace home">
+        <Logo className="size-7" />
       </Link>
-      <nav aria-label="Main" className="scrollbar-none flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        {NAV.map((g) => {
-          const inGroup = g.items.some((i) => isActivePath(pathname, i.to))
-          const expanded = !g.collapsible || (open[g.label!] ?? inGroup)
+      <nav aria-label="Main" className="scrollbar-none flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-2">
+        {AXES.map((axis) => {
+          const on = axis.tabs.some((t) => isActivePath(pathname, t.to))
+          const alert = axis.tabs.reduce((n, t) => n + (t.badge ? (counts[t.to] ?? 0) : 0), 0)
           return (
-            <div key={g.label ?? 'top'} className="flex flex-col gap-0.5">
-              {g.label && g.collapsible ? (
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  onClick={() => setOpen((o) => ({ ...o, [g.label!]: !expanded }))}
-                  className="flex w-full cursor-pointer items-center rounded-sm px-2.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[.05em] text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  <span className="flex-1 text-left">{g.label}</span>
-                  {!expanded ? <span className="mr-1.5 font-mono text-[10.5px] font-medium normal-case tracking-normal">{g.items.length}</span> : null}
-                  <ChevronDown className={cn('size-3 transition-transform', !expanded && '-rotate-90')} aria-hidden />
-                </button>
-              ) : g.label ? (
-                <span className="px-2.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[.05em] text-muted-foreground">{g.label}</span>
-              ) : null}
-              {expanded &&
-                g.items.map((i) => (
-                  <NavLink
-                    key={i.to}
-                    to={i.to}
-                    end={i.to === '/'}
-                    className={({ isActive: a }) =>
-                      cn('flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-muted-foreground no-underline hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring', a && 'bg-muted text-foreground')
-                    }
-                  >
-                    <i.icon className="size-4 shrink-0" aria-hidden />
-                    <span className="flex-1 truncate">{i.label}</span>
-                    {i.badge && i.to === '/issues' && newIssues ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${newIssues} new issues`}>{newIssues} new</span> : null}
-                    {i.badge && i.to === '/alerts' && firing ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${firing} alerts firing`}>{firing} firing</span> : null}
-                    {i.badge && i.to === '/incidents' && ongoing ? <span className="rounded-full bg-destructive-subtle px-1.5 font-mono text-[11px] font-semibold leading-[18px] text-destructive-text" aria-label={`${ongoing} open incidents`}>{ongoing} open</span> : null}
-                    {!i.badge && i.keys ? <span className="flex gap-0.5"><Kbd>G</Kbd><Kbd>{i.keys}</Kbd></span> : null}
-                  </NavLink>
-                ))}
-            </div>
+            <Link key={axis.key} to={axis.tabs[0].to} aria-current={on ? 'page' : undefined} title={axis.label} className={cn(item, on && 'bg-muted text-foreground')}>
+              {on ? <span aria-hidden className="absolute -left-[9px] top-2 h-[calc(100%-16px)] w-0.5 rounded-full bg-primary" /> : null}
+              <axis.icon className="size-5" aria-hidden />
+              {axis.label}
+              {alert ? <span aria-label={`${alert} need attention`} className="absolute right-1.5 top-1 size-2 rounded-full bg-destructive" /> : null}
+            </Link>
           )
         })}
       </nav>
-      <div className="flex flex-col gap-0.5 border-t p-2">
-        <NavLink to="/settings" className={({ isActive: a }) => cn('sb-row no-underline', a && 'bg-muted')}>
-          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><Settings2 className="size-3.5" aria-hidden /></span>
-          <span className="flex min-w-0 flex-1 flex-col leading-4">
-            <span className="truncate text-control font-semibold">Settings</span>
-            <span className="truncate text-caption text-muted-foreground">Personal, organisation, project</span>
-          </span>
-          <span className="flex gap-0.5"><Kbd>G</Kbd><Kbd>S</Kbd></span>
-        </NavLink>
+      <div className="flex flex-col items-center gap-1 border-t py-2">
+        <Link to="/settings" title="Settings" aria-current={onSettings ? 'page' : undefined} className={cn(item, onSettings && 'bg-muted text-foreground')}>
+          <Settings2 className="size-5" aria-hidden />
+          Settings
+        </Link>
         <Popover>
           <PopoverTrigger asChild>
-            <button type="button" aria-label="Account menu" className="sb-row data-[state=open]:bg-muted">
+            <button type="button" aria-label="Account menu" className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-transparent hover:bg-muted data-[state=open]:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
               <Avatar initials={initials} src={account?.photo} />
-              <span className="flex min-w-0 flex-1 flex-col leading-4">
-                <span className="truncate text-control font-semibold">{who ?? 'Signed in'}</span>
-                <span className="truncate text-caption text-muted-foreground">{account?.email ?? '—'}</span>
-              </span>
-              <ChevronsUpDown className="size-3.5 text-muted-foreground" aria-hidden />
             </button>
           </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="w-[264px] p-1">
+          <PopoverContent side="right" align="end" className="w-[264px] p-1">
             <div className="mb-1 flex items-center gap-2.5 border-b px-2 pb-2.5 pt-2">
               <Avatar initials={initials} src={account?.photo} />
               <div className="flex min-w-0 flex-1 flex-col leading-[17px]">

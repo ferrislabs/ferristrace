@@ -1,10 +1,12 @@
-import { CircleX, Copy, Search } from 'lucide-react'
+import { CircleX, Copy, Search, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from '@/lib/router'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ViewTabs } from '@/components/ft/ViewTabs'
 import { Switch } from '@/components/ui/switch'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
@@ -22,10 +24,39 @@ import { useWindow } from '@/lib/window'
 const codeTone = (code: number, errors: number) =>
   code >= 500 || errors > 0 ? 'text-destructive-text' : code >= 400 ? 'text-warning-text' : 'text-muted-foreground'
 
-export function Traces() {
+export type TraceView = 'recent' | 'errors' | 'slow' | 'explore'
+
+const PRESETS: Record<TraceView, Partial<Sift>> = {
+  recent: {},
+  errors: { errorsOnly: true },
+  slow: { order: 'duration' },
+  explore: {},
+}
+
+const VIEWS = [
+  { label: 'Recent', to: '/traces' },
+  { label: 'Errors', to: '/traces/errors' },
+  { label: 'Slow', to: '/traces/slow' },
+  { label: 'Explore', to: '/traces/explore' },
+]
+
+export const TracesRecent = () => <Traces view="recent" />
+export const TracesErrors = () => <Traces view="errors" />
+export const TracesSlow = () => <Traces view="slow" />
+export const TracesExplore = () => <Traces view="explore" />
+
+const SUBTITLE: Record<TraceView, string> = {
+  recent: 'Newest first',
+  errors: 'Only traces with an error',
+  slow: 'Slowest first',
+  explore: 'Every filter',
+}
+
+function Traces({ view }: { view: TraceView }) {
   const navigate = useNavigate()
   const { ms: windowMs, label: windowLabel } = useWindow()
-  const [chosen, setSift] = useState<Sift>(ANY)
+  const base = useMemo(() => ({ ...ANY, ...PRESETS[view] }), [view])
+  const [chosen, setSift] = useState<Sift>(base)
   const sift = useMemo(() => ({ ...chosen, rangeMs: windowMs }), [chosen, windowMs])
   const [typed, setTyped] = useState('')
   const [density, setDensity] = useState<'compact' | 'comfy'>('compact')
@@ -36,8 +67,9 @@ export function Traces() {
   const { rows, loading, failed } = useTraces(asked, placement)
   const { names, unreachable } = useServiceNames(sift.rangeMs)
   const change = (part: Partial<Sift>) => { setSift((was) => ({ ...was, ...part })); setCursor(0) }
-  const clear = () => { setTyped(''); setSift((was) => ({ ...ANY, rangeMs: was.rangeMs, order: was.order, limit: was.limit })); place(NOWHERE) }
-  const sifting = Boolean(sift.service || typed || sift.errorsOnly || sift.atLeastMs || isPlaced(placement))
+  const clear = () => { setTyped(''); setSift((was) => ({ ...base, rangeMs: was.rangeMs, limit: was.limit })); place(NOWHERE) }
+  const full = view === 'explore'
+  const sifting = Boolean(sift.service || typed || (full && (sift.errorsOnly || sift.atLeastMs)) || isPlaced(placement))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,30 +87,51 @@ export function Traces() {
 
   return (
     <>
-      <PageHeader title="Traces" meta={sift.order === 'started' ? `Newest first · last ${windowLabel}` : `Last ${windowLabel}`}>
-        <Segmented label="Row density" value={density} onChange={setDensity} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfortable' }]} />
-        <span className="hidden items-center gap-1 text-caption text-muted-foreground lg:inline-flex"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>open</span>
+      <PageHeader title="Traces" meta={`${SUBTITLE[view]} · last ${windowLabel}`}>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="sm" aria-label="View options"><SlidersHorizontal />View</Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="flex w-[280px] flex-col gap-3 p-3">
+            <div className="flex items-center justify-between gap-2 text-control">
+              Row density
+              <Segmented label="Row density" size="sm" value={density} onChange={setDensity} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfortable' }]} />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-control">
+              Traces read
+              <NativeSelect aria-label="How many to read" value={sift.limit} onChange={(e) => change({ limit: Number(e.target.value) })} className="h-7 w-[100px]">
+                {COUNTS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </NativeSelect>
+            </div>
+            <span className="inline-flex items-center gap-1 text-caption text-muted-foreground"><Kbd>J</Kbd><Kbd>K</Kbd>move<Kbd>↵</Kbd>open</span>
+          </PopoverContent>
+        </Popover>
       </PageHeader>
-      <Filters active={[sift.service, typed, sift.errorsOnly, sift.atLeastMs].filter(Boolean).length + placedCount(placement)}>
+      <ViewTabs label="Trace views" tabs={VIEWS} />
+      <Filters active={[sift.service, typed, full && sift.errorsOnly, full && sift.atLeastMs].filter(Boolean).length + (full ? placedCount(placement) : 0)}>
       <div className="flex flex-wrap items-center gap-2" role="search">
         <NativeSelect aria-label="Service" value={sift.service} onChange={(e) => change({ service: e.target.value })} className="w-[190px]">
           <option value="">Service: any</option>
           {names.map((s) => <option key={s} value={s}>{s}</option>)}
         </NativeSelect>
         <InputGroup className="w-[280px] max-w-full"><Search aria-hidden /><input aria-label="Span name" placeholder="Span name, e.g. psp.charge" value={typed} onChange={(e) => { setTyped(e.target.value); setCursor(0) }} /></InputGroup>
-        <NativeSelect aria-label="Minimum duration" value={sift.atLeastMs} onChange={(e) => change({ atLeastMs: Number(e.target.value) })} className="w-[160px]">
-          <option value={0}>Any duration</option>
-          {[100, 500, 1000, 5000].map((ms) => <option key={ms} value={ms}>Slower than {ms < 1000 ? `${ms} ms` : `${ms / 1000} s`}</option>)}
-        </NativeSelect>
-        <NativeSelect aria-label="Order" value={sift.order} onChange={(e) => change({ order: e.target.value as Order })} className="w-[160px]">
-          <option value="started">Newest first</option>
-          <option value="duration">Slowest first</option>
-          <option value="spans">Most spans first</option>
-        </NativeSelect>
-        <Switch checked={sift.errorsOnly} onCheckedChange={(on) => change({ errorsOnly: on })} label="Errors only" />
+        {full ? (
+          <>
+            <NativeSelect aria-label="Minimum duration" value={sift.atLeastMs} onChange={(e) => change({ atLeastMs: Number(e.target.value) })} className="w-[160px]">
+              <option value={0}>Any duration</option>
+              {[100, 500, 1000, 5000].map((ms) => <option key={ms} value={ms}>Slower than {ms < 1000 ? `${ms} ms` : `${ms / 1000} s`}</option>)}
+            </NativeSelect>
+            <NativeSelect aria-label="Order" value={sift.order} onChange={(e) => change({ order: e.target.value as Order })} className="w-[160px]">
+              <option value="started">Newest first</option>
+              <option value="duration">Slowest first</option>
+              <option value="spans">Most spans first</option>
+            </NativeSelect>
+            <Switch checked={sift.errorsOnly} onCheckedChange={(on) => change({ errorsOnly: on })} label="Errors only" />
+          </>
+        ) : null}
         <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
       </div>
-      <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
+      {full ? <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} /> : null}
       </Filters>
       {unreachable ? <p className="m-0 text-caption text-muted-foreground">{because(unreachable, 'The services could not be listed, so that filter is empty')}</p> : null}
       {failed ? (
@@ -119,9 +172,6 @@ export function Traces() {
             <span className="text-caption text-muted-foreground">
               {rows.length === sift.limit ? `The newest ${sift.limit} of this window.` : `${rows.length} trace${rows.length === 1 ? '' : 's'} in this window.`}
             </span>
-            <NativeSelect aria-label="How many to read" value={sift.limit} onChange={(e) => change({ limit: Number(e.target.value) })} className="h-7 w-[130px]">
-              {COUNTS.map((n) => <option key={n} value={n}>Read {n}</option>)}
-            </NativeSelect>
           </div>
         </div>
       )}
