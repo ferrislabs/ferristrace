@@ -24,7 +24,7 @@ import { Services } from '@/pages/Services'
 import { SignalPage } from '@/pages/SignalPage'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
-import { Traces } from '@/pages/Traces'
+import { TracesErrors, TracesExplore, TracesRecent, TracesSlow } from '@/pages/Traces'
 import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
@@ -148,7 +148,10 @@ const routeTree = rootRoute.addChildren([
     inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra/kubernetes', Kubernetes, real),
     inShell('/infra/kubernetes/nodes/$name', KubernetesNode, real),
-    inShell('/traces', Traces, timed),
+    inShell('/traces', TracesRecent, timed),
+    inShell('/traces/errors', TracesErrors, timed),
+    inShell('/traces/slow', TracesSlow, timed),
+    inShell('/traces/explore', TracesExplore, timed),
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, timed),
     inShell('/metrics', Metrics, timed),
