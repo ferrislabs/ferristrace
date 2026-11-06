@@ -700,11 +700,19 @@ async fn a_placement_rides_with_a_query_tree() {
     assert_eq!(status, StatusCode::OK, "{text}");
     let (_, query, _) = &shelf.asked()[0];
     assert_eq!(
-        query.placement.namespace.as_ref().map(|name| name.as_str()),
+        query
+            .placement
+            .namespace
+            .as_ref()
+            .map(ferristrace_domain::PlacementName::as_str),
         Some("shop")
     );
     assert_eq!(
-        query.placement.pod.as_ref().map(|name| name.as_str()),
+        query
+            .placement
+            .pod
+            .as_ref()
+            .map(ferristrace_domain::PlacementName::as_str),
         Some("checkout-1")
     );
 }
