@@ -9,7 +9,13 @@ export type { Order }
 
 export type Visibility = 'private' | 'org'
 
-export type Definition = { q: string; o: Order }
+export type Tab = 'traces' | 'spans'
+
+export const TABS: Tab[] = ['traces', 'spans']
+
+export const tabOf = (raw: unknown): Tab => (TABS.includes(raw as Tab) ? (raw as Tab) : 'traces')
+
+export type Definition = { q: string; o: Order; t: Tab }
 
 export type SavedView = {
   id: string
@@ -23,14 +29,14 @@ export type SavedView = {
 export type BuiltIn = { key: string; name: string; hint: string; definition: Definition }
 
 export const BUILT_IN: BuiltIn[] = [
-  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started' } },
+  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started', t: 'traces' } },
   {
     key: 'errors',
     name: 'Errors',
     hint: 'Spans that failed',
-    definition: { q: 'status = error', o: 'started' },
+    definition: { q: 'status = error', o: 'started', t: 'traces' },
   },
-  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration' } },
+  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration', t: 'traces' } },
 ]
 
 const ORDERS: Order[] = ['started', 'duration', 'spans']
@@ -40,10 +46,10 @@ export const orderOf = (raw: unknown): Order => (ORDERS.includes(raw as Order) ?
 export function definitionOf(raw: unknown): Definition {
   const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
   const q = typeof body.q === 'string' ? normalise(body.q) : itemsText(validChips(body.q))
-  return { q, o: orderOf(body.o) }
+  return { q, o: orderOf(body.o), t: tabOf(body.t) }
 }
 
-export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && normalise(a.q) === normalise(b.q)
+export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && a.t === b.t && normalise(a.q) === normalise(b.q)
 
 type Wire = {
   id: string

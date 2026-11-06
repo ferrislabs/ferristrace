@@ -9,9 +9,10 @@ use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ProjectId,
-    Query as TraceQuery, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
-    Span, SpanKind, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ListedSpan,
+    ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
+    ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder, SpanStatus, TenantId, TraceFilter,
+    TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -220,6 +221,7 @@ where
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/search", post(search::<S>))
         .route("/api/orgs/{org}/traces/facets", post(facets::<S>))
+        .route("/api/orgs/{org}/spans/search", post(span_search::<S>))
         .route("/api/orgs/{org}/attributes", get(attributes::<S>))
         .route(
             "/api/orgs/{org}/attributes/{key}/values",
@@ -284,6 +286,100 @@ where
         .map(Into::into)
         .collect();
     Ok(Json(Found { traces: found }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpanSearch {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    order: SpanOrdering,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SpanOrdering {
+    #[default]
+    Started,
+    Duration,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FoundSpans {
+    spans: Vec<SpanListed>,
+}
+
+#[derive(Debug, Serialize)]
+struct SpanListed {
+    trace_id: String,
+    span_id: String,
+    service: String,
+    name: String,
+    kind: &'static str,
+    status: &'static str,
+    status_code: Option<u16>,
+    started_at_ms: u64,
+    duration_us: u64,
+}
+
+impl From<ListedSpan> for SpanListed {
+    fn from(span: ListedSpan) -> Self {
+        Self {
+            trace_id: hex::encode(span.trace_id.as_bytes()),
+            span_id: hex::encode(span.span_id.as_bytes()),
+            service: span.service.into_string(),
+            name: span.name.into_string(),
+            kind: named_kind(span.kind),
+            status: named_status(span.status),
+            status_code: span.status_code,
+            started_at_ms: span.started_unix_nanos / NANOS_PER_MILLI,
+            duration_us: span.duration_nanos / NANOS_PER_MICRO,
+        }
+    }
+}
+
+async fn span_search<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<SpanSearch>,
+) -> Result<Json<FoundSpans>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let window = Window::new(
+        asked.from.saturating_mul(NANOS_PER_MILLI),
+        asked.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LookRefused::Window)?;
+    let mut filter = SpanFilter::over(window);
+    if let Some(body) = asked.query {
+        filter.query = body.query()?;
+    }
+    filter.project = asked.project.map(ProjectId::new);
+    filter.order = match asked.order {
+        SpanOrdering::Started => SpanOrder::Started,
+        SpanOrdering::Duration => SpanOrder::Duration,
+    };
+    if let Some(limit) = asked.limit {
+        filter = filter.at_most(limit);
+    }
+
+    let found = state
+        .app
+        .spans(&who, TenantId::new(org), &filter)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(FoundSpans { spans: found }))
 }
 
 #[derive(Debug, Deserialize)]

@@ -139,6 +139,41 @@ impl Compiled {
         (sql, compiled.params)
     }
 
+    pub(crate) fn spans(
+        query: &Query,
+        tenant: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+        by_duration: bool,
+        limit: u32,
+    ) -> (String, Vec<Param>) {
+        let mut compiled = Self::default();
+        compiled.scoped(tenant, window, project);
+        let filter = query.filter().map(|expr| compiled.expr(expr));
+        let mut sql = format!(
+            "SELECT lower(hex(trace_id)) AS trace_hex, lower(hex(span_id)) AS span_hex, \
+                    service_name AS service, name AS name, toString(kind) AS kind, \
+                    toString(status) AS status, ifNull(http_status_code, 0) AS status_code, \
+                    toUnixTimestamp64Nano(start_time) AS started_at, \
+                    toUInt64({DURATION}) AS duration \
+             FROM spans FINAL \
+             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
+               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?)"
+        );
+        if let Some(filter) = filter {
+            sql.push_str(" AND (");
+            sql.push_str(&filter);
+            sql.push(')');
+        }
+        sql.push_str(if by_duration {
+            " ORDER BY duration DESC, start_time DESC, span_id LIMIT ?"
+        } else {
+            " ORDER BY start_time DESC, span_id LIMIT ?"
+        });
+        compiled.params.push(Param::Whole(i64::from(limit)));
+        (sql, compiled.params)
+    }
+
     fn scoped(&mut self, tenant: TenantId, window: Window, project: Option<ProjectId>) {
         self.params.extend([
             Param::Id(tenant.as_uuid()),

@@ -3,7 +3,7 @@ use super::query::{Field, Query};
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
 use crate::placement::Placement;
-use crate::telemetry::TraceId;
+use crate::telemetry::{SpanId, SpanKind, SpanStatus, TraceId};
 
 const DEFAULT_LIMIT: u32 = 50;
 
@@ -82,6 +82,57 @@ impl TraceFilter {
     pub fn limit(&self) -> u32 {
         self.limit
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpanOrder {
+    #[default]
+    Started,
+    Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub query: Query,
+    pub order: SpanOrder,
+    limit: u32,
+}
+
+impl SpanFilter {
+    pub fn over(window: Window) -> Self {
+        Self {
+            window,
+            project: None,
+            query: Query::anything(),
+            order: SpanOrder::default(),
+            limit: DEFAULT_LIMIT,
+        }
+    }
+
+    #[must_use]
+    pub fn at_most(mut self, asked: u32) -> Self {
+        self.limit = asked.clamp(1, MAX_LIMIT);
+        self
+    }
+
+    pub fn limit(&self) -> u32 {
+        self.limit
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedSpan {
+    pub trace_id: TraceId,
+    pub span_id: SpanId,
+    pub service: Box<str>,
+    pub name: Box<str>,
+    pub kind: SpanKind,
+    pub status: SpanStatus,
+    pub status_code: Option<u16>,
+    pub started_unix_nanos: u64,
+    pub duration_nanos: u64,
 }
 
 pub const MAX_FACETS: usize = 12;

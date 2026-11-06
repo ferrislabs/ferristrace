@@ -67,10 +67,10 @@ pub use cluster::{
 };
 pub use explore::{
     AttributeFilter, AttributeKey, BadQuery, BadWindow, Clause, DurationRange, Explore,
-    ExploreError, Expr, FACET_VALUES, FacetFilter, FacetValues, Facets, Field, MAX_ATTRIBUTES,
-    MAX_FACETS, MAX_VALUES, Number, Op, Query, Scalar, SeenAttribute, SeenValue, ServiceFilter,
-    ServicePoint, ServiceSeries, ServiceSummary, SpanReader, Test, TraceFilter, TraceOrder,
-    TraceSummary, Value, Window,
+    ExploreError, Expr, FACET_VALUES, FacetFilter, FacetValues, Facets, Field, ListedSpan,
+    MAX_ATTRIBUTES, MAX_FACETS, MAX_VALUES, Number, Op, Query, Scalar, SeenAttribute, SeenValue,
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, SpanFilter, SpanOrder, SpanReader,
+    Test, TraceFilter, TraceOrder, TraceSummary, Value, Window,
 };
 pub use export::{
     EXPORT_PAGE, ExportError, ExportGrant, ExportSource, ExportedSpan, Exporter, Prepared,

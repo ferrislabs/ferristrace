@@ -10,12 +10,13 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, AttributeFilter, AttributeKey, DurationRange, Expr, FacetFilter, FacetValues,
-    Facets, Field, Membership, Memberships, NoPhotos, OrgRole, Placement, PlacementName,
-    PlacementReader, Placements, ProjectId, SeenAttribute, SeenPod, SeenValue, SeenWorkload,
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session, SessionError,
-    SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages,
-    SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter, TraceId, TraceOrder,
-    TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
+    Facets, Field, ListedSpan, Membership, Memberships, NoPhotos, OrgRole, Placement,
+    PlacementName, PlacementReader, Placements, ProjectId, SeenAttribute, SeenPod, SeenValue,
+    SeenWorkload, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
+    SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanFilter, SpanId,
+    SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, Test,
+    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload,
+    WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -613,6 +614,7 @@ struct Remembering(
     Mutex<Vec<(Window, Option<ProjectId>)>>,
     Mutex<Option<(Option<String>, AttributeFilter)>>,
     Mutex<Option<FacetFilter>>,
+    Mutex<Option<SpanFilter>>,
 );
 
 impl PlacementReader for Remembering {
@@ -723,6 +725,25 @@ impl SpanReader for Remembering {
         _project: Option<ProjectId>,
     ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn spans(
+        &self,
+        _tenant: TenantId,
+        filter: &SpanFilter,
+    ) -> Result<Vec<ListedSpan>, StoreError> {
+        *self.5.lock().expect("the lock") = Some(filter.clone());
+        Ok(vec![ListedSpan {
+            trace_id: TraceId::try_from([0xab_u8; 16].as_slice()).expect("a trace id"),
+            span_id: SpanId::try_from([0x01_u8; 8].as_slice()).expect("a span id"),
+            service: "checkout".into(),
+            name: "charge".into(),
+            kind: SpanKind::Client,
+            status: SpanStatus::Error,
+            status_code: Some(503),
+            started_unix_nanos: 1_700_000_000_123_456_789,
+            duration_nanos: 2_500_000,
+        }])
     }
 
     async fn facets(&self, _tenant: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
@@ -1317,5 +1338,59 @@ async fn an_unsigned_facet_request_is_refused() {
 
     let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
 
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn the_spans_search_passes_the_query_the_order_and_the_limit_and_lists_the_spans() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/spans/search", org(MINE));
+    let body = r#"{"from":1000,"to":2000,"order":"duration","limit":120,
+        "query":{"all":[{"field":"status","op":"eq","value":"error"},
+                        {"attr":"rpc.method","op":"exists"}]}}"#;
+
+    let (status, found) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let listed = &serde_json::from_str::<serde_json::Value>(&found).expect("json")["spans"][0];
+    assert_eq!(listed["trace_id"], "ab".repeat(16));
+    assert_eq!(listed["span_id"], "01".repeat(8));
+    assert_eq!(listed["service"], "checkout");
+    assert_eq!(listed["name"], "charge");
+    assert_eq!(listed["kind"], "client");
+    assert_eq!(listed["status"], "error");
+    assert_eq!(listed["status_code"], 503);
+    assert_eq!(listed["started_at_ms"], 1_700_000_000_123u64);
+    assert_eq!(listed["duration_us"], 2_500);
+    let filter = asked.5.lock().expect("the lock").clone().expect("asked");
+    assert_eq!(filter.order, SpanOrder::Duration);
+    assert_eq!(filter.limit(), 120);
+    assert!(matches!(filter.query.filter(), Some(Expr::All(parts)) if parts.len() == 2));
+}
+
+#[tokio::test]
+async fn a_spans_search_the_domain_refuses_or_nobody_signed_is_not_served() {
+    let uri = format!("/api/orgs/{}/spans/search", org(MINE));
+    let refused = [
+        r#"{"from":1000,"to":2000,"query":{"all":[]}}"#,
+        r#"{"from":1000,"to":2000,"query":{"field":"service","op":"gt","value":1}}"#,
+        r#"{"from":2000,"to":1000}"#,
+    ];
+
+    for body in refused {
+        let asked = Arc::new(Remembering::default());
+
+        let (status, _) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(asked.5.lock().expect("the lock").is_none(), "{body}");
+    }
+    let unsigned = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"from":1000,"to":2000}"#))
+        .expect("a request");
+    let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

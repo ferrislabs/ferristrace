@@ -1,8 +1,8 @@
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, Clock, Explore, ExploreError, FacetFilter, Facets, Placements,
-    ProjectId, Reader, Readers, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
-    ServiceSite, ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
-    Window,
+    AttributeFilter, AttributeKey, Clock, Explore, ExploreError, FacetFilter, Facets, ListedSpan,
+    Placements, ProjectId, Reader, Readers, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
+    ServiceSite, ServiceSummary, Span, SpanFilter, TenantId, TraceFilter, TraceId, TraceSummary,
+    Whoami, Window,
 };
 
 use crate::registry::{ReadRepos, SiteRepos};
@@ -123,6 +123,24 @@ where
             reader,
         )
         .attribute_values(who, org, key, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn spans(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &SpanFilter,
+    ) -> Result<Vec<ListedSpan>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .spans(who, org, filter)
         .await
     }
 

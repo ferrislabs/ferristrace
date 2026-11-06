@@ -3,9 +3,10 @@ use std::collections::{BTreeMap, HashMap};
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets,
-    MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter, ServicePoint,
-    ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus,
-    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    ListedSpan, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter,
+    ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter, SpanId, SpanKind,
+    SpanOrder, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder,
+    TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -133,6 +134,19 @@ struct AttributeRow {
     key: String,
     spans: u64,
     numbers: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct ListedRow {
+    trace_hex: String,
+    span_hex: String,
+    service: String,
+    name: String,
+    kind: String,
+    status: String,
+    status_code: u16,
+    started_at: i64,
+    duration: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -426,6 +440,44 @@ impl SpanReader for ClickhouseReader {
                 spans: row.spans,
             })
             .collect())
+    }
+
+    async fn spans(
+        &self,
+        tenant: TenantId,
+        filter: &SpanFilter,
+    ) -> Result<Vec<ListedSpan>, StoreError> {
+        let (sql, params) = Compiled::spans(
+            &filter.query,
+            tenant,
+            filter.window,
+            filter.project,
+            filter.order == SpanOrder::Duration,
+            filter.limit(),
+        );
+        let mut statement = self.client.query(&sql);
+        for param in &params {
+            statement = statement.bind(param);
+        }
+        let rows: Vec<ListedRow> = statement
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ListedSpan {
+                    trace_id: a_trace(&row.trace_hex)?,
+                    span_id: a_span(&row.span_hex)?,
+                    service: row.service.into(),
+                    name: row.name.into(),
+                    kind: read_kind(&row.kind),
+                    status: read_status(&row.status),
+                    status_code: (row.status_code != 0).then_some(row.status_code),
+                    started_unix_nanos: unsigned(row.started_at),
+                    duration_nanos: row.duration,
+                })
+            })
+            .collect()
     }
 
     async fn facets(&self, tenant: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
