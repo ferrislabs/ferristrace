@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { get, json } from '@/auth/client'
+import { get, json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
 import { NOWHERE, placed, type Placement } from '@/data/placement'
@@ -33,6 +33,7 @@ export type MetricQuery = {
   toMs: number | null
   groupBy: string[]
   agg: Aggregation
+  where?: unknown
 }
 
 export const AGGREGATIONS: Record<MetricKind, Aggregation[]> = {
@@ -79,6 +80,14 @@ export function useMetricSeries(query: MetricQuery | null, placement: Placement 
       const q = query as MetricQuery
       const to = q.toMs ?? Date.now()
       const from = q.fromMs ?? to - q.rangeMs
+      if (q.where !== undefined) {
+        const body: Record<string, unknown> = { from, to, agg: q.agg, group_by: q.groupBy, query: q.where }
+        if (project) body.project = project
+        const place = new URLSearchParams()
+        placed(place, placement)
+        for (const [key, value] of place) body[key] = value
+        return json<MetricSeriesResult>(await post(`/api/orgs/${active?.org}/metrics/${encodeURIComponent(q.name)}/series`, body))
+      }
       const params = new URLSearchParams({ from: String(from), to: String(to), agg: q.agg })
       for (const key of q.groupBy) params.append('group_by', key)
       if (project) params.set('project', project)

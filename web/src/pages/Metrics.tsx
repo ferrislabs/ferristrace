@@ -1,6 +1,10 @@
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
 import { Plus, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { FilterBar } from '@/components/ft/FilterBar'
+import { QueryBar } from '@/components/ft/QueryBar'
+import { bodyOf, itemsText, parse, type Node } from '@/lib/queryLang'
+import { MetricProvider, SignalProvider } from '@/lib/signal'
 import { useSearchParam } from '@/lib/router'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
@@ -27,7 +31,7 @@ import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
 import { useWindow } from '@/lib/window'
 
-type Picked = { name: string; agg: Aggregation | null; groupBy: string[]; rangeMs: number; fromMs: number | null; toMs: number | null; q: string }
+type Picked = { name: string; agg: Aggregation | null; groupBy: string[]; rangeMs: number; fromMs: number | null; toMs: number | null; q: string; w: string }
 
 const EVERY = Object.values(AGGREGATIONS).flat()
 
@@ -49,6 +53,7 @@ function decode(raw: string | undefined): Picked {
     fromMs: pinned ? from : null,
     toMs: pinned ? to : null,
     q: p.get('q') ?? '',
+    w: p.get('w') ?? '',
   }
 }
 
@@ -62,6 +67,7 @@ function encode(picked: Picked): string | undefined {
     p.set('to', String(picked.toMs))
   }
   if (picked.q) p.set('q', picked.q)
+  if (picked.w) p.set('w', picked.w)
   const out = p.toString()
   return out || undefined
 }
@@ -87,6 +93,17 @@ function Meta({ metric }: { metric: MetricInfo }) {
 }
 
 export function Metrics() {
+  const name = new URLSearchParams(useSearchParam('f') ?? '').get('metric') ?? ''
+  return (
+    <SignalProvider value="metrics">
+      <MetricProvider value={name}>
+        <MetricsPage />
+      </MetricProvider>
+    </SignalProvider>
+  )
+}
+
+function MetricsPage() {
   const navigate = useRouterNavigate()
   const raw = useSearchParam('f')
   const span = useWindow()
@@ -115,8 +132,12 @@ export function Metrics() {
   const valid = metric ? AGGREGATIONS[metric.kind] : []
   const agg = metric ? (picked.agg && valid.includes(picked.agg) ? picked.agg : DEFAULT_AGG[metric.kind]) : null
 
+  const parsed = useMemo(() => parse(picked.w), [picked.w])
+  const items = useMemo<Node[]>(() => (parsed.ok ? parsed.items : []), [parsed])
+  const where = bodyOf(items)
+
   const query: MetricQuery | null = picked.name && agg
-    ? { name: picked.name, agg, groupBy: picked.groupBy, rangeMs: picked.rangeMs, fromMs: picked.fromMs, toMs: picked.toMs }
+    ? { name: picked.name, agg, groupBy: picked.groupBy, rangeMs: picked.rangeMs, fromMs: picked.fromMs, toMs: picked.toMs, where }
     : null
   const series = useMetricSeries(query, placement)
 
@@ -190,11 +211,14 @@ export function Metrics() {
               </form>
               {picked.groupBy.map((k) => <Chip key={k} label={`Remove group by ${k}`} onRemove={() => apply({ groupBy: picked.groupBy.filter((x) => x !== k) })}>by {k}</Chip>)}
             </div>
+            <QueryBar text={picked.w} onCommit={(next) => apply({ w: next.trim() })} rangeMs={picked.rangeMs} />
+            {!parsed.ok ? <p role="alert" className="m-0 text-caption text-destructive-text">The filter in this link is not valid, so nothing is filtered: {parsed.error}.</p> : null}
+            <FilterBar items={items} onChange={(next) => apply({ w: itemsText(next) })} rangeMs={picked.rangeMs} />
             <PlacementPicker collapsible placement={placement} onChange={place} windowMs={isPinned(picked) ? (picked.toMs as number) - (picked.fromMs as number) : picked.rangeMs} />
             {series.failed ? (
               status === 404 ? (
                 <EmptyState title="Unknown metric">No metric named <span className="font-mono">{picked.name}</span> is known to this project.</EmptyState>
-              ) : status === 422 ? (
+              ) : status === 422 || status === 400 ? (
                 <EmptyState title="That query is not valid">{because(series.failed, 'This aggregation or time range does not apply to this metric.')}</EmptyState>
               ) : (
                 <EmptyState title="The series could not be read">{because(series.failed, 'The metric store did not answer.')}</EmptyState>

@@ -1,6 +1,6 @@
 export type Scalar = string | number | boolean
 
-export type Signal = 'traces' | 'logs'
+export type Signal = 'traces' | 'logs' | 'metrics'
 
 export type BuiltIn = 'service' | 'name' | 'status' | 'kind' | 'duration' | 'http_status_code' | 'trace_id' | 'span_id' | 'severity' | 'body'
 
@@ -43,7 +43,10 @@ export const BUILT_INS: Described[] = [
 const SPAN_ONLY: BuiltIn[] = ['name', 'status', 'kind', 'duration', 'http_status_code']
 
 export const builtInsFor = (signal: Signal): Described[] =>
-  BUILT_INS.filter((field) => (signal === 'logs' ? !SPAN_ONLY.includes(field.name) : field.only !== 'logs'))
+  BUILT_INS.filter((field) => {
+    if (signal === 'metrics') return field.name === 'service'
+    return signal === 'logs' ? !SPAN_ONLY.includes(field.name) : field.only !== 'logs'
+  })
 
 export const OPS: Record<Op, { label: string; list?: boolean; bare?: boolean }> = {
   eq: { label: 'is' },
