@@ -26,6 +26,10 @@ pub fn decode_metrics(payload: &[u8]) -> Result<Vec<Metric>, DecodeError> {
     metrics_of(ExportMetricsServiceRequest::decode(payload)?)
 }
 
+pub fn decode_metrics_json(payload: &[u8]) -> Result<Vec<Metric>, DecodeError> {
+    metrics_of(serde_json::from_slice(payload)?)
+}
+
 pub fn metrics_of(request: ExportMetricsServiceRequest) -> Result<Vec<Metric>, DecodeError> {
     let mut metrics = Vec::new();
     for resource_metrics in request.resource_metrics {

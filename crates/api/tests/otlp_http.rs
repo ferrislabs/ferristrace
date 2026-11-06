@@ -238,7 +238,7 @@ async fn a_wrong_content_type_is_refused() {
     let request = Request::builder()
         .method("POST")
         .uri(TRACES)
-        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_TYPE, "text/plain")
         .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
         .body(Body::from(a_payload(1)))
         .expect("a well formed request");
@@ -308,4 +308,75 @@ async fn a_tenant_inside_its_cap_is_served_as_before() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(harness.sink.accepted(), 1);
+}
+
+fn json_export(uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, format!("Bearer {KEY}"))
+        .body(Body::from(body.to_owned()))
+        .expect("a well formed request")
+}
+
+#[tokio::test]
+async fn a_json_export_with_hex_ids_and_numeric_enums_is_accepted() {
+    let harness = harness();
+    let body = r#"{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"checkout"}}]},"scopeSpans":[{"spans":[{"traceId":"0102030405060708090a0b0c0d0e0f10","spanId":"0102030405060708","name":"pay","kind":2,"startTimeUnixNano":"1","endTimeUnixNano":"2"}]}]}]}"#;
+
+    let response = harness
+        .router
+        .clone()
+        .oneshot(json_export(TRACES, body))
+        .await
+        .expect("the router answers");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(harness.sink.accepted(), 1);
+    assert_eq!(&*harness.sink.recent()[0].1.service_name, "checkout");
+}
+
+#[tokio::test]
+async fn a_malformed_json_export_is_refused() {
+    let harness = harness();
+
+    let response = harness
+        .router
+        .clone()
+        .oneshot(json_export(TRACES, "{not json"))
+        .await
+        .expect("the router answers");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(harness.sink.accepted(), 0);
+}
+
+#[tokio::test]
+async fn a_json_export_still_needs_a_known_key() {
+    let harness = harness();
+    let request = Request::builder()
+        .method("POST")
+        .uri(TRACES)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, "Bearer wrong-key")
+        .body(Body::from("{}"))
+        .expect("a well formed request");
+
+    let response = harness
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router answers");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(harness.sink.accepted(), 0);
 }

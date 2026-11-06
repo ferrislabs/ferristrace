@@ -14,6 +14,10 @@ pub fn decode_logs(payload: &[u8]) -> Result<Vec<LogRecord>, DecodeError> {
     logs_of(ExportLogsServiceRequest::decode(payload)?)
 }
 
+pub fn decode_logs_json(payload: &[u8]) -> Result<Vec<LogRecord>, DecodeError> {
+    logs_of(serde_json::from_slice(payload)?)
+}
+
 pub fn logs_of(request: ExportLogsServiceRequest) -> Result<Vec<LogRecord>, DecodeError> {
     let mut records = Vec::with_capacity(record_count(&request.resource_logs));
     for resource_logs in request.resource_logs {

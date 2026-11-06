@@ -9,7 +9,10 @@ use axum::routing::post;
 use bytes::Bytes;
 use ferristrace_application::{Ingestion, Stack};
 use ferristrace_domain::{DecompressedBytes, LogPayload, MetricPayload, Payload};
-use ferristrace_otlp::{decode_logs, decode_metrics, decode_traces};
+use ferristrace_otlp::{
+    decode_logs, decode_logs_json, decode_metrics, decode_metrics_json, decode_traces,
+    decode_traces_json,
+};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
@@ -22,6 +25,22 @@ use crate::error::ApiError;
 
 pub const MAX_DECOMPRESSED_BYTES: usize = 4 * 1024 * 1024;
 const PROTOBUF: &str = "application/x-protobuf";
+const JSON: &str = "application/json";
+
+#[derive(Clone, Copy)]
+enum Encoding {
+    Protobuf,
+    Json,
+}
+
+impl Encoding {
+    fn media(self) -> &'static str {
+        match self {
+            Self::Protobuf => PROTOBUF,
+            Self::Json => JSON,
+        }
+    }
+}
 
 pub fn router<S: Stack>(ingest: Arc<Ingestion<S>>) -> Router {
     Router::new()
@@ -39,9 +58,12 @@ async fn traces<S: Stack>(
     Bearer(key): Bearer,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    require_protobuf(&headers)?;
+    let encoding = encoding_of(&headers)?;
     let decompressed = DecompressedBytes::new(body.len() as u64);
-    let spans = decode_traces(&body)?;
+    let spans = match encoding {
+        Encoding::Protobuf => decode_traces(&body)?,
+        Encoding::Json => decode_traces_json(&body)?,
+    };
     ingest
         .accept(
             &key,
@@ -52,6 +74,7 @@ async fn traces<S: Stack>(
         )
         .await?;
     Ok(accepted(
+        encoding,
         ExportTraceServiceResponse::default().encode_to_vec(),
     ))
 }
@@ -62,9 +85,12 @@ async fn logs<S: Stack>(
     Bearer(key): Bearer,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    require_protobuf(&headers)?;
+    let encoding = encoding_of(&headers)?;
     let decompressed = DecompressedBytes::new(body.len() as u64);
-    let records = decode_logs(&body)?;
+    let records = match encoding {
+        Encoding::Protobuf => decode_logs(&body)?,
+        Encoding::Json => decode_logs_json(&body)?,
+    };
     ingest
         .accept_logs(
             &key,
@@ -75,6 +101,7 @@ async fn logs<S: Stack>(
         )
         .await?;
     Ok(accepted(
+        encoding,
         ExportLogsServiceResponse::default().encode_to_vec(),
     ))
 }
@@ -85,9 +112,12 @@ async fn metrics<S: Stack>(
     Bearer(key): Bearer,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    require_protobuf(&headers)?;
+    let encoding = encoding_of(&headers)?;
     let decompressed = DecompressedBytes::new(body.len() as u64);
-    let metrics = decode_metrics(&body)?;
+    let metrics = match encoding {
+        Encoding::Protobuf => decode_metrics(&body)?,
+        Encoding::Json => decode_metrics_json(&body)?,
+    };
     ingest
         .accept_metrics(
             &key,
@@ -98,27 +128,32 @@ async fn metrics<S: Stack>(
         )
         .await?;
     Ok(accepted(
+        encoding,
         ExportMetricsServiceResponse::default().encode_to_vec(),
     ))
 }
 
-fn require_protobuf(headers: &HeaderMap) -> Result<(), ApiError> {
-    let declared = headers
+fn encoding_of(headers: &HeaderMap) -> Result<Encoding, ApiError> {
+    let base = headers
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
-        .is_some_and(|base| base.trim().eq_ignore_ascii_case(PROTOBUF));
-    if declared {
-        Ok(())
-    } else {
-        Err(ApiError::UnsupportedContentType)
+        .map(str::trim);
+    match base {
+        Some(base) if base.eq_ignore_ascii_case(PROTOBUF) => Ok(Encoding::Protobuf),
+        Some(base) if base.eq_ignore_ascii_case(JSON) => Ok(Encoding::Json),
+        _ => Err(ApiError::UnsupportedContentType),
     }
 }
 
-fn accepted(body: Vec<u8>) -> Response {
+fn accepted(encoding: Encoding, protobuf: Vec<u8>) -> Response {
+    let body = match encoding {
+        Encoding::Protobuf => protobuf,
+        Encoding::Json => b"{}".to_vec(),
+    };
     (
         StatusCode::OK,
-        [(CONTENT_TYPE, HeaderValue::from_static(PROTOBUF))],
+        [(CONTENT_TYPE, HeaderValue::from_static(encoding.media()))],
         body,
     )
         .into_response()
