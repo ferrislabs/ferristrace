@@ -1,4 +1,5 @@
 use super::errors::BadWindow;
+use super::query::Query;
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
 use crate::placement::Placement;
@@ -52,6 +53,7 @@ pub struct TraceFilter {
     pub at_least_nanos: Option<u64>,
     pub order: TraceOrder,
     pub placement: Placement,
+    pub query: Query,
     limit: u32,
 }
 
@@ -66,6 +68,7 @@ impl TraceFilter {
             at_least_nanos: None,
             order: TraceOrder::default(),
             placement: Placement::default(),
+            query: Query::default(),
             limit: DEFAULT_LIMIT,
         }
     }

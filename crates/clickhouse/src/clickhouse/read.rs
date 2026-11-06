@@ -10,6 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::clickhouse::placement::{Held, Placed};
+use crate::clickhouse::query::Compiled;
 
 const SERVED: &str = "FROM spans FINAL \
    WHERE tenant_id = ? \
@@ -63,7 +64,7 @@ const SUMMARIES: &str = "SELECT \
    WHERE tenant_id = ? \
      AND start_time >= fromUnixTimestamp64Nano(?) \
      AND start_time < fromUnixTimestamp64Nano(?) \
-     AND (? = 0 OR project_id = ?){placed} \
+     AND (? = 0 OR project_id = ?){placed}{queried} \
    GROUP BY trace_id \
    HAVING (? = '' OR countIf(service_name = ?) > 0) \
      AND (? = '' OR countIf(positionCaseInsensitive(name, ?) > 0) > 0) \
@@ -288,12 +289,14 @@ impl SpanReader for ClickhouseReader {
         } else {
             format!(" AND trace_id IN ({})", placed.spans("trace_id"))
         };
+        let asked = Compiled::of(&filter.query);
         let mut query = self
             .client
             .query(
                 &SUMMARIES
                     .replace("{order}", ordering(filter.order))
-                    .replace("{placed}", &touched),
+                    .replace("{placed}", &touched)
+                    .replace("{queried}", &asked.traces_matching()),
             )
             .bind(tenant.as_uuid())
             .bind(nanos(filter.window.from_unix_nanos()))
@@ -303,6 +306,7 @@ impl SpanReader for ClickhouseReader {
         if !placed.is_empty() {
             query = placed.bind_spans(query, tenant, filter.window, filter.project);
         }
+        query = asked.bind_matching(query, tenant, filter.window, filter.project);
         let rows: Vec<SummaryRow> = query
             .bind(service)
             .bind(service)
