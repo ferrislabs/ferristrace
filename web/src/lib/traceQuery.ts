@@ -141,3 +141,42 @@ export function show(value: Chip['value']): string {
   if (value === undefined) return ''
   return Array.isArray(value) ? value.join(', ') : String(value)
 }
+
+const managed = (chip: Chip, field: FieldRef) => sameField(chip.field, field) && (chip.op === 'eq' || chip.op === 'in')
+
+export function selectedValues(chips: Chip[], field: FieldRef): string[] {
+  const chip = chips.find((one) => managed(one, field))
+  if (!chip || chip.value === undefined) return []
+  return (Array.isArray(chip.value) ? chip.value : [chip.value]).map(String)
+}
+
+export function withValue(chips: Chip[], field: FieldRef, value: string, on: boolean, numeric: boolean): Chip[] {
+  const held = selectedValues(chips, field)
+  const next = on ? (held.includes(value) ? held : [...held, value]) : held.filter((one) => one !== value)
+  const at = chips.findIndex((one) => managed(one, field))
+  const typed = (text: string): Scalar => (numeric && Number.isFinite(Number(text)) ? Number(text) : text)
+  const chip: Chip | null =
+    next.length === 0 ? null : next.length === 1 ? { field, op: 'eq', value: typed(next[0]) } : { field, op: 'in', value: next.map(typed) }
+  if (at === -1) return chip ? [...chips, chip] : chips
+  return chip ? chips.map((one, index) => (index === at ? chip : one)) : chips.filter((_, index) => index !== at)
+}
+
+const DURATION: FieldRef = { built: 'duration' }
+
+const isBound = (chip: Chip) => sameField(chip.field, DURATION) && (chip.op === 'gte' || chip.op === 'lte')
+
+export function durationBounds(chips: Chip[]): { min?: number; max?: number } {
+  const bound = (op: Op) => {
+    const value = chips.find((chip) => isBound(chip) && chip.op === op)?.value
+    return typeof value === 'number' ? value : undefined
+  }
+  return { min: bound('gte'), max: bound('lte') }
+}
+
+export function withDuration(chips: Chip[], min: number | undefined, max: number | undefined): Chip[] {
+  const kept = chips.filter((chip) => !isBound(chip))
+  const added: Chip[] = []
+  if (min !== undefined) added.push({ field: DURATION, op: 'gte', value: min })
+  if (max !== undefined) added.push({ field: DURATION, op: 'lte', value: max })
+  return [...kept, ...added]
+}
