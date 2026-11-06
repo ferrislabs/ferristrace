@@ -10,9 +10,9 @@ use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ListedSpan,
-    ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
-    ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder, SpanStatus, TenantId, TraceFilter,
-    TraceId, TraceOrder, TraceSummary, Window,
+    Measure, ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
+    ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder,
+    SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -222,6 +222,7 @@ where
         .route("/api/orgs/{org}/traces/search", post(search::<S>))
         .route("/api/orgs/{org}/traces/facets", post(facets::<S>))
         .route("/api/orgs/{org}/spans/search", post(span_search::<S>))
+        .route("/api/orgs/{org}/spans/series", post(span_series::<S>))
         .route("/api/orgs/{org}/attributes", get(attributes::<S>))
         .route(
             "/api/orgs/{org}/attributes/{key}/values",
@@ -380,6 +381,105 @@ where
         .map(Into::into)
         .collect();
     Ok(Json(FoundSpans { spans: found }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeriesAsked {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    measure: Measuring,
+    #[serde(default)]
+    group_by: Option<FieldRefBody>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Measuring {
+    #[default]
+    Count,
+    Errors,
+    ErrorRate,
+    Average,
+    P50,
+    P95,
+    P99,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Plotted {
+    step_ms: u64,
+    series: Vec<Plot>,
+}
+
+#[derive(Debug, Serialize)]
+struct Plot {
+    group: Option<String>,
+    points: Vec<(u64, Option<f64>)>,
+}
+
+impl From<SeriesResult> for Plotted {
+    fn from(result: SeriesResult) -> Self {
+        let starts = result.starts;
+        Self {
+            step_ms: result.step_nanos / NANOS_PER_MILLI,
+            series: result
+                .lines
+                .into_iter()
+                .map(|line| Plot {
+                    group: line.group.map(String::from),
+                    points: starts
+                        .iter()
+                        .map(|start| start / NANOS_PER_MILLI)
+                        .zip(line.points)
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+async fn span_series<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<SeriesAsked>,
+) -> Result<Json<Plotted>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let window = Window::new(
+        asked.from.saturating_mul(NANOS_PER_MILLI),
+        asked.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LookRefused::Window)?;
+    let query = match asked.query {
+        Some(body) => body.query()?,
+        None => TraceQuery::anything(),
+    };
+    let measure = match asked.measure {
+        Measuring::Count => Measure::Count,
+        Measuring::Errors => Measure::Errors,
+        Measuring::ErrorRate => Measure::ErrorRate,
+        Measuring::Average => Measure::Average,
+        Measuring::P50 => Measure::P50,
+        Measuring::P95 => Measure::P95,
+        Measuring::P99 => Measure::P99,
+    };
+    let group = asked.group_by.map(FieldRefBody::field).transpose()?;
+    let mut filter = SeriesFilter::new(window, query, measure, group)?;
+    filter.project = asked.project.map(ProjectId::new);
+
+    let plotted = state
+        .app
+        .span_series(&who, TenantId::new(org), &filter)
+        .await?;
+    Ok(Json(plotted.into()))
 }
 
 #[derive(Debug, Deserialize)]

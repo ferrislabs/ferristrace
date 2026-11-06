@@ -3,10 +3,10 @@ use std::collections::{BTreeMap, HashMap};
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets,
-    ListedSpan, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter,
-    ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter, SpanId, SpanKind,
-    SpanOrder, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder,
-    TraceSummary,
+    ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, SeenAttribute, SeenValue,
+    SeriesFilter, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span,
+    SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine,
+    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -147,6 +147,13 @@ struct ListedRow {
     status_code: u16,
     started_at: i64,
     duration: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct SlotRow {
+    grp: String,
+    slot: i64,
+    value: f64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -480,6 +487,68 @@ impl SpanReader for ClickhouseReader {
             .collect()
     }
 
+    async fn span_series(
+        &self,
+        tenant: TenantId,
+        filter: &SeriesFilter,
+    ) -> Result<SeriesResult, StoreError> {
+        let groups: Vec<String> = match filter.group() {
+            None => Vec::new(),
+            Some(field) => {
+                let (sql, params) = Compiled::facet(
+                    field,
+                    &filter.query,
+                    tenant,
+                    filter.window,
+                    filter.project,
+                    MAX_GROUPS,
+                    false,
+                );
+                let mut statement = self.client.query(&sql);
+                for param in &params {
+                    statement = statement.bind(param);
+                }
+                let rows: Vec<ValueRow> = statement
+                    .fetch_all()
+                    .await
+                    .map_err(|error| refused(&error))?;
+                if rows.is_empty() {
+                    return Ok(SeriesResult::dense(filter, Vec::new()));
+                }
+                rows.into_iter().map(|row| row.value).collect()
+            }
+        };
+        let (sql, params) = Compiled::series(filter, &groups, tenant);
+        let mut statement = self.client.query(&sql);
+        for param in &params {
+            statement = statement.bind(param);
+        }
+        let rows: Vec<SlotRow> = statement
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+
+        let mut sparse: Vec<SparseLine> = if filter.group().is_some() {
+            groups
+                .iter()
+                .map(|group| (Some(group.as_str().into()), Vec::new()))
+                .collect()
+        } else {
+            vec![(None, Vec::new())]
+        };
+        for row in rows {
+            let at = if filter.group().is_some() {
+                groups.iter().position(|group| *group == row.grp)
+            } else {
+                Some(0)
+            };
+            if let (Some(at), Ok(slot)) = (at, u64::try_from(row.slot)) {
+                sparse[at].1.push((slot, row.value));
+            }
+        }
+        Ok(SeriesResult::dense(filter, sparse))
+    }
+
     async fn facets(&self, tenant: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
         let mut fields = Vec::with_capacity(filter.fields().len());
         for field in filter.fields() {
@@ -490,6 +559,7 @@ impl SpanReader for ClickhouseReader {
                 filter.window,
                 filter.project,
                 FACET_VALUES,
+                true,
             );
             let mut statement = self.client.query(&sql);
             for param in &params {

@@ -3,8 +3,9 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, Clause, Expr, FacetFilter, Field, Number, Op, Query, Scalar,
-    Scope, SpanFilter, SpanOrder, SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
+    AttributeFilter, AttributeKey, Clause, Expr, FacetFilter, Field, Measure, Number, Op, Query,
+    Scalar, Scope, SeriesFilter, SpanFilter, SpanOrder, SpanReader, SpanSink, TenantId,
+    TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -749,4 +750,191 @@ fn a_span_filter_is_bounded() {
     assert_eq!(filter.clone().at_most(0).limit(), 1);
     assert_eq!(filter.clone().at_most(10_000).limit(), 500);
     assert_eq!(filter.limit(), 50);
+}
+
+fn series_filter(query: Query, measure: Measure, group: Option<Field>) -> SeriesFilter {
+    let window = Window::new(BASE, BASE + 60 * SECOND).expect("a minute");
+    SeriesFilter::new(window, query, measure, group).expect("a valid series request")
+}
+
+fn line(result: &ferristrace_domain::SeriesResult, group: Option<&str>) -> Vec<Option<f64>> {
+    result
+        .lines
+        .iter()
+        .find(|line| line.group.as_deref() == group)
+        .unwrap_or_else(|| panic!("no line for {group:?}"))
+        .points
+        .clone()
+}
+
+#[tokio::test]
+async fn a_count_by_service_has_one_line_per_top_service_and_a_zero_where_nothing_happened() {
+    let Some(reader) = reader("ferristrace_query_series_count").await else {
+        return;
+    };
+
+    let result = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::Count, Some(Field::Service)),
+        )
+        .await
+        .expect("the series read");
+
+    assert_eq!(result.step_nanos, SECOND);
+    assert_eq!(result.starts.len(), 60);
+    assert_eq!(
+        result
+            .lines
+            .iter()
+            .map(|l| l.group.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["checkout", "payments"]
+    );
+    let checkout = line(&result, Some("checkout"));
+    assert_eq!(
+        (checkout[1], checkout[2], checkout[3], checkout[4]),
+        (Some(1.0), Some(1.0), Some(0.0), Some(1.0))
+    );
+    let payments = line(&result, Some("payments"));
+    assert_eq!((payments[2], payments[3]), (Some(0.0), Some(2.0)));
+    assert_eq!(checkout.len(), 60);
+}
+
+#[tokio::test]
+async fn errors_error_rate_and_percentiles_follow_the_spans_of_each_slot() {
+    let Some(reader) = reader("ferristrace_query_series_measures").await else {
+        return;
+    };
+
+    let errors = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::Errors, None),
+        )
+        .await
+        .expect("read");
+    let rate = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::ErrorRate, None),
+        )
+        .await
+        .expect("read");
+    let p95 = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::P95, None),
+        )
+        .await
+        .expect("read");
+    let average = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::Average, None),
+        )
+        .await
+        .expect("read");
+
+    let errors = line(&errors, None);
+    assert_eq!(
+        (errors[1], errors[2], errors[30]),
+        (Some(0.0), Some(1.0), Some(0.0))
+    );
+    let rate = line(&rate, None);
+    assert_eq!((rate[1], rate[2], rate[30]), (Some(0.0), Some(100.0), None));
+    let p95 = line(&p95, None);
+    assert_eq!(p95[2], Some(900_000.0), "a latency is in microseconds");
+    assert_eq!(p95[30], None);
+    assert_eq!(line(&average, None)[3], Some(17_500.0));
+}
+
+#[tokio::test]
+async fn a_series_follows_the_query_groups_by_an_attribute_and_skips_spans_without_it() {
+    let Some(reader) = reader("ferristrace_query_series_group").await else {
+        return;
+    };
+    let checkout =
+        Query::new(is(Field::Service, Op::Eq, Value::One(word("checkout")))).expect("a query");
+
+    let narrowed = reader
+        .span_series(tenant(MINE), &series_filter(checkout, Measure::Count, None))
+        .await
+        .expect("read");
+    let by_method = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(Query::anything(), Measure::Count, Some(key("rpc.method"))),
+        )
+        .await
+        .expect("read");
+
+    assert_eq!(line(&narrowed, None).iter().flatten().sum::<f64>(), 3.0);
+    assert_eq!(
+        by_method
+            .lines
+            .iter()
+            .map(|l| l.group.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["Pay", "Refund"]
+    );
+    assert_eq!(
+        line(&by_method, Some("Pay")).iter().flatten().sum::<f64>(),
+        3.0
+    );
+    assert_eq!(
+        line(&by_method, Some("Refund"))
+            .iter()
+            .flatten()
+            .sum::<f64>(),
+        1.0
+    );
+}
+
+#[tokio::test]
+async fn a_series_never_crosses_organisations_and_a_hostile_group_key_is_data() {
+    let Some(reader) = reader("ferristrace_query_series_scope").await else {
+        return;
+    };
+
+    let theirs = reader
+        .span_series(
+            tenant(THEIRS),
+            &series_filter(Query::anything(), Measure::Count, Some(Field::Service)),
+        )
+        .await
+        .expect("read");
+    let hostile = reader
+        .span_series(
+            tenant(MINE),
+            &series_filter(
+                Query::anything(),
+                Measure::Count,
+                Some(key("a'] OR 1=1 --")),
+            ),
+        )
+        .await
+        .expect("read");
+
+    assert_eq!(theirs.lines.len(), 1);
+    assert_eq!(
+        line(&theirs, Some("checkout"))
+            .iter()
+            .flatten()
+            .sum::<f64>(),
+        1.0
+    );
+    assert!(hostile.lines.is_empty());
+}
+
+#[test]
+fn a_series_cannot_be_grouped_by_an_id_or_the_duration() {
+    let window = the_hour();
+
+    for field in [Field::TraceId, Field::SpanId, Field::Duration] {
+        assert!(SeriesFilter::new(window, Query::anything(), Measure::Count, Some(field)).is_err());
+    }
+    assert!(
+        SeriesFilter::new(window, Query::anything(), Measure::Count, Some(Field::Kind)).is_ok()
+    );
 }

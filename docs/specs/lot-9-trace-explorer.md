@@ -124,7 +124,17 @@ Design
     answers `{spans: [{trace_id, span_id, service, name, kind, status,
     status_code, started_at_ms, duration_us}]}`, the spans that satisfy
     the query on their own (not the traces that hold them), newest or
-    slowest first, at most 500.
+    slowest first, at most 500. Time series (9d-2):
+    `POST /api/orgs/{org}/spans/series` takes `{from, to, project?,
+    query?, measure, group_by?: {field}|{attr}}` with `measure` one of
+    `count, errors, error_rate, average, p50, p95, p99`, and answers
+    `{step_ms, series: [{group: string|null, points: [[ms, value|null]]}]}`
+    over the same 60 steps as the services series. Counts and errors are
+    0 where nothing happened, the others null; the error rate is in
+    percent and the durations in microseconds. A group is one of the 8
+    most used values of the field in the window; ids and the duration
+    cannot be grouped. The tab, the measure (`m`) and the group (`g`) are
+    in the url and in a view.
     Lot 9e (web only, no new route): the query is kept in the url as
     text, parsed in the web to the same tree the API takes.
     Grammar: `expr := or; or := and (OR and)*; and := not (AND not)*;

@@ -68,9 +68,10 @@ pub use cluster::{
 pub use explore::{
     AttributeFilter, AttributeKey, BadQuery, BadWindow, Clause, DurationRange, Explore,
     ExploreError, Expr, FACET_VALUES, FacetFilter, FacetValues, Facets, Field, ListedSpan,
-    MAX_ATTRIBUTES, MAX_FACETS, MAX_VALUES, Number, Op, Query, Scalar, SeenAttribute, SeenValue,
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, SpanFilter, SpanOrder, SpanReader,
-    Test, TraceFilter, TraceOrder, TraceSummary, Value, Window,
+    MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, Number, Op, Query, Scalar,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, SpanFilter, SpanOrder, SpanReader, SparseLine, Test,
+    TraceFilter, TraceOrder, TraceSummary, Value, Window,
 };
 pub use export::{
     EXPORT_PAGE, ExportError, ExportGrant, ExportSource, ExportedSpan, Exporter, Prepared,

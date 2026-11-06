@@ -10,13 +10,13 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, AttributeFilter, AttributeKey, DurationRange, Expr, FacetFilter, FacetValues,
-    Facets, Field, ListedSpan, Membership, Memberships, NoPhotos, OrgRole, Placement,
+    Facets, Field, ListedSpan, Measure, Membership, Memberships, NoPhotos, OrgRole, Placement,
     PlacementName, PlacementReader, Placements, ProjectId, SeenAttribute, SeenPod, SeenValue,
-    SeenWorkload, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
-    SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanFilter, SpanId,
-    SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, Test,
-    TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload,
-    WorkloadKind,
+    SeenWorkload, SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
+    SpanCursor, SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages,
+    SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter, TraceId, TraceOrder,
+    TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -615,6 +615,7 @@ struct Remembering(
     Mutex<Option<(Option<String>, AttributeFilter)>>,
     Mutex<Option<FacetFilter>>,
     Mutex<Option<SpanFilter>>,
+    Mutex<Option<SeriesFilter>>,
 );
 
 impl PlacementReader for Remembering {
@@ -725,6 +726,28 @@ impl SpanReader for Remembering {
         _project: Option<ProjectId>,
     ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
+    }
+
+    async fn span_series(
+        &self,
+        _tenant: TenantId,
+        filter: &SeriesFilter,
+    ) -> Result<SeriesResult, StoreError> {
+        *self.6.lock().expect("the lock") = Some(filter.clone());
+        Ok(SeriesResult {
+            step_nanos: 5_000_000_000,
+            starts: vec![1_000_000_000, 6_000_000_000],
+            lines: vec![
+                SeriesLine {
+                    group: Some("checkout".into()),
+                    points: vec![Some(3.0), None],
+                },
+                SeriesLine {
+                    group: None,
+                    points: vec![Some(0.5), Some(2.0)],
+                },
+            ],
+        })
     }
 
     async fn spans(
@@ -1384,6 +1407,63 @@ async fn a_spans_search_the_domain_refuses_or_nobody_signed_is_not_served() {
 
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert!(asked.5.lock().expect("the lock").is_none(), "{body}");
+    }
+    let unsigned = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"from":1000,"to":2000}"#))
+        .expect("a request");
+    let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_series_request_reaches_the_store_and_comes_back_in_milliseconds() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/spans/series", org(MINE));
+    let body = r#"{"from":1000,"to":61000,"measure":"p95","group_by":{"attr":"rpc.method"},
+        "query":{"field":"status","op":"eq","value":"error"}}"#;
+
+    let (status, found) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let plotted = serde_json::from_str::<serde_json::Value>(&found).expect("json");
+    assert_eq!(plotted["step_ms"], 5_000);
+    assert_eq!(plotted["series"][0]["group"], "checkout");
+    assert_eq!(
+        plotted["series"][0]["points"][0],
+        serde_json::json!([1_000, 3.0])
+    );
+    assert_eq!(
+        plotted["series"][0]["points"][1],
+        serde_json::json!([6_000, null])
+    );
+    assert_eq!(plotted["series"][1]["group"], serde_json::Value::Null);
+    let filter = asked.6.lock().expect("the lock").clone().expect("asked");
+    assert_eq!(filter.measure, Measure::P95);
+    assert!(filter.group().is_some());
+    assert!(!filter.query.is_anything());
+}
+
+#[tokio::test]
+async fn a_series_request_the_domain_refuses_is_a_bad_request() {
+    let uri = format!("/api/orgs/{}/spans/series", org(MINE));
+    let refused = [
+        r#"{"from":1000,"to":2000,"group_by":{"field":"trace_id"}}"#,
+        r#"{"from":1000,"to":2000,"group_by":{"field":"duration"}}"#,
+        r#"{"from":1000,"to":2000,"group_by":{"field":"service","attr":"x"}}"#,
+        r#"{"from":1000,"to":2000,"query":{"all":[]}}"#,
+        r#"{"from":2000,"to":1000}"#,
+    ];
+
+    for body in refused {
+        let asked = Arc::new(Remembering::default());
+
+        let (status, _) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(asked.6.lock().expect("the lock").is_none(), "{body}");
     }
     let unsigned = Request::builder()
         .method("POST")

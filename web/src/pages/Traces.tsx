@@ -16,7 +16,8 @@ import type { Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
-import { orderOf, tabOf, TABS, type Definition, type Order, type Tab } from '@/data/views'
+import { groupOf, measureOf, orderOf, tabOf, TABS, TAB_LABELS, type Definition, type Measure, type Order, type Tab } from '@/data/views'
+import { SeriesPanel } from '@/components/ft/SeriesPanel'
 import { useSpans } from '@/data/spans'
 import { SpansTable } from '@/components/ft/SpansTable'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
@@ -44,17 +45,19 @@ export function Traces() {
   const others = useMemo(() => items.filter((item) => !isChip(item)), [items])
   const order = orderOf(useSearchParam('o'))
   const tab = tabOf(useSearchParam('t'))
+  const measure = measureOf(useSearchParam('m'))
+  const group = groupOf(useSearchParam('g'))
   const viewParam = useSearchParam('view')
   const viewKey = viewParam ?? (items.length === 0 && order === 'started' && tab === 'traces' ? 'recent' : undefined)
   const sift = useMemo<Sift>(() => ({ ...ANY, rangeMs: windowMs, order, limit }), [windowMs, order, limit])
   const { placement, place } = usePlacement()
   const { rows, loading, failed } = useTraces(sift, placement, items, tab === 'traces')
   const spans = useSpans(windowMs, order, limit, items, tab === 'spans')
-  const current = useMemo<Definition>(() => ({ q: normalise(text), o: order, t: tab }), [text, order, tab])
+  const current = useMemo<Definition>(() => ({ q: normalise(text), o: order, t: tab, m: measure, g: group }), [text, order, tab, measure, group])
   const [panel, setPanel] = useState<'facets' | 'views'>('facets')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const show = (next: Partial<{ q: string; o: Order; t: Tab; view: string | undefined }>) => {
-    const was = { q: text, o: order, t: tab, view: viewParam }
+  const show = (next: Partial<{ q: string; o: Order; t: Tab; m: Measure; g: string; view: string | undefined }>) => {
+    const was = { q: text, o: order, t: tab, m: measure, g: group, view: viewParam }
     const merged = { ...was, ...next }
     void goTo({
       to: '.' as never,
@@ -63,6 +66,8 @@ export function Traces() {
         q: merged.q.trim() === '' ? undefined : merged.q,
         o: merged.o === 'started' ? undefined : merged.o,
         t: merged.t === 'traces' ? undefined : merged.t,
+        m: merged.m === 'count' ? undefined : merged.m,
+        g: merged.g === '' ? undefined : merged.g,
         view: merged.view,
       })) as never,
       replace: true,
@@ -71,7 +76,7 @@ export function Traces() {
   }
   const setItems = (next: Node[]) => show({ q: itemsText(next) })
   const setChips = (next: Chip[]) => setItems([...others, ...next])
-  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, t: definition.t, view: key })
+  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, t: definition.t, m: definition.m, g: definition.g, view: key })
   const viewsState = useViewsState(current, viewKey, select)
   const clear = () => { show({ q: '', o: 'started', view: undefined }); place(NOWHERE) }
   const sifting = items.length > 0 || order !== 'started' || isPlaced(placement)
@@ -80,7 +85,7 @@ export function Traces() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return
-      const count = tab === 'spans' ? spans.rows.length : rows.length
+      const count = tab === 'series' ? 0 : tab === 'spans' ? spans.rows.length : rows.length
       if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(count - 1, c + 1)) }
       if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)) }
       if (e.key === 'Enter') {
@@ -146,9 +151,9 @@ export function Traces() {
                 role="tab"
                 aria-selected={one === tab}
                 onClick={() => show({ t: one })}
-                className={cn('-mb-px cursor-pointer border-b-2 border-transparent bg-transparent px-3 py-2 text-control font-semibold capitalize text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', one === tab && 'border-primary text-foreground')}
+                className={cn('-mb-px cursor-pointer border-b-2 border-transparent bg-transparent px-3 py-2 text-control font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', one === tab && 'border-primary text-foreground')}
               >
-                {one}
+                {TAB_LABELS[one]}
               </button>
             ))}
           </div>
@@ -166,7 +171,9 @@ export function Traces() {
             </Popover>
             {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
-      {tab === 'spans' ? (
+      {tab === 'series' ? (
+        <SeriesPanel items={items} rangeMs={windowMs} measure={measure} group={group} onChange={(part) => show(part)} />
+      ) : tab === 'spans' ? (
         <SpansTable rows={spans.rows} loading={spans.loading} failed={spans.failed} sifting={sifting} limit={limit} cursor={cursor} density={density} onOpen={(row) => navigate(`/traces/${row.traceId}`)} onCopy={copy} onClear={clear} />
       ) : failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
