@@ -5,6 +5,7 @@ import { useAttributeKeys } from '@/data/attributes'
 import { facetKey, useFacets } from '@/data/facets'
 import { dur } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import type { Node } from '@/lib/queryLang'
 import { durationBounds, selectedValues, withDuration, withValue, type Chip, type FieldRef } from '@/lib/traceQuery'
 
 type Def = { id: string; field: FieldRef; label: string; numeric?: boolean }
@@ -44,7 +45,7 @@ function loadOpen(): Set<string> {
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
-export function Facets({ chips, onChange, rangeMs }: { chips: Chip[]; onChange: (chips: Chip[]) => void; rangeMs: number }) {
+export function Facets({ chips, query, onChange, rangeMs }: { chips: Chip[]; query: Node[]; onChange: (chips: Chip[]) => void; rangeMs: number }) {
   const { keys } = useAttributeKeys(rangeMs, '', true)
   const [open, setOpen] = useState(loadOpen)
   useEffect(() => {
@@ -65,7 +66,7 @@ export function Facets({ chips, onChange, rangeMs }: { chips: Chip[]; onChange: 
   }, [keys])
 
   const wanted = defs.filter((def) => open.has(def.id)).map((def) => def.field)
-  const { facets, spread, loading } = useFacets(chips, rangeMs, wanted, open.has(DURATION_ID))
+  const { facets, spread, loading } = useFacets(query, rangeMs, wanted, open.has(DURATION_ID))
   const toggle = (id: string) => setOpen((was) => { const next = new Set(was); if (!next.delete(id)) next.add(id); return next })
 
   return (

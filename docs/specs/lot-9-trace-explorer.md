@@ -118,9 +118,24 @@ Design
     answers `{facets: [{field|attr, values: [{value, spans}]}],
     duration: {min_us, max_us}|null}`. The values are the 10 most used.
     Lot 9d: tabs Traces, Spans, Time series, Table.
-    Lot 9e: a typed bar (`service.name = "checkout" AND
-    http.status_code >= 500`) that parses to the same tree, both ways.
-    The URL then carries the typed form.
+    Lot 9e (web only, no new route): the query is kept in the url as
+    text, parsed in the web to the same tree the API takes.
+    Grammar: `expr := or; or := and (OR and)*; and := not (AND not)*;
+    not := NOT not | atom; atom := ( expr ) | clause`. A clause is
+    `field op value`, `field IN (v, v)`, `field NOT IN (…)`, `field
+    CONTAINS v`, `field NOT CONTAINS v`, `field EXISTS`, `field NOT
+    EXISTS`, with `= != > >= < <=`; keywords are case-insensitive. A
+    bare word is a built-in field (`service name status kind duration
+    http_status_code trace_id span_id`) or an attribute key; a quoted
+    word is always an attribute key. Values are quoted text, numbers,
+    `true`/`false` or bare words; a duration takes `us`, `ms`, `s` or
+    `m`. The top-level ANDs are the chips of the filter bar: a clause is
+    an editable chip, anything with an OR or a NOT is a read-only chip
+    that the text bar edits. Facets and chips keep editing the simple
+    clauses and leave the others as they are. A saved view keeps the
+    text; a view saved as chips before this lot is read as text.
+    Suggestions: fields, operators and values under the cursor; a syntax
+    error says what was expected and where.
     Lot 9f: duration histogram with brush selection, click a value to
     filter or exclude, attribute facets with counts, column picker,
     side preview of a trace.

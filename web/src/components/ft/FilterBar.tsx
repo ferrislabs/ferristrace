@@ -7,6 +7,7 @@ import { useAttributeKeys, useAttributeValues } from '@/data/attributes'
 import { useServiceNames } from '@/data/services'
 import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
+import { isChip, nodeText, type Node } from '@/lib/queryLang'
 import {
   BUILT_INS, KINDS, MAX_CHIPS, OPS, STATUSES, kindOf, labelOf, opsFor, parsedValue, show,
   type Chip, type FieldRef, type Op,
@@ -17,32 +18,47 @@ const sentence = (chip: Chip) => {
   return op.bare ? `${labelOf(chip.field)} ${op.label}` : `${labelOf(chip.field)} ${op.label} ${show(chip.value)}`
 }
 
-export function FilterBar({ chips, onChange, rangeMs }: { chips: Chip[]; onChange: (chips: Chip[]) => void; rangeMs: number }) {
+export function FilterBar({ items, onChange, rangeMs }: { items: Node[]; onChange: (items: Node[]) => void; rangeMs: number }) {
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const replace = (at: number | 'new', chip: Chip) => {
-    onChange(at === 'new' ? [...chips, chip] : chips.map((was, index) => (index === at ? chip : was)))
+    onChange(at === 'new' ? [...items, chip] : items.map((was, index) => (index === at ? chip : was)))
     setEditing(null)
   }
+  const remove = (index: number) => onChange(items.filter((_, at) => at !== index))
   return (
     <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filters">
-      {chips.map((chip, index) => (
-        <span key={`${sentence(chip)}-${index}`} className="inline-flex h-7 items-center rounded-md border bg-muted text-control">
-          <Popover open={editing === index} onOpenChange={(open) => setEditing(open ? index : null)}>
-            <PopoverTrigger asChild>
-              <button type="button" className="h-full max-w-[320px] cursor-pointer truncate rounded-l-md px-2 text-left hover:bg-border-subtle focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Edit filter: ${sentence(chip)}`}>
-                <span className="font-semibold">{labelOf(chip.field)}</span> <span className="text-muted-foreground">{OPS[chip.op].label}</span>{OPS[chip.op].bare ? null : <> <span>{show(chip.value)}</span></>}
+      {items.map((item, index) => {
+        if (!isChip(item)) {
+          const text = nodeText(item)
+          return (
+            <span key={`${text}-${index}`} className="inline-flex h-7 items-center rounded-md border bg-muted text-control">
+              <span className="max-w-[360px] truncate px-2 font-mono text-[12px]" title={`${text}. Edit it in the query box.`}>{text}</span>
+              <button type="button" aria-label={`Remove filter: ${text}`} onClick={() => remove(index)} className="inline-flex h-full w-6 cursor-pointer items-center justify-center rounded-r-md text-muted-foreground hover:bg-border-subtle hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                <X className="size-3.5" aria-hidden />
               </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-[340px] p-3">
-              <ChipEditor start={chip} rangeMs={rangeMs} onApply={(next) => replace(index, next)} onCancel={() => setEditing(null)} />
-            </PopoverContent>
-          </Popover>
-          <button type="button" aria-label={`Remove filter: ${sentence(chip)}`} onClick={() => onChange(chips.filter((_, at) => at !== index))} className="inline-flex h-full w-6 cursor-pointer items-center justify-center rounded-r-md text-muted-foreground hover:bg-border-subtle hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
-            <X className="size-3.5" aria-hidden />
-          </button>
-        </span>
-      ))}
-      {chips.length < MAX_CHIPS ? (
+            </span>
+          )
+        }
+        const chip = item
+        return (
+          <span key={`${sentence(chip)}-${index}`} className="inline-flex h-7 items-center rounded-md border bg-muted text-control">
+            <Popover open={editing === index} onOpenChange={(open) => setEditing(open ? index : null)}>
+              <PopoverTrigger asChild>
+                <button type="button" className="h-full max-w-[320px] cursor-pointer truncate rounded-l-md px-2 text-left hover:bg-border-subtle focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Edit filter: ${sentence(chip)}`}>
+                  <span className="font-semibold">{labelOf(chip.field)}</span> <span className="text-muted-foreground">{OPS[chip.op].label}</span>{OPS[chip.op].bare ? null : <> <span>{show(chip.value)}</span></>}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[340px] p-3">
+                <ChipEditor start={chip} rangeMs={rangeMs} onApply={(next) => replace(index, next)} onCancel={() => setEditing(null)} />
+              </PopoverContent>
+            </Popover>
+            <button type="button" aria-label={`Remove filter: ${sentence(chip)}`} onClick={() => remove(index)} className="inline-flex h-full w-6 cursor-pointer items-center justify-center rounded-r-md text-muted-foreground hover:bg-border-subtle hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+              <X className="size-3.5" aria-hidden />
+            </button>
+          </span>
+        )
+      })}
+      {items.length < MAX_CHIPS ? (
         <Popover open={editing === 'new'} onOpenChange={(open) => setEditing(open ? 'new' : null)}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm"><Plus />Add filter</Button>

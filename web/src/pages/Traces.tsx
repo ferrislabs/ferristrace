@@ -10,7 +10,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ViewsPanel, ViewsToggle, useViewsState } from '@/components/ft/Views'
 import { Facets } from '@/components/ft/Facets'
 import { FilterBar } from '@/components/ft/FilterBar'
-import { decode, encode, type Chip } from '@/lib/traceQuery'
+import { QueryBar } from '@/components/ft/QueryBar'
+import { isChip, itemsText, normalise, parse, queryTextOf, type Node } from '@/lib/queryLang'
+import type { Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
@@ -32,25 +34,29 @@ export function Traces() {
   const [limit, setLimit] = useState(ANY.limit)
   const [density, setDensity] = useState<'compact' | 'comfy'>('compact')
   const [cursor, setCursor] = useState(0)
-  const rawChips = useSearchParam('q')
-  const chips = useMemo(() => decode(rawChips), [rawChips])
+  const rawQuery = useSearchParam('q')
+  const text = useMemo(() => queryTextOf(rawQuery), [rawQuery])
+  const parsed = useMemo(() => parse(text), [text])
+  const items = useMemo<Node[]>(() => (parsed.ok ? parsed.items : []), [parsed])
+  const chips = useMemo(() => items.filter(isChip), [items])
+  const others = useMemo(() => items.filter((item) => !isChip(item)), [items])
   const order = orderOf(useSearchParam('o'))
   const viewParam = useSearchParam('view')
-  const viewKey = viewParam ?? (chips.length === 0 && order === 'started' ? 'recent' : undefined)
+  const viewKey = viewParam ?? (items.length === 0 && order === 'started' ? 'recent' : undefined)
   const sift = useMemo<Sift>(() => ({ ...ANY, rangeMs: windowMs, order, limit }), [windowMs, order, limit])
   const { placement, place } = usePlacement()
-  const { rows, loading, failed } = useTraces(sift, placement, chips)
-  const current = useMemo<Definition>(() => ({ q: chips, o: order }), [chips, order])
+  const { rows, loading, failed } = useTraces(sift, placement, items)
+  const current = useMemo<Definition>(() => ({ q: normalise(text), o: order }), [text, order])
   const [panel, setPanel] = useState<'facets' | 'views'>('facets')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const show = (next: Partial<{ q: Chip[]; o: Order; view: string | undefined }>) => {
-    const was = { q: chips, o: order, view: viewParam }
+  const show = (next: Partial<{ q: string; o: Order; view: string | undefined }>) => {
+    const was = { q: text, o: order, view: viewParam }
     const merged = { ...was, ...next }
     void goTo({
       to: '.' as never,
       search: ((search: Record<string, unknown>) => ({
         ...search,
-        q: encode(merged.q),
+        q: merged.q.trim() === '' ? undefined : merged.q,
         o: merged.o === 'started' ? undefined : merged.o,
         view: merged.view,
       })) as never,
@@ -58,11 +64,12 @@ export function Traces() {
     })
     setCursor(0)
   }
-  const setChips = (next: Chip[]) => show({ q: next })
+  const setItems = (next: Node[]) => show({ q: itemsText(next) })
+  const setChips = (next: Chip[]) => setItems([...others, ...next])
   const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, view: key })
   const viewsState = useViewsState(current, viewKey, select)
-  const clear = () => { show({ q: [], o: 'started', view: undefined }); place(NOWHERE) }
-  const sifting = chips.length > 0 || order !== 'started' || isPlaced(placement)
+  const clear = () => { show({ q: '', o: 'started', view: undefined }); place(NOWHERE) }
+  const sifting = items.length > 0 || order !== 'started' || isPlaced(placement)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,7 +90,7 @@ export function Traces() {
       <PageHeader title="Traces" meta={`Last ${windowLabel}`}>
         <ViewsToggle state={viewsState} on={panel === 'views'} onToggle={() => { setPanel((was) => (was === 'views' ? 'facets' : 'views')); setMobileOpen(true) }} />
         <Button size="sm" variant="ghost" className="md:hidden" aria-expanded={mobileOpen} onClick={() => setMobileOpen((was) => !was)}>
-          <ListFilter />Filters{chips.length > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{chips.length}</span> : null}
+          <ListFilter />Filters{items.length > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{items.length}</span> : null}
         </Button>
         <Popover>
           <PopoverTrigger asChild>
@@ -118,12 +125,14 @@ export function Traces() {
           {panel === 'views' ? (
             <ViewsPanel state={viewsState} viewKey={viewKey} onSelect={select} onClose={() => setPanel('facets')} />
           ) : (
-            <Facets chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
+            <Facets chips={chips} query={items} onChange={setChips} rangeMs={sift.rangeMs} />
           )}
         </aside>
         <div className="flex min-w-0 flex-col gap-3">
+          <QueryBar text={text} onCommit={(next) => show({ q: next })} rangeMs={sift.rangeMs} />
+          {!parsed.ok ? <p role="alert" className="m-0 text-caption text-destructive-text">The query in this link is not valid, so nothing is filtered: {parsed.error}.</p> : null}
           <div className="flex flex-wrap items-center gap-2" role="search">
-            <FilterBar chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
+            <FilterBar items={items} onChange={setItems} rangeMs={sift.rangeMs} />
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" aria-label="Kubernetes placement"><Boxes />Kubernetes{placedCount(placement) > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{placedCount(placement)}</span> : null}</Button>

@@ -2,7 +2,8 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { useScope } from '@/lib/scope'
-import { toBody, type Chip, type FieldRef } from '@/lib/traceQuery'
+import { bodyOf, type Node } from '@/lib/queryLang'
+import type { FieldRef } from '@/lib/traceQuery'
 
 export type FacetValue = { value: string; spans: number }
 
@@ -22,7 +23,7 @@ const key = (field: FieldRef) => ('built' in field ? `built:${field.built}` : `a
 export const facetKey = key
 
 export function useFacets(
-  chips: Chip[],
+  items: Node[],
   rangeMs: number,
   wanted: FieldRef[],
   duration: boolean,
@@ -31,7 +32,7 @@ export function useFacets(
   const { project } = useScope()
   const asked = wanted.map(key).join('|')
   const { data, isFetching, error } = useQuery({
-    queryKey: ['facets', active?.org, project, rangeMs, chips, asked, duration],
+    queryKey: ['facets', active?.org, project, rangeMs, items, asked, duration],
     enabled: Boolean(active) && (wanted.length > 0 || duration),
     staleTime: STALE_MS,
     placeholderData: keepPreviousData,
@@ -44,7 +45,7 @@ export function useFacets(
         duration,
       }
       if (project) body.project = project
-      const query = toBody(chips)
+      const query = bodyOf(items)
       if (query !== undefined) body.query = query
       const found = await json<{ facets: WireFacet[]; duration: Wire['duration'] }>(await post(`/api/orgs/${active?.org}/traces/facets`, body))
       return {
