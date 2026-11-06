@@ -1,4 +1,4 @@
-import { Building2, Check, ChevronDown, Lock, Pencil, Save, Trash2 } from 'lucide-react'
+import { Building2, Check, Lock, PanelLeft, Pencil, Save, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { because } from '@/auth/client'
@@ -6,7 +6,6 @@ import { useAccount, useOrganisations } from '@/auth/session'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Segmented } from '@/components/ui/segmented'
 import {
   BUILT_IN, sameDefinition, useChangeView, useDeleteView, useSaveView, useViews,
@@ -16,11 +15,10 @@ import { cn } from '@/lib/utils'
 
 type Editing = { kind: 'new' } | { kind: 'edit'; view: SavedView }
 
-export function Views({ current, viewKey, onSelect }: { current: Definition; viewKey: string | undefined; onSelect: (key: string | undefined, definition: Definition) => void }) {
+export function useViewsState(current: Definition, viewKey: string | undefined, onSelect: (key: string | undefined, definition: Definition) => void) {
   const { views } = useViews()
   const account = useAccount()
   const { active } = useOrganisations()
-  const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Editing | null>(null)
   const change = useChangeView()
   const remove = useDeleteView()
@@ -32,7 +30,6 @@ export function Views({ current, viewKey, onSelect }: { current: Definition; vie
   const filtered = current.q.length > 0 || current.o !== 'started'
   const isAdmin = active?.role === 'owner' || active?.role === 'admin'
   const mayChange = (view: SavedView) => view.createdBy === account?.account || (view.visibility === 'org' && isAdmin)
-  const name = builtIn?.name ?? saved?.name ?? 'Unsaved'
 
   const update = () => {
     if (!saved) return
@@ -54,66 +51,90 @@ export function Views({ current, viewKey, onSelect }: { current: Definition; vie
       onError: (error) => toast.error(because(error, 'The view was not deleted')),
     })
   }
-  const mine = views.filter((one) => one.visibility === 'private')
-  const shared = views.filter((one) => one.visibility === 'org')
+  const dialog = editing ? (
+    <ViewDialog
+      editing={editing}
+      current={current}
+      canShare={editing.kind === 'new' || editing.view.createdBy === account?.account}
+      onClose={() => setEditing(null)}
+      onSaved={(view) => { setEditing(null); onSelect(view.id, view.definition) }}
+    />
+  ) : null
 
+  return {
+    views, builtIn, saved, dirty, filtered, mayChange, update, drop, dialog, updating: change.isPending,
+    name: builtIn?.name ?? saved?.name ?? 'Unsaved',
+    edit: (view: SavedView) => setEditing({ kind: 'edit', view }),
+    saveAs: () => setEditing({ kind: 'new' }),
+  }
+}
+
+export type ViewsState = ReturnType<typeof useViewsState>
+
+export function ViewsToggle({ state, on, onToggle }: { state: ViewsState; on: boolean; onToggle: () => void }) {
+  const { saved, dirty, filtered, builtIn, mayChange, update, saveAs, updating, name } = state
+  const base = builtIn ?? saved
+  const mine = saved !== undefined && mayChange(saved)
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button size="sm" aria-label={`View: ${name}${dirty ? ', changed' : ''}`}>
-            <span className="max-w-[180px] truncate">{name}</span>
-            {dirty ? <span className="size-1.5 rounded-full bg-primary" aria-hidden /> : null}
-            <ChevronDown className="text-muted-foreground" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-[320px] p-1">
-          <Section title="Built in">
-            {BUILT_IN.map((one) => (
-              <Row key={one.key} on={one.key === viewKey} onPick={() => { onSelect(one.key, one.definition); setOpen(false) }} hint={one.hint}>{one.name}</Row>
-            ))}
-          </Section>
-          {shared.length > 0 ? (
-            <Section title="Shared with the organisation">
-              {shared.map((one) => (
-                <Row key={one.id} on={one.id === viewKey} icon={<Building2 />} onPick={() => { onSelect(one.id, one.definition); setOpen(false) }}
-                  actions={mayChange(one) ? <Actions view={one} onEdit={() => { setOpen(false); setEditing({ kind: 'edit', view: one }) }} onDelete={() => drop(one)} /> : null}>
-                  {one.name}
-                </Row>
-              ))}
-            </Section>
-          ) : null}
-          {mine.length > 0 ? (
-            <Section title="Only you">
-              {mine.map((one) => (
-                <Row key={one.id} on={one.id === viewKey} icon={<Lock />} onPick={() => { onSelect(one.id, one.definition); setOpen(false) }}
-                  actions={<Actions view={one} onEdit={() => { setOpen(false); setEditing({ kind: 'edit', view: one }) }} onDelete={() => drop(one)} />}>
-                  {one.name}
-                </Row>
-              ))}
-            </Section>
-          ) : null}
-          {views.length === 0 ? <p className="m-0 px-2 py-2 text-caption text-muted-foreground">Filter the traces, then save the result as a view to come back to it.</p> : null}
-        </PopoverContent>
-      </Popover>
-
-      {saved && dirty && mayChange(saved) ? (
-        <Button size="sm" variant="primary" loading={change.isPending} onClick={update}><Save />Update</Button>
-      ) : null}
-      {(dirty || (!base && filtered)) ? (
-        <Button size="sm" variant={saved && dirty && mayChange(saved) ? 'outline' : 'primary'} onClick={() => setEditing({ kind: 'new' })}><Save />Save as view</Button>
-      ) : null}
-
-      {editing ? (
-        <ViewDialog
-          editing={editing}
-          current={current}
-          canShare={editing.kind === 'new' || editing.view.createdBy === account?.account}
-          onClose={() => setEditing(null)}
-          onSaved={(view) => { setEditing(null); onSelect(view.id, view.definition) }}
-        />
+      <Button size="sm" aria-pressed={on} aria-label={`Views, current: ${name}${dirty ? ', changed' : ''}`} onClick={onToggle} className={cn(on && 'bg-muted')}>
+        <PanelLeft />
+        <span className="max-w-[180px] truncate">{name}</span>
+        {dirty ? <span className="size-1.5 rounded-full bg-primary" aria-hidden /> : null}
+      </Button>
+      {saved && dirty && mine ? <Button size="sm" variant="primary" loading={updating} onClick={update}><Save />Update</Button> : null}
+      {dirty || (!base && filtered) ? (
+        <Button size="sm" variant={saved && dirty && mine ? 'outline' : 'primary'} onClick={saveAs}><Save />Save as view</Button>
       ) : null}
     </>
+  )
+}
+
+export function ViewsPanel({ state, viewKey, onSelect, onClose }: { state: ViewsState; viewKey: string | undefined; onSelect: (key: string | undefined, definition: Definition) => void; onClose: () => void }) {
+  const [search, setSearch] = useState('')
+  const wanted = search.trim().toLowerCase()
+  const matches = <T extends { name: string }>(rows: T[]) => rows.filter((row) => row.name.toLowerCase().includes(wanted))
+  const builtIn = matches(BUILT_IN)
+  const shared = matches(state.views.filter((one) => one.visibility === 'org'))
+  const mine = matches(state.views.filter((one) => one.visibility === 'private'))
+  const nothing = builtIn.length + shared.length + mine.length === 0
+  return (
+    <div className="flex flex-col gap-1" role="group" aria-label="All views">
+      <div className="flex items-center gap-1.5 pb-1">
+        <span className="flex-1 text-control font-semibold">All views</span>
+        <Button variant="ghost" size="icon-sm" aria-label="Back to the filters" onClick={onClose}><X /></Button>
+      </div>
+      <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search…" aria-label="Search the views" className="h-8" />
+      {builtIn.length > 0 ? (
+        <Section title="Built in">
+          {builtIn.map((one) => (
+            <Row key={one.key} on={one.key === viewKey} hint={one.hint} onPick={() => onSelect(one.key, one.definition)}>{one.name}</Row>
+          ))}
+        </Section>
+      ) : null}
+      {shared.length > 0 ? (
+        <Section title="Shared with the organisation">
+          {shared.map((one) => (
+            <Row key={one.id} on={one.id === viewKey} icon={<Building2 />} onPick={() => onSelect(one.id, one.definition)}
+              actions={state.mayChange(one) ? <Actions view={one} onEdit={() => state.edit(one)} onDelete={() => state.drop(one)} /> : null}>
+              {one.name}
+            </Row>
+          ))}
+        </Section>
+      ) : null}
+      {mine.length > 0 ? (
+        <Section title="Created by me">
+          {mine.map((one) => (
+            <Row key={one.id} on={one.id === viewKey} icon={<Lock />} onPick={() => onSelect(one.id, one.definition)}
+              actions={<Actions view={one} onEdit={() => state.edit(one)} onDelete={() => state.drop(one)} />}>
+              {one.name}
+            </Row>
+          ))}
+        </Section>
+      ) : null}
+      {nothing ? <p className="m-0 px-1 py-2 text-caption text-muted-foreground">No view matches.</p> : null}
+      {state.views.length === 0 && wanted === '' ? <p className="m-0 px-1 py-2 text-caption text-muted-foreground">Filter the traces, then save the result as a view to come back to it.</p> : null}
+    </div>
   )
 }
 
