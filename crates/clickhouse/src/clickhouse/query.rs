@@ -3,6 +3,7 @@ use ferristrace_domain::{
     Clause, Expr, Field, Number, ProjectId, Query, Scalar, TenantId, Test, Window,
 };
 use serde::{Serialize, Serializer};
+use uuid::Uuid;
 
 use crate::clickhouse::read::{nanos, uuid_of};
 
@@ -17,6 +18,9 @@ const SPANS_MATCHING: &str = " AND trace_id IN (SELECT trace_id FROM spans \
 pub(crate) enum Param {
     Text(String),
     Float(f64),
+    Whole(i64),
+    Flag(u8),
+    Id(Uuid),
 }
 
 impl Serialize for Param {
@@ -24,6 +28,9 @@ impl Serialize for Param {
         match self {
             Self::Text(text) => serializer.serialize_str(text),
             Self::Float(number) => serializer.serialize_f64(*number),
+            Self::Whole(number) => serializer.serialize_i64(*number),
+            Self::Flag(flag) => serializer.serialize_u8(*flag),
+            Self::Id(id) => id.serialize(serializer),
         }
     }
 }
@@ -74,6 +81,72 @@ impl Compiled {
             statement = statement.bind(param);
         }
         statement
+    }
+
+    pub(crate) fn facet(
+        field: &Field,
+        query: &Query,
+        tenant: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+        limit: u32,
+    ) -> (String, Vec<Param>) {
+        let mut compiled = Self::default();
+        let column = Column::of(field);
+        let value = compiled.text_of(&column);
+        compiled.scoped(tenant, window, project);
+        let present = compiled.present_of(&column);
+        let narrowed = query.without(field);
+        let filter = narrowed.filter().map(|expr| compiled.expr(expr));
+        let mut sql = format!(
+            "SELECT {value} AS value, count() AS spans FROM spans \
+             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
+               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?) \
+               AND ({present})"
+        );
+        if let Some(filter) = filter {
+            sql.push_str(" AND (");
+            sql.push_str(&filter);
+            sql.push(')');
+        }
+        sql.push_str(" GROUP BY value ORDER BY spans DESC, value LIMIT ?");
+        compiled.params.push(Param::Whole(i64::from(limit)));
+        (sql, compiled.params)
+    }
+
+    pub(crate) fn durations(
+        query: &Query,
+        tenant: TenantId,
+        window: Window,
+        project: Option<ProjectId>,
+    ) -> (String, Vec<Param>) {
+        let mut compiled = Self::default();
+        compiled.scoped(tenant, window, project);
+        let narrowed = query.without(&Field::Duration);
+        let filter = narrowed.filter().map(|expr| compiled.expr(expr));
+        let mut sql = format!(
+            "SELECT toUInt64(ifNull(min({DURATION}), 0)) AS shortest, \
+                    toUInt64(ifNull(max({DURATION}), 0)) AS longest, count() AS spans \
+             FROM spans \
+             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
+               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?)"
+        );
+        if let Some(filter) = filter {
+            sql.push_str(" AND (");
+            sql.push_str(&filter);
+            sql.push(')');
+        }
+        (sql, compiled.params)
+    }
+
+    fn scoped(&mut self, tenant: TenantId, window: Window, project: Option<ProjectId>) {
+        self.params.extend([
+            Param::Id(tenant.as_uuid()),
+            Param::Whole(nanos(window.from_unix_nanos())),
+            Param::Whole(nanos(window.to_unix_nanos())),
+            Param::Flag(u8::from(project.is_some())),
+            Param::Id(uuid_of(project)),
+        ]);
     }
 
     fn expr(&mut self, expr: &Expr) -> String {

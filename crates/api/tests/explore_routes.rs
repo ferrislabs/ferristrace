@@ -9,12 +9,13 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, AttributeFilter, AttributeKey, Expr, Field, Membership, Memberships, NoPhotos,
-    OrgRole, Placement, PlacementName, PlacementReader, Placements, ProjectId, SeenAttribute,
-    SeenPod, SeenValue, SeenWorkload, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary,
-    Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId,
-    SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter,
-    TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
+    AccountId, AttributeFilter, AttributeKey, DurationRange, Expr, FacetFilter, FacetValues,
+    Facets, Field, Membership, Memberships, NoPhotos, OrgRole, Placement, PlacementName,
+    PlacementReader, Placements, ProjectId, SeenAttribute, SeenPod, SeenValue, SeenWorkload,
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session, SessionError,
+    SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages,
+    SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter, TraceId, TraceOrder,
+    TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -611,6 +612,7 @@ struct Remembering(
     Mutex<Vec<ServiceAsked>>,
     Mutex<Vec<(Window, Option<ProjectId>)>>,
     Mutex<Option<(Option<String>, AttributeFilter)>>,
+    Mutex<Option<FacetFilter>>,
 );
 
 impl PlacementReader for Remembering {
@@ -723,6 +725,27 @@ impl SpanReader for Remembering {
         Ok(Vec::new())
     }
 
+    async fn facets(&self, _tenant: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
+        *self.4.lock().expect("the lock") = Some(filter.clone());
+        Ok(Facets {
+            fields: filter
+                .fields()
+                .iter()
+                .map(|field| FacetValues {
+                    field: field.clone(),
+                    values: vec![SeenValue {
+                        value: "checkout".into(),
+                        spans: 12,
+                    }],
+                })
+                .collect(),
+            duration: filter.duration.then_some(DurationRange {
+                min_nanos: 1_500,
+                max_nanos: 2_000_001,
+            }),
+        })
+    }
+
     async fn attributes(
         &self,
         _tenant: TenantId,
@@ -747,6 +770,12 @@ impl SpanReader for Remembering {
             value: "Pay".into(),
             spans: 3,
         }])
+    }
+}
+
+impl Remembering {
+    fn facets_asked(&self) -> Option<FacetFilter> {
+        self.4.lock().expect("the lock").clone()
     }
 }
 
@@ -1223,4 +1252,70 @@ async fn a_request_without_a_session_is_refused() {
     assert_eq!(no_bearer, StatusCode::UNAUTHORIZED);
     assert_eq!(unknown, StatusCode::UNAUTHORIZED);
     assert_eq!(not_a_person, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn facets_are_counted_under_the_query_and_come_back_named_as_they_were_asked() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/traces/facets", org(MINE));
+    let body = format!(
+        r#"{{"from":1000,"to":2000,"project":"{}","duration":true,
+            "query":{{"field":"status","op":"eq","value":"error"}},
+            "facets":[{{"field":"service"}},{{"attr":"http.method"}}]}}"#,
+        org(7)
+    );
+
+    let (status, found) = served(Arc::clone(&asked), searching(&uri, &body)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let counted = serde_json::from_str::<serde_json::Value>(&found).expect("json");
+    assert_eq!(counted["facets"][0]["field"], "service");
+    assert_eq!(counted["facets"][0]["values"][0]["value"], "checkout");
+    assert_eq!(counted["facets"][0]["values"][0]["spans"], 12);
+    assert_eq!(counted["facets"][1]["attr"], "http.method");
+    assert_eq!(counted["duration"]["min_us"], 1);
+    assert_eq!(counted["duration"]["max_us"], 2_001);
+    let filter = asked.facets_asked().expect("asked");
+    assert!(filter.duration);
+    assert_eq!(filter.fields().len(), 2);
+    assert!(!filter.query.is_anything());
+    assert_eq!(filter.project, Some(ProjectId::new(Uuid::from_u128(7))));
+}
+
+#[tokio::test]
+async fn a_facet_request_the_domain_refuses_is_a_bad_request() {
+    let uri = format!("/api/orgs/{}/traces/facets", org(MINE));
+    let many = vec![r#"{"attr":"k"}"#; 13].join(",");
+    let refused = [
+        format!(r#"{{"from":1000,"to":2000,"facets":[{many}]}}"#),
+        r#"{"from":1000,"to":2000,"facets":[{"field":"trace_id"}]}"#.to_owned(),
+        r#"{"from":1000,"to":2000,"facets":[{"field":"duration"}]}"#.to_owned(),
+        r#"{"from":1000,"to":2000,"facets":[{"field":"service","attr":"x"}]}"#.to_owned(),
+        r#"{"from":1000,"to":2000,"query":{"all":[]},"facets":[]}"#.to_owned(),
+        r#"{"from":2000,"to":1000,"facets":[]}"#.to_owned(),
+    ];
+
+    for body in refused {
+        let asked = Arc::new(Remembering::default());
+
+        let (status, _) = served(Arc::clone(&asked), searching(&uri, &body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(asked.facets_asked().is_none(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn an_unsigned_facet_request_is_refused() {
+    let uri = format!("/api/orgs/{}/traces/facets", org(MINE));
+    let unsigned = Request::builder()
+        .method("POST")
+        .uri(&uri)
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"from":1000,"to":2000}"#))
+        .expect("a request");
+
+    let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

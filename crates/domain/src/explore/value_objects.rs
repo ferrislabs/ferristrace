@@ -1,5 +1,5 @@
 use super::errors::BadWindow;
-use super::query::Query;
+use super::query::{Field, Query};
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
 use crate::placement::Placement;
@@ -82,6 +82,63 @@ impl TraceFilter {
     pub fn limit(&self) -> u32 {
         self.limit
     }
+}
+
+pub const MAX_FACETS: usize = 12;
+
+pub const FACET_VALUES: u32 = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FacetFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub query: Query,
+    fields: Vec<Field>,
+    pub duration: bool,
+}
+
+impl FacetFilter {
+    pub fn new(
+        window: Window,
+        query: Query,
+        fields: Vec<Field>,
+        duration: bool,
+    ) -> Result<Self, super::errors::BadQuery> {
+        let countable =
+            |field: &Field| !matches!(field, Field::Duration | Field::TraceId | Field::SpanId);
+        if fields.len() > MAX_FACETS || !fields.iter().all(countable) {
+            return Err(super::errors::BadQuery::Shape);
+        }
+        Ok(Self {
+            window,
+            project: None,
+            query,
+            fields,
+            duration,
+        })
+    }
+
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FacetValues {
+    pub field: Field,
+    pub values: Vec<SeenValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DurationRange {
+    pub min_nanos: u64,
+    pub max_nanos: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Facets {
+    pub fields: Vec<FacetValues>,
+    pub duration: Option<DurationRange>,
 }
 
 pub const MAX_ATTRIBUTES: u32 = 200;

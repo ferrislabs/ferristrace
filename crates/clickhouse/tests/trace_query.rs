@@ -3,8 +3,8 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, Clause, Expr, Field, Number, Op, Query, Scalar, Scope,
-    SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
+    AttributeFilter, AttributeKey, Clause, Expr, FacetFilter, Field, Number, Op, Query, Scalar,
+    Scope, SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -467,4 +467,163 @@ async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
         vec![("Pay".to_owned(), 3), ("Refund".to_owned(), 1)]
     );
     assert!(named(&theirs).iter().all(|(key, _)| key != "db.system"));
+}
+
+fn facet_filter(query: Query, fields: Vec<Field>, duration: bool) -> FacetFilter {
+    FacetFilter::new(the_hour(), query, fields, duration).expect("a valid facet request")
+}
+
+#[tokio::test]
+async fn a_facet_counts_the_values_of_a_field_under_the_query_without_its_own_clauses() {
+    let Some(reader) = reader("ferristrace_query_facets").await else {
+        return;
+    };
+    let method =
+        Query::new(is(key("rpc.method"), Op::Eq, Value::One(word("Pay")))).expect("a query");
+    let both = Query::new(Expr::All(vec![
+        is(Field::Service, Op::Eq, Value::One(word("checkout"))),
+        is(key("rpc.method"), Op::Eq, Value::One(word("Pay"))),
+    ]))
+    .expect("a query");
+
+    let by_service = reader
+        .facets(
+            tenant(MINE),
+            &facet_filter(method, vec![Field::Service], false),
+        )
+        .await
+        .expect("the facets read");
+    let by_method = reader
+        .facets(
+            tenant(MINE),
+            &facet_filter(both, vec![key("rpc.method"), Field::Service], false),
+        )
+        .await
+        .expect("the facets read");
+
+    let counts = |values: &ferristrace_domain::FacetValues| -> Vec<(String, u64)> {
+        values
+            .values
+            .iter()
+            .map(|v| (v.value.to_string(), v.spans))
+            .collect()
+    };
+    assert_eq!(
+        counts(&by_service.fields[0]),
+        vec![("checkout".to_owned(), 2), ("payments".to_owned(), 1)]
+    );
+    assert_eq!(
+        counts(&by_method.fields[0]),
+        vec![("Pay".to_owned(), 2), ("Refund".to_owned(), 1)],
+        "the method facet ignores its own clause but keeps the service one"
+    );
+    assert_eq!(
+        counts(&by_method.fields[1]),
+        vec![("checkout".to_owned(), 2), ("payments".to_owned(), 1)],
+        "the service facet ignores its own clause but keeps the method one"
+    );
+    assert!(by_service.duration.is_none());
+}
+
+#[tokio::test]
+async fn a_facet_only_counts_spans_that_hold_the_attribute_and_never_crosses_tenants() {
+    let Some(reader) = reader("ferristrace_query_facets_scope").await else {
+        return;
+    };
+
+    let mine = reader
+        .facets(
+            tenant(MINE),
+            &facet_filter(
+                Query::anything(),
+                vec![key("db.system"), Field::Status, Field::Kind],
+                false,
+            ),
+        )
+        .await
+        .expect("the facets read");
+    let theirs = reader
+        .facets(
+            tenant(THEIRS),
+            &facet_filter(
+                Query::anything(),
+                vec![key("db.system"), Field::Status],
+                false,
+            ),
+        )
+        .await
+        .expect("the facets read");
+
+    assert_eq!(mine.fields[0].values.len(), 1);
+    assert_eq!(&*mine.fields[0].values[0].value, "postgres");
+    assert_eq!(
+        mine.fields[1]
+            .values
+            .iter()
+            .map(|v| (v.value.to_string(), v.spans))
+            .collect::<Vec<_>>(),
+        vec![("unset".to_owned(), 4), ("error".to_owned(), 1)]
+    );
+    assert_eq!(
+        mine.fields[2].values.iter().map(|v| v.spans).sum::<u64>(),
+        5
+    );
+    assert!(theirs.fields[0].values.is_empty());
+    assert_eq!(theirs.fields[1].values.len(), 1);
+}
+
+#[tokio::test]
+async fn the_duration_range_follows_the_query_but_not_its_own_clauses() {
+    let Some(reader) = reader("ferristrace_query_facets_duration").await else {
+        return;
+    };
+    let slow = Query::new(is(
+        Field::Duration,
+        Op::Gt,
+        Value::One(num(500.0 * MILLI as f64)),
+    ))
+    .expect("a query");
+    let payments = Query::new(Expr::All(vec![
+        is(Field::Service, Op::Eq, Value::One(word("payments"))),
+        is(
+            Field::Duration,
+            Op::Gt,
+            Value::One(num(500.0 * MILLI as f64)),
+        ),
+    ]))
+    .expect("a query");
+    let nobody = Query::new(is(Field::Service, Op::Eq, Value::One(word("nope")))).expect("a query");
+
+    let all = reader
+        .facets(tenant(MINE), &facet_filter(slow, vec![], true))
+        .await
+        .expect("read");
+    let narrowed = reader
+        .facets(tenant(MINE), &facet_filter(payments, vec![], true))
+        .await
+        .expect("read");
+    let none = reader
+        .facets(tenant(MINE), &facet_filter(nobody, vec![], true))
+        .await
+        .expect("read");
+
+    let range = all.duration.expect("a range");
+    assert_eq!(range.min_nanos, 5 * MILLI);
+    assert_eq!(range.max_nanos, 900 * MILLI);
+    let payments_range = narrowed.duration.expect("a range");
+    assert_eq!(
+        (payments_range.min_nanos, payments_range.max_nanos),
+        (5 * MILLI, 30 * MILLI)
+    );
+    assert!(none.duration.is_none());
+}
+
+#[test]
+fn a_facet_request_is_bounded_and_refuses_ids_and_duration_as_facets() {
+    let many = (0..13).map(|n| key(&format!("k{n}"))).collect();
+
+    assert!(FacetFilter::new(the_hour(), Query::anything(), many, false).is_err());
+    assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::TraceId], false).is_err());
+    assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::Duration], false).is_err());
+    assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::Service], false).is_ok());
 }

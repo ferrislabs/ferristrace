@@ -1,7 +1,8 @@
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, Clock, Explore, ExploreError, Placements, ProjectId, Reader,
-    Readers, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSite, ServiceSummary,
-    Span, TenantId, TraceFilter, TraceId, TraceSummary, Whoami, Window,
+    AttributeFilter, AttributeKey, Clock, Explore, ExploreError, FacetFilter, Facets, Placements,
+    ProjectId, Reader, Readers, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
+    ServiceSite, ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
+    Window,
 };
 
 use crate::registry::{ReadRepos, SiteRepos};
@@ -122,6 +123,24 @@ where
             reader,
         )
         .attribute_values(who, org, key, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn facets(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &FacetFilter,
+    ) -> Result<Facets, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .facets(who, org, filter)
         .await
     }
 

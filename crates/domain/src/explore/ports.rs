@@ -2,8 +2,8 @@ use core::future::Future;
 
 use super::query::AttributeKey;
 use super::value_objects::{
-    AttributeFilter, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
-    TraceFilter, TraceSummary,
+    AttributeFilter, FacetFilter, Facets, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
+    ServiceSummary, TraceFilter, TraceSummary,
 };
 use crate::catalogue::ProjectId;
 use crate::store::StoreError;
@@ -58,6 +58,14 @@ pub trait SpanReader {
         _filter: &AttributeFilter,
     ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
         async { Ok(Vec::new()) }
+    }
+
+    fn facets(
+        &self,
+        _tenant: TenantId,
+        _filter: &FacetFilter,
+    ) -> impl Future<Output = Result<Facets, StoreError>> + Send {
+        async { Ok(Facets::default()) }
     }
 }
 
@@ -121,6 +129,14 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
         (*self).attribute_values(tenant, key, filter)
     }
+
+    fn facets(
+        &self,
+        tenant: TenantId,
+        filter: &FacetFilter,
+    ) -> impl Future<Output = Result<Facets, StoreError>> + Send {
+        (*self).facets(tenant, filter)
+    }
 }
 
 impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
@@ -182,5 +198,13 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         filter: &AttributeFilter,
     ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
         self.as_ref().attribute_values(tenant, key, filter)
+    }
+
+    fn facets(
+        &self,
+        tenant: TenantId,
+        filter: &FacetFilter,
+    ) -> impl Future<Output = Result<Facets, StoreError>> + Send {
+        self.as_ref().facets(tenant, filter)
     }
 }

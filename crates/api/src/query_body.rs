@@ -1,7 +1,7 @@
 use ferristrace_domain::{
     AttributeKey, BadQuery, Clause, Expr, Field, Number, Op, Query, Scalar, Value,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -142,6 +142,51 @@ impl ClauseBody {
             None => Value::Nothing,
         };
         Clause::new(field, self.op.into(), value)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldRefBody {
+    #[serde(default)]
+    field: Option<FieldBody>,
+    #[serde(default)]
+    attr: Option<String>,
+}
+
+impl FieldRefBody {
+    pub fn field(self) -> Result<Field, BadQuery> {
+        match (self.field, self.attr) {
+            (Some(field), None) => Ok(field.into()),
+            (None, Some(key)) => Ok(Field::Attribute(AttributeKey::new(&key)?)),
+            _ => Err(BadQuery::Shape),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum FieldRefOut {
+    Built { field: &'static str },
+    Attribute { attr: String },
+}
+
+impl From<&Field> for FieldRefOut {
+    fn from(field: &Field) -> Self {
+        let built = |name| Self::Built { field: name };
+        match field {
+            Field::Service => built("service"),
+            Field::Name => built("name"),
+            Field::Status => built("status"),
+            Field::Kind => built("kind"),
+            Field::Duration => built("duration"),
+            Field::HttpStatusCode => built("http_status_code"),
+            Field::TraceId => built("trace_id"),
+            Field::SpanId => built("span_id"),
+            Field::Attribute(key) => Self::Attribute {
+                attr: key.as_str().to_owned(),
+            },
+        }
     }
 }
 

@@ -283,6 +283,29 @@ impl Query {
         self.filter.is_none()
     }
 
+    #[must_use]
+    pub fn without(&self, field: &Field) -> Self {
+        let on_field = |expr: &Expr| matches!(expr, Expr::Is(clause) if clause.field() == field);
+        match &self.filter {
+            Some(only) if on_field(only) => Self::anything(),
+            Some(Expr::All(parts)) if parts.iter().any(on_field) => {
+                let kept: Vec<Expr> = parts
+                    .iter()
+                    .filter(|part| !on_field(part))
+                    .cloned()
+                    .collect();
+                if kept.is_empty() {
+                    Self::anything()
+                } else {
+                    Self {
+                        filter: Some(Expr::All(kept)),
+                    }
+                }
+            }
+            _ => self.clone(),
+        }
+    }
+
     fn walk(expr: &Expr, depth: usize, conditions: &mut usize) -> Result<(), BadQuery> {
         if depth > MAX_DEPTH {
             return Err(BadQuery::Deep);
@@ -454,6 +477,42 @@ mod tests {
             Query::new(Expr::Not(Box::new(Expr::Any(vec![])))),
             Err(BadQuery::Empty)
         );
+    }
+
+    #[test]
+    fn a_facet_counts_without_the_clauses_on_its_own_field_only() {
+        let service = || is(Field::Service, Op::Eq, Value::One(text("checkout")));
+        let query = Query::new(Expr::All(vec![
+            service(),
+            eq("rpc.method", "Pay"),
+            is(Field::Service, Op::Ne, Value::One(text("backup"))),
+        ]))
+        .unwrap();
+
+        let without_service = query.without(&Field::Service);
+        let without_method = query.without(&attribute("rpc.method"));
+        let untouched = query.without(&Field::Name);
+
+        assert_eq!(
+            without_service.filter(),
+            Some(&Expr::All(vec![eq("rpc.method", "Pay")]))
+        );
+        assert!(matches!(without_method.filter(), Some(Expr::All(parts)) if parts.len() == 2));
+        assert_eq!(untouched, query);
+        assert!(
+            Query::new(service())
+                .unwrap()
+                .without(&Field::Service)
+                .is_anything()
+        );
+        assert!(Query::anything().without(&Field::Service).is_anything());
+    }
+
+    #[test]
+    fn a_group_that_is_not_a_plain_and_is_left_alone() {
+        let query = Query::new(Expr::Any(vec![eq("a", "1"), eq("b", "2")])).unwrap();
+
+        assert_eq!(query.without(&attribute("a")), query);
     }
 
     #[test]

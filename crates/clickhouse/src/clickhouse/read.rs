@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue,
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId, SpanKind,
-    SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    AttributeFilter, AttributeKey, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets,
+    MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId, SpanKind, SpanReader, SpanStatus,
+    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -132,6 +133,13 @@ struct AttributeRow {
     key: String,
     spans: u64,
     numbers: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct RangeRow {
+    shortest: u64,
+    longest: u64,
+    spans: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -418,6 +426,58 @@ impl SpanReader for ClickhouseReader {
                 spans: row.spans,
             })
             .collect())
+    }
+
+    async fn facets(&self, tenant: TenantId, filter: &FacetFilter) -> Result<Facets, StoreError> {
+        let mut fields = Vec::with_capacity(filter.fields().len());
+        for field in filter.fields() {
+            let (sql, params) = Compiled::facet(
+                field,
+                &filter.query,
+                tenant,
+                filter.window,
+                filter.project,
+                FACET_VALUES,
+            );
+            let mut statement = self.client.query(&sql);
+            for param in &params {
+                statement = statement.bind(param);
+            }
+            let rows: Vec<ValueRow> = statement
+                .fetch_all()
+                .await
+                .map_err(|error| refused(&error))?;
+            fields.push(FacetValues {
+                field: field.clone(),
+                values: rows
+                    .into_iter()
+                    .map(|row| SeenValue {
+                        value: row.value.into(),
+                        spans: row.spans,
+                    })
+                    .collect(),
+            });
+        }
+
+        let duration = if filter.duration {
+            let (sql, params) =
+                Compiled::durations(&filter.query, tenant, filter.window, filter.project);
+            let mut statement = self.client.query(&sql);
+            for param in &params {
+                statement = statement.bind(param);
+            }
+            let range: RangeRow = statement
+                .fetch_one()
+                .await
+                .map_err(|error| refused(&error))?;
+            (range.spans > 0).then_some(DurationRange {
+                min_nanos: range.shortest,
+                max_nanos: range.longest,
+            })
+        } else {
+            None
+        };
+        Ok(Facets { fields, duration })
     }
 
     async fn trace(
