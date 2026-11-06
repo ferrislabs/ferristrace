@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use super::entities::{Exemplar, Metric};
 use super::errors::{BadAggregation, BadMetricKind, BadMetricQuery};
 use crate::catalogue::ProjectId;
-use crate::explore::Window;
+use crate::explore::{Query, Stream, Window};
 use crate::placement::Placement;
 use crate::telemetry::DecompressedBytes;
 
@@ -162,6 +162,7 @@ pub struct MetricQuery {
     pub aggregation: Option<Aggregation>,
     pub project: Option<ProjectId>,
     pub placement: Placement,
+    pub filter: Query,
 }
 
 impl MetricQuery {
@@ -173,10 +174,14 @@ impl MetricQuery {
             aggregation: None,
             project: None,
             placement: Placement::default(),
+            filter: Query::default(),
         }
     }
 
     pub fn resolved(&self, kind: MetricKind) -> Result<Aggregation, BadMetricQuery> {
+        self.filter
+            .fits(Stream::Metrics)
+            .map_err(|_| BadMetricQuery::Field)?;
         if self.group_by.len() > MAX_GROUP_BY {
             return Err(BadMetricQuery::GroupBy { max: MAX_GROUP_BY });
         }

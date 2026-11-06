@@ -7,9 +7,10 @@ use ferristrace_clickhouse::{
     SpanStoreSettings, open_span_store,
 };
 use ferristrace_domain::{
-    Aggregation, Exemplar, HistogramPoint, Metric, MetricData, MetricKind, MetricPoint,
-    MetricQuery, MetricReader, MetricSink, ProjectId, RetentionDays, Scope, SeriesSet, SpanId,
-    Temporality, TenantId, TraceId, Window,
+    Aggregation, AttributeFilter, AttributeKey, Clause, Exemplar, Expr, Field, HistogramPoint,
+    Metric, MetricData, MetricKind, MetricPoint, MetricQuery, MetricReader, MetricSink, Op,
+    ProjectId, Query, RetentionDays, Scalar, Scope, SeriesSet, SpanId, Temporality, TenantId,
+    TraceId, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -853,4 +854,115 @@ async fn a_series_groups_by_a_resource_attribute_of_the_export() {
             (labelled(&[("host.name", "web-2")]), Some(2.0)),
         ]
     );
+}
+
+fn route_is(op: Op, route: &str) -> Query {
+    let clause = Clause::new(
+        Field::Attribute(AttributeKey::new("http.route").expect("a key")),
+        op,
+        Value::One(Scalar::Text(route.into())),
+    )
+    .expect("a valid clause");
+    Query::new(Expr::Is(clause)).expect("a valid query")
+}
+
+#[tokio::test]
+async fn a_query_tree_narrows_a_series_and_the_text_is_bound_not_spliced() {
+    let Some(client) = prepared("ferristrace_metrics_tree").await else {
+        return;
+    };
+    sent(
+        &sink_of(&client),
+        Scope::of(org(1)),
+        vec![a_metric(
+            "queue.depth",
+            "1",
+            MetricData::Gauge(vec![a_point(5, 1.5, "/a"), a_point(5, 2.0, "/b")]),
+        )],
+    )
+    .await;
+    let reader = ClickhouseMetricReader::new(client);
+    let mut only_a = charting("queue.depth", Aggregation::Sum, &[]);
+    only_a.filter = route_is(Op::Eq, "/a");
+    let mut not_a = charting("queue.depth", Aggregation::Sum, &[]);
+    not_a.filter = route_is(Op::Ne, "/a");
+    let mut hostile = charting("queue.depth", Aggregation::Sum, &[]);
+    hostile.filter = route_is(Op::Eq, "' OR 1 = 1 --");
+
+    let narrowed = reader
+        .series(org(1), MetricKind::Gauge, Aggregation::Sum, &only_a)
+        .await
+        .expect("a series set");
+    let excluded = reader
+        .series(org(1), MetricKind::Gauge, Aggregation::Sum, &not_a)
+        .await
+        .expect("a series set");
+    let refused = reader
+        .series(org(1), MetricKind::Gauge, Aggregation::Sum, &hostile)
+        .await
+        .expect("a series set");
+
+    assert_eq!(values_of(&narrowed, None), vec![(5, 1.5)]);
+    assert_eq!(values_of(&excluded, None), vec![(5, 2.0)]);
+    assert!(
+        refused
+            .series
+            .iter()
+            .all(|line| line.points.iter().all(|(_, value)| value.is_none()))
+    );
+}
+
+#[tokio::test]
+async fn the_attributes_of_a_metric_are_listed_with_their_values() {
+    let Some(client) = prepared("ferristrace_metrics_attributes").await else {
+        return;
+    };
+    let sink = sink_of(&client);
+    sent(
+        &sink,
+        Scope::of(org(1)),
+        vec![
+            a_metric(
+                "queue.depth",
+                "1",
+                MetricData::Gauge(vec![a_point(5, 1.5, "/a"), a_point(6, 2.0, "/b")]),
+            ),
+            a_metric(
+                "other",
+                "1",
+                MetricData::Gauge(vec![a_point(5, 1.0, "/elsewhere")]),
+            ),
+        ],
+    )
+    .await;
+    let reader = ClickhouseMetricReader::new(client);
+    let filter = AttributeFilter::over(the_minute());
+
+    let keys = reader
+        .attributes(org(1), "queue.depth", &filter)
+        .await
+        .expect("keys");
+    let values = reader
+        .attribute_values(
+            org(1),
+            "queue.depth",
+            &AttributeKey::new("http.route").expect("a key"),
+            &filter,
+        )
+        .await
+        .expect("values");
+    let theirs = reader
+        .attributes(org(2), "queue.depth", &filter)
+        .await
+        .expect("keys");
+
+    assert_eq!(
+        keys.iter().map(|key| &*key.key).collect::<Vec<_>>(),
+        vec!["host", "http.route"]
+    );
+    assert_eq!(
+        values.iter().map(|one| &*one.value).collect::<Vec<_>>(),
+        vec!["/a", "/b"]
+    );
+    assert!(theirs.is_empty());
 }

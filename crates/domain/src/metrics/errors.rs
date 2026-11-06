@@ -19,6 +19,8 @@ pub enum BadMetricQuery {
     },
     #[error("a series groups by at most {max} attribute keys")]
     GroupBy { max: usize },
+    #[error("a metric has no such field: use service or an attribute")]
+    Field,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

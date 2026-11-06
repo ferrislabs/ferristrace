@@ -1,7 +1,7 @@
 use ferristrace_domain::{
-    Clock, ClusterFilter, ClusterSnapshot, ClusterView, ExploreError, MetricDescriptor,
-    MetricError, MetricQuery, MetricSearch, ProjectId, Reader, Readers, SeriesSet, TenantId,
-    Whoami,
+    AttributeFilter, AttributeKey, Clock, ClusterFilter, ClusterSnapshot, ClusterView,
+    ExploreError, MetricDescriptor, MetricError, MetricQuery, MetricSearch, ProjectId, Reader,
+    Readers, SeenAttribute, SeenValue, SeriesSet, TenantId, Whoami,
 };
 
 use crate::registry::ReadRepos;
@@ -45,6 +45,45 @@ where
             reader,
         )
         .series(who, org, query)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn metric_attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        metric: &str,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let Some(reader) = &self.metric_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        MetricSearch::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attributes(who, org, metric, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn metric_attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        metric: &str,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let Some(reader) = &self.metric_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        MetricSearch::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attribute_values(who, org, metric, key, filter)
         .await
     }
 
