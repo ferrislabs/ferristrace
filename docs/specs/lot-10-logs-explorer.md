@@ -52,7 +52,10 @@ Design (10b, web)
   routes also take the Kubernetes placement fields.
 
 Design (10c)
-  A log with a trace id links to the trace; a trace shows its logs.
+  A log with a trace id links to the trace (already so in the expanded
+  row); a trace links to its logs with `q=trace_id = "<id>"` and the
+  trace's period plus five minutes either side as the zoom, without the
+  older `f` parameter.
 
 Acceptance (10a)
   A1  `severity = error` returns the error logs only.

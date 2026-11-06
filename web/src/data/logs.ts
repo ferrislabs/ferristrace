@@ -129,11 +129,6 @@ export function traceWindow(startedAtMs: number, durationMs: number): { fromMs: 
   return { fromMs: startedAtMs - AROUND_TRACE_MS, toMs: Math.ceil(startedAtMs + durationMs) + AROUND_TRACE_MS }
 }
 
-export function traceLogsFilter(trace: string, startedAtMs: number, durationMs: number): string {
-  const { fromMs, toMs } = traceWindow(startedAtMs, durationMs)
-  return new URLSearchParams({ from: String(fromMs), to: String(toMs), trace }).toString()
-}
-
 export function useTraceLogs(trace: string | undefined, startedAtMs: number, durationMs: number) {
   const { active } = useOrganisations()
   const { project } = useScope()
