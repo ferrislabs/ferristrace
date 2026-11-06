@@ -177,12 +177,12 @@ function searched(sift: Sift, project: string | undefined, placement: Placement)
   return body
 }
 
-export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, items: Node[] = []): { rows: TraceRow[]; loading: boolean; failed: unknown } {
+export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, items: Node[] = [], enabled = true): { rows: TraceRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
   const { data, isFetching, error } = useQuery({
     queryKey: ['traces', active?.org, project, sift, placement, items],
-    enabled: Boolean(active),
+    enabled: Boolean(active) && enabled,
     staleTime: FRESH_MS,
     queryFn: async () => {
       const query = bodyOf(items)

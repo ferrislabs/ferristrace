@@ -4,7 +4,7 @@ use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, Clause, Expr, FacetFilter, Field, Number, Op, Query, Scalar,
-    Scope, SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
+    Scope, SpanFilter, SpanOrder, SpanReader, SpanSink, TenantId, TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_otlp::spans_of;
@@ -626,4 +626,127 @@ fn a_facet_request_is_bounded_and_refuses_ids_and_duration_as_facets() {
     assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::TraceId], false).is_err());
     assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::Duration], false).is_err());
     assert!(FacetFilter::new(the_hour(), Query::anything(), vec![Field::Service], false).is_ok());
+}
+
+fn span_filter(query: Query, order: SpanOrder, limit: u32) -> SpanFilter {
+    let mut filter = SpanFilter::over(the_hour()).at_most(limit);
+    filter.query = query;
+    filter.order = order;
+    filter
+}
+
+#[tokio::test]
+async fn the_spans_tab_lists_the_spans_that_match_not_the_traces_that_hold_them() {
+    let Some(reader) = reader("ferristrace_query_spans").await else {
+        return;
+    };
+    let method =
+        Query::new(is(key("rpc.method"), Op::Eq, Value::One(word("Pay")))).expect("a query");
+
+    let matched = reader
+        .spans(tenant(MINE), &span_filter(method, SpanOrder::Started, 50))
+        .await
+        .expect("the spans read");
+    let everything = reader
+        .spans(
+            tenant(MINE),
+            &span_filter(Query::anything(), SpanOrder::Started, 50),
+        )
+        .await
+        .expect("the spans read");
+
+    let mut services: Vec<&str> = matched.iter().map(|span| &*span.service).collect();
+    services.sort_unstable();
+    assert_eq!(services, vec!["checkout", "checkout", "payments"]);
+    assert_eq!(
+        everything.len(),
+        5,
+        "the db span of trace 3 is a span of its own"
+    );
+    assert!(
+        everything
+            .iter()
+            .any(|span| &*span.name == "work" && span.span_id.as_bytes()[0] == 2)
+    );
+}
+
+#[tokio::test]
+async fn spans_come_newest_or_slowest_first_within_the_limit_and_carry_their_fields() {
+    let Some(reader) = reader("ferristrace_query_spans_order").await else {
+        return;
+    };
+
+    let newest = reader
+        .spans(
+            tenant(MINE),
+            &span_filter(Query::anything(), SpanOrder::Started, 50),
+        )
+        .await
+        .expect("read");
+    let slowest = reader
+        .spans(
+            tenant(MINE),
+            &span_filter(Query::anything(), SpanOrder::Duration, 2),
+        )
+        .await
+        .expect("read");
+
+    assert!(
+        newest
+            .windows(2)
+            .all(|pair| pair[0].started_unix_nanos >= pair[1].started_unix_nanos)
+    );
+    assert_eq!(slowest.len(), 2);
+    assert_eq!(slowest[0].duration_nanos, 900 * MILLI);
+    assert_eq!(slowest[0].status, ferristrace_domain::SpanStatus::Error);
+    assert_eq!(slowest[0].status_code, Some(503));
+    assert_eq!(slowest[0].kind, ferristrace_domain::SpanKind::Server);
+    assert_eq!(&*slowest[0].service, "checkout");
+    assert_eq!(slowest[0].trace_id.as_bytes()[0], 2);
+    assert_eq!(slowest[1].duration_nanos, 30 * MILLI);
+}
+
+#[tokio::test]
+async fn spans_never_cross_organisations_and_a_hostile_value_is_data() {
+    let Some(reader) = reader("ferristrace_query_spans_scope").await else {
+        return;
+    };
+    let nasty = Query::new(is(
+        key("note"),
+        Op::Eq,
+        Value::One(word("it's a \"quote\"; DROP TABLE spans")),
+    ))
+    .expect("a query");
+    let errors = Query::new(is(Field::Status, Op::Eq, Value::One(word("error")))).expect("a query");
+
+    let hostile = reader
+        .spans(tenant(MINE), &span_filter(nasty, SpanOrder::Started, 50))
+        .await
+        .expect("read");
+    let mine = reader
+        .spans(
+            tenant(MINE),
+            &span_filter(errors.clone(), SpanOrder::Started, 50),
+        )
+        .await
+        .expect("read");
+    let theirs = reader
+        .spans(tenant(THEIRS), &span_filter(errors, SpanOrder::Started, 50))
+        .await
+        .expect("read");
+
+    assert_eq!(hostile.len(), 1);
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].trace_id.as_bytes()[0], 2);
+    assert_eq!(theirs.len(), 1);
+    assert_eq!(theirs[0].trace_id.as_bytes()[0], 9);
+}
+
+#[test]
+fn a_span_filter_is_bounded() {
+    let filter = SpanFilter::over(the_hour());
+
+    assert_eq!(filter.clone().at_most(0).limit(), 1);
+    assert_eq!(filter.clone().at_most(10_000).limit(), 500);
+    assert_eq!(filter.limit(), 50);
 }

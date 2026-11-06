@@ -117,7 +117,14 @@ Design
     query?, facets: [{field}|{attr}], duration?}` (at most 12 facets) and
     answers `{facets: [{field|attr, values: [{value, spans}]}],
     duration: {min_us, max_us}|null}`. The values are the 10 most used.
-    Lot 9d: tabs Traces, Spans, Time series, Table.
+    Lot 9d: tabs over the same query: Traces, Spans, Time series, Table,
+    one pull request each. The tab is in the url (`t`) and in a view's
+    definition. Spans (9d-1): `POST /api/orgs/{org}/spans/search` takes
+    `{from, to, project?, query?, order: started|duration, limit?}` and
+    answers `{spans: [{trace_id, span_id, service, name, kind, status,
+    status_code, started_at_ms, duration_us}]}`, the spans that satisfy
+    the query on their own (not the traces that hold them), newest or
+    slowest first, at most 500.
     Lot 9e (web only, no new route): the query is kept in the url as
     text, parsed in the web to the same tree the API takes.
     Grammar: `expr := or; or := and (OR and)*; and := not (AND not)*;

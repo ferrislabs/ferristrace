@@ -16,7 +16,9 @@ import type { Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
-import { orderOf, type Definition, type Order } from '@/data/views'
+import { orderOf, tabOf, TABS, type Definition, type Order, type Tab } from '@/data/views'
+import { useSpans } from '@/data/spans'
+import { SpansTable } from '@/components/ft/SpansTable'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { because } from '@/auth/client'
@@ -41,16 +43,18 @@ export function Traces() {
   const chips = useMemo(() => items.filter(isChip), [items])
   const others = useMemo(() => items.filter((item) => !isChip(item)), [items])
   const order = orderOf(useSearchParam('o'))
+  const tab = tabOf(useSearchParam('t'))
   const viewParam = useSearchParam('view')
-  const viewKey = viewParam ?? (items.length === 0 && order === 'started' ? 'recent' : undefined)
+  const viewKey = viewParam ?? (items.length === 0 && order === 'started' && tab === 'traces' ? 'recent' : undefined)
   const sift = useMemo<Sift>(() => ({ ...ANY, rangeMs: windowMs, order, limit }), [windowMs, order, limit])
   const { placement, place } = usePlacement()
-  const { rows, loading, failed } = useTraces(sift, placement, items)
-  const current = useMemo<Definition>(() => ({ q: normalise(text), o: order }), [text, order])
+  const { rows, loading, failed } = useTraces(sift, placement, items, tab === 'traces')
+  const spans = useSpans(windowMs, order, limit, items, tab === 'spans')
+  const current = useMemo<Definition>(() => ({ q: normalise(text), o: order, t: tab }), [text, order, tab])
   const [panel, setPanel] = useState<'facets' | 'views'>('facets')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const show = (next: Partial<{ q: string; o: Order; view: string | undefined }>) => {
-    const was = { q: text, o: order, view: viewParam }
+  const show = (next: Partial<{ q: string; o: Order; t: Tab; view: string | undefined }>) => {
+    const was = { q: text, o: order, t: tab, view: viewParam }
     const merged = { ...was, ...next }
     void goTo({
       to: '.' as never,
@@ -58,6 +62,7 @@ export function Traces() {
         ...search,
         q: merged.q.trim() === '' ? undefined : merged.q,
         o: merged.o === 'started' ? undefined : merged.o,
+        t: merged.t === 'traces' ? undefined : merged.t,
         view: merged.view,
       })) as never,
       replace: true,
@@ -66,7 +71,7 @@ export function Traces() {
   }
   const setItems = (next: Node[]) => show({ q: itemsText(next) })
   const setChips = (next: Chip[]) => setItems([...others, ...next])
-  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, view: key })
+  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, t: definition.t, view: key })
   const viewsState = useViewsState(current, viewKey, select)
   const clear = () => { show({ q: '', o: 'started', view: undefined }); place(NOWHERE) }
   const sifting = items.length > 0 || order !== 'started' || isPlaced(placement)
@@ -75,13 +80,17 @@ export function Traces() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return
-      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(rows.length - 1, c + 1)) }
+      const count = tab === 'spans' ? spans.rows.length : rows.length
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor((c) => Math.min(count - 1, c + 1)) }
       if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)) }
-      if (e.key === 'Enter' && rows[cursor]) navigate(`/traces/${rows[cursor].id}`)
+      if (e.key === 'Enter') {
+        const target = tab === 'spans' ? spans.rows[cursor]?.traceId : rows[cursor]?.id
+        if (target) navigate(`/traces/${target}`)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [rows, cursor, navigate])
+  }, [rows, spans.rows, tab, cursor, navigate])
 
   const copy = (id: string) => { void navigator.clipboard?.writeText(id); toast.success('Trace id copied', { description: shortId(id) }) }
 
@@ -129,6 +138,20 @@ export function Traces() {
           )}
         </aside>
         <div className="flex min-w-0 flex-col gap-3">
+          <div role="tablist" aria-label="How to list the matches" className="flex gap-1 border-b">
+            {TABS.map((one) => (
+              <button
+                key={one}
+                type="button"
+                role="tab"
+                aria-selected={one === tab}
+                onClick={() => show({ t: one })}
+                className={cn('-mb-px cursor-pointer border-b-2 border-transparent bg-transparent px-3 py-2 text-control font-semibold capitalize text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', one === tab && 'border-primary text-foreground')}
+              >
+                {one}
+              </button>
+            ))}
+          </div>
           <QueryBar text={text} onCommit={(next) => show({ q: next })} rangeMs={sift.rangeMs} />
           {!parsed.ok ? <p role="alert" className="m-0 text-caption text-destructive-text">The query in this link is not valid, so nothing is filtered: {parsed.error}.</p> : null}
           <div className="flex flex-wrap items-center gap-2" role="search">
@@ -143,7 +166,9 @@ export function Traces() {
             </Popover>
             {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
-      {failed ? (
+      {tab === 'spans' ? (
+        <SpansTable rows={spans.rows} loading={spans.loading} failed={spans.failed} sifting={sifting} limit={limit} cursor={cursor} density={density} onOpen={(row) => navigate(`/traces/${row.traceId}`)} onCopy={copy} onClear={clear} />
+      ) : failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
       ) : rows.length === 0 ? (
         <EmptyState title={loading ? 'Reading the traces…' : sifting ? 'No traces match' : 'No traces in this window'} actions={sifting ? <Button size="sm" onClick={clear}>Reset filters</Button> : null}>
