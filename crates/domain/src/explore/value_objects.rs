@@ -1,4 +1,5 @@
 use super::errors::BadWindow;
+use super::query::Query;
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
 use crate::placement::Placement;
@@ -52,6 +53,7 @@ pub struct TraceFilter {
     pub at_least_nanos: Option<u64>,
     pub order: TraceOrder,
     pub placement: Placement,
+    pub query: Query,
     limit: u32,
 }
 
@@ -66,6 +68,7 @@ impl TraceFilter {
             at_least_nanos: None,
             order: TraceOrder::default(),
             placement: Placement::default(),
+            query: Query::default(),
             limit: DEFAULT_LIMIT,
         }
     }
@@ -79,6 +82,40 @@ impl TraceFilter {
     pub fn limit(&self) -> u32 {
         self.limit
     }
+}
+
+pub const MAX_ATTRIBUTES: u32 = 200;
+
+pub const MAX_VALUES: u32 = 20;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributeFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub prefix: Option<Box<str>>,
+}
+
+impl AttributeFilter {
+    pub fn over(window: Window) -> Self {
+        Self {
+            window,
+            project: None,
+            prefix: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenAttribute {
+    pub key: Box<str>,
+    pub spans: u64,
+    pub numeric: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenValue {
+    pub value: Box<str>,
+    pub spans: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

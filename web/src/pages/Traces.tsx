@@ -1,13 +1,15 @@
 import { CircleX, Copy, Search, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from '@/lib/router'
+import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
+import { Link, useNavigate, useSearchParam } from '@/lib/router'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { InputGroup, NativeSelect } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ViewTabs } from '@/components/ft/ViewTabs'
-import { Switch } from '@/components/ui/switch'
+import { FilterBar } from '@/components/ft/FilterBar'
+import { decode, encode, type Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Order, type Sift } from '@/data/traces'
@@ -64,12 +66,19 @@ function Traces({ view }: { view: TraceView }) {
   const name = useSettled(typed)
   const asked = useMemo(() => ({ ...sift, name }), [sift, name])
   const { placement, place } = usePlacement()
-  const { rows, loading, failed } = useTraces(asked, placement)
+  const raw = useSearchParam('q')
+  const chips = useMemo(() => (view === 'explore' ? decode(raw) : []), [raw, view])
+  const goTo = useRouterNavigate()
+  const setChips = (next: Chip[]) => {
+    void goTo({ to: '.' as never, search: ((was: Record<string, unknown>) => ({ ...was, q: encode(next) })) as never, replace: true })
+    setCursor(0)
+  }
+  const { rows, loading, failed } = useTraces(asked, placement, chips)
   const { names, unreachable } = useServiceNames(sift.rangeMs)
   const change = (part: Partial<Sift>) => { setSift((was) => ({ ...was, ...part })); setCursor(0) }
-  const clear = () => { setTyped(''); setSift((was) => ({ ...base, rangeMs: was.rangeMs, limit: was.limit })); place(NOWHERE) }
+  const clear = () => { setTyped(''); if (chips.length > 0) setChips([]); setSift((was) => ({ ...base, rangeMs: was.rangeMs, limit: was.limit })); place(NOWHERE) }
   const full = view === 'explore'
-  const sifting = Boolean(sift.service || typed || (full && (sift.errorsOnly || sift.atLeastMs)) || isPlaced(placement))
+  const sifting = Boolean(sift.service || typed || chips.length > 0 || (full && (sift.errorsOnly || sift.atLeastMs)) || isPlaced(placement))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -108,30 +117,30 @@ function Traces({ view }: { view: TraceView }) {
         </Popover>
       </PageHeader>
       <ViewTabs label="Trace views" tabs={VIEWS} />
-      <Filters active={[sift.service, typed, full && sift.errorsOnly, full && sift.atLeastMs].filter(Boolean).length + (full ? placedCount(placement) : 0)}>
-      <div className="flex flex-wrap items-center gap-2" role="search">
-        <NativeSelect aria-label="Service" value={sift.service} onChange={(e) => change({ service: e.target.value })} className="w-[190px]">
-          <option value="">Service: any</option>
-          {names.map((s) => <option key={s} value={s}>{s}</option>)}
-        </NativeSelect>
-        <InputGroup className="w-[280px] max-w-full"><Search aria-hidden /><input aria-label="Span name" placeholder="Span name, e.g. psp.charge" value={typed} onChange={(e) => { setTyped(e.target.value); setCursor(0) }} /></InputGroup>
-        {full ? (
-          <>
-            <NativeSelect aria-label="Minimum duration" value={sift.atLeastMs} onChange={(e) => change({ atLeastMs: Number(e.target.value) })} className="w-[160px]">
-              <option value={0}>Any duration</option>
-              {[100, 500, 1000, 5000].map((ms) => <option key={ms} value={ms}>Slower than {ms < 1000 ? `${ms} ms` : `${ms / 1000} s`}</option>)}
-            </NativeSelect>
+      <Filters active={[sift.service, typed].filter(Boolean).length + (full ? chips.length + placedCount(placement) : 0)}>
+      {full ? (
+        <div className="flex flex-col gap-2" role="search">
+          <FilterBar chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
+          <div className="flex flex-wrap items-center gap-2">
             <NativeSelect aria-label="Order" value={sift.order} onChange={(e) => change({ order: e.target.value as Order })} className="w-[160px]">
               <option value="started">Newest first</option>
               <option value="duration">Slowest first</option>
               <option value="spans">Most spans first</option>
             </NativeSelect>
-            <Switch checked={sift.errorsOnly} onCheckedChange={(on) => change({ errorsOnly: on })} label="Errors only" />
-          </>
-        ) : null}
-        <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
-      </div>
-      {full ? <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} /> : null}
+            <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
+          </div>
+          <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2" role="search">
+          <NativeSelect aria-label="Service" value={sift.service} onChange={(e) => change({ service: e.target.value })} className="w-[190px]">
+            <option value="">Service: any</option>
+            {names.map((s) => <option key={s} value={s}>{s}</option>)}
+          </NativeSelect>
+        <InputGroup className="w-[280px] max-w-full"><Search aria-hidden /><input aria-label="Span name" placeholder="Span name, e.g. psp.charge" value={typed} onChange={(e) => { setTyped(e.target.value); setCursor(0) }} /></InputGroup>
+          <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
+        </div>
+      )}
       </Filters>
       {unreachable ? <p className="m-0 text-caption text-muted-foreground">{because(unreachable, 'The services could not be listed, so that filter is empty')}</p> : null}
       {failed ? (

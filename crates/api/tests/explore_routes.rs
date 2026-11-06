@@ -9,12 +9,12 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Membership, Memberships, NoPhotos, OrgRole, Placement, PlacementName,
-    PlacementReader, Placements, ProjectId, SeenPod, SeenWorkload, ServiceFilter, ServicePoint,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
-    SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
-    StoreError, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError,
-    Window, Workload, WorkloadKind,
+    AccountId, AttributeFilter, AttributeKey, Expr, Field, Membership, Memberships, NoPhotos,
+    OrgRole, Placement, PlacementName, PlacementReader, Placements, ProjectId, SeenAttribute,
+    SeenPod, SeenValue, SeenWorkload, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary,
+    Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanId,
+    SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TenantId, Test, TraceFilter,
+    TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -610,6 +610,7 @@ struct Remembering(
     Mutex<Option<TraceFilter>>,
     Mutex<Vec<ServiceAsked>>,
     Mutex<Vec<(Window, Option<ProjectId>)>>,
+    Mutex<Option<(Option<String>, AttributeFilter)>>,
 );
 
 impl PlacementReader for Remembering {
@@ -721,6 +722,155 @@ impl SpanReader for Remembering {
     ) -> Result<Vec<Span>, StoreError> {
         Ok(Vec::new())
     }
+
+    async fn attributes(
+        &self,
+        _tenant: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, StoreError> {
+        *self.3.lock().expect("the lock") = Some((None, filter.clone()));
+        Ok(vec![SeenAttribute {
+            key: "rpc.method".into(),
+            spans: 7,
+            numeric: false,
+        }])
+    }
+
+    async fn attribute_values(
+        &self,
+        _tenant: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, StoreError> {
+        *self.3.lock().expect("the lock") = Some((Some(key.as_str().to_owned()), filter.clone()));
+        Ok(vec![SeenValue {
+            value: "Pay".into(),
+            spans: 3,
+        }])
+    }
+}
+
+fn searching(uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(AUTHORIZATION, session())
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("a request")
+}
+
+#[tokio::test]
+async fn a_posted_query_reaches_the_store_as_a_tree() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/traces/search", org(MINE));
+    let body = r#"{"from":1000,"to":2000,"errors":true,
+        "query":{"all":[{"field":"service","op":"eq","value":"checkout"},
+                        {"any":[{"attr":"rpc.method","op":"eq","value":"Pay"},
+                                {"attr":"retries","op":"gt","value":3}]}]}}"#;
+
+    let (status, _) = served(Arc::clone(&asked), searching(&uri, body)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let filter = asked.0.lock().expect("the lock").clone().expect("a filter");
+    assert!(filter.only_errors);
+    let Some(Expr::All(parts)) = filter.query.filter() else {
+        panic!("an AND at the top");
+    };
+    assert_eq!(parts.len(), 2);
+    let Expr::Is(first) = &parts[0] else {
+        panic!("a clause first");
+    };
+    assert_eq!(first.field(), &Field::Service);
+    assert!(matches!(first.test(), Test::Eq(_)));
+    assert!(matches!(&parts[1], Expr::Any(any) if any.len() == 2));
+}
+
+#[tokio::test]
+async fn a_search_without_a_query_asks_for_everything() {
+    let asked = Arc::new(Remembering::default());
+    let uri = format!("/api/orgs/{}/traces/search", org(MINE));
+
+    let (status, _) = served(
+        Arc::clone(&asked),
+        searching(&uri, r#"{"from":1000,"to":2000}"#),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let filter = asked.0.lock().expect("the lock").clone().expect("a filter");
+    assert!(filter.query.is_anything());
+}
+
+#[tokio::test]
+async fn a_query_the_domain_refuses_never_reaches_the_store() {
+    let uri = format!("/api/orgs/{}/traces/search", org(MINE));
+    let nine_deep = (0..8).fold(
+        r#"{"attr":"a","op":"eq","value":"x"}"#.to_owned(),
+        |inner, _| format!(r#"{{"not":{inner}}}"#),
+    );
+    let thirty_three = format!(
+        r#"{{"all":[{}]}}"#,
+        vec![r#"{"attr":"a","op":"exists"}"#; 33].join(",")
+    );
+    let refused = [
+        format!(r#"{{"from":1000,"to":2000,"query":{nine_deep}}}"#),
+        format!(r#"{{"from":1000,"to":2000,"query":{thirty_three}}}"#),
+        r#"{"from":1000,"to":2000,"query":{"field":"service","op":"gt","value":1}}"#.to_owned(),
+        r#"{"from":1000,"to":2000,"query":{"all":[]}}"#.to_owned(),
+        r#"{"from":1000,"to":2000,"query":{"attr":"","op":"exists"}}"#.to_owned(),
+    ];
+
+    for body in refused {
+        let asked = Arc::new(Remembering::default());
+
+        let (status, _) = served(Arc::clone(&asked), searching(&uri, &body)).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(asked.0.lock().expect("the lock").is_none(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn the_catalogue_lists_keys_and_values_for_the_window() {
+    let asked = Arc::new(Remembering::default());
+    let keys = format!(
+        "/api/orgs/{}/attributes?from=1000&to=2000&prefix=rpc&project={}",
+        org(MINE),
+        org(7)
+    );
+    let values = format!(
+        "/api/orgs/{}/attributes/rpc.method/values?from=1000&to=2000&prefix=P",
+        org(MINE)
+    );
+
+    let (status, body) = served(Arc::clone(&asked), looking(&keys, Some(&session()))).await;
+    let (_, narrowed) = asked.3.lock().expect("the lock").clone().expect("asked");
+    let (values_status, values_body) =
+        served(Arc::clone(&asked), looking(&values, Some(&session()))).await;
+    let (key, by_prefix) = asked.3.lock().expect("the lock").clone().expect("asked");
+
+    assert_eq!(status, StatusCode::OK);
+    let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(found["attributes"][0]["key"], "rpc.method");
+    assert_eq!(found["attributes"][0]["spans"], 7);
+    assert_eq!(found["attributes"][0]["numeric"], false);
+    assert_eq!(narrowed.prefix.as_deref(), Some("rpc"));
+    assert_eq!(narrowed.project, Some(ProjectId::new(Uuid::from_u128(7))));
+    assert_eq!(values_status, StatusCode::OK);
+    let listed: serde_json::Value = serde_json::from_str(&values_body).expect("json");
+    assert_eq!(listed["values"][0]["value"], "Pay");
+    assert_eq!(key.as_deref(), Some("rpc.method"));
+    assert_eq!(by_prefix.prefix.as_deref(), Some("P"));
+}
+
+#[tokio::test]
+async fn an_unsigned_catalogue_request_is_refused() {
+    let uri = format!("/api/orgs/{}/attributes?from=1000&to=2000", org(MINE));
+
+    let (status, _) = served(Arc::new(Remembering::default()), looking(&uri, None)).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
