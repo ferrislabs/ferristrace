@@ -3,12 +3,17 @@ import { useSpanSeries } from '@/data/spanSeries'
 import type { Node } from '@/lib/queryLang'
 import { cn } from '@/lib/utils'
 
-const HEIGHT = 56
-const MIN_BARS_SELECTED = 1
+const HEIGHT = 84
+
+const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+
+const whole = new Intl.NumberFormat('en')
 
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8)
 
-const longClock = (ms: number) => `${new Date(ms).toISOString().slice(5, 10)} ${clock(ms)}`
+const day = (ms: number) => new Date(ms).toISOString().slice(5, 10)
+
+const stamp = (ms: number) => `${day(ms)} ${clock(ms)}`
 
 export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: number; onZoom: (from: number, to: number) => void }) {
   const total = useSpanSeries(rangeMs, 'count', '', items, true)
@@ -16,6 +21,7 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
   const id = useId()
   const box = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  const [hover, setHover] = useState<number | null>(null)
   const [cursor, setCursor] = useState<number | null>(null)
   const [anchor, setAnchor] = useState<number | null>(null)
 
@@ -29,6 +35,8 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
   const start = bars[0]?.at ?? 0
   const end = bars.length > 0 ? bars[bars.length - 1].at + step : 0
   const peak = Math.max(1, ...bars.map((bar) => bar.count))
+  const spans = bars.reduce((sum, bar) => sum + bar.count, 0)
+  const errors = bars.reduce((sum, bar) => sum + bar.errors, 0)
 
   const indexAt = (clientX: number): number => {
     const rect = box.current?.getBoundingClientRect()
@@ -38,93 +46,134 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
   }
 
   const apply = (a: number, b: number) => {
+    if (bars.length === 0) return
     const low = Math.min(a, b)
     const high = Math.max(a, b)
-    if (bars.length === 0 || high - low + 1 < MIN_BARS_SELECTED) return
     onZoom(bars[low].at, bars[high].at + step)
   }
 
-  const selected = drag ?? (cursor !== null && anchor !== null ? { from: anchor, to: cursor } : null)
-  const low = selected ? Math.min(selected.from, selected.to) : 0
-  const high = selected ? Math.max(selected.from, selected.to) : 0
-  const width = 100 / Math.max(1, bars.length)
-  const description = bars.length === 0 ? 'No spans in this window' : `Spans from ${longClock(start)} to ${longClock(end)}, ${bars.reduce((sum, bar) => sum + bar.count, 0).toLocaleString('en-US')} in all`
+  const selecting = drag ?? (cursor !== null && anchor !== null ? { from: anchor, to: cursor } : null)
+  const low = selecting ? Math.min(selecting.from, selecting.to) : 0
+  const high = selecting ? Math.max(selecting.from, selecting.to) : 0
+  const pointed = hover ?? cursor
+  const bar = pointed !== null ? bars[pointed] : undefined
+  const left = pointed !== null && bars.length > 0 ? ((pointed + 0.5) / bars.length) * 100 : 0
 
-  if (bars.length === 0 || peak <= 1 && bars.every((bar) => bar.count === 0)) {
+  if (bars.length === 0 || spans === 0) {
     return (
-      <div className="flex h-[56px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
+      <div className="flex h-[84px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
         {total.loading ? 'Counting the spans…' : 'No span matches in this window.'}
       </div>
     )
   }
 
   return (
-    <figure className="m-0 flex flex-col gap-1">
-      <div
-        ref={box}
-        role="application"
-        aria-roledescription="histogram with a time selection"
-        aria-label={`${description}. Drag to zoom on a period, or use the arrow keys, Shift to select, Enter to zoom, Escape to cancel.`}
-        aria-describedby={`${id}-hint`}
-        tabIndex={0}
-        className="relative cursor-crosshair touch-none select-none rounded-lg border bg-card focus-visible:outline-2 focus-visible:outline-ring"
-        style={{ height: HEIGHT }}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId)
-          const at = indexAt(event.clientX)
-          setDrag({ from: at, to: at })
-          setCursor(null)
-          setAnchor(null)
-        }}
-        onPointerMove={(event) => {
-          if (drag) setDrag({ from: drag.from, to: indexAt(event.clientX) })
-        }}
-        onPointerUp={() => {
-          if (drag) apply(drag.from, drag.to)
-          setDrag(null)
-        }}
-        onPointerCancel={() => setDrag(null)}
-        onKeyDown={(event) => {
-          const last = bars.length - 1
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault()
-            const next = Math.min(last, Math.max(0, (cursor ?? (event.key === 'ArrowLeft' ? last : 0)) + (event.key === 'ArrowLeft' ? -1 : 1)))
-            if (event.shiftKey) setAnchor((was) => was ?? cursor ?? next)
-            else setAnchor(null)
-            setCursor(next)
-          } else if (event.key === 'Enter' && cursor !== null && anchor !== null) {
-            event.preventDefault()
-            apply(anchor, cursor)
-            setAnchor(null)
-            setCursor(null)
-          } else if (event.key === 'Escape') {
-            setAnchor(null)
-            setCursor(null)
-            setDrag(null)
-          }
-        }}
-        onBlur={() => { setAnchor(null); setCursor(null) }}
-      >
-        <svg viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none" width="100%" height={HEIGHT} aria-hidden className="block">
-          {bars.map((bar, index) => {
-            const tall = (bar.count / peak) * (HEIGHT - 4)
-            const red = bar.count === 0 ? 0 : (Math.min(bar.errors, bar.count) / bar.count) * tall
-            return (
-              <g key={bar.at}>
-                <rect x={index * width + 0.08} width={Math.max(0.1, width - 0.16)} y={HEIGHT - tall} height={tall} fill="var(--primary)" opacity={selected && (index < low || index > high) ? 0.35 : 0.75} />
-                {red > 0 ? <rect x={index * width + 0.08} width={Math.max(0.1, width - 0.16)} y={HEIGHT - red} height={red} fill="var(--destructive)" /> : null}
-              </g>
-            )
-          })}
-          {cursor !== null && anchor === null ? <rect x={cursor * width} width={width} y={0} height={HEIGHT} fill="none" stroke="var(--ring)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" /> : null}
-          {selected ? <rect x={low * width} width={(high - low + 1) * width} y={0} height={HEIGHT} fill="var(--primary)" opacity={0.12} stroke="var(--primary)" strokeWidth="1" vectorEffect="non-scaling-stroke" /> : null}
-        </svg>
+    <figure className="m-0 flex flex-col gap-2 rounded-lg border bg-card px-3 pb-2.5 pt-2.5">
+      <div className="flex items-baseline gap-2 text-caption">
+        <span className="font-semibold text-foreground">Spans over time</span>
+        <span className="text-muted-foreground">{whole.format(spans)} in all{errors > 0 ? `, ${whole.format(errors)} failed` : ''}</span>
+        <span className="ml-auto hidden text-faint-foreground sm:inline">Drag to zoom on a period</span>
       </div>
-      <figcaption id={`${id}-hint`} className={cn('flex justify-between font-mono text-[10px] text-faint-foreground')}>
-        <span>{longClock(start)}</span>
-        <span>{selected ? `${longClock(bars[low].at)} to ${longClock(bars[high].at + step)}` : 'Drag to zoom. Red is the share of failed spans.'}</span>
-        <span>{longClock(end)}</span>
-      </figcaption>
+      <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
+        <div className="flex flex-col justify-between text-right font-mono text-[10px] leading-3 text-faint-foreground" style={{ height: HEIGHT }} aria-hidden>
+          <span>{compact.format(peak)}</span>
+          <span>0</span>
+        </div>
+        <div className="relative">
+          <div
+            ref={box}
+            role="application"
+            aria-roledescription="histogram with a time selection"
+            aria-label={`Spans from ${stamp(start)} to ${stamp(end)}, ${whole.format(spans)} in all. Drag to zoom on a period, or use the arrow keys, Shift to select, Enter to zoom, Escape to cancel.`}
+            tabIndex={0}
+            className="relative flex cursor-crosshair touch-none select-none items-end gap-[2px] border-b border-border focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            style={{ height: HEIGHT, backgroundImage: 'linear-gradient(to bottom, var(--chart-grid) 1px, transparent 1px)', backgroundSize: '100% 50%' }}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId)
+              const at = indexAt(event.clientX)
+              setDrag({ from: at, to: at })
+              setCursor(null)
+              setAnchor(null)
+            }}
+            onPointerMove={(event) => {
+              const at = indexAt(event.clientX)
+              setHover(at)
+              if (drag) setDrag({ from: drag.from, to: at })
+            }}
+            onPointerUp={() => {
+              if (drag) apply(drag.from, drag.to)
+              setDrag(null)
+            }}
+            onPointerLeave={() => setHover(null)}
+            onPointerCancel={() => setDrag(null)}
+            onKeyDown={(event) => {
+              const last = bars.length - 1
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                event.preventDefault()
+                const next = Math.min(last, Math.max(0, (cursor ?? (event.key === 'ArrowLeft' ? last : 0)) + (event.key === 'ArrowLeft' ? -1 : 1)))
+                if (event.shiftKey) setAnchor((was) => was ?? cursor ?? next)
+                else setAnchor(null)
+                setCursor(next)
+              } else if (event.key === 'Enter' && cursor !== null && anchor !== null) {
+                event.preventDefault()
+                apply(anchor, cursor)
+                setAnchor(null)
+                setCursor(null)
+              } else if (event.key === 'Escape') {
+                setAnchor(null)
+                setCursor(null)
+                setDrag(null)
+              }
+            }}
+            onBlur={() => { setAnchor(null); setCursor(null) }}
+          >
+            {bars.map((one, index) => {
+              const tall = one.count === 0 ? 0 : Math.max(3, (one.count / peak) * 100)
+              const share = one.count === 0 ? 0 : Math.min(1, one.errors / one.count)
+              const dim = selecting !== null && (index < low || index > high)
+              return (
+                <div key={one.at} className="relative flex h-full min-w-0 flex-1 items-end" aria-hidden>
+                  <div
+                    className={cn('relative w-full overflow-hidden rounded-t-[3px] bg-primary transition-opacity', index === pointed ? 'opacity-100' : dim ? 'opacity-30' : 'opacity-60')}
+                    style={{ height: `${tall}%` }}
+                  >
+                    {share > 0 ? <div className="absolute inset-x-0 bottom-0 bg-destructive" style={{ height: `${Math.max(share * 100, 12)}%` }} /> : null}
+                  </div>
+                </div>
+              )
+            })}
+            {selecting ? (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 rounded-sm border border-primary bg-primary/10"
+                style={{ left: `${(low / bars.length) * 100}%`, width: `${((high - low + 1) / bars.length) * 100}%` }}
+              />
+            ) : null}
+          </div>
+          {bar ? (
+            <div
+              id={`${id}-tip`}
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full z-20 mb-2 flex w-max max-w-[260px] -translate-x-1/2 flex-col gap-0.5 rounded-md border bg-popover px-2.5 py-1.5 text-caption shadow-md"
+              style={{ left: `clamp(70px, ${left}%, calc(100% - 70px))` }}
+            >
+              <span className="font-mono text-[11px] text-muted-foreground">{clock(bar.at)} to {clock(bar.at + step)}</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" aria-hidden /><span className="font-semibold">{whole.format(bar.count)}</span> spans</span>
+              {bar.errors > 0 ? (
+                <span className="flex items-center gap-1.5 text-destructive-text"><span className="size-2 rounded-sm bg-destructive" aria-hidden /><span className="font-semibold">{whole.format(bar.errors)}</span> failed ({((bar.errors / Math.max(1, bar.count)) * 100).toFixed(1)}%)</span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2 font-mono text-[10px] text-faint-foreground" aria-hidden>
+        <span />
+        <span className="flex justify-between">
+          <span>{stamp(start)}</span>
+          <span className="max-sm:hidden">{clock((start + end) / 2)}</span>
+          <span>{stamp(end)}</span>
+        </span>
+      </div>
     </figure>
   )
 }
