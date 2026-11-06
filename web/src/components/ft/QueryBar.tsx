@@ -88,7 +88,7 @@ export function QueryBar({ text, onCommit, rangeMs }: { text: string; onCommit: 
 
   const error = !parsed.ok && draft.trim() !== '' ? parsed : null
   return (
-    <div className="relative min-w-0 flex-1 basis-[320px]">
+    <div className="relative min-w-0">
       <div className={cn('flex items-center gap-2 rounded-md border bg-background px-2.5 shadow-sm focus-within:outline-2 focus-within:outline-ring', error && 'border-destructive')}>
         <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <Input
