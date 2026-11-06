@@ -1,4 +1,6 @@
 import { useId, useMemo, useRef, useState } from 'react'
+import { useLogSeries } from '@/data/logs'
+import type { Placement } from '@/data/placement'
 import { useSpanSeries } from '@/data/spanSeries'
 import type { Node } from '@/lib/queryLang'
 import { cn } from '@/lib/utils'
@@ -15,21 +17,31 @@ const day = (ms: number) => new Date(ms).toISOString().slice(5, 10)
 
 const stamp = (ms: number) => `${day(ms)} ${clock(ms)}`
 
+export type Bar = { at: number; count: number; errors: number }
+
 export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: number; onZoom: (from: number, to: number) => void }) {
   const total = useSpanSeries(rangeMs, 'count', '', items, true)
   const failed = useSpanSeries(rangeMs, 'errors', '', items, true)
+  const bars = useMemo<Bar[]>(() => {
+    const counts = total.lines[0]?.points ?? []
+    const errors = failed.lines[0]?.points ?? []
+    return counts.map(([ns, value], index) => ({ at: ns / 1_000_000, count: value ?? 0, errors: errors[index]?.[1] ?? 0 }))
+  }, [total.lines, failed.lines])
+  return <Bars bars={bars} loading={total.loading} onZoom={onZoom} noun="spans" title="Spans over time" />
+}
+
+export function LogHistogram({ items, rangeMs, onZoom, placement, live }: { items: Node[]; rangeMs: number; onZoom: (from: number, to: number) => void; placement: Placement; live: boolean }) {
+  const found = useLogSeries(items, rangeMs, placement, live)
+  return <Bars bars={found.bars} loading={found.loading} onZoom={onZoom} noun="records" title="Records over time" />
+}
+
+function Bars({ bars, loading, onZoom, noun, title }: { bars: Bar[]; loading: boolean; onZoom: (from: number, to: number) => void; noun: string; title: string }) {
   const id = useId()
   const box = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
   const [hover, setHover] = useState<number | null>(null)
   const [cursor, setCursor] = useState<number | null>(null)
   const [anchor, setAnchor] = useState<number | null>(null)
-
-  const bars = useMemo(() => {
-    const counts = total.lines[0]?.points ?? []
-    const errors = failed.lines[0]?.points ?? []
-    return counts.map(([ns, value], index) => ({ at: ns / 1_000_000, count: value ?? 0, errors: errors[index]?.[1] ?? 0 }))
-  }, [total.lines, failed.lines])
 
   const step = bars.length > 1 ? bars[1].at - bars[0].at : 0
   const start = bars[0]?.at ?? 0
@@ -62,7 +74,7 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
   if (bars.length === 0 || spans === 0) {
     return (
       <div className="flex h-[84px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
-        {total.loading ? 'Counting the spans…' : 'No span matches in this window.'}
+        {loading ? `Counting the ${noun}…` : `No ${noun.replace(/s$/, '')} matches in this window.`}
       </div>
     )
   }
@@ -70,7 +82,7 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
   return (
     <figure className="m-0 flex flex-col gap-2 rounded-lg border bg-card px-3 pb-2.5 pt-2.5">
       <div className="flex items-baseline gap-2 text-caption">
-        <span className="font-semibold text-foreground">Spans over time</span>
+        <span className="font-semibold text-foreground">{title}</span>
         <span className="text-muted-foreground">{whole.format(spans)} in all{errors > 0 ? `, ${whole.format(errors)} failed` : ''}</span>
         <span className="ml-auto hidden text-faint-foreground sm:inline">Drag to zoom on a period</span>
       </div>
@@ -84,7 +96,7 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
             ref={box}
             role="application"
             aria-roledescription="histogram with a time selection"
-            aria-label={`Spans from ${stamp(start)} to ${stamp(end)}, ${whole.format(spans)} in all. Drag to zoom on a period, or use the arrow keys, Shift to select, Enter to zoom, Escape to cancel.`}
+            aria-label={`${title}, from ${stamp(start)} to ${stamp(end)}, ${whole.format(spans)} in all. Drag to zoom on a period, or use the arrow keys, Shift to select, Enter to zoom, Escape to cancel.`}
             tabIndex={0}
             className="relative flex cursor-crosshair touch-none select-none items-end gap-[2px] border-b border-border focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
             style={{ height: HEIGHT, backgroundImage: 'linear-gradient(to bottom, var(--chart-grid) 1px, transparent 1px)', backgroundSize: '100% 50%' }}
@@ -158,7 +170,7 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
               style={{ left: `clamp(70px, ${left}%, calc(100% - 70px))` }}
             >
               <span className="font-mono text-[11px] text-muted-foreground">{clock(bar.at)} to {clock(bar.at + step)}</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" aria-hidden /><span className="font-semibold">{whole.format(bar.count)}</span> spans</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" aria-hidden /><span className="font-semibold">{whole.format(bar.count)}</span> {noun}</span>
               {bar.errors > 0 ? (
                 <span className="flex items-center gap-1.5 text-destructive-text"><span className="size-2 rounded-sm bg-destructive" aria-hidden /><span className="font-semibold">{whole.format(bar.errors)}</span> failed ({((bar.errors / Math.max(1, bar.count)) * 100).toFixed(1)}%)</span>
               ) : null}

@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { useAttributeKeys } from '@/data/attributes'
 import { facetKey, useFacets } from '@/data/facets'
 import { dur } from '@/lib/format'
+import { useSignal } from '@/lib/signal'
 import { cn } from '@/lib/utils'
 import type { Node } from '@/lib/queryLang'
 import { durationBounds, selectedValues, withDuration, withValue, type Chip, type FieldRef } from '@/lib/traceQuery'
@@ -18,6 +19,16 @@ const BASE: Def[] = [
   { id: facetKey({ built: 'http_status_code' }), field: { built: 'http_status_code' }, label: 'HTTP status code', numeric: true },
 ]
 
+const LOG_BASE: Def[] = [
+  { id: facetKey({ built: 'service' }), field: { built: 'service' }, label: 'Service' },
+  { id: facetKey({ built: 'severity' }), field: { built: 'severity' }, label: 'Severity' },
+]
+
+const LOG_KNOWN = [
+  'deployment.environment', 'deployment.environment.name', 'k8s.namespace.name', 'k8s.deployment.name', 'k8s.pod.name',
+  'k8s.node.name', 'host.name', 'log.level', 'logger', 'http.route', 'http.method', 'error.type',
+]
+
 const KNOWN = [
   'deployment.environment', 'deployment.environment.name', 'http.method', 'http.request.method', 'http.route', 'http.host',
   'server.address', 'http.url', 'url.full', 'rpc.service', 'rpc.method', 'db.system', 'db.operation', 'messaging.system',
@@ -30,50 +41,58 @@ const DURATION_ID = 'duration'
 
 const OPEN_KEY = 'ft.facets.open'
 
+const LOG_OPEN_KEY = 'ft.facets.logs.open'
+
 const DEFAULT_OPEN = [DURATION_ID, BASE[0].id, BASE[1].id]
 
-function loadOpen(): Set<string> {
+const LOG_DEFAULT_OPEN = [LOG_BASE[0].id, LOG_BASE[1].id]
+
+function loadOpen(logs: boolean): Set<string> {
+  const fallback = logs ? LOG_DEFAULT_OPEN : DEFAULT_OPEN
   try {
-    const saved = window.localStorage.getItem(OPEN_KEY)
+    const saved = window.localStorage.getItem(logs ? LOG_OPEN_KEY : OPEN_KEY)
     const parsed: unknown = saved ? JSON.parse(saved) : null
     if (Array.isArray(parsed)) return new Set(parsed.filter((item): item is string => typeof item === 'string'))
   } catch {
-    return new Set(DEFAULT_OPEN)
+    return new Set(fallback)
   }
-  return new Set(DEFAULT_OPEN)
+  return new Set(fallback)
 }
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
 export function Facets({ chips, query, onChange, rangeMs }: { chips: Chip[]; query: Node[]; onChange: (chips: Chip[]) => void; rangeMs: number }) {
+  const logs = useSignal() === 'logs'
   const { keys } = useAttributeKeys(rangeMs, '', true)
-  const [open, setOpen] = useState(loadOpen)
+  const [open, setOpen] = useState(() => loadOpen(logs))
   useEffect(() => {
     try {
-      window.localStorage.setItem(OPEN_KEY, JSON.stringify([...open]))
+      window.localStorage.setItem(logs ? LOG_OPEN_KEY : OPEN_KEY, JSON.stringify([...open]))
     } catch {
       return
     }
-  }, [open])
+  }, [open, logs])
 
   const defs = useMemo<Def[]>(() => {
     const seen = new Map(keys.map((key) => [key.key, key]))
-    const attributes = KNOWN.filter((known) => seen.has(known))
+    const attributes = (logs ? LOG_KNOWN : KNOWN).filter((known) => seen.has(known))
       .sort((a, b) => (seen.get(b)?.spans ?? 0) - (seen.get(a)?.spans ?? 0))
       .slice(0, MAX_ATTRIBUTE_FACETS)
       .map<Def>((attr) => ({ id: facetKey({ attr }), field: { attr }, label: attr, numeric: seen.get(attr)?.numeric }))
-    return [...BASE, ...attributes]
-  }, [keys])
+    return [...(logs ? LOG_BASE : BASE), ...attributes]
+  }, [keys, logs])
 
   const wanted = defs.filter((def) => open.has(def.id)).map((def) => def.field)
-  const { facets, spread, loading } = useFacets(query, rangeMs, wanted, open.has(DURATION_ID))
+  const { facets, spread, loading } = useFacets(query, rangeMs, wanted, !logs && open.has(DURATION_ID))
   const toggle = (id: string) => setOpen((was) => { const next = new Set(was); if (!next.delete(id)) next.add(id); return next })
 
   return (
     <div className="flex flex-col" role="group" aria-label="Facets">
-      <Section id={DURATION_ID} label="Duration" open={open.has(DURATION_ID)} onToggle={toggle} chosen={Object.values(durationBounds(chips)).filter((one) => one !== undefined).length}>
-        <DurationRange chips={chips} onChange={onChange} seen={spread} />
-      </Section>
+      {logs ? null : (
+        <Section id={DURATION_ID} label="Duration" open={open.has(DURATION_ID)} onToggle={toggle} chosen={Object.values(durationBounds(chips)).filter((one) => one !== undefined).length}>
+          <DurationRange chips={chips} onChange={onChange} seen={spread} />
+        </Section>
+      )}
       {defs.map((def) => {
         const chosen = selectedValues(chips, def.field)
         const shown = facets.get(def.id)

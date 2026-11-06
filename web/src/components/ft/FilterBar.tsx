@@ -6,10 +6,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAttributeKeys, useAttributeValues } from '@/data/attributes'
 import { useServiceNames } from '@/data/services'
 import { useSettled } from '@/lib/settle'
+import { useSignal } from '@/lib/signal'
 import { cn } from '@/lib/utils'
 import { isChip, nodeText, type Node } from '@/lib/queryLang'
 import {
-  BUILT_INS, KINDS, MAX_CHIPS, OPS, STATUSES, kindOf, labelOf, opsFor, parsedValue, show,
+  builtInsFor, CHOICES, MAX_CHIPS, OPS, kindOf, labelOf, opsFor, parsedValue, show,
   type Chip, type FieldRef, type Op,
 } from '@/lib/traceQuery'
 
@@ -73,6 +74,7 @@ export function FilterBar({ items, onChange, rangeMs }: { items: Node[]; onChang
 }
 
 function ChipEditor({ start, rangeMs, onApply, onCancel }: { start?: Chip; rangeMs: number; onApply: (chip: Chip) => void; onCancel: () => void }) {
+  const signal = useSignal()
   const [field, setField] = useState<FieldRef | null>(start?.field ?? null)
   const [typed, setTyped] = useState(start ? labelOf(start.field) : '')
   const [op, setOp] = useState<Op>(start?.op ?? 'eq')
@@ -104,7 +106,7 @@ function ChipEditor({ start, rangeMs, onApply, onCancel }: { start?: Chip; range
   const { names: services } = useServiceNames(rangeMs)
   const options =
     field && 'built' in field
-      ? field.built === 'service' ? services : field.built === 'status' ? STATUSES : field.built === 'kind' ? KINDS : []
+      ? field.built === 'service' ? services : CHOICES[field.built] ?? []
       : values.map((seen) => seen.value)
 
   const parsed = bare ? undefined : parsedValue(value, kind, isList)
@@ -115,7 +117,7 @@ function ChipEditor({ start, rangeMs, onApply, onCancel }: { start?: Chip; range
   }
 
   const wanted = typed.trim().toLowerCase()
-  const matches = BUILT_INS.filter((built) => built.label.toLowerCase().includes(wanted) || built.name.includes(wanted))
+  const matches = builtInsFor(signal).filter((built) => built.label.toLowerCase().includes(wanted) || built.name.includes(wanted))
   const attributes = keys.filter((key) => key.key.toLowerCase().includes(wanted)).slice(0, 12)
   const unknownKey = wanted !== '' && !keys.some((key) => key.key === typed.trim())
 

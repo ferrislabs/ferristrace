@@ -688,3 +688,23 @@ async fn the_series_route_counts_per_severity_for_a_query() {
     assert!(text.contains("buckets"));
     assert!(!shelf.asked()[0].1.query.is_anything());
 }
+
+#[tokio::test]
+async fn a_placement_rides_with_a_query_tree() {
+    let shelf = Arc::new(Shelf::default());
+    let body =
+        format!(r#"{{"from":{FROM_MS},"to":{TO_MS},"namespace":"shop","pod":"checkout-1"}}"#);
+
+    let (status, text) = served(Some(Arc::clone(&shelf)), posting("search", &body)).await;
+
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let (_, query, _) = &shelf.asked()[0];
+    assert_eq!(
+        query.placement.namespace.as_ref().map(|name| name.as_str()),
+        Some("shop")
+    );
+    assert_eq!(
+        query.placement.pod.as_ref().map(|name| name.as_str()),
+        Some("checkout-1")
+    );
+}

@@ -4,6 +4,8 @@ import { useOrganisations } from '@/auth/session'
 import { itemsText, normalise } from '@/lib/queryLang'
 import { validChips } from '@/lib/traceQuery'
 import type { Order } from '@/data/traces'
+import { useSignal } from '@/lib/signal'
+import type { Signal } from '@/lib/traceQuery'
 
 export type { Order }
 
@@ -57,6 +59,14 @@ export const BUILT_IN: BuiltIn[] = [
   { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration', t: 'traces', m: 'count', g: '' } },
 ]
 
+export const LOG_BUILT_IN: BuiltIn[] = [
+  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started', t: 'traces', m: 'count', g: '' } },
+  { key: 'errors', name: 'Errors', hint: 'Error and fatal', definition: { q: 'severity IN (error, fatal)', o: 'started', t: 'traces', m: 'count', g: '' } },
+  { key: 'warnings', name: 'Warnings', hint: 'Warn and above', definition: { q: 'severity IN (warn, error, fatal)', o: 'started', t: 'traces', m: 'count', g: '' } },
+]
+
+export const builtInFor = (signal: Signal): BuiltIn[] => (signal === 'logs' ? LOG_BUILT_IN : BUILT_IN)
+
 const ORDERS: Order[] = ['started', 'duration', 'spans']
 
 export const orderOf = (raw: unknown): Order => (ORDERS.includes(raw as Order) ? (raw as Order) : 'started')
@@ -87,44 +97,48 @@ const viewed = (wire: Wire): SavedView => ({
   updatedAtMs: wire.updated_at_ms,
 })
 
-const key = (org: string | undefined) => ['org', org, 'views', 'traces']
+const key = (org: string | undefined, signal: Signal) => ['org', org, 'views', signal]
 
 export function useViews(): { views: SavedView[]; loading: boolean; failed: unknown } {
+  const signal = useSignal()
   const { active } = useOrganisations()
   const { data, isPending, error } = useQuery({
-    queryKey: key(active?.org),
+    queryKey: key(active?.org, signal),
     enabled: Boolean(active),
     staleTime: 15_000,
-    queryFn: async () => (await json<{ views: Wire[] }>(await get(`/api/orgs/${active?.org}/views?signal=traces`))).views.map(viewed),
+    queryFn: async () => (await json<{ views: Wire[] }>(await get(`/api/orgs/${active?.org}/views?signal=${signal}`))).views.map(viewed),
   })
   return { views: data ?? [], loading: isPending && Boolean(active), failed: error }
 }
 
 export function useSaveView() {
+  const signal = useSignal()
   const { active } = useOrganisations()
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (view: { name: string; visibility: Visibility; definition: Definition }) =>
-      viewed(await json<Wire>(await post(`/api/orgs/${active?.org}/views`, { signal: 'traces', ...view }))),
-    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org) }),
+      viewed(await json<Wire>(await post(`/api/orgs/${active?.org}/views`, { signal, ...view }))),
+    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org, signal) }),
   })
 }
 
 export function useChangeView() {
+  const signal = useSignal()
   const { active } = useOrganisations()
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, ...change }: { id: string; name: string; definition: Definition; visibility?: Visibility }) =>
       viewed(await json<Wire>(await put(`/api/orgs/${active?.org}/views/${id}`, change))),
-    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org, signal) }),
   })
 }
 
 export function useDeleteView() {
+  const signal = useSignal()
   const { active } = useOrganisations()
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => void (await del(`/api/orgs/${active?.org}/views/${id}`)),
-    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org) }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org, signal) }),
   })
 }
