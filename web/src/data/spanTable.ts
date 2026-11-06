@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { bodyOf, type Node } from '@/lib/queryLang'
+import { boundsOf, useZoom, zoomKey } from '@/lib/bounds'
 import { useScope } from '@/lib/scope'
 import { groupBody } from '@/data/spanSeries'
 import type { Measure } from '@/data/views'
@@ -33,13 +34,14 @@ const FRESH_MS = 15_000
 export function useSpanTable(rangeMs: number, order: Measure, group: string, items: Node[], enabled: boolean): { rows: TableRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
+  const zoom = useZoom()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['span-table', active?.org, project, rangeMs, order, group, items],
+    queryKey: ['span-table', active?.org, project, rangeMs, order, group, items, zoomKey(zoom)],
     enabled: Boolean(active) && enabled,
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const to = Date.now()
-      const body: Record<string, unknown> = { from: to - rangeMs, to, order, group_by: groupBody(group), limit: 50 }
+      const bounds = boundsOf(rangeMs, zoom)
+      const body: Record<string, unknown> = { from: bounds.from, to: bounds.to, order, group_by: groupBody(group), limit: 50 }
       if (project) body.project = project
       const query = bodyOf(items)
       if (query !== undefined) body.query = query

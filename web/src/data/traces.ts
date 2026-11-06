@@ -5,6 +5,7 @@ import { useScope } from '@/lib/scope'
 import { dur } from '@/lib/format'
 import { NOWHERE, placed, type Placement } from '@/data/placement'
 import { bodyOf, type Node } from '@/lib/queryLang'
+import { boundsOf, useZoom, zoomKey, type Zoom } from '@/lib/bounds'
 
 export type TraceRow = { id: string; root: string; svc: string; code: number | null; start: string; startedAtMs: number; durationMs: number; dur: string; spans: number; errors: number }
 export type Span = { id: string; name: string; svc: string; depth: number; offset: number; width: number; dur: string; err: boolean; kind: string; attrs: [string, string][]; events: Happening[] }
@@ -150,9 +151,9 @@ export const ANY: Sift = {
   limit: 50,
 }
 
-function asked(sift: Sift, project: string | undefined, placement: Placement): string {
-  const to = Date.now()
-  const query = new URLSearchParams({ from: String(to - sift.rangeMs), to: String(to) })
+function asked(sift: Sift, project: string | undefined, placement: Placement, zoom: Zoom | null): string {
+  const bounds = boundsOf(sift.rangeMs, zoom)
+  const query = new URLSearchParams({ from: String(bounds.from), to: String(bounds.to) })
   if (project) query.set('project', project)
   if (sift.service) query.set('service', sift.service)
   if (sift.name.trim()) query.set('name', sift.name.trim())
@@ -163,9 +164,8 @@ function asked(sift: Sift, project: string | undefined, placement: Placement): s
   return placed(query, placement).toString()
 }
 
-function searched(sift: Sift, project: string | undefined, placement: Placement): Record<string, unknown> {
-  const to = Date.now()
-  const body: Record<string, unknown> = { from: to - sift.rangeMs, to }
+function searched(sift: Sift, project: string | undefined, placement: Placement, zoom: Zoom | null): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...boundsOf(sift.rangeMs, zoom) }
   if (project) body.project = project
   if (sift.service) body.service = sift.service
   if (sift.name.trim()) body.name = sift.name.trim()
@@ -180,8 +180,9 @@ function searched(sift: Sift, project: string | undefined, placement: Placement)
 export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, items: Node[] = [], enabled = true): { rows: TraceRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
+  const zoom = useZoom()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['traces', active?.org, project, sift, placement, items],
+    queryKey: ['traces', active?.org, project, sift, placement, items, zoomKey(zoom)],
     enabled: Boolean(active) && enabled,
     staleTime: FRESH_MS,
     queryFn: async () => {
@@ -189,8 +190,8 @@ export function useTraces(sift: Sift = ANY, placement: Placement = NOWHERE, item
       const path = `/api/orgs/${active?.org}/traces`
       const found = await json<{ traces: Listed[] }>(
         query === undefined
-          ? await get(`${path}?${asked(sift, project, placement)}`)
-          : await post(`${path}/search`, { ...searched(sift, project, placement), query }),
+          ? await get(`${path}?${asked(sift, project, placement, zoom)}`)
+          : await post(`${path}/search`, { ...searched(sift, project, placement, zoom), query }),
       )
       return found.traces.map(listed)
     },

@@ -3,6 +3,7 @@ import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { dur } from '@/lib/format'
 import { bodyOf, type Node } from '@/lib/queryLang'
+import { boundsOf, useZoom, zoomKey } from '@/lib/bounds'
 import { useScope } from '@/lib/scope'
 import type { Order } from '@/data/views'
 
@@ -51,13 +52,14 @@ const row = (wire: Wire): SpanRow => ({
 export function useSpans(rangeMs: number, order: Order, limit: number, items: Node[], enabled: boolean): { rows: SpanRow[]; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
+  const zoom = useZoom()
   const { data, isFetching, error } = useQuery({
-    queryKey: ['spans', active?.org, project, rangeMs, order, limit, items],
+    queryKey: ['spans', active?.org, project, rangeMs, order, limit, items, zoomKey(zoom)],
     enabled: Boolean(active) && enabled,
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const to = Date.now()
-      const body: Record<string, unknown> = { from: to - rangeMs, to, limit, order: order === 'duration' ? 'duration' : 'started' }
+      const bounds = boundsOf(rangeMs, zoom)
+      const body: Record<string, unknown> = { from: bounds.from, to: bounds.to, limit, order: order === 'duration' ? 'duration' : 'started' }
       if (project) body.project = project
       const query = bodyOf(items)
       if (query !== undefined) body.query = query
