@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    ProjectId, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId,
+    AttributeFilter, AttributeKey, MAX_ATTRIBUTES, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanId,
     SpanKind, SpanReader, SpanStatus, StoreError, TenantId, TraceFilter, TraceId, TraceOrder,
     TraceSummary,
 };
@@ -73,6 +73,29 @@ const SUMMARIES: &str = "SELECT \
    ORDER BY {order} DESC \
    LIMIT ?";
 
+const ATTRIBUTES: &str = "SELECT key, count() AS spans, \
+     countIf(toFloat64OrNull(value) IS NOT NULL) AS numbers \
+   FROM spans \
+   ARRAY JOIN mapKeys(attributes) AS key, mapValues(attributes) AS value \
+   WHERE tenant_id = ? \
+     AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?) \
+     AND (? = 0 OR project_id = ?) \
+     AND (? = '' OR positionCaseInsensitive(key, ?) > 0) \
+   GROUP BY key \
+   ORDER BY spans DESC, key \
+   LIMIT ?";
+
+const ATTRIBUTE_VALUES: &str = "SELECT attributes[?] AS value, count() AS spans \
+   FROM spans \
+   WHERE tenant_id = ? \
+     AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?) \
+     AND (? = 0 OR project_id = ?) \
+     AND mapContains(attributes, ?) \
+   GROUP BY value \
+   HAVING (? = '' OR positionCaseInsensitive(value, ?) > 0) \
+   ORDER BY spans DESC, value \
+   LIMIT ?";
+
 const ONE_TRACE: &str = "SELECT \
      lower(hex(span_id)) AS span_id, \
      lower(hex(parent_span_id)) AS parent_span_id, \
@@ -102,6 +125,19 @@ const EVENTS_OF_TRACE: &str = "SELECT \
 #[derive(Debug, Clone)]
 pub struct ClickhouseReader {
     client: Client,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct AttributeRow {
+    key: String,
+    spans: u64,
+    numbers: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct ValueRow {
+    value: String,
+    spans: u64,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -320,6 +356,68 @@ impl SpanReader for ClickhouseReader {
             .map_err(|error| refused(&error))?;
 
         rows.into_iter().map(read_summary).collect()
+    }
+
+    async fn attributes(
+        &self,
+        tenant: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let rows: Vec<AttributeRow> = self
+            .client
+            .query(ATTRIBUTES)
+            .bind(tenant.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(prefix)
+            .bind(prefix)
+            .bind(MAX_ATTRIBUTES)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenAttribute {
+                numeric: row.numbers == row.spans,
+                key: row.key.into(),
+                spans: row.spans,
+            })
+            .collect())
+    }
+
+    async fn attribute_values(
+        &self,
+        tenant: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let rows: Vec<ValueRow> = self
+            .client
+            .query(ATTRIBUTE_VALUES)
+            .bind(key.as_str())
+            .bind(tenant.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(key.as_str())
+            .bind(prefix)
+            .bind(prefix)
+            .bind(MAX_VALUES)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenValue {
+                value: row.value.into(),
+                spans: row.spans,
+            })
+            .collect())
     }
 
     async fn trace(

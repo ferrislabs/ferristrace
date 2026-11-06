@@ -3,8 +3,10 @@ use super::ports::SpanReader;
 use std::borrow::Cow;
 
 use super::value_objects::Window;
+use super::query::AttributeKey;
 use super::value_objects::{
-    ServiceFilter, ServiceSeries, ServiceSummary, TraceFilter, TraceSummary,
+    AttributeFilter, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
+    TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -94,6 +96,40 @@ where
         let mut narrowed = filter.clone();
         narrowed.project = project;
         Ok(self.reader.traces(org, &narrowed).await?)
+    }
+
+    pub async fn attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let filter = self.narrowed_attributes(who, org, filter).await?;
+        Ok(self.reader.attributes(org, &filter).await?)
+    }
+
+    pub async fn attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let filter = self.narrowed_attributes(who, org, filter).await?;
+        Ok(self.reader.attribute_values(org, key, &filter).await?)
+    }
+
+    async fn narrowed_attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<AttributeFilter, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        Ok(AttributeFilter {
+            project,
+            ..filter.clone()
+        })
     }
 
     pub async fn trace(

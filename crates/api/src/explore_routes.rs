@@ -5,11 +5,12 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    ExploreError, ProjectId, ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanKind,
+    AttributeFilter, AttributeKey, BadQuery, ExploreError, ProjectId, Query as TraceQuery,
+    SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanKind,
     SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
 use crate::placement::{Misplaced, Placed, PlacementBody};
+use crate::query_body::ExprBody;
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -216,6 +218,12 @@ where
         )
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
+        .route("/api/orgs/{org}/traces/search", post(search::<S>))
+        .route("/api/orgs/{org}/attributes", get(attributes::<S>))
+        .route(
+            "/api/orgs/{org}/attributes/{key}/values",
+            get(attribute_values::<S>),
+        )
         .route("/api/orgs/{org}/traces/{trace}", get(one::<S>))
         .route("/api/orgs/{org}/placements", get(placements::<S>))
         .with_state(state)
@@ -231,12 +239,60 @@ where
     S::Repos: ReadRepos,
 {
     let who = reading(&state, &headers).await?;
+    let filter = filtered(asked, TraceQuery::anything())?;
+
+    let found = state
+        .app
+        .traces(&who, TenantId::new(org), &filter)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(Found { traces: found }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Searched {
+    #[serde(flatten)]
+    asked: Asked,
+    #[serde(default)]
+    query: Option<ExprBody>,
+}
+
+async fn search<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(searched): Json<Searched>,
+) -> Result<Json<Found>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let query = match searched.query {
+        Some(body) => body.query()?,
+        None => TraceQuery::anything(),
+    };
+    let filter = filtered(searched.asked, query)?;
+
+    let found = state
+        .app
+        .traces(&who, TenantId::new(org), &filter)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(Found { traces: found }))
+}
+
+fn filtered(asked: Asked, query: TraceQuery) -> Result<TraceFilter, LookRefused> {
     let window = Window::new(
         asked.from.saturating_mul(NANOS_PER_MILLI),
         asked.to.saturating_mul(NANOS_PER_MILLI),
     )
     .map_err(|_| LookRefused::Window)?;
     let mut filter = TraceFilter::over(window);
+    filter.query = query;
     filter.placement = PlacementBody {
         cluster: asked.cluster,
         namespace: asked.namespace,
@@ -259,15 +315,7 @@ where
     if let Some(limit) = asked.limit {
         filter = filter.at_most(limit);
     }
-
-    let found = state
-        .app
-        .traces(&who, TenantId::new(org), &filter)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-    Ok(Json(Found { traces: found }))
+    Ok(filter)
 }
 
 async fn one<S: Stack>(
@@ -326,6 +374,114 @@ where
     Ok(Json(found.into()))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Catalogued {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    prefix: Option<String>,
+}
+
+impl Catalogued {
+    fn filter(self) -> Result<AttributeFilter, LookRefused> {
+        let window = Window::new(
+            self.from.saturating_mul(NANOS_PER_MILLI),
+            self.to.saturating_mul(NANOS_PER_MILLI),
+        )
+        .map_err(|_| LookRefused::Window)?;
+        let mut filter = AttributeFilter::over(window);
+        filter.project = self.project.map(ProjectId::new);
+        filter.prefix = self
+            .prefix
+            .filter(|typed| !typed.trim().is_empty())
+            .map(Into::into);
+        Ok(filter)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Keys {
+    attributes: Vec<Key>,
+}
+
+#[derive(Debug, Serialize)]
+struct Key {
+    key: String,
+    spans: u64,
+    numeric: bool,
+}
+
+impl From<SeenAttribute> for Key {
+    fn from(seen: SeenAttribute) -> Self {
+        Self {
+            key: seen.key.into_string(),
+            spans: seen.spans,
+            numeric: seen.numeric,
+        }
+    }
+}
+
+async fn attributes<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Keys>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let seen = state
+        .app
+        .attributes(&who, TenantId::new(org), &catalogued.filter()?)
+        .await?;
+    Ok(Json(Keys {
+        attributes: seen.into_iter().map(Into::into).collect(),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct Values {
+    values: Vec<Valued>,
+}
+
+#[derive(Debug, Serialize)]
+struct Valued {
+    value: String,
+    spans: u64,
+}
+
+impl From<SeenValue> for Valued {
+    fn from(seen: SeenValue) -> Self {
+        Self {
+            value: seen.value.into_string(),
+            spans: seen.spans,
+        }
+    }
+}
+
+async fn attribute_values<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, key)): Path<(Uuid, String)>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Values>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let key = AttributeKey::new(&key)?;
+    let seen = state
+        .app
+        .attribute_values(&who, TenantId::new(org), &key, &catalogued.filter()?)
+        .await?;
+    Ok(Json(Values {
+        values: seen.into_iter().map(Into::into).collect(),
+    }))
+}
+
 impl From<NotCarried> for LookRefused {
     fn from(error: NotCarried) -> Self {
         Self::Reaching(error)
@@ -344,6 +500,8 @@ pub enum LookRefused {
     Window,
     #[error(transparent)]
     Placement(#[from] Misplaced),
+    #[error(transparent)]
+    Query(#[from] BadQuery),
     #[error("that is not a trace identifier")]
     TraceId,
     #[error("no trace carries that identifier")]
@@ -369,7 +527,9 @@ impl IntoResponse for LookRefused {
             Self::Reaching(refused) => return refused.into_response(),
             Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg | Self::NoSuchTrace => StatusCode::NOT_FOUND,
-            Self::Window | Self::TraceId | Self::Placement(_) => StatusCode::BAD_REQUEST,
+            Self::Window | Self::TraceId | Self::Placement(_) | Self::Query(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
         if status.is_server_error() {

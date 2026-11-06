@@ -65,7 +65,7 @@ pub use cluster::{
     PodReason, WorkloadSummary, assess, fresh_window,
 };
 pub use explore::{
-    AttributeKey, BadQuery, BadWindow, Clause, Explore, ExploreError, Expr, Field, Number, Op,
+    AttributeFilter, AttributeKey, BadQuery, BadWindow, Clause, MAX_ATTRIBUTES, MAX_VALUES, SeenAttribute, SeenValue, Explore, ExploreError, Expr, Field, Number, Op,
     Query, Scalar, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, SpanReader, Test,
     TraceFilter, TraceOrder, TraceSummary, Value, Window,
 };

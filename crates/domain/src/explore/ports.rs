@@ -1,7 +1,9 @@
 use core::future::Future;
 
+use super::query::AttributeKey;
 use super::value_objects::{
-    ServiceFilter, ServiceSeries, ServiceSummary, TraceFilter, TraceSummary,
+    AttributeFilter, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
+    TraceFilter, TraceSummary,
 };
 use crate::catalogue::ProjectId;
 use crate::store::StoreError;
@@ -40,6 +42,23 @@ pub trait SpanReader {
         id: TraceId,
         project: Option<ProjectId>,
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send;
+
+    fn attributes(
+        &self,
+        _tenant: TenantId,
+        _filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenAttribute>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
+
+    fn attribute_values(
+        &self,
+        _tenant: TenantId,
+        _key: &AttributeKey,
+        _filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
 }
 
 impl<T: SpanReader + Sync> SpanReader for &T {
@@ -85,6 +104,23 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send {
         (*self).trace(tenant, id, project)
     }
+
+    fn attributes(
+        &self,
+        tenant: TenantId,
+        filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenAttribute>, StoreError>> + Send {
+        (*self).attributes(tenant, filter)
+    }
+
+    fn attribute_values(
+        &self,
+        tenant: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
+        (*self).attribute_values(tenant, key, filter)
+    }
 }
 
 impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
@@ -129,5 +165,22 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         project: Option<ProjectId>,
     ) -> impl Future<Output = Result<Vec<Span>, StoreError>> + Send {
         self.as_ref().trace(tenant, id, project)
+    }
+
+    fn attributes(
+        &self,
+        tenant: TenantId,
+        filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenAttribute>, StoreError>> + Send {
+        self.as_ref().attributes(tenant, filter)
+    }
+
+    fn attribute_values(
+        &self,
+        tenant: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> impl Future<Output = Result<Vec<SeenValue>, StoreError>> + Send {
+        self.as_ref().attribute_values(tenant, key, filter)
     }
 }

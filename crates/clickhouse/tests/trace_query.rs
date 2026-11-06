@@ -3,7 +3,7 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    AttributeKey, Clause, Expr, Field, Number, Op, Query, Scalar, Scope, SpanReader, SpanSink,
+    AttributeFilter, AttributeKey, Clause, Expr, Field, Number, Op, Query, Scalar, Scope, SpanReader, SpanSink,
     TenantId, TraceFilter, Value, Window,
 };
 use ferristrace_infra::FixedClock;
@@ -416,4 +416,43 @@ async fn a_text_attribute_compares_as_a_number_and_a_list_matches_any() {
     assert_eq!(listed, vec![1, 2, 3, 4]);
     assert_eq!(slow, vec![2]);
     assert_eq!(named, vec![3]);
+}
+
+#[tokio::test]
+async fn the_catalogue_lists_the_keys_of_the_window_and_their_values() {
+    let Some(reader) = reader("ferristrace_query_catalogue").await else { return };
+    let mut narrowed = AttributeFilter::over(the_hour());
+    narrowed.prefix = Some("RPC".into());
+
+    let keys = reader
+        .attributes(tenant(MINE), &AttributeFilter::over(the_hour()))
+        .await
+        .expect("the keys read");
+    let prefixed = reader
+        .attributes(tenant(MINE), &narrowed)
+        .await
+        .expect("the keys read");
+    let values = reader
+        .attribute_values(tenant(MINE), &AttributeKey::new("rpc.method").expect("a key"), &AttributeFilter::over(the_hour()))
+        .await
+        .expect("the values read");
+    let theirs = reader
+        .attributes(tenant(THEIRS), &AttributeFilter::over(the_hour()))
+        .await
+        .expect("the keys read");
+
+    let named = |seen: &[ferristrace_domain::SeenAttribute]| -> Vec<(String, bool)> {
+        let mut pairs: Vec<_> = seen.iter().map(|k| (k.key.to_string(), k.numeric)).collect();
+        pairs.sort();
+        pairs
+    };
+    assert!(named(&keys).contains(&("http.status_code".to_owned(), true)));
+    assert!(named(&keys).contains(&("rpc.method".to_owned(), false)));
+    assert!(named(&keys).contains(&("db.system".to_owned(), false)));
+    assert_eq!(named(&prefixed), vec![("rpc.method".to_owned(), false)]);
+    assert_eq!(
+        values.iter().map(|v| (v.value.to_string(), v.spans)).collect::<Vec<_>>(),
+        vec![("Pay".to_owned(), 3), ("Refund".to_owned(), 1)]
+    );
+    assert!(named(&theirs).iter().all(|(key, _)| key != "db.system"));
 }

@@ -24,6 +24,7 @@ mod oncall_routes;
 mod org_routes;
 mod placement;
 mod postmortem_routes;
+mod query_body;
 mod release_routes;
 mod roster_routes;
 mod site_routes;

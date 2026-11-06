@@ -55,14 +55,22 @@ Design
     whole trace. On the spans tab a span matches on its own.
 
   API
-    `POST /api/orgs/{org}/explore/traces`
-      body `{from, to, project?, query, order, limit}`; answers
-      `{traces: [...]}` like the GET. The GET stays.
-    `GET  /api/orgs/{org}/explore/attributes?from&to&project&prefix`
-      answers `[{key, kind: "text"|"number", spans}]`, the 200 most
-      used keys in the window, built-ins first.
-    `GET  /api/orgs/{org}/explore/attributes/{key}/values?from&to&prefix`
-      answers the 20 most used values with their count.
+    `POST /api/orgs/{org}/traces/search`
+      body `{from, to, project?, order, limit, errors?, query?}` (the
+      GET parameters plus a `query` tree); answers `{traces: [...]}`
+      like the GET. The GET stays. A clause is
+      `{"field": "service"|"name"|"status"|"kind"|"duration"|
+      "http_status_code"|"trace_id"|"span_id", ...}` or
+      `{"attr": "<key>", ...}`, then `"op"` and `"value"` (text,
+      number, bool or a list; absent for exists). Groups are
+      `{"all": [...]}`, `{"any": [...]}` and `{"not": {...}}`.
+      `duration` is in nanoseconds.
+    `GET  /api/orgs/{org}/attributes?from&to&project&prefix`
+      answers `{attributes: [{key, spans, numeric}]}`, the 200 most
+      used span attribute keys in the window. The built-in fields are
+      a fixed list in the web.
+    `GET  /api/orgs/{org}/attributes/{key}/values?from&to&project&prefix`
+      answers `{values: [{value, spans}]}`, the 20 most used.
     Later lots add `POST .../explore/spans`, `.../series`, `.../table`.
     Views (lot 9b):
     `GET|POST /api/orgs/{org}/views?signal=traces`,

@@ -84,6 +84,40 @@ impl TraceFilter {
     }
 }
 
+pub const MAX_ATTRIBUTES: u32 = 200;
+
+pub const MAX_VALUES: u32 = 20;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributeFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub prefix: Option<Box<str>>,
+}
+
+impl AttributeFilter {
+    pub fn over(window: Window) -> Self {
+        Self {
+            window,
+            project: None,
+            prefix: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenAttribute {
+    pub key: Box<str>,
+    pub spans: u64,
+    pub numeric: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenValue {
+    pub value: Box<str>,
+    pub spans: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceSummary {
     pub trace_id: TraceId,

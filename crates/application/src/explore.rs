@@ -1,5 +1,5 @@
 use ferristrace_domain::{
-    Clock, Explore, ExploreError, Placements, ProjectId, Reader, Readers, ServiceFilter,
+    AttributeFilter, AttributeKey, SeenAttribute, SeenValue, Clock, Explore, ExploreError, Placements, ProjectId, Reader, Readers, ServiceFilter,
     ServiceSeries, ServiceSite, ServiceSummary, Span, TenantId, TraceFilter, TraceId, TraceSummary,
     Whoami, Window,
 };
@@ -85,6 +85,43 @@ where
             reader,
         )
         .traces(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attributes(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .attribute_values(who, org, key, filter)
         .await
     }
 
