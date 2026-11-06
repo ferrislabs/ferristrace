@@ -1,6 +1,7 @@
 use clickhouse::query::Query as Statement;
 use ferristrace_domain::{
-    Clause, Expr, Field, Number, ProjectId, Query, Scalar, TenantId, Test, Window,
+    Clause, Expr, Field, Measure, Number, ProjectId, Query, Scalar, SeriesFilter, TenantId, Test,
+    Window,
 };
 use serde::{Serialize, Serializer};
 use uuid::Uuid;
@@ -90,13 +91,18 @@ impl Compiled {
         window: Window,
         project: Option<ProjectId>,
         limit: u32,
+        ignore_own: bool,
     ) -> (String, Vec<Param>) {
         let mut compiled = Self::default();
         let column = Column::of(field);
         let value = compiled.text_of(&column);
         compiled.scoped(tenant, window, project);
         let present = compiled.present_of(&column);
-        let narrowed = query.without(field);
+        let narrowed = if ignore_own {
+            query.without(field)
+        } else {
+            query.clone()
+        };
         let filter = narrowed.filter().map(|expr| compiled.expr(expr));
         let mut sql = format!(
             "SELECT {value} AS value, count() AS spans FROM spans \
@@ -136,6 +142,58 @@ impl Compiled {
             sql.push_str(&filter);
             sql.push(')');
         }
+        (sql, compiled.params)
+    }
+
+    pub(crate) fn series(
+        filter: &SeriesFilter,
+        groups: &[String],
+        tenant: TenantId,
+    ) -> (String, Vec<Param>) {
+        let (group, measure, query) = (filter.group(), filter.measure, &filter.query);
+        let (window, project, step_nanos) = (filter.window, filter.project, filter.step_nanos());
+        let mut compiled = Self::default();
+        let column = group.map(Column::of);
+        let selected = column
+            .as_ref()
+            .map_or_else(|| "''".to_owned(), |column| compiled.text_of(column));
+        compiled
+            .params
+            .push(Param::Whole(nanos(window.from_unix_nanos())));
+        compiled
+            .params
+            .push(Param::Whole(i64::try_from(step_nanos).unwrap_or(i64::MAX)));
+        compiled.scoped(tenant, window, project);
+        let present = column.as_ref().map(|column| compiled.present_of(column));
+        let mut sql = format!(
+            "SELECT {selected} AS grp, \
+                    toInt64(intDiv(toUnixTimestamp64Nano(start_time) - ?, ?)) AS slot, \
+                    toFloat64({}) AS value \
+             FROM spans FINAL \
+             WHERE tenant_id = ? AND start_time >= fromUnixTimestamp64Nano(?) \
+               AND start_time < fromUnixTimestamp64Nano(?) AND (? = 0 OR project_id = ?)",
+            measured(measure)
+        );
+        if let Some(present) = present {
+            sql.push_str(" AND (");
+            sql.push_str(&present);
+            sql.push(')');
+        }
+        if column.is_some() {
+            let marks = vec!["?"; groups.len()].join(", ");
+            sql.push_str(" AND grp IN (");
+            sql.push_str(&marks);
+            sql.push(')');
+            compiled
+                .params
+                .extend(groups.iter().map(|group| Param::Text(group.clone())));
+        }
+        if let Some(filter) = query.filter().map(|expr| compiled.expr(expr)) {
+            sql.push_str(" AND (");
+            sql.push_str(&filter);
+            sql.push(')');
+        }
+        sql.push_str(" GROUP BY grp, slot ORDER BY slot");
         (sql, compiled.params)
     }
 
@@ -284,6 +342,20 @@ impl Compiled {
             Column::HttpStatus => "http_status_code IS NOT NULL".to_owned(),
             Column::Attribute(key) => format!("mapContains(attributes, {})", self.text(key)),
         }
+    }
+}
+
+fn measured(measure: Measure) -> String {
+    match measure {
+        Measure::Count => "count()".to_owned(),
+        Measure::Errors => "countIf(status = 'error')".to_owned(),
+        Measure::ErrorRate => {
+            "if(count() = 0, 0, countIf(status = 'error') * 100 / count())".to_owned()
+        }
+        Measure::Average => format!("avg({DURATION}) / 1000"),
+        Measure::P50 => format!("quantile(0.5)({DURATION}) / 1000"),
+        Measure::P95 => format!("quantile(0.95)({DURATION}) / 1000"),
+        Measure::P99 => format!("quantile(0.99)({DURATION}) / 1000"),
     }
 }
 

@@ -135,6 +135,116 @@ pub struct ListedSpan {
     pub duration_nanos: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Measure {
+    #[default]
+    Count,
+    Errors,
+    ErrorRate,
+    Average,
+    P50,
+    P95,
+    P99,
+}
+
+pub const MAX_GROUPS: u32 = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeriesFilter {
+    pub window: Window,
+    pub project: Option<ProjectId>,
+    pub query: Query,
+    pub measure: Measure,
+    group: Option<Field>,
+}
+
+impl SeriesFilter {
+    pub fn new(
+        window: Window,
+        query: Query,
+        measure: Measure,
+        group: Option<Field>,
+    ) -> Result<Self, super::errors::BadQuery> {
+        if matches!(
+            group,
+            Some(Field::Duration | Field::TraceId | Field::SpanId)
+        ) {
+            return Err(super::errors::BadQuery::Shape);
+        }
+        Ok(Self {
+            window,
+            project: None,
+            query,
+            measure,
+            group,
+        })
+    }
+
+    pub fn group(&self) -> Option<&Field> {
+        self.group.as_ref()
+    }
+
+    pub fn step_nanos(&self) -> u64 {
+        self.span().div_ceil(STEPS).max(MIN_STEP_NANOS)
+    }
+
+    pub fn slot_starts(&self) -> Vec<u64> {
+        let from = self.window.from_unix_nanos();
+        let step = self.step_nanos();
+        (0..self.span().div_ceil(step))
+            .map(|slot| from + slot * step)
+            .collect()
+    }
+
+    fn span(&self) -> u64 {
+        self.window.to_unix_nanos() - self.window.from_unix_nanos()
+    }
+}
+
+pub type SparseLine = (Option<Box<str>>, Vec<(u64, f64)>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesLine {
+    pub group: Option<Box<str>>,
+    pub points: Vec<Option<f64>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SeriesResult {
+    pub step_nanos: u64,
+    pub starts: Vec<u64>,
+    pub lines: Vec<SeriesLine>,
+}
+
+impl SeriesResult {
+    pub fn dense(filter: &SeriesFilter, sparse: Vec<SparseLine>) -> Self {
+        let starts = filter.slot_starts();
+        let empty = match filter.measure {
+            Measure::Count | Measure::Errors => Some(0.0),
+            _ => None,
+        };
+        let lines = sparse
+            .into_iter()
+            .map(|(group, found)| {
+                let mut points = vec![empty; starts.len()];
+                for (slot, value) in found {
+                    if let Some(point) =
+                        usize::try_from(slot).ok().and_then(|at| points.get_mut(at))
+                    {
+                        *point = Some(value);
+                    }
+                }
+                SeriesLine { group, points }
+            })
+            .collect();
+        Self {
+            step_nanos: filter.step_nanos(),
+            starts,
+            lines,
+        }
+    }
+}
+
 pub const MAX_FACETS: usize = 12;
 
 pub const FACET_VALUES: u32 = 10;

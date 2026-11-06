@@ -9,13 +9,31 @@ export type { Order }
 
 export type Visibility = 'private' | 'org'
 
-export type Tab = 'traces' | 'spans'
+export type Tab = 'traces' | 'spans' | 'series'
 
-export const TABS: Tab[] = ['traces', 'spans']
+export const TABS: Tab[] = ['traces', 'spans', 'series']
+
+export const TAB_LABELS: Record<Tab, string> = { traces: 'Traces', spans: 'Spans', series: 'Time series' }
+
+export type Measure = 'count' | 'errors' | 'error_rate' | 'average' | 'p50' | 'p95' | 'p99'
+
+export const MEASURES: { value: Measure; label: string; unit: string }[] = [
+  { value: 'count', label: 'Spans', unit: '' },
+  { value: 'errors', label: 'Errors', unit: '' },
+  { value: 'error_rate', label: 'Error rate', unit: '%' },
+  { value: 'average', label: 'Average duration', unit: 'ms' },
+  { value: 'p50', label: 'Duration p50', unit: 'ms' },
+  { value: 'p95', label: 'Duration p95', unit: 'ms' },
+  { value: 'p99', label: 'Duration p99', unit: 'ms' },
+]
+
+export const measureOf = (raw: unknown): Measure => (MEASURES.some((one) => one.value === raw) ? (raw as Measure) : 'count')
+
+export const groupOf = (raw: unknown): string => (typeof raw === 'string' && raw.length <= 140 ? raw : '')
 
 export const tabOf = (raw: unknown): Tab => (TABS.includes(raw as Tab) ? (raw as Tab) : 'traces')
 
-export type Definition = { q: string; o: Order; t: Tab }
+export type Definition = { q: string; o: Order; t: Tab; m: Measure; g: string }
 
 export type SavedView = {
   id: string
@@ -29,14 +47,14 @@ export type SavedView = {
 export type BuiltIn = { key: string; name: string; hint: string; definition: Definition }
 
 export const BUILT_IN: BuiltIn[] = [
-  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started', t: 'traces' } },
+  { key: 'recent', name: 'Recent', hint: 'Newest first', definition: { q: '', o: 'started', t: 'traces', m: 'count', g: '' } },
   {
     key: 'errors',
     name: 'Errors',
     hint: 'Spans that failed',
-    definition: { q: 'status = error', o: 'started', t: 'traces' },
+    definition: { q: 'status = error', o: 'started', t: 'traces', m: 'count', g: '' },
   },
-  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration', t: 'traces' } },
+  { key: 'slow', name: 'Slow', hint: 'Slowest first', definition: { q: '', o: 'duration', t: 'traces', m: 'count', g: '' } },
 ]
 
 const ORDERS: Order[] = ['started', 'duration', 'spans']
@@ -46,10 +64,10 @@ export const orderOf = (raw: unknown): Order => (ORDERS.includes(raw as Order) ?
 export function definitionOf(raw: unknown): Definition {
   const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
   const q = typeof body.q === 'string' ? normalise(body.q) : itemsText(validChips(body.q))
-  return { q, o: orderOf(body.o), t: tabOf(body.t) }
+  return { q, o: orderOf(body.o), t: tabOf(body.t), m: measureOf(body.m), g: groupOf(body.g) }
 }
 
-export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && a.t === b.t && normalise(a.q) === normalise(b.q)
+export const sameDefinition = (a: Definition, b: Definition) => a.o === b.o && a.t === b.t && a.m === b.m && a.g === b.g && normalise(a.q) === normalise(b.q)
 
 type Wire = {
   id: string
