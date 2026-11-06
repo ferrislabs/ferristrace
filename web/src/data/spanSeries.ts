@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { bodyOf, type Node } from '@/lib/queryLang'
+import { boundsOf, useZoom, zoomKey } from '@/lib/bounds'
 import { useScope } from '@/lib/scope'
 import { MEASURES, type Measure } from '@/data/views'
 import type { MetricLine } from '@/data/metrics'
@@ -22,14 +23,15 @@ export const groupLabel = (group: string): string => (group.startsWith('attr:') 
 export function useSpanSeries(rangeMs: number, measure: Measure, group: string, items: Node[], enabled: boolean): { lines: MetricLine[]; unit: string; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
+  const zoom = useZoom()
   const unit = MEASURES.find((one) => one.value === measure)?.unit ?? ''
   const { data, isFetching, error } = useQuery({
-    queryKey: ['span-series', active?.org, project, rangeMs, measure, group, items],
+    queryKey: ['span-series', active?.org, project, rangeMs, measure, group, items, zoomKey(zoom)],
     enabled: Boolean(active) && enabled,
     staleTime: FRESH_MS,
     queryFn: async () => {
-      const to = Date.now()
-      const body: Record<string, unknown> = { from: to - rangeMs, to, measure }
+      const bounds = boundsOf(rangeMs, zoom)
+      const body: Record<string, unknown> = { from: bounds.from, to: bounds.to, measure }
       if (project) body.project = project
       const grouped = groupBody(group)
       if (grouped) body.group_by = grouped

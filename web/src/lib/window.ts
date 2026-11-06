@@ -33,7 +33,7 @@ export function useWindow(): Window & { choose: (key: Window['key']) => void } {
   const choose = (key: Window['key']) =>
     void navigate({
       to: '.' as never,
-      search: ((was: Record<string, unknown>) => ({ ...was, f: unzoomed(was.f), window: key === DEFAULT_WINDOW.key ? undefined : key })) as never,
+      search: ((was: Record<string, unknown>) => ({ ...was, f: unzoomed(was.f), from: undefined, to: undefined, window: key === DEFAULT_WINDOW.key ? undefined : key })) as never,
       replace: true,
     })
   return { ...current, choose }

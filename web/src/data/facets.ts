@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { json, post } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
+import { boundsOf, useZoom, zoomKey } from '@/lib/bounds'
 import { useScope } from '@/lib/scope'
 import { bodyOf, type Node } from '@/lib/queryLang'
 import type { FieldRef } from '@/lib/traceQuery'
@@ -30,17 +31,18 @@ export function useFacets(
 ): { facets: Map<string, FacetValue[]>; spread: Spread | null; loading: boolean; failed: unknown } {
   const { active } = useOrganisations()
   const { project } = useScope()
+  const zoom = useZoom()
   const asked = wanted.map(key).join('|')
   const { data, isFetching, error } = useQuery({
-    queryKey: ['facets', active?.org, project, rangeMs, items, asked, duration],
+    queryKey: ['facets', active?.org, project, rangeMs, items, asked, duration, zoomKey(zoom)],
     enabled: Boolean(active) && (wanted.length > 0 || duration),
     staleTime: STALE_MS,
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      const to = Date.now()
+      const bounds = boundsOf(rangeMs, zoom)
       const body: Record<string, unknown> = {
-        from: to - rangeMs,
-        to,
+        from: bounds.from,
+        to: bounds.to,
         facets: wanted.map((field) => ('built' in field ? { field: field.built } : { attr: field.attr })),
         duration,
       }

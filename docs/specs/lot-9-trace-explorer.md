@@ -161,7 +161,14 @@ Design
     text; a view saved as chips before this lot is read as text.
     Suggestions: fields, operators and values under the cursor; a syntax
     error says what was expected and where.
-    Lot 9f: duration histogram with brush selection, click a value to
+    Lot 9f (web only, one pull request per item): 1 a histogram above
+    the list (spans over time, the failed share in red) with a brush: drag,
+    or arrow keys, Shift and Enter, to zoom on a period. The period is the
+    url's `from` and `to` (epoch milliseconds), overrides the window for
+    every read of the explorer, is not part of a view, and is dropped when
+    a window is picked. It reuses `POST /spans/series`. 2 click a value to
+    filter or exclude, 3 a column picker, 4 a side preview of a trace.
+    Items of 9f, as first written: duration histogram with brush selection, click a value to
     filter or exclude, attribute facets with counts, column picker,
     side preview of a trace.
 

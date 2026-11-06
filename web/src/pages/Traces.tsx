@@ -19,6 +19,8 @@ import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
 import { groupOf, measureOf, orderOf, tabOf, TABS, TAB_LABELS, type Definition, type Measure, type Order, type Tab } from '@/data/views'
 import { SeriesPanel } from '@/components/ft/SeriesPanel'
 import { TABLE_DEFAULT_GROUP, TablePanel } from '@/components/ft/TablePanel'
+import { Histogram } from '@/components/ft/Histogram'
+import { useZoom } from '@/lib/bounds'
 import { useSpans } from '@/data/spans'
 import { SpansTable } from '@/components/ft/SpansTable'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
@@ -47,6 +49,7 @@ export function Traces() {
   const order = orderOf(useSearchParam('o'))
   const tab = tabOf(useSearchParam('t'))
   const measure = measureOf(useSearchParam('m'))
+  const zoom = useZoom()
   const group = groupOf(useSearchParam('g'))
   const viewParam = useSearchParam('view')
   const viewKey = viewParam ?? (items.length === 0 && order === 'started' && tab === 'traces' ? 'recent' : undefined)
@@ -71,6 +74,14 @@ export function Traces() {
         g: merged.g === '' ? undefined : merged.g,
         view: merged.view,
       })) as never,
+      replace: true,
+    })
+    setCursor(0)
+  }
+  const zoomTo = (from: number, to: number | undefined) => {
+    void goTo({
+      to: '.' as never,
+      search: ((search: Record<string, unknown>) => ({ ...search, from: to === undefined ? undefined : Math.round(from), to: to === undefined ? undefined : Math.round(to) })) as never,
       replace: true,
     })
     setCursor(0)
@@ -107,7 +118,7 @@ export function Traces() {
 
   return (
     <>
-      <PageHeader title="Traces" meta={`Last ${windowLabel}`}>
+      <PageHeader title="Traces" meta={zoom ? `${new Date(zoom.from).toLocaleString()} to ${new Date(zoom.to).toLocaleString()}` : `Last ${windowLabel}`}>
         <ViewsToggle state={viewsState} on={panel === 'views'} onToggle={() => { setPanel((was) => (was === 'views' ? 'facets' : 'views')); setMobileOpen(true) }} />
         <Button size="sm" variant="ghost" className="md:hidden" aria-expanded={mobileOpen} onClick={() => setMobileOpen((was) => !was)}>
           <ListFilter />Filters{items.length > 0 ? <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">{items.length}</span> : null}
@@ -177,6 +188,17 @@ export function Traces() {
             </Popover>
             {sifting ? <Button variant="ghost" size="sm" onClick={clear}>Reset</Button> : null}
           </div>
+      {tab !== 'series' ? (
+        <div className="flex flex-col gap-1.5">
+          {zoom ? (
+            <div className="flex items-center gap-2 text-caption text-muted-foreground">
+              <span>Zoomed on a period of {Math.max(1, Math.round((zoom.to - zoom.from) / 1000))} s.</span>
+              <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {windowLabel}</Button>
+            </div>
+          ) : null}
+          <Histogram items={items} rangeMs={windowMs} onZoom={(from, to) => zoomTo(from, to)} />
+        </div>
+      ) : null}
       {tab === 'table' ? (
         <TablePanel items={items} rangeMs={windowMs} order={measure} group={group} onChange={(part) => show(part)} onPick={pickGroup} />
       ) : tab === 'series' ? (
