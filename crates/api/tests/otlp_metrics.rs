@@ -317,24 +317,19 @@ async fn a_metrics_export_is_refused_without_an_ingest_key() {
 }
 
 #[tokio::test]
-async fn a_json_metrics_export_is_refused_like_a_json_trace_export() {
+async fn a_json_metrics_export_is_accepted() {
     let harness = harness();
-    let json = br#"{"resourceMetrics":[]}"#.to_vec();
+    let json = br#"{"resourceMetrics":[{"scopeMetrics":[{"metrics":[{"name":"requests","gauge":{"dataPoints":[{"timeUnixNano":"1","asDouble":2.5}]}}]}]}]}"#.to_vec();
 
-    let metrics = status_of(
+    let status = status_of(
         harness.router(),
-        posted(METRICS, "application/json", Some(KEY), json.clone()),
-    )
-    .await;
-    let traces = status_of(
-        harness.router(),
-        posted(TRACES, "application/json", Some(KEY), json),
+        posted(METRICS, "application/json", Some(KEY), json),
     )
     .await;
 
-    assert_eq!(metrics, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    assert_eq!(metrics, traces);
-    assert_eq!(harness.sink.metrics_accepted(), 0);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(harness.sink.metrics_accepted(), 1);
+    assert_eq!(harness.sink.accepted(), 0, "no span was written");
 }
 
 #[tokio::test]

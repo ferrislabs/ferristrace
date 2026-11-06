@@ -17,10 +17,16 @@ pub enum DecodeError {
     Protobuf(#[from] prost::DecodeError),
     #[error(transparent)]
     Id(#[from] InvalidId),
+    #[error("the payload is not a valid OTLP JSON export request")]
+    Json(#[from] serde_json::Error),
 }
 
 pub fn decode_traces(payload: &[u8]) -> Result<Vec<Span>, DecodeError> {
     spans_of(ExportTraceServiceRequest::decode(payload)?)
+}
+
+pub fn decode_traces_json(payload: &[u8]) -> Result<Vec<Span>, DecodeError> {
+    spans_of(serde_json::from_slice(payload)?)
 }
 
 pub fn spans_of(request: ExportTraceServiceRequest) -> Result<Vec<Span>, DecodeError> {

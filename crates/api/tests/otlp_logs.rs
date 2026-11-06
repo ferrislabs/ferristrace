@@ -243,24 +243,19 @@ async fn a_logs_export_is_refused_without_an_ingest_key() {
 }
 
 #[tokio::test]
-async fn a_json_logs_export_is_refused_like_a_json_trace_export() {
+async fn a_json_logs_export_is_accepted() {
     let harness = harness();
-    let json = br#"{"resourceLogs":[]}"#.to_vec();
+    let json = br#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1","severityNumber":9,"body":{"stringValue":"paid"}}]}]}]}"#.to_vec();
 
-    let logs = status_of(
+    let status = status_of(
         harness.router(),
-        posted(LOGS, "application/json", Some(KEY), json.clone()),
-    )
-    .await;
-    let traces = status_of(
-        harness.router(),
-        posted(TRACES, "application/json", Some(KEY), json),
+        posted(LOGS, "application/json", Some(KEY), json),
     )
     .await;
 
-    assert_eq!(logs, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    assert_eq!(logs, traces);
-    assert_eq!(harness.sink.logs_accepted(), 0);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(harness.sink.logs_accepted(), 1);
+    assert_eq!(harness.sink.accepted(), 0, "no span was written");
 }
 
 #[tokio::test]
