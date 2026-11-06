@@ -3,18 +3,49 @@ use std::collections::BTreeMap;
 use clickhouse::query::Query;
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    Aggregation, Exemplar, HistogramPoint, MAX_EXEMPLARS, MetricDescriptor, MetricKind,
-    MetricQuery, MetricReader, ProjectId, Series, SeriesSet, SpanId, StoreError, TenantId, TraceId,
+    Aggregation, AttributeFilter, AttributeKey, Exemplar, HistogramPoint, MAX_ATTRIBUTES,
+    MAX_EXEMPLARS, MAX_VALUES, MetricDescriptor, MetricKind, MetricQuery, MetricReader, ProjectId,
+    SeenAttribute, SeenValue, Series, SeriesSet, SpanId, StoreError, TenantId, TraceId,
 };
 use serde::Deserialize;
 
 use crate::clickhouse::placement::{Held, Placed};
-use crate::clickhouse::read::{held, map_of, nanos, refused, unsigned};
+use crate::clickhouse::query::Compiled;
+use crate::clickhouse::read::{
+    AttributeRow, ValueRow, held, map_of, nanos, refused, unsigned, uuid_of,
+};
 
 const MAX_CATALOGUE: u32 = 1000;
 const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
 const ZERO_TRACE: &str = "00000000000000000000000000000000";
 const ZERO_SPAN: &str = "0000000000000000";
+
+const SEEN: &str = "(SELECT attributes, time FROM metric_points \
+     WHERE tenant_id = ? AND name = ? \
+       AND time >= fromUnixTimestamp64Nano(?) AND time < fromUnixTimestamp64Nano(?) \
+       AND (? = 0 OR project_id = ?) \
+     UNION ALL \
+     SELECT attributes, time FROM metric_histograms \
+     WHERE tenant_id = ? AND name = ? \
+       AND time >= fromUnixTimestamp64Nano(?) AND time < fromUnixTimestamp64Nano(?) \
+       AND (? = 0 OR project_id = ?))";
+
+const ATTRIBUTES: &str = "SELECT key, count() AS spans, \
+     countIf(toFloat64OrNull(value) IS NOT NULL) AS numbers \
+   FROM {seen} \
+   ARRAY JOIN mapKeys(attributes) AS key, mapValues(attributes) AS value \
+   WHERE (? = '' OR positionCaseInsensitive(key, ?) > 0) \
+   GROUP BY key \
+   ORDER BY spans DESC, key \
+   LIMIT ?";
+
+const ATTRIBUTE_VALUES: &str = "SELECT attributes[?] AS value, count() AS spans \
+   FROM {seen} \
+   WHERE mapContains(attributes, ?) \
+   GROUP BY value \
+   HAVING (? = '' OR positionCaseInsensitive(value, ?) > 0) \
+   ORDER BY spans DESC, value \
+   LIMIT ?";
 
 const CATALOGUE: &str = "SELECT \
      name AS name, \
@@ -187,21 +218,34 @@ fn bind_scope(query: Query, org: TenantId, project: Option<ProjectId>) -> Query 
     }
 }
 
-fn charted(query: &MetricQuery) -> String {
+fn charted(query: &MetricQuery, compiled: &Compiled) -> String {
+    let narrowed = if compiled.is_empty() {
+        String::new()
+    } else {
+        format!(" AND ({})", compiled.expression())
+    };
     format!(
         "{} AND name = ? \
          AND time >= fromUnixTimestamp64Nano(toInt64({})) \
-         AND time < fromUnixTimestamp64Nano(toInt64({}))",
+         AND time < fromUnixTimestamp64Nano(toInt64({})){narrowed}",
         scoped(query.project),
         nanos(query.window.from_unix_nanos()),
         nanos(query.window.to_unix_nanos()),
     )
 }
 
+fn bind_filter(mut statement: Query, compiled: &Compiled) -> Query {
+    for param in compiled.params() {
+        statement = statement.bind(param);
+    }
+    statement
+}
+
 fn laid(
     sql: &str,
     query: &MetricQuery,
     placed: &Placed<'_>,
+    compiled: &Compiled,
     per_series: &str,
     outer: &str,
 ) -> String {
@@ -212,7 +256,10 @@ fn laid(
         .replace("{seconds}", &format!("{seconds:?}"))
         .replace("{from}", &nanos(query.window.from_unix_nanos()).to_string())
         .replace("{step}", &nanos(query.step_nanos()).to_string())
-        .replace("{filters}", &format!("{}{}", charted(query), placed.and()))
+        .replace(
+            "{filters}",
+            &format!("{}{}", charted(query, compiled), placed.and()),
+        )
 }
 
 fn point_plan(kind: MetricKind, aggregation: Aggregation) -> (String, &'static str) {
@@ -249,16 +296,18 @@ impl ClickhouseMetricReader {
     ) -> Result<BTreeMap<Vec<String>, Vec<Option<f64>>>, StoreError> {
         let (per_series, outer) = point_plan(kind, aggregation);
         let placed = Placed::of(&query.placement, Held::Attributes);
-        let sql = laid(POINTS, query, &placed, &per_series, outer);
+        let compiled = Compiled::of_metrics(&query.filter);
+        let sql = laid(POINTS, query, &placed, &compiled, &per_series, outer);
         let rows: Vec<PointRow> = placed
-            .bind(
+            .bind(bind_filter(
                 bind_scope(
                     self.client.query(&sql).bind(keys_of(query)),
                     org,
                     query.project,
                 )
                 .bind(&*query.name),
-            )
+                &compiled,
+            ))
             .fetch_all()
             .await
             .map_err(|error| refused(&error))?;
@@ -277,16 +326,18 @@ impl ClickhouseMetricReader {
         query: &MetricQuery,
     ) -> Result<BTreeMap<Vec<String>, Vec<Option<f64>>>, StoreError> {
         let placed = Placed::of(&query.placement, Held::Attributes);
-        let sql = laid(HISTOGRAMS, query, &placed, "", "");
+        let compiled = Compiled::of_metrics(&query.filter);
+        let sql = laid(HISTOGRAMS, query, &placed, &compiled, "", "");
         let rows: Vec<HistogramRow> = placed
-            .bind(
+            .bind(bind_filter(
                 bind_scope(
                     self.client.query(&sql).bind(keys_of(query)),
                     org,
                     query.project,
                 )
                 .bind(&*query.name),
-            )
+                &compiled,
+            ))
             .fetch_all()
             .await
             .map_err(|error| refused(&error))?;
@@ -314,6 +365,9 @@ impl ClickhouseMetricReader {
         org: TenantId,
         query: &MetricQuery,
     ) -> Result<Vec<Exemplar>, StoreError> {
+        if !query.filter.is_anything() {
+            return Ok(Vec::new());
+        }
         let placed = Placed::of(&query.placement, Held::Attributes);
         let touched = if placed.is_empty() {
             String::new()
@@ -324,7 +378,10 @@ impl ClickhouseMetricReader {
             )
         };
         let sql = EXEMPLARS
-            .replace("{filters}", &format!("{}{touched}", charted(query)))
+            .replace(
+                "{filters}",
+                &format!("{}{touched}", charted(query, &Compiled::default())),
+            )
             .replace("{limit}", &MAX_EXEMPLARS.to_string());
         let mut asked = bind_scope(self.client.query(&sql), org, query.project).bind(&*query.name);
         if !placed.is_empty() {
@@ -403,7 +460,77 @@ fn optional<T, E: core::fmt::Display>(
     read(&bytes).map(Some).map_err(|error| held(&error))
 }
 
+fn bind_seen(statement: Query, org: TenantId, metric: &str, filter: &AttributeFilter) -> Query {
+    let mut statement = statement;
+    for _ in 0..2 {
+        statement = statement
+            .bind(org.as_uuid())
+            .bind(metric)
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project));
+    }
+    statement
+}
+
 impl MetricReader for ClickhouseMetricReader {
+    async fn attributes(
+        &self,
+        org: TenantId,
+        metric: &str,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let sql = ATTRIBUTES.replace("{seen}", SEEN);
+        let rows: Vec<AttributeRow> = bind_seen(self.client.query(&sql), org, metric, filter)
+            .bind(prefix)
+            .bind(prefix)
+            .bind(MAX_ATTRIBUTES)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenAttribute {
+                numeric: row.numbers == row.spans,
+                key: row.key.into(),
+                spans: row.spans,
+            })
+            .collect())
+    }
+
+    async fn attribute_values(
+        &self,
+        org: TenantId,
+        metric: &str,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, StoreError> {
+        let prefix = filter.prefix.as_deref().unwrap_or_default();
+        let sql = ATTRIBUTE_VALUES.replace("{seen}", SEEN);
+        let rows: Vec<ValueRow> = bind_seen(
+            self.client.query(&sql).bind(key.as_str()),
+            org,
+            metric,
+            filter,
+        )
+        .bind(key.as_str())
+        .bind(prefix)
+        .bind(prefix)
+        .bind(MAX_VALUES)
+        .fetch_all()
+        .await
+        .map_err(|error| refused(&error))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SeenValue {
+                value: row.value.into(),
+                spans: row.spans,
+            })
+            .collect())
+    }
+
     async fn catalogue(
         &self,
         org: TenantId,

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::explore_routes::{Catalogued, Keys, Values};
+use crate::query_body::ExprBody;
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -9,10 +11,10 @@ use axum::routing::get;
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    Aggregation, BadMetricQuery, Exemplar, ExploreError, MetricDescriptor, MetricError,
-    MetricQuery, ProjectId, Series, SeriesSet, TenantId, Window,
+    Aggregation, AttributeKey, BadMetricQuery, BadQuery, Exemplar, ExploreError, MetricDescriptor,
+    MetricError, MetricQuery, ProjectId, Series, SeriesSet, Stream, TenantId, Window,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
@@ -27,7 +29,18 @@ where
 {
     Router::new()
         .route("/api/orgs/{org}/metrics", get(catalogue::<S>))
-        .route("/api/orgs/{org}/metrics/{name}/series", get(series::<S>))
+        .route(
+            "/api/orgs/{org}/metrics/{name}/series",
+            get(series::<S>).post(series_by_query::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/metrics/{name}/attributes",
+            get(attributes::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/metrics/{name}/attributes/{key}/values",
+            get(attribute_values::<S>),
+        )
         .with_state(state)
 }
 
@@ -227,6 +240,101 @@ where
     Ok(Json(charted.into()))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Charting {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    group_by: Vec<String>,
+    #[serde(default)]
+    agg: Option<String>,
+    #[serde(flatten)]
+    placement: PlacementBody,
+}
+
+impl Charting {
+    fn metric_query(self, name: &str) -> Result<MetricQuery, MetricRefused> {
+        let window = Window::new(
+            self.from.saturating_mul(NANOS_PER_MILLI),
+            self.to.saturating_mul(NANOS_PER_MILLI),
+        )
+        .map_err(|_| MetricRefused::Window)?;
+        let mut query = MetricQuery::over(window, name);
+        if let Some(body) = self.query {
+            query.filter = body.query(Stream::Metrics)?;
+        }
+        query.placement = self.placement.placement()?;
+        query.group_by = self.group_by.into_iter().map(Into::into).collect();
+        query.aggregation = self
+            .agg
+            .as_deref()
+            .map(Aggregation::try_from)
+            .transpose()
+            .map_err(|_| MetricRefused::Malformed("agg"))?;
+        query.project = self.project.map(ProjectId::new);
+        Ok(query)
+    }
+}
+
+async fn series_by_query<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, name)): Path<(Uuid, String)>,
+    headers: HeaderMap,
+    Json(asked): Json<Charting>,
+) -> Result<Json<Charted>, MetricRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let query = asked.metric_query(&name)?;
+    let charted = state
+        .app
+        .metric_series(&who, TenantId::new(org), &query)
+        .await?;
+    Ok(Json(charted.into()))
+}
+
+async fn attributes<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, name)): Path<(Uuid, String)>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Keys>, MetricRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let filter = catalogued.filter().map_err(|_| MetricRefused::Window)?;
+    let seen = state
+        .app
+        .metric_attributes(&who, TenantId::new(org), &name, &filter)
+        .await?;
+    Ok(Json(Keys::of(seen)))
+}
+
+async fn attribute_values<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, name, key)): Path<(Uuid, String, String)>,
+    Query(catalogued): Query<Catalogued>,
+    headers: HeaderMap,
+) -> Result<Json<Values>, MetricRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let key = AttributeKey::new(&key).map_err(|_| MetricRefused::Malformed("key"))?;
+    let filter = catalogued.filter().map_err(|_| MetricRefused::Window)?;
+    let seen = state
+        .app
+        .metric_attribute_values(&who, TenantId::new(org), &name, &key, &filter)
+        .await?;
+    Ok(Json(Values::of(seen)))
+}
+
 impl From<NotCarried> for MetricRefused {
     fn from(error: NotCarried) -> Self {
         Self::Reaching(error)
@@ -251,6 +359,8 @@ pub enum MetricRefused {
     Placement(#[from] Misplaced),
     #[error(transparent)]
     OutOfRange(#[from] BadMetricQuery),
+    #[error(transparent)]
+    BadQuery(#[from] BadQuery),
     #[error("the metrics could not be read")]
     Unavailable,
 }
@@ -280,7 +390,9 @@ impl IntoResponse for MetricRefused {
             Self::Reaching(refused) => return refused.into_response(),
             Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoSuchOrg | Self::NoSuchMetric => StatusCode::NOT_FOUND,
-            Self::Window | Self::Malformed(_) | Self::Placement(_) => StatusCode::BAD_REQUEST,
+            Self::Window | Self::Malformed(_) | Self::Placement(_) | Self::BadQuery(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::OutOfRange(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };

@@ -78,12 +78,14 @@ pub enum Field {
 pub enum Stream {
     Spans,
     Logs,
+    Metrics,
 }
 
 impl Field {
     pub fn belongs_to(&self, stream: Stream) -> bool {
         match self {
-            Self::Service | Self::TraceId | Self::SpanId | Self::Attribute(_) => true,
+            Self::Service | Self::Attribute(_) => true,
+            Self::TraceId | Self::SpanId => stream != Stream::Metrics,
             Self::Name | Self::Status | Self::Kind | Self::Duration | Self::HttpStatusCode => {
                 stream == Stream::Spans
             }
@@ -587,5 +589,8 @@ mod tests {
         assert_eq!(named.fits(Stream::Logs), Err(BadQuery::Field));
         assert_eq!(shared.fits(Stream::Logs), Ok(()));
         assert_eq!(shared.fits(Stream::Spans), Ok(()));
+        assert_eq!(shared.fits(Stream::Metrics), Ok(()));
+        assert_eq!(named.fits(Stream::Metrics), Err(BadQuery::Field));
+        assert_eq!(level.fits(Stream::Metrics), Err(BadQuery::Field));
     }
 }

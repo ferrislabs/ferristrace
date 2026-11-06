@@ -665,3 +665,63 @@ async fn a_placement_reaches_the_metric_store() {
     assert_eq!(placement.cluster, None);
     assert_eq!(placement.node, None);
 }
+
+fn charting_post(name: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/orgs/{}/metrics/{name}/series",
+            Uuid::from_u128(MINE)
+        ))
+        .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .expect("a request")
+}
+
+#[tokio::test]
+async fn a_query_tree_narrows_the_series_the_store_is_asked_for() {
+    let shelf = Arc::new(Shelf::default());
+    let body = format!(
+        r#"{{"from":{FROM_MS},"to":{TO_MS},"agg":"rate","group_by":["http.route"],
+            "query":{{"all":[
+              {{"field":"service","op":"eq","value":"checkout"}},
+              {{"not":{{"attr":"http.route","op":"eq","value":"/health"}}}}]}}}}"#
+    );
+
+    let (status, text) = served(Some(Arc::clone(&shelf)), charting_post(ENCODED, &body)).await;
+
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let (_, _, aggregation, query) = &shelf.charted()[0];
+    assert_eq!(*aggregation, Aggregation::Rate);
+    assert_eq!(query.group_by, vec!["http.route".into()]);
+    assert!(!query.filter.is_anything());
+}
+
+#[tokio::test]
+async fn a_span_only_field_is_refused_on_a_metric() {
+    let shelf = Arc::new(Shelf::default());
+    let body = format!(
+        r#"{{"from":{FROM_MS},"to":{TO_MS},"query":{{"field":"status","op":"eq","value":"error"}}}}"#
+    );
+
+    let (status, _) = served(Some(Arc::clone(&shelf)), charting_post(ENCODED, &body)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(shelf.charted().is_empty());
+}
+
+#[tokio::test]
+async fn the_attribute_routes_answer_with_the_shape_of_the_other_signals() {
+    let shelf = Arc::new(Shelf::default());
+    let uri = format!(
+        "/api/orgs/{}/metrics/{ENCODED}/attributes?from={FROM_MS}&to={TO_MS}",
+        Uuid::from_u128(MINE)
+    );
+
+    let (status, text) = served(Some(shelf), looking(&uri, &Who::Session)).await;
+
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let found: serde_json::Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(found, serde_json::json!({"attributes": []}));
+}

@@ -4,7 +4,7 @@ use super::ports::MetricReader;
 use super::value_objects::{MetricQuery, SeriesSet};
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
-use crate::explore::ExploreError;
+use crate::explore::{AttributeFilter, AttributeKey, ExploreError, SeenAttribute, SeenValue};
 use crate::identity::SessionStore;
 use crate::organisation::Memberships;
 use crate::telemetry::TenantId;
@@ -68,5 +68,44 @@ where
             .reader
             .series(org, kind, aggregation, &narrowed)
             .await?)
+    }
+
+    pub async fn attributes(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        metric: &str,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenAttribute>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.attributes(org, metric, &filter).await?)
+    }
+
+    pub async fn attribute_values(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        metric: &str,
+        key: &AttributeKey,
+        filter: &AttributeFilter,
+    ) -> Result<Vec<SeenValue>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self
+            .reader
+            .attribute_values(org, metric, key, &filter)
+            .await?)
+    }
+
+    async fn narrowed(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &AttributeFilter,
+    ) -> Result<AttributeFilter, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        Ok(AttributeFilter {
+            project,
+            ..filter.clone()
+        })
     }
 }

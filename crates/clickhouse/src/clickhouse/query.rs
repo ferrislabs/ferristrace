@@ -41,6 +41,7 @@ pub(crate) enum Table {
     #[default]
     Spans,
     Logs,
+    Metrics,
 }
 
 impl Table {
@@ -48,13 +49,14 @@ impl Table {
         match self {
             Self::Spans => "spans",
             Self::Logs => "logs",
+            Self::Metrics => "metric_points",
         }
     }
 
     fn time(self) -> &'static str {
         match self {
             Self::Spans => "start_time",
-            Self::Logs => "time",
+            Self::Logs | Self::Metrics => "time",
         }
     }
 }
@@ -78,6 +80,17 @@ impl Compiled {
     pub(crate) fn of_logs(query: &Query) -> Self {
         let mut compiled = Self {
             table: Table::Logs,
+            ..Self::default()
+        };
+        if let Some(expr) = query.filter() {
+            compiled.expression = compiled.expr(expr);
+        }
+        compiled
+    }
+
+    pub(crate) fn of_metrics(query: &Query) -> Self {
+        let mut compiled = Self {
+            table: Table::Metrics,
             ..Self::default()
         };
         if let Some(expr) = query.filter() {
@@ -448,7 +461,7 @@ impl Compiled {
             Column::Plain(sql) => format!("{sql} != ''"),
             Column::Measured(_) => "1".to_owned(),
             Column::HttpStatus => "http_status_code IS NOT NULL".to_owned(),
-            Column::Attribute(key, Table::Spans) => {
+            Column::Attribute(key, Table::Spans | Table::Metrics) => {
                 format!("mapContains(attributes, {})", self.text(key))
             }
             Column::Attribute(key, Table::Logs) => {
@@ -462,7 +475,7 @@ impl Compiled {
 
 fn held(table: Table) -> &'static str {
     match table {
-        Table::Spans => "attributes",
+        Table::Spans | Table::Metrics => "attributes",
         Table::Logs => "mapUpdate(resource, attributes)",
     }
 }
@@ -497,6 +510,13 @@ impl Column {
                 Field::Body => Self::Plain("body"),
                 Field::TraceId => Self::Plain("lower(hex(trace_id))"),
                 Field::SpanId => Self::Plain("lower(hex(span_id))"),
+                Field::Attribute(key) => Self::Attribute(key.as_str().to_owned(), table),
+                _ => Self::Plain("''"),
+            };
+        }
+        if table == Table::Metrics {
+            return match field {
+                Field::Service => Self::Plain("service_name"),
                 Field::Attribute(key) => Self::Attribute(key.as_str().to_owned(), table),
                 _ => Self::Plain("''"),
             };
