@@ -14,6 +14,7 @@ pub use query::{
     Scalar, Test, Value,
 };
 pub use value_objects::{
-    AttributeFilter, MAX_ATTRIBUTES, MAX_VALUES, SeenAttribute, SeenValue, ServiceFilter,
-    ServicePoint, ServiceSeries, ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window,
+    AttributeFilter, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, MAX_ATTRIBUTES,
+    MAX_FACETS, MAX_VALUES, SeenAttribute, SeenValue, ServiceFilter, ServicePoint, ServiceSeries,
+    ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window,
 };

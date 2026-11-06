@@ -9,16 +9,16 @@ use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, BadQuery, ExploreError, ProjectId, Query as TraceQuery,
-    SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanKind,
-    SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ProjectId,
+    Query as TraceQuery, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
+    Span, SpanKind, SpanStatus, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, reading};
 use crate::placement::{Misplaced, Placed, PlacementBody};
-use crate::query_body::ExprBody;
+use crate::query_body::{ExprBody, FieldRefBody, FieldRefOut};
 use crate::state::AppState;
 
 const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -219,6 +219,7 @@ where
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/search", post(search::<S>))
+        .route("/api/orgs/{org}/traces/facets", post(facets::<S>))
         .route("/api/orgs/{org}/attributes", get(attributes::<S>))
         .route(
             "/api/orgs/{org}/attributes/{key}/values",
@@ -283,6 +284,89 @@ where
         .map(Into::into)
         .collect();
     Ok(Json(Found { traces: found }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Faceting {
+    from: u64,
+    to: u64,
+    #[serde(default)]
+    project: Option<Uuid>,
+    #[serde(default)]
+    query: Option<ExprBody>,
+    #[serde(default)]
+    facets: Vec<FieldRefBody>,
+    #[serde(default)]
+    duration: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Counted {
+    facets: Vec<CountedField>,
+    duration: Option<Spread>,
+}
+
+#[derive(Debug, Serialize)]
+struct CountedField {
+    #[serde(flatten)]
+    field: FieldRefOut,
+    values: Vec<Valued>,
+}
+
+#[derive(Debug, Serialize)]
+struct Spread {
+    min_us: u64,
+    max_us: u64,
+}
+
+impl From<Facets> for Counted {
+    fn from(found: Facets) -> Self {
+        Self {
+            facets: found
+                .fields
+                .into_iter()
+                .map(|facet| CountedField {
+                    field: FieldRefOut::from(&facet.field),
+                    values: facet.values.into_iter().map(Valued::from).collect(),
+                })
+                .collect(),
+            duration: found.duration.map(|range| Spread {
+                min_us: range.min_nanos / NANOS_PER_MICRO,
+                max_us: range.max_nanos.div_ceil(NANOS_PER_MICRO),
+            }),
+        }
+    }
+}
+
+async fn facets<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<Faceting>,
+) -> Result<Json<Counted>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let window = Window::new(
+        asked.from.saturating_mul(NANOS_PER_MILLI),
+        asked.to.saturating_mul(NANOS_PER_MILLI),
+    )
+    .map_err(|_| LookRefused::Window)?;
+    let query = match asked.query {
+        Some(body) => body.query()?,
+        None => TraceQuery::anything(),
+    };
+    let fields = asked
+        .facets
+        .into_iter()
+        .map(FieldRefBody::field)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut filter = FacetFilter::new(window, query, fields, asked.duration)?;
+    filter.project = asked.project.map(ProjectId::new);
+
+    let found = state.app.facets(&who, TenantId::new(org), &filter).await?;
+    Ok(Json(found.into()))
 }
 
 fn filtered(asked: Asked, query: TraceQuery) -> Result<TraceFilter, LookRefused> {

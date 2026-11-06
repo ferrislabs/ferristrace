@@ -5,8 +5,8 @@ use std::borrow::Cow;
 use super::query::AttributeKey;
 use super::value_objects::Window;
 use super::value_objects::{
-    AttributeFilter, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries, ServiceSummary,
-    TraceFilter, TraceSummary,
+    AttributeFilter, FacetFilter, Facets, SeenAttribute, SeenValue, ServiceFilter, ServiceSeries,
+    ServiceSummary, TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -117,6 +117,18 @@ where
     ) -> Result<Vec<SeenValue>, ExploreError> {
         let filter = self.narrowed_attributes(who, org, filter).await?;
         Ok(self.reader.attribute_values(org, key, &filter).await?)
+    }
+
+    pub async fn facets(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &FacetFilter,
+    ) -> Result<Facets, ExploreError> {
+        let project = self.readers.grant(who, org).await?.narrow(filter.project)?;
+        let mut narrowed = filter.clone();
+        narrowed.project = project;
+        Ok(self.reader.facets(org, &narrowed).await?)
     }
 
     async fn narrowed_attributes(

@@ -105,11 +105,23 @@ Design
     boxes of the Explore view. The query rides in the url so a link
     shares it. Recent, Errors and Slow stay as the tabs of #250.
     Lot 9b: a Views menu replaces those tabs; they become built-in views.
-    Lot 9c: tabs Traces, Spans, Time series, Table.
-    Lot 9d: a typed bar (`service.name = "checkout" AND
+    Lot 9c: a facets panel at the left of the list, and the views as a
+    panel beside it, as SigNoz does. A facet is a section (Service,
+    Status, Kind, Name, Duration, then the well-known attributes present
+    in the window) that unfolds to the most used values with their span
+    counts, to tick. A tick adds the chip `field is value`, two ticks make
+    it `is one of`, and removing the chip unticks. The counts follow the
+    query without the clauses on the facet's own field, so each box
+    tells what ticking it would give. Duration is a min and a max in ms.
+    `POST /api/orgs/{org}/traces/facets` takes `{from, to, project?,
+    query?, facets: [{field}|{attr}], duration?}` (at most 12 facets) and
+    answers `{facets: [{field|attr, values: [{value, spans}]}],
+    duration: {min_us, max_us}|null}`. The values are the 10 most used.
+    Lot 9d: tabs Traces, Spans, Time series, Table.
+    Lot 9e: a typed bar (`service.name = "checkout" AND
     http.status_code >= 500`) that parses to the same tree, both ways.
     The URL then carries the typed form.
-    Lot 9e: duration histogram with brush selection, click a value to
+    Lot 9f: duration histogram with brush selection, click a value to
     filter or exclude, attribute facets with counts, column picker,
     side preview of a trace.
 
