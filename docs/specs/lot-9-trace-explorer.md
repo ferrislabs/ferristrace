@@ -72,9 +72,18 @@ Design
     `GET  /api/orgs/{org}/attributes/{key}/values?from&to&project&prefix`
       answers `{values: [{value, spans}]}`, the 20 most used.
     Later lots add `POST .../explore/spans`, `.../series`, `.../table`.
-    Views (lot 9b):
-    `GET|POST /api/orgs/{org}/views?signal=traces`,
-    `PUT|DELETE /api/orgs/{org}/views/{id}`.
+    Views (lot 9b), person sessions only (an API key or an agent gets
+    401):
+    `GET /api/orgs/{org}/views?signal=traces` lists the organisation's
+    views and the caller's private ones;
+    `POST /api/orgs/{org}/views` with `{signal?, name, visibility,
+    definition}` answers 201 with the view;
+    `PUT /api/orgs/{org}/views/{id}` with `{name, definition,
+    visibility?}`; `DELETE` answers 204.
+    A name already taken is 409, a bad name, visibility or definition
+    422, a view the caller may not see 404, one it may not change 403.
+    `definition` is a JSON object the server stores as it is, at most
+    16 KiB: the web owns its shape.
 
   Views (lot 9b)
     Postgres table `explorer_views(id, org_id, signal, name, visibility

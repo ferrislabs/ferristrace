@@ -28,6 +28,7 @@ mod stack;
 mod status;
 mod teams;
 mod usage;
+mod views;
 mod workspace;
 
 #[cfg(any(test, feature = "testing"))]

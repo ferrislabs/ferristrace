@@ -93,6 +93,10 @@ pub fn teams<C>(backend: &Postgres<C>) -> Each<'_, domain::Teams, C> {
     Each::over(backend)
 }
 
+pub fn views<C>(backend: &Postgres<C>) -> Each<'_, domain::Views, C> {
+    Each::over(backend)
+}
+
 pub fn usage<C>(backend: &Postgres<C>) -> Each<'_, domain::UsageHistory, C> {
     Each::over(backend)
 }
@@ -215,6 +219,14 @@ forward!(Teams: Squads {
     fn disband(&self, org: TenantId, team: TeamId) -> Result<bool, StoreError>;
     fn seat(&self, org: TenantId, team: TeamId, members: &[AccountId]) -> Result<bool, StoreError>;
     fn own(&self, org: TenantId, team: TeamId, projects: &[ProjectId]) -> Result<bool, StoreError>;
+});
+
+forward!(Views: ExplorerViews {
+    fn visible(&self, org: TenantId, signal: ViewSignal, to: AccountId) -> Result<Vec<View>, StoreError>;
+    fn find(&self, org: TenantId, id: ViewId) -> Result<Option<View>, StoreError>;
+    fn create(&self, org: TenantId, by: AccountId, view: &NewView) -> Result<Creation, StoreError>;
+    fn change(&self, org: TenantId, id: ViewId, change: &ViewChange) -> Result<Saving, StoreError>;
+    fn delete(&self, org: TenantId, id: ViewId) -> Result<bool, StoreError>;
 });
 
 forward!(UsageHistory: UsageHistory {
