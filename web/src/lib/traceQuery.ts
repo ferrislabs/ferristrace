@@ -115,20 +115,23 @@ const isField = (value: unknown): value is FieldRef => {
   return typeof field.attr === 'string' && field.attr.length > 0 && field.attr.length <= 128
 }
 
+export function validChips(parsed: unknown): Chip[] {
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter((item): item is Chip => {
+      if (typeof item !== 'object' || item === null) return false
+      const chip = item as Record<string, unknown>
+      const value = chip.value
+      const good = value === undefined || isScalar(value) || (Array.isArray(value) && value.every(isScalar))
+      return isField(chip.field) && typeof chip.op === 'string' && chip.op in OPS && good
+    })
+    .slice(0, MAX_CHIPS)
+}
+
 export function decode(raw: string | undefined): Chip[] {
   if (!raw) return []
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((item): item is Chip => {
-        if (typeof item !== 'object' || item === null) return false
-        const chip = item as Record<string, unknown>
-        const value = chip.value
-        const good = value === undefined || isScalar(value) || (Array.isArray(value) && value.every(isScalar))
-        return isField(chip.field) && typeof chip.op === 'string' && chip.op in OPS && good
-      })
-      .slice(0, MAX_CHIPS)
+    return validChips(JSON.parse(raw))
   } catch {
     return []
   }

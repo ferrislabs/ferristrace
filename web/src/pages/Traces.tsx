@@ -1,84 +1,65 @@
-import { CircleX, Copy, Search, SlidersHorizontal } from 'lucide-react'
+import { CircleX, Copy, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
 import { Link, useNavigate, useSearchParam } from '@/lib/router'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { InputGroup, NativeSelect } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ViewTabs } from '@/components/ft/ViewTabs'
+import { Views } from '@/components/ft/Views'
 import { FilterBar } from '@/components/ft/FilterBar'
 import { decode, encode, type Chip } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
-import { ANY, COUNTS, useTraces, type Order, type Sift } from '@/data/traces'
-import { useServiceNames } from '@/data/services'
+import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
+import { orderOf, type Definition, type Order } from '@/data/views'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { Filters } from '@/components/ft/Filters'
 import { because } from '@/auth/client'
 import { shortId } from '@/lib/format'
-import { useSettled } from '@/lib/settle'
 import { cn } from '@/lib/utils'
 import { useWindow } from '@/lib/window'
 
 const codeTone = (code: number, errors: number) =>
   code >= 500 || errors > 0 ? 'text-destructive-text' : code >= 400 ? 'text-warning-text' : 'text-muted-foreground'
 
-export type TraceView = 'recent' | 'errors' | 'slow' | 'explore'
-
-const PRESETS: Record<TraceView, Partial<Sift>> = {
-  recent: {},
-  errors: { errorsOnly: true },
-  slow: { order: 'duration' },
-  explore: {},
-}
-
-const VIEWS = [
-  { label: 'Recent', to: '/traces' },
-  { label: 'Errors', to: '/traces/errors' },
-  { label: 'Slow', to: '/traces/slow' },
-  { label: 'Explore', to: '/traces/explore' },
-]
-
-export const TracesRecent = () => <Traces view="recent" />
-export const TracesErrors = () => <Traces view="errors" />
-export const TracesSlow = () => <Traces view="slow" />
-export const TracesExplore = () => <Traces view="explore" />
-
-const SUBTITLE: Record<TraceView, string> = {
-  recent: 'Newest first',
-  errors: 'Only traces with an error',
-  slow: 'Slowest first',
-  explore: 'Every filter',
-}
-
-function Traces({ view }: { view: TraceView }) {
+export function Traces() {
   const navigate = useNavigate()
+  const goTo = useRouterNavigate()
   const { ms: windowMs, label: windowLabel } = useWindow()
-  const base = useMemo(() => ({ ...ANY, ...PRESETS[view] }), [view])
-  const [chosen, setSift] = useState<Sift>(base)
-  const sift = useMemo(() => ({ ...chosen, rangeMs: windowMs }), [chosen, windowMs])
-  const [typed, setTyped] = useState('')
+  const [limit, setLimit] = useState(ANY.limit)
   const [density, setDensity] = useState<'compact' | 'comfy'>('compact')
   const [cursor, setCursor] = useState(0)
-  const name = useSettled(typed)
-  const asked = useMemo(() => ({ ...sift, name }), [sift, name])
+  const rawChips = useSearchParam('q')
+  const chips = useMemo(() => decode(rawChips), [rawChips])
+  const order = orderOf(useSearchParam('o'))
+  const viewParam = useSearchParam('view')
+  const viewKey = viewParam ?? (chips.length === 0 && order === 'started' ? 'recent' : undefined)
+  const sift = useMemo<Sift>(() => ({ ...ANY, rangeMs: windowMs, order, limit }), [windowMs, order, limit])
   const { placement, place } = usePlacement()
-  const raw = useSearchParam('q')
-  const chips = useMemo(() => (view === 'explore' ? decode(raw) : []), [raw, view])
-  const goTo = useRouterNavigate()
-  const setChips = (next: Chip[]) => {
-    void goTo({ to: '.' as never, search: ((was: Record<string, unknown>) => ({ ...was, q: encode(next) })) as never, replace: true })
+  const { rows, loading, failed } = useTraces(sift, placement, chips)
+  const current = useMemo<Definition>(() => ({ q: chips, o: order }), [chips, order])
+  const show = (next: Partial<{ q: Chip[]; o: Order; view: string | undefined }>) => {
+    const was = { q: chips, o: order, view: viewParam }
+    const merged = { ...was, ...next }
+    void goTo({
+      to: '.' as never,
+      search: ((search: Record<string, unknown>) => ({
+        ...search,
+        q: encode(merged.q),
+        o: merged.o === 'started' ? undefined : merged.o,
+        view: merged.view,
+      })) as never,
+      replace: true,
+    })
     setCursor(0)
   }
-  const { rows, loading, failed } = useTraces(asked, placement, chips)
-  const { names, unreachable } = useServiceNames(sift.rangeMs)
-  const change = (part: Partial<Sift>) => { setSift((was) => ({ ...was, ...part })); setCursor(0) }
-  const clear = () => { setTyped(''); if (chips.length > 0) setChips([]); setSift((was) => ({ ...base, rangeMs: was.rangeMs, limit: was.limit })); place(NOWHERE) }
-  const full = view === 'explore'
-  const sifting = Boolean(sift.service || typed || chips.length > 0 || (full && (sift.errorsOnly || sift.atLeastMs)) || isPlaced(placement))
+  const setChips = (next: Chip[]) => show({ q: next })
+  const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, view: key })
+  const clear = () => { show({ q: [], o: 'started', view: undefined }); place(NOWHERE) }
+  const sifting = chips.length > 0 || order !== 'started' || isPlaced(placement)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -96,10 +77,11 @@ function Traces({ view }: { view: TraceView }) {
 
   return (
     <>
-      <PageHeader title="Traces" meta={`${SUBTITLE[view]} · last ${windowLabel}`}>
+      <PageHeader title="Traces" meta={`Last ${windowLabel}`}>
+        <Views current={current} viewKey={viewKey} onSelect={select} />
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" aria-label="View options"><SlidersHorizontal />View</Button>
+            <Button variant="ghost" size="sm" aria-label="Display options"><SlidersHorizontal />Display</Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="flex w-[280px] flex-col gap-3 p-3">
             <div className="flex items-center justify-between gap-2 text-control">
@@ -108,7 +90,7 @@ function Traces({ view }: { view: TraceView }) {
             </div>
             <div className="flex items-center justify-between gap-2 text-control">
               Traces read
-              <NativeSelect aria-label="How many to read" value={sift.limit} onChange={(e) => change({ limit: Number(e.target.value) })} className="h-7 w-[100px]">
+              <NativeSelect aria-label="How many to read" value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setCursor(0) }} className="h-7 w-[100px]">
                 {COUNTS.map((n) => <option key={n} value={n}>{n}</option>)}
               </NativeSelect>
             </div>
@@ -116,38 +98,25 @@ function Traces({ view }: { view: TraceView }) {
           </PopoverContent>
         </Popover>
       </PageHeader>
-      <ViewTabs label="Trace views" tabs={VIEWS} />
-      <Filters active={[sift.service, typed].filter(Boolean).length + (full ? chips.length + placedCount(placement) : 0)}>
-      {full ? (
+      <Filters active={chips.length + placedCount(placement)}>
         <div className="flex flex-col gap-2" role="search">
           <FilterBar chips={chips} onChange={setChips} rangeMs={sift.rangeMs} />
           <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect aria-label="Order" value={sift.order} onChange={(e) => change({ order: e.target.value as Order })} className="w-[160px]">
+            <NativeSelect aria-label="Order" value={order} onChange={(e) => show({ o: orderOf(e.target.value) })} className="w-[160px]">
               <option value="started">Newest first</option>
               <option value="duration">Slowest first</option>
               <option value="spans">Most spans first</option>
             </NativeSelect>
-            <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
+            <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Reset</Button>
           </div>
           <PlacementPicker placement={placement} onChange={(part) => { place(part); setCursor(0) }} windowMs={sift.rangeMs} />
         </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2" role="search">
-          <NativeSelect aria-label="Service" value={sift.service} onChange={(e) => change({ service: e.target.value })} className="w-[190px]">
-            <option value="">Service: any</option>
-            {names.map((s) => <option key={s} value={s}>{s}</option>)}
-          </NativeSelect>
-        <InputGroup className="w-[280px] max-w-full"><Search aria-hidden /><input aria-label="Span name" placeholder="Span name, e.g. psp.charge" value={typed} onChange={(e) => { setTyped(e.target.value); setCursor(0) }} /></InputGroup>
-          <Button variant="ghost" size="sm" disabled={!sifting} onClick={clear}>Clear</Button>
-        </div>
-      )}
       </Filters>
-      {unreachable ? <p className="m-0 text-caption text-muted-foreground">{because(unreachable, 'The services could not be listed, so that filter is empty')}</p> : null}
       {failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
       ) : rows.length === 0 ? (
-        <EmptyState title={loading ? 'Reading the traces…' : sifting ? 'No traces match' : 'No traces in this window'} actions={sifting ? <Button size="sm" onClick={clear}>Clear filters</Button> : null}>
-          {loading ? 'Asking the span store.' : sifting ? 'Try a shorter span name, a wider window, no service or no placement.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
+        <EmptyState title={loading ? 'Reading the traces…' : sifting ? 'No traces match' : 'No traces in this window'} actions={sifting ? <Button size="sm" onClick={clear}>Reset filters</Button> : null}>
+          {loading ? 'Asking the span store.' : sifting ? 'Try fewer filters, a wider window or no placement.' : 'Nothing arrived in the window you are looking at. Try a wider one.'}
         </EmptyState>
       ) : (
         <div className="-mx-4 overflow-x-auto border-t md:-mx-5">

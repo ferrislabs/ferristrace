@@ -24,7 +24,9 @@ import { Services } from '@/pages/Services'
 import { SignalPage } from '@/pages/SignalPage'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
-import { TracesErrors, TracesExplore, TracesRecent, TracesSlow } from '@/pages/Traces'
+import { Traces } from '@/pages/Traces'
+import { BUILT_IN } from '@/data/views'
+import { encode } from '@/lib/traceQuery'
 import { Welcome } from '@/pages/auth/Welcome'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { Profile } from '@/pages/settings/Profile'
@@ -108,6 +110,17 @@ const shellRoute = createRoute({
 
 const inShell = (path: string, component: () => React.ReactNode, staticData: Marker = mock) => createRoute({ getParentRoute: () => shellRoute, path, component, staticData })
 
+const oldTracesView = (view: 'errors' | 'slow' | 'explore') =>
+  createRoute({
+    getParentRoute: () => shellRoute,
+    path: `/traces/${view}`,
+    beforeLoad: () => {
+      const built = BUILT_IN.find((one) => one.key === view)
+      const search = built ? { view, q: encode(built.definition.q), o: built.definition.o === 'started' ? undefined : built.definition.o } : {}
+      throw redirect({ to: '/traces' as never, search: search as never })
+    },
+  })
+
 const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: '/settings', component: SettingsLayout, staticData: real })
 
 const settingsChildren = [
@@ -148,10 +161,8 @@ const routeTree = rootRoute.addChildren([
     inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra/kubernetes', Kubernetes, real),
     inShell('/infra/kubernetes/nodes/$name', KubernetesNode, real),
-    inShell('/traces', TracesRecent, timed),
-    inShell('/traces/errors', TracesErrors, timed),
-    inShell('/traces/slow', TracesSlow, timed),
-    inShell('/traces/explore', TracesExplore, timed),
+    inShell('/traces', Traces, timed),
+    ...(['errors', 'slow', 'explore'] as const).map((view) => oldTracesView(view)),
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, timed),
     inShell('/metrics', Metrics, timed),
