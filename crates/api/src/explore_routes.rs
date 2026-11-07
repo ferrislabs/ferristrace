@@ -23,8 +23,8 @@ use crate::placement::{Misplaced, Placed, PlacementBody};
 use crate::query_body::{ExprBody, FieldRefBody, FieldRefOut};
 use crate::state::AppState;
 
-const NANOS_PER_MILLI: u64 = 1_000_000;
-const NANOS_PER_MICRO: u64 = 1_000;
+pub(crate) const NANOS_PER_MILLI: u64 = 1_000_000;
+pub(crate) const NANOS_PER_MICRO: u64 = 1_000;
 
 #[derive(Debug, Deserialize)]
 pub struct Asked {
@@ -220,6 +220,27 @@ where
         )
         .route("/api/orgs/{org}/caches", get(caches::<S>))
         .route("/api/orgs/{org}/caches/series", get(cache_series::<S>))
+        .route(
+            "/api/orgs/{org}/requests",
+            get(crate::request_routes::requests::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/requests/series",
+            get(crate::request_routes::request_series::<S>),
+        )
+        .route("/api/orgs/{org}/jobs", get(crate::job_routes::jobs::<S>))
+        .route(
+            "/api/orgs/{org}/jobs/series",
+            get(crate::job_routes::job_series::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/statements",
+            get(crate::statement_routes::statements::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/statements/series",
+            get(crate::statement_routes::statement_series::<S>),
+        )
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/search", post(search::<S>))
@@ -1171,7 +1192,7 @@ impl From<CacheSeries> for Hitting {
 }
 
 impl Spanning {
-    fn filter(self) -> Result<ServiceFilter, LookRefused> {
+    pub(crate) fn filter(self) -> Result<ServiceFilter, LookRefused> {
         let placement = PlacementBody {
             cluster: self.cluster,
             namespace: self.namespace,
@@ -1197,7 +1218,7 @@ impl Spanning {
     }
 
     #[allow(clippy::cast_precision_loss)]
-    fn seconds(&self) -> f64 {
+    pub(crate) fn seconds(&self) -> f64 {
         (self.to.saturating_sub(self.from) as f64) / 1000.0
     }
 }

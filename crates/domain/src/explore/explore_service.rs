@@ -2,7 +2,10 @@ use super::errors::ExploreError;
 use super::ports::SpanReader;
 use std::borrow::Cow;
 
+use super::jobs::{JobGrouping, JobSeries, JobSummary};
 use super::query::AttributeKey;
+use super::requests::{RequestGrouping, RequestSeries, RequestSummary};
+use super::statements::{StatementGrouping, StatementSeries, StatementSummary};
 use super::value_objects::Window;
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
@@ -90,6 +93,77 @@ where
         Ok(self
             .reader
             .cache_series(org, &filter)
+            .await?
+            .filled(&filter))
+    }
+
+    pub async fn requests(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: RequestGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<RequestSummary>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.requests(org, grouping, &filter).await?)
+    }
+
+    pub async fn request_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<RequestSeries, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self
+            .reader
+            .request_series(org, &filter)
+            .await?
+            .filled(&filter))
+    }
+
+    pub async fn jobs(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: JobGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<JobSummary>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.jobs(org, grouping, &filter).await?)
+    }
+
+    pub async fn job_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<JobSeries, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.job_series(org, &filter).await?.filled(&filter))
+    }
+
+    pub async fn statements(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: StatementGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<StatementSummary>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.statements(org, grouping, &filter).await?)
+    }
+
+    pub async fn statement_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<StatementSeries, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self
+            .reader
+            .statement_series(org, &filter)
             .await?
             .filled(&filter))
     }

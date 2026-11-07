@@ -2,6 +2,7 @@ mod cluster_read;
 mod culprits;
 mod export;
 mod issues;
+mod job_read;
 mod llm_read;
 mod log_read;
 mod log_sink;
@@ -13,8 +14,10 @@ mod placement;
 mod query;
 mod read;
 mod release_read;
+mod request_read;
 mod rows;
 mod sink;
+mod statement_read;
 
 pub use issues::ClickhouseIssues;
 pub use log_read::ClickhouseLogReader;

@@ -326,7 +326,15 @@ async fn a_service_series_counts_the_requests_and_errors_of_each_step() {
         (2, 1)
     );
     assert!(near(checkout.points[5].p95_nanos.expect("a p95"), 300));
-    assert_eq!(checkout.points[1], ServicePoint::idle(BASE + MINUTE));
+    assert_eq!(
+        checkout.points[1],
+        ServicePoint {
+            start_unix_nanos: BASE + MINUTE,
+            requests: 0,
+            errors: 0,
+            p95_nanos: None,
+        }
+    );
     assert_eq!((checkout.requests, checkout.errors), (5, 1));
     assert!(near(
         checkout.p95_nanos.expect("a p95 over the window"),

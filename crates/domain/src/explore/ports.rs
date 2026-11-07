@@ -1,6 +1,9 @@
 use core::future::Future;
 
+use super::jobs::{JobGrouping, JobSeries, JobSummary};
 use super::query::AttributeKey;
+use super::requests::{RequestGrouping, RequestSeries, RequestSummary};
+use super::statements::{StatementGrouping, StatementSeries, StatementSummary};
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
     SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
@@ -108,6 +111,57 @@ pub trait SpanReader {
         _filter: &ServiceFilter,
     ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
         async { Ok(CacheSeries::default()) }
+    }
+
+    fn requests(
+        &self,
+        _tenant: TenantId,
+        _grouping: RequestGrouping,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<RequestSummary>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
+
+    fn request_series(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<RequestSeries, StoreError>> + Send {
+        async { Ok(RequestSeries::default()) }
+    }
+
+    fn jobs(
+        &self,
+        _tenant: TenantId,
+        _grouping: JobGrouping,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<JobSummary>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
+
+    fn job_series(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<JobSeries, StoreError>> + Send {
+        async { Ok(JobSeries::default()) }
+    }
+
+    fn statements(
+        &self,
+        _tenant: TenantId,
+        _grouping: StatementGrouping,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<StatementSummary>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
+
+    fn statement_series(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
+        async { Ok(StatementSeries::default()) }
     }
 }
 
@@ -220,6 +274,57 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
         (*self).cache_series(tenant, filter)
     }
+
+    fn requests(
+        &self,
+        tenant: TenantId,
+        grouping: RequestGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<RequestSummary>, StoreError>> + Send {
+        (*self).requests(tenant, grouping, filter)
+    }
+
+    fn request_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<RequestSeries, StoreError>> + Send {
+        (*self).request_series(tenant, filter)
+    }
+
+    fn jobs(
+        &self,
+        tenant: TenantId,
+        grouping: JobGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<JobSummary>, StoreError>> + Send {
+        (*self).jobs(tenant, grouping, filter)
+    }
+
+    fn job_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<JobSeries, StoreError>> + Send {
+        (*self).job_series(tenant, filter)
+    }
+
+    fn statements(
+        &self,
+        tenant: TenantId,
+        grouping: StatementGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<StatementSummary>, StoreError>> + Send {
+        (*self).statements(tenant, grouping, filter)
+    }
+
+    fn statement_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
+        (*self).statement_series(tenant, filter)
+    }
 }
 
 impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
@@ -330,5 +435,56 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         filter: &ServiceFilter,
     ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
         self.as_ref().cache_series(tenant, filter)
+    }
+
+    fn requests(
+        &self,
+        tenant: TenantId,
+        grouping: RequestGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<RequestSummary>, StoreError>> + Send {
+        self.as_ref().requests(tenant, grouping, filter)
+    }
+
+    fn request_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<RequestSeries, StoreError>> + Send {
+        self.as_ref().request_series(tenant, filter)
+    }
+
+    fn jobs(
+        &self,
+        tenant: TenantId,
+        grouping: JobGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<JobSummary>, StoreError>> + Send {
+        self.as_ref().jobs(tenant, grouping, filter)
+    }
+
+    fn job_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<JobSeries, StoreError>> + Send {
+        self.as_ref().job_series(tenant, filter)
+    }
+
+    fn statements(
+        &self,
+        tenant: TenantId,
+        grouping: StatementGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<StatementSummary>, StoreError>> + Send {
+        self.as_ref().statements(tenant, grouping, filter)
+    }
+
+    fn statement_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
+        self.as_ref().statement_series(tenant, filter)
     }
 }
