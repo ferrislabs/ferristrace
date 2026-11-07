@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { EmptyState, Kpi, PageHeader, barBg } from '@/components/ft/bits'
-import { CacheHistogram } from '@/components/ft/Histogram'
+import { Bars, type Bar } from '@/components/ft/Histogram'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { usePlacement } from '@/data/placement'
 import { GROUPINGS, groupingNoun, groupingOf, useCacheOperations, useCacheSeries, type Operation } from '@/data/caches'
@@ -57,7 +57,7 @@ export function CachePage() {
   const zoom = useZoom()
   const { placement, place } = usePlacement()
   const { operations, pending, failed } = useCacheOperations(group, windowMs, settledEnv, placement)
-  const { series } = useCacheSeries(windowMs, settledEnv, placement)
+  const { series, pending: seriesPending } = useCacheSeries(windowMs, settledEnv, placement)
 
   const show = (part: Record<string, string | undefined>) =>
     void goTo({
@@ -83,6 +83,10 @@ export function CachePage() {
         sort,
       ),
     [operations, sort, q],
+  )
+  const bars = useMemo<Bar[]>(
+    () => (series?.points ?? []).map((point) => ({ at: point.atMs, count: point.calls, errors: point.misses })),
+    [series],
   )
   const { noun, field } = groupingNoun(group)
   const calls = series?.calls ?? 0
@@ -128,7 +132,7 @@ export function CachePage() {
             <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {label}</Button>
           </div>
         ) : null}
-        <CacheHistogram rangeMs={windowMs} onZoom={(from, to) => zoomTo(from, to)} environment={settledEnv} placement={placement} />
+        <Bars bars={bars} loading={seriesPending} onZoom={(from, to) => zoomTo(from, to)} noun="operations" title="Cache operations over time" />
       </div>
 
       <Card className="overflow-hidden">

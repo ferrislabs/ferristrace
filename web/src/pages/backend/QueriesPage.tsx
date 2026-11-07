@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { EmptyState, Kpi, PageHeader, barBg } from '@/components/ft/bits'
+import { Bars, type Bar } from '@/components/ft/Histogram'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { usePlacement } from '@/data/placement'
 import {
@@ -18,8 +19,6 @@ import {
   useStatementFanouts,
   useStatements,
   useStatementSeries,
-  type Point,
-  type Series,
   type Statement,
 } from '@/data/statements'
 import { ERROR_THRESHOLD } from '@/data/services'
@@ -51,61 +50,6 @@ function sorted(statements: Statement[], by: Sort): Statement[] {
     name: (a, b) => a.group.localeCompare(b.group),
   }
   return [...statements].sort(order[by])
-}
-
-function QueryHistogram({
-  series,
-  pending,
-  onZoom,
-}: {
-  series: Series | null
-  pending: boolean
-  onZoom: (from: number, to: number) => void
-}) {
-  const bars: Point[] = series?.points ?? []
-  const step = series?.stepMs ?? 0
-  const peak = Math.max(1, ...bars.map((bar) => bar.calls))
-  const total = bars.reduce((sum, bar) => sum + bar.calls, 0)
-  const errors = bars.reduce((sum, bar) => sum + bar.errors, 0)
-
-  if (bars.length === 0 || total === 0) {
-    return (
-      <div className="flex h-[84px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
-        {pending ? 'Counting the statements…' : 'No database calls match in this window.'}
-      </div>
-    )
-  }
-
-  return (
-    <figure className="m-0 flex flex-col gap-2 rounded-lg border bg-card px-3 pb-2.5 pt-2.5">
-      <div className="flex items-baseline gap-2 text-caption">
-        <span className="font-semibold text-foreground">Database calls over time</span>
-        <span className="text-muted-foreground">
-          {total.toLocaleString()} in all{errors > 0 ? `, ${errors.toLocaleString()} failed` : ''}
-        </span>
-        <span className="ml-auto hidden text-faint-foreground sm:inline">Click a bar to zoom on that step</span>
-      </div>
-      <div className="flex h-[84px] items-end gap-[2px]">
-        {bars.map((bar) => {
-          const tall = bar.calls === 0 ? 0 : Math.max(3, (bar.calls / peak) * 100)
-          const share = bar.calls === 0 ? 0 : Math.min(1, bar.errors / bar.calls)
-          return (
-            <button
-              key={bar.atMs}
-              type="button"
-              className="relative flex h-full min-w-0 flex-1 items-end"
-              title={`${new Date(bar.atMs).toLocaleTimeString()}: ${bar.calls.toLocaleString()} call${bar.calls === 1 ? '' : 's'}${bar.errors > 0 ? `, ${bar.errors.toLocaleString()} failed` : ''}`}
-              onClick={() => onZoom(bar.atMs, bar.atMs + step)}
-            >
-              <span className="relative w-full overflow-hidden rounded-t-[3px] bg-primary opacity-60 transition-opacity hover:opacity-100" style={{ height: `${tall}%` }}>
-                {share > 0 ? <span className="absolute inset-x-0 bottom-0 bg-destructive" style={{ height: `${Math.max(share * 100, 12)}%` }} /> : null}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </figure>
-  )
 }
 
 export function QueriesPage() {
@@ -147,6 +91,10 @@ export function QueriesPage() {
         sort,
       ),
     [statements, sort, q],
+  )
+  const bars = useMemo<Bar[]>(
+    () => (series?.points ?? []).map((point) => ({ at: point.atMs, count: point.calls, errors: point.errors })),
+    [series],
   )
   const { noun, field } = groupingNoun(group)
   const calls = series?.calls ?? 0
@@ -202,7 +150,7 @@ export function QueriesPage() {
             <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {label}</Button>
           </div>
         ) : null}
-        <QueryHistogram series={series} pending={pending} onZoom={(from, to) => zoomTo(from, to)} />
+        <Bars bars={bars} loading={pending} onZoom={(from, to) => zoomTo(from, to)} noun="calls" title="Database calls over time" />
       </div>
 
       {fanouts.length > 0 ? (

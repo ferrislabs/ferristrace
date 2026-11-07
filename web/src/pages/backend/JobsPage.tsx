@@ -9,9 +9,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { EmptyState, Kpi, PageHeader, barBg } from '@/components/ft/bits'
+import { Bars, type Bar } from '@/components/ft/Histogram'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { usePlacement } from '@/data/placement'
-import { GROUPINGS, groupingNoun, groupingOf, useJobs, useJobSeries, type Run, type Series } from '@/data/jobs'
+import { GROUPINGS, groupingNoun, groupingOf, useJobs, useJobSeries, type Run } from '@/data/jobs'
 import { useZoom } from '@/lib/bounds'
 import { useWindow } from '@/lib/window'
 import { because } from '@/auth/client'
@@ -42,53 +43,6 @@ function sorted(runs: Run[], by: Sort): Run[] {
     name: (a, b) => a.group.localeCompare(b.group),
   }
   return [...runs].sort(order[by])
-}
-
-function JobBars({ series, pending, onZoom }: { series: Series | null; pending: boolean; onZoom: (from: number, to: number) => void }) {
-  const bars = series?.points ?? []
-  const step = series?.stepMs ?? 0
-  const peak = Math.max(1, ...bars.map((bar) => bar.processed))
-  const total = bars.reduce((sum, bar) => sum + bar.processed, 0)
-  const failed = bars.reduce((sum, bar) => sum + bar.failed, 0)
-
-  if (bars.length === 0 || total === 0) {
-    return (
-      <div className="flex h-[84px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
-        {pending ? 'Counting the jobs…' : 'No jobs match in this window.'}
-      </div>
-    )
-  }
-
-  return (
-    <figure className="m-0 flex flex-col gap-2 rounded-lg border bg-card px-3 pb-2.5 pt-2.5">
-      <div className="flex items-baseline gap-2 text-caption">
-        <span className="font-semibold text-foreground">Jobs processed over time</span>
-        <span className="text-muted-foreground">
-          {total.toLocaleString()} in all{failed > 0 ? `, ${failed.toLocaleString()} failed` : ''}
-        </span>
-        <span className="ml-auto hidden text-faint-foreground sm:inline">Click a bar to zoom on that step</span>
-      </div>
-      <div className="flex h-[84px] items-end gap-[2px]" role="img" aria-label={`${total.toLocaleString()} jobs processed, ${failed.toLocaleString()} failed`}>
-        {bars.map((bar) => {
-          const tall = bar.processed === 0 ? 0 : Math.max(3, (bar.processed / peak) * 100)
-          const share = bar.processed === 0 ? 0 : Math.min(1, bar.failed / bar.processed)
-          return (
-            <button
-              key={bar.atMs}
-              type="button"
-              aria-label={`${bar.processed} processed, ${bar.failed} failed`}
-              className="relative flex h-full min-w-0 flex-1 cursor-pointer items-end border-0 bg-transparent p-0"
-              onClick={() => onZoom(bar.atMs, bar.atMs + step)}
-            >
-              <span className="relative w-full overflow-hidden rounded-t-[3px] bg-primary opacity-60 transition-opacity hover:opacity-100" style={{ height: `${tall}%` }}>
-                {share > 0 ? <span className="absolute inset-x-0 bottom-0 bg-destructive" style={{ height: `${Math.max(share * 100, 12)}%` }} /> : null}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </figure>
-  )
 }
 
 export function JobsPage() {
@@ -129,6 +83,10 @@ export function JobsPage() {
         sort,
       ),
     [jobs, sort, q],
+  )
+  const bars = useMemo<Bar[]>(
+    () => (series?.points ?? []).map((point) => ({ at: point.atMs, count: point.processed, errors: point.failed })),
+    [series],
   )
   const { noun, field } = groupingNoun(group)
   const processed = series?.processed ?? 0
@@ -178,7 +136,7 @@ export function JobsPage() {
             <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {label}</Button>
           </div>
         ) : null}
-        <JobBars series={series} pending={seriesPending} onZoom={(from, to) => zoomTo(from, to)} />
+        <Bars bars={bars} loading={seriesPending} onZoom={(from, to) => zoomTo(from, to)} noun="jobs" title="Jobs processed over time" />
       </div>
 
       <Card className="overflow-hidden">
