@@ -1197,7 +1197,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferristrace-api"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "axum",
  "bytes",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-application"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ferristrace-domain",
  "ferristrace-macros",
@@ -1235,7 +1235,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-clickhouse"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "axum",
  "clickhouse",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-domain"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "hex",
  "hmac 0.13.0",
@@ -1277,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-env-file"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "figment",
  "serde",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-infra"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-macros"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-mcp"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -1342,14 +1342,14 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-mcp-args"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "uuid",
 ]
 
 [[package]]
 name = "ferristrace-mcp-gateway"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -1378,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-otlp"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ferristrace-domain",
  "hex",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-postgres"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ferristrace-application",
  "ferristrace-domain",
@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-redis"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ferristrace-application",
  "ferristrace-domain",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "ferristrace-server"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "axum",
