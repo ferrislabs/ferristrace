@@ -9,14 +9,15 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, AttributeFilter, AttributeKey, DurationRange, Expr, FacetFilter, FacetValues,
-    Facets, Field, ListedSpan, Measure, Membership, Memberships, NoPhotos, OrgRole, Placement,
-    PlacementName, PlacementReader, Placements, ProjectId, SeenAttribute, SeenPod, SeenValue,
-    SeenWorkload, SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
-    SpanCursor, SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages,
-    SpanReader, SpanStatus, StoreError, TableFilter, TableRow, TenantId, Test, TraceFilter,
-    TraceId, TraceOrder, TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
+    AccountId, AttributeFilter, AttributeKey, CacheGrouping, CachePoint, CacheSeries, CacheSummary,
+    DurationRange, Expr, FacetFilter, FacetValues, Facets, Field, ListedSpan, Measure, Membership,
+    Memberships, NoPhotos, OrgRole, Placement, PlacementName, PlacementReader, Placements,
+    ProjectId, SeenAttribute, SeenPod, SeenValue, SeenWorkload, SeriesFilter, SeriesLine,
+    SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
+    SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanFilter, SpanId,
+    SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TableFilter,
+    TableRow, TenantId, Test, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
+    WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -166,6 +167,41 @@ impl SpanReader for TwoSpans {
                 requests: 7,
                 errors: 2,
                 p95_nanos: Some(3_000_000),
+            }],
+        })
+    }
+
+    async fn caches(
+        &self,
+        _tenant: TenantId,
+        _grouping: CacheGrouping,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<CacheSummary>, StoreError> {
+        Ok(vec![
+            an_operation("GET", 4, 3, 1),
+            an_operation("SET", 2, 0, 0),
+        ])
+    }
+
+    async fn cache_series(
+        &self,
+        _tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<CacheSeries, StoreError> {
+        Ok(CacheSeries {
+            step_nanos: filter.step_nanos(),
+            calls: 4,
+            hits: 3,
+            misses: 1,
+            p50_nanos: Some(900_000),
+            p95_nanos: Some(2_100_000),
+            p99_nanos: None,
+            points: vec![CachePoint {
+                start_unix_nanos: filter.window.from_unix_nanos(),
+                calls: 4,
+                hits: 3,
+                misses: 1,
+                p95_nanos: Some(2_100_000),
             }],
         })
     }
@@ -1548,4 +1584,90 @@ async fn a_table_request_the_domain_refuses_is_a_bad_request() {
         .expect("a request");
     let (status, _) = served(Arc::new(Remembering::default()), unsigned).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+fn an_operation(name: &str, calls: u64, hits: u64, misses: u64) -> CacheSummary {
+    CacheSummary {
+        operation: name.into(),
+        store: "redis".into(),
+        calls,
+        hits,
+        misses,
+        p50_nanos: 900_000,
+        p95_nanos: 2_100_000,
+        last_seen_unix_nanos: 1_700_000_000_123_456_789,
+    }
+}
+
+#[tokio::test]
+async fn the_cache_page_reads_its_operations_with_a_hit_rate() {
+    let uri = format!(
+        "/api/orgs/{}/caches?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let looked = &read["operations"][0];
+    assert_eq!(looked["operation"], "GET");
+    assert_eq!(looked["store"], "redis");
+    assert_eq!(looked["calls"], 4);
+    assert_eq!(looked["hits"], 3);
+    assert_eq!(looked["misses"], 1);
+    assert_eq!(looked["hit_rate"], 0.75);
+    assert_eq!(looked["p95_us"], 2100);
+    assert_eq!(
+        looked["last_seen_ms"], 1_700_000_000_123u64,
+        "a time a browser can hold without losing digits"
+    );
+}
+
+#[tokio::test]
+async fn an_operation_no_instrumentation_judged_serialises_no_hit_rate() {
+    let uri = format!(
+        "/api/orgs/{}/caches?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let written = &read["operations"][1];
+    assert_eq!(written["operation"], "SET");
+    assert_eq!(written["calls"], 2);
+    assert!(
+        written["hit_rate"].is_null(),
+        "a page with no verdict must not read as nought per cent: {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_cache_series_carries_a_hit_rate_per_point() {
+    let uri = format!(
+        "/api/orgs/{}/caches/series?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(read["calls"], 4);
+    assert_eq!(read["hit_rate"], 0.75);
+    let point = &read["points"][0];
+    assert_eq!(point[1], 4, "calls");
+    assert_eq!(point[2], 3, "hits");
+    assert_eq!(point[4], 0.75, "hit rate");
+}
+
+#[tokio::test]
+async fn an_organisation_this_session_does_not_belong_to_reads_no_cache() {
+    let uri = format!("/api/orgs/{}/caches?from=1&to=2", org(THEIRS));
+
+    let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

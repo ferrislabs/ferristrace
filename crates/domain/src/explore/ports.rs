@@ -2,9 +2,9 @@ use core::future::Future;
 
 use super::query::AttributeKey;
 use super::value_objects::{
-    AttributeFilter, FacetFilter, Facets, ListedSpan, SeenAttribute, SeenValue, SeriesFilter,
-    SeriesResult, ServiceFilter, ServiceSeries, ServiceSummary, SpanFilter, TableFilter, TableRow,
-    TraceFilter, TraceSummary,
+    AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
+    ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
 };
 use crate::catalogue::ProjectId;
 use crate::store::StoreError;
@@ -91,6 +91,23 @@ pub trait SpanReader {
         _filter: &TableFilter,
     ) -> impl Future<Output = Result<Vec<TableRow>, StoreError>> + Send {
         async { Ok(Vec::new()) }
+    }
+
+    fn caches(
+        &self,
+        _tenant: TenantId,
+        _grouping: CacheGrouping,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<CacheSummary>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
+    }
+
+    fn cache_series(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
+        async { Ok(CacheSeries::default()) }
     }
 }
 
@@ -186,6 +203,23 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     ) -> impl Future<Output = Result<Vec<TableRow>, StoreError>> + Send {
         (*self).span_table(tenant, filter)
     }
+
+    fn caches(
+        &self,
+        tenant: TenantId,
+        grouping: CacheGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<CacheSummary>, StoreError>> + Send {
+        (*self).caches(tenant, grouping, filter)
+    }
+
+    fn cache_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
+        (*self).cache_series(tenant, filter)
+    }
 }
 
 impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
@@ -279,5 +313,22 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         filter: &TableFilter,
     ) -> impl Future<Output = Result<Vec<TableRow>, StoreError>> + Send {
         self.as_ref().span_table(tenant, filter)
+    }
+
+    fn caches(
+        &self,
+        tenant: TenantId,
+        grouping: CacheGrouping,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<CacheSummary>, StoreError>> + Send {
+        self.as_ref().caches(tenant, grouping, filter)
+    }
+
+    fn cache_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<CacheSeries, StoreError>> + Send {
+        self.as_ref().cache_series(tenant, filter)
     }
 }

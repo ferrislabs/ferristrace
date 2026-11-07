@@ -9,11 +9,11 @@ use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, BadQuery, ExploreError, FacetFilter, Facets, ListedSpan,
-    Measure, ProjectId, Query as TraceQuery, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
-    ServiceFilter, ServiceSeries, ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder,
-    SpanStatus, Stream, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder,
-    TraceSummary, Window,
+    AttributeFilter, AttributeKey, BadQuery, CacheGrouping, CacheSeries, CacheSummary,
+    ExploreError, FacetFilter, Facets, ListedSpan, Measure, ProjectId, Query as TraceQuery,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
+    ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder, SpanStatus, Stream, TableFilter,
+    TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -218,6 +218,8 @@ where
             "/api/orgs/{org}/services/{service}/series",
             get(service_series::<S>),
         )
+        .route("/api/orgs/{org}/caches", get(caches::<S>))
+        .route("/api/orgs/{org}/caches/series", get(cache_series::<S>))
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/search", post(search::<S>))
@@ -1060,6 +1062,112 @@ pub struct Spanning {
     node: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Asking {
+    #[serde(default)]
+    group: Grouped,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grouped {
+    #[default]
+    Operation,
+    Store,
+}
+
+impl From<Grouped> for CacheGrouping {
+    fn from(grouped: Grouped) -> Self {
+        match grouped {
+            Grouped::Operation => Self::Operation,
+            Grouped::Store => Self::Store,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Cached {
+    operations: Vec<Looked>,
+}
+
+#[derive(Debug, Serialize)]
+struct Looked {
+    operation: String,
+    store: String,
+    calls: u64,
+    hits: u64,
+    misses: u64,
+    hit_rate: Option<f64>,
+    per_second: f64,
+    p50_us: u64,
+    p95_us: u64,
+    last_seen_ms: u64,
+}
+
+fn looked(summary: CacheSummary, seconds: f64) -> Looked {
+    Looked {
+        #[allow(clippy::cast_precision_loss)]
+        per_second: if seconds > 0.0 {
+            summary.calls as f64 / seconds
+        } else {
+            0.0
+        },
+        hit_rate: summary.hit_rate(),
+        operation: summary.operation.into_string(),
+        store: summary.store.into_string(),
+        calls: summary.calls,
+        hits: summary.hits,
+        misses: summary.misses,
+        p50_us: summary.p50_nanos / NANOS_PER_MICRO,
+        p95_us: summary.p95_nanos / NANOS_PER_MICRO,
+        last_seen_ms: summary.last_seen_unix_nanos / NANOS_PER_MILLI,
+    }
+}
+
+type Beat = (u64, u64, u64, u64, Option<f64>, Option<u64>);
+
+#[derive(Debug, Serialize)]
+pub struct Hitting {
+    step_ns: u64,
+    calls: u64,
+    hits: u64,
+    misses: u64,
+    hit_rate: Option<f64>,
+    p50_ns: Option<u64>,
+    p95_ns: Option<u64>,
+    p99_ns: Option<u64>,
+    points: Vec<Beat>,
+}
+
+impl From<CacheSeries> for Hitting {
+    fn from(series: CacheSeries) -> Self {
+        Self {
+            step_ns: series.step_nanos,
+            calls: series.calls,
+            hits: series.hits,
+            misses: series.misses,
+            hit_rate: series.hit_rate(),
+            p50_ns: series.p50_nanos,
+            p95_ns: series.p95_nanos,
+            p99_ns: series.p99_nanos,
+            points: series
+                .points
+                .into_iter()
+                .map(|point| {
+                    (
+                        point.start_unix_nanos,
+                        point.calls,
+                        point.hits,
+                        point.misses,
+                        point.hit_rate(),
+                        point.p95_nanos,
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
 impl Spanning {
     fn filter(self) -> Result<ServiceFilter, LookRefused> {
         let placement = PlacementBody {
@@ -1090,6 +1198,49 @@ impl Spanning {
     fn seconds(&self) -> f64 {
         (self.to.saturating_sub(self.from) as f64) / 1000.0
     }
+}
+
+async fn caches<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(over): Query<Spanning>,
+    Query(asking): Query<Asking>,
+    headers: HeaderMap,
+) -> Result<Json<Cached>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let seconds = over.seconds();
+    let filter = over.filter()?;
+
+    let found = state
+        .app
+        .caches(&who, TenantId::new(org), asking.group.into(), &filter)
+        .await?
+        .into_iter()
+        .map(|summary| looked(summary, seconds))
+        .collect();
+    Ok(Json(Cached { operations: found }))
+}
+
+async fn cache_series<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Hitting>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let filter = over.filter()?;
+
+    let series = state
+        .app
+        .cache_series(&who, TenantId::new(org), &filter)
+        .await?;
+    Ok(Json(series.into()))
 }
 
 async fn services<S: Stack>(

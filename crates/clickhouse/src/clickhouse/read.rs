@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
-    AttributeFilter, AttributeKey, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets,
-    ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, SeenAttribute, SeenValue,
-    SeriesFilter, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span,
-    SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine,
-    StoreError, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    AttributeFilter, AttributeKey, CacheGrouping, CachePoint, CacheSeries, CacheSummary,
+    DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan, MAX_ATTRIBUTES,
+    MAX_GROUPS, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
+    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter,
+    SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StoreError, TableFilter,
+    TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -51,6 +52,53 @@ const WHOLE: &str = "SELECT \
        toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
      ) AS latency \
    {served}";
+
+const CACHED: &str = "FROM spans FINAL \
+   WHERE tenant_id = ? \
+     AND start_time >= fromUnixTimestamp64Nano(?) \
+     AND start_time < fromUnixTimestamp64Nano(?) \
+     AND kind = 'client' \
+     AND (mapContains(attributes, 'cache.hit') \
+       OR {store} IN ('redis', 'memcached', 'valkey')) \
+     AND (? = 0 OR project_id = ?) \
+     AND (? = '' OR attributes['deployment.environment'] = ? \
+       OR attributes['deployment.environment.name'] = ?){placed}";
+
+const STORE: &str = "multiIf(attributes['db.system.name'] != '', attributes['db.system.name'], \
+   attributes['db.system'] != '', attributes['db.system'], 'unknown')";
+
+const CACHE_COUNTED: &str = "count() AS calls, \
+     countIf(attributes['cache.hit'] = 'true') AS hits, \
+     countIf(attributes['cache.hit'] = 'false') AS misses, \
+     quantiles(0.5, 0.95)( \
+       toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
+     ) AS latency, \
+     toUnixTimestamp64Nano(max(start_time)) AS last_seen";
+
+const CACHE_BY_OPERATION: &str = "SELECT name AS operation, {store} AS store, \
+     {counted} {cached} \
+   GROUP BY operation, store ORDER BY calls DESC, operation, store LIMIT 500";
+
+const CACHE_BY_STORE: &str = "SELECT {store} AS operation, {store} AS store, \
+     {counted} {cached} \
+   GROUP BY operation, store ORDER BY calls DESC, store LIMIT 500";
+
+const CACHE_STEPS: &str = "SELECT \
+     toInt64(intDiv(toUnixTimestamp64Nano(start_time) - {from}, {step})) AS slot, \
+     count() AS calls, \
+     countIf(attributes['cache.hit'] = 'true') AS hits, \
+     countIf(attributes['cache.hit'] = 'false') AS misses, \
+     quantile(0.95)(toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time)) AS p95 \
+   {cached} GROUP BY slot ORDER BY slot";
+
+const CACHE_WHOLE: &str = "SELECT \
+     count() AS calls, \
+     countIf(attributes['cache.hit'] = 'true') AS hits, \
+     countIf(attributes['cache.hit'] = 'false') AS misses, \
+     quantiles(0.5, 0.95, 0.99)( \
+       toUnixTimestamp64Nano(end_time) - toUnixTimestamp64Nano(start_time) \
+     ) AS latency \
+   {cached}";
 
 const SUMMARIES: &str = "SELECT \
      lower(hex(trace_id)) AS trace_hex, \
@@ -188,6 +236,34 @@ struct ServiceRow {
 }
 
 #[derive(Debug, Row, Deserialize)]
+struct CacheRow {
+    operation: String,
+    store: String,
+    calls: u64,
+    hits: u64,
+    misses: u64,
+    latency: Vec<f64>,
+    last_seen: i64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct CacheStepRow {
+    slot: i64,
+    calls: u64,
+    hits: u64,
+    misses: u64,
+    p95: f64,
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct CacheWholeRow {
+    calls: u64,
+    hits: u64,
+    misses: u64,
+    latency: Vec<f64>,
+}
+
+#[derive(Debug, Row, Deserialize)]
 struct StepRow {
     slot: i64,
     requests: u64,
@@ -242,6 +318,33 @@ impl ClickhouseReader {
 
     pub(crate) fn client(&self) -> &Client {
         &self.client
+    }
+
+    fn cached(
+        &self,
+        sql: &str,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> clickhouse::query::Query {
+        let environment = filter.environment.as_deref().unwrap_or_default();
+        let placed = Placed::of(&filter.placement, Held::Attributes);
+        let query = self
+            .client
+            .query(
+                &sql.replace("{counted}", CACHE_COUNTED)
+                    .replace("{cached}", CACHED)
+                    .replace("{store}", STORE)
+                    .replace("{placed}", &placed.and()),
+            )
+            .bind(tenant.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(environment)
+            .bind(environment)
+            .bind(environment);
+        placed.bind(query)
     }
 
     pub(crate) fn served(
@@ -344,6 +447,66 @@ impl SpanReader for ClickhouseReader {
                     start_unix_nanos: from + unsigned(row.slot) * step,
                     requests: row.requests,
                     errors: row.errors,
+                    p95_nanos: Some(nanos_of(row.p95)),
+                })
+                .collect(),
+        })
+    }
+
+    async fn caches(
+        &self,
+        tenant: TenantId,
+        grouping: CacheGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<CacheSummary>, StoreError> {
+        let sql = match grouping {
+            CacheGrouping::Operation => CACHE_BY_OPERATION,
+            CacheGrouping::Store => CACHE_BY_STORE,
+        };
+        let rows: Vec<CacheRow> = self
+            .cached(sql, tenant, filter)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows.into_iter().map(read_cache).collect())
+    }
+
+    async fn cache_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<CacheSeries, StoreError> {
+        let from = filter.window.from_unix_nanos();
+        let step = filter.step_nanos();
+        let stepped = CACHE_STEPS
+            .replace("{from}", &nanos(from).to_string())
+            .replace("{step}", &nanos(step).to_string());
+        let steps: Vec<CacheStepRow> = self
+            .cached(&stepped, tenant, filter)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        let whole: CacheWholeRow = self
+            .cached(CACHE_WHOLE, tenant, filter)
+            .fetch_one()
+            .await
+            .map_err(|error| refused(&error))?;
+
+        Ok(CacheSeries {
+            step_nanos: step,
+            calls: whole.calls,
+            hits: whole.hits,
+            misses: whole.misses,
+            p50_nanos: (whole.calls > 0).then(|| quantile(&whole.latency, 0)),
+            p95_nanos: (whole.calls > 0).then(|| quantile(&whole.latency, 1)),
+            p99_nanos: (whole.calls > 0).then(|| quantile(&whole.latency, 2)),
+            points: steps
+                .into_iter()
+                .map(|row| CachePoint {
+                    start_unix_nanos: from + unsigned(row.slot) * step,
+                    calls: row.calls,
+                    hits: row.hits,
+                    misses: row.misses,
                     p95_nanos: Some(nanos_of(row.p95)),
                 })
                 .collect(),
@@ -696,6 +859,19 @@ fn read_service(row: ServiceRow) -> ServiceSummary {
         p50_nanos: quantile(&row.latency, 0),
         p95_nanos: quantile(&row.latency, 1),
         p99_nanos: quantile(&row.latency, 2),
+        last_seen_unix_nanos: unsigned(row.last_seen),
+    }
+}
+
+fn read_cache(row: CacheRow) -> CacheSummary {
+    CacheSummary {
+        operation: row.operation.into(),
+        store: row.store.into(),
+        calls: row.calls,
+        hits: row.hits,
+        misses: row.misses,
+        p50_nanos: quantile(&row.latency, 0),
+        p95_nanos: quantile(&row.latency, 1),
         last_seen_unix_nanos: unsigned(row.last_seen),
     }
 }
