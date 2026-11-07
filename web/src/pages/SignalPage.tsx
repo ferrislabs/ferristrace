@@ -13,9 +13,9 @@ import { cn } from '@/lib/utils'
 
 const tone = (c: string) => (c.includes('warn') ? 'warn' : c.includes('ok') ? 'ok' : undefined) as 'warn' | 'ok' | undefined
 
-export function SignalPage({ group }: { group: 'backend' | 'frontend' }) {
+export function SignalPage() {
   const { view = '' } = useParams()
-  const series = useSignalView(group, view)
+  const series = useSignalView(view)
   const [by, setBy] = useState('0')
   const [q, setQ] = useState('')
   if (!series) return <NotFound />

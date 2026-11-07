@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowLeftRight, BellRing, Boxes, Bug, CircleAlert, Sparkles, Rocket, Cpu, Database, Globe, House, Layers, LayoutGrid, LineChart, Mail, MonitorSmartphone, Package, PanelTop, ScrollText, Server, ShieldAlert, Siren, Telescope, Users, Waypoints, Zap, type LucideIcon,
+  Activity, ArrowLeftRight, BellRing, Boxes, CircleAlert, Sparkles, Rocket, Cpu, Database, House, Layers, LayoutGrid, LineChart, Mail, ScrollText, Server, ShieldAlert, Siren, Telescope, Waypoints, Zap, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = { label: string; to: string; icon: LucideIcon; keys?: string; badge?: boolean }
@@ -33,17 +33,6 @@ export const AXES: NavAxis[] = [
       { label: 'Emails', to: '/backend/emails', icon: Mail },
       { label: 'Queries', to: '/backend/queries', icon: Database },
       { label: 'System metrics', to: '/backend/system', icon: Cpu },
-    ],
-  },
-  {
-    key: 'frontend', label: 'Frontend', icon: PanelTop,
-    tabs: [
-      { label: 'Pages', to: '/frontend/pages', icon: PanelTop },
-      { label: 'Errors', to: '/frontend/errors', icon: Bug },
-      { label: 'Network', to: '/frontend/network', icon: Globe },
-      { label: 'Sessions', to: '/frontend/sessions', icon: Users },
-      { label: 'Resources', to: '/frontend/resources', icon: Package },
-      { label: 'Browsers & devices', to: '/frontend/devices', icon: MonitorSmartphone },
     ],
   },
   {
