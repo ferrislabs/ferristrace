@@ -12,7 +12,7 @@ import { Facets } from '@/components/ft/Facets'
 import { FilterBar } from '@/components/ft/FilterBar'
 import { QueryBar } from '@/components/ft/QueryBar'
 import { isChip, itemsText, normalise, parse, queryTextOf, type Node } from '@/lib/queryLang'
-import { withValue, type Chip, type FieldRef } from '@/lib/traceQuery'
+import { withValue, withoutValue, type Chip, type FieldRef } from '@/lib/traceQuery'
 import { Kbd, Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, PageHeader, ServiceDot } from '@/components/ft/bits'
 import { ANY, COUNTS, useTraces, type Sift } from '@/data/traces'
@@ -23,6 +23,7 @@ import { Histogram } from '@/components/ft/Histogram'
 import { useZoom } from '@/lib/bounds'
 import { useSpans } from '@/data/spans'
 import { SpansTable } from '@/components/ft/SpansTable'
+import { ValueMenu } from '@/components/ft/ValueMenu'
 import { isPlaced, NOWHERE, usePlacement } from '@/data/placement'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { because } from '@/auth/client'
@@ -32,6 +33,10 @@ import { useWindow } from '@/lib/window'
 
 const codeTone = (code: number, errors: number) =>
   code >= 500 || errors > 0 ? 'text-destructive-text' : code >= 400 ? 'text-warning-text' : 'text-muted-foreground'
+
+const NUMERIC = ['http_status_code', 'duration']
+
+const counts = (field: FieldRef) => 'built' in field && NUMERIC.includes(field.built)
 
 export function Traces() {
   const navigate = useNavigate()
@@ -93,6 +98,12 @@ export function Traces() {
     const field: FieldRef = by.startsWith('attr:') ? { attr: by.slice(5) } : { built: by as never }
     setChips(withValue(chips, field, value, true, by === 'http_status_code'))
   }
+  const filterOn = (field: FieldRef, value: string, keep: boolean) =>
+    setChips(
+      keep
+        ? withValue(chips, field, value, true, counts(field))
+        : withoutValue(chips, field, value, true, counts(field)),
+    )
   const select = (key: string | undefined, definition: Definition) => show({ q: definition.q, o: definition.o, t: definition.t, m: definition.m, g: definition.g, view: key })
   const viewsState = useViewsState(current, viewKey, select)
   const clear = () => { show({ q: '', o: 'started', view: undefined }); place(NOWHERE) }
@@ -204,7 +215,7 @@ export function Traces() {
       ) : tab === 'series' ? (
         <SeriesPanel items={items} rangeMs={windowMs} measure={measure} group={group} onChange={(part) => show(part)} />
       ) : tab === 'spans' ? (
-        <SpansTable rows={spans.rows} loading={spans.loading} failed={spans.failed} sifting={sifting} limit={limit} cursor={cursor} density={density} onOpen={(row) => navigate(`/traces/${row.traceId}`)} onCopy={copy} onClear={clear} />
+        <SpansTable rows={spans.rows} loading={spans.loading} failed={spans.failed} sifting={sifting} limit={limit} cursor={cursor} density={density} onOpen={(row) => navigate(`/traces/${row.traceId}`)} onCopy={copy} onClear={clear} onFilter={filterOn} />
       ) : failed ? (
         <EmptyState title="The traces could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
       ) : rows.length === 0 ? (
@@ -219,7 +230,11 @@ export function Traces() {
               {rows.map((t, i) => (
                 <tr key={t.id} onClick={() => navigate(`/traces/${t.id}`)} className={cn('cursor-pointer hover:[&>td]:bg-row-hover', i === cursor && '[&>td]:bg-accent-subtle')}>
                   <Td className={cn(density === 'comfy' && 'h-10', 'font-mono text-control max-md:h-[52px] max-md:text-caption')}>{t.start.length > 8 && t.start.includes(':') ? <><span className="md:hidden">{t.start.slice(0, 8)}</span><span className="max-md:hidden">{t.start}</span></> : t.start}</Td>
-                  <Td className="max-md:hidden"><span className="inline-flex items-center gap-1.5 text-control"><ServiceDot name={t.svc} />{t.svc}</span></Td>
+                  <Td className="max-md:hidden">
+                    <ValueMenu field={{ built: 'service' }} value={t.svc} onFilter={filterOn}>
+                      <span className="inline-flex items-center gap-1.5 truncate text-control"><ServiceDot name={t.svc} />{t.svc}</span>
+                    </ValueMenu>
+                  </Td>
                   <Td className="max-md:max-w-0">
                     <span className="flex min-w-0 flex-col">
                       <Link to={`/traces/${t.id}`} className="truncate font-semibold text-foreground" onClick={(e) => e.stopPropagation()}>{t.root}</Link>
@@ -231,7 +246,11 @@ export function Traces() {
                       ? t.errors
                         ? <span className="inline-flex text-destructive-text" title={`${t.errors} errors`}><CircleX className="size-3.5" aria-label={`${t.errors} errors`} /></span>
                         : <span className="text-muted-foreground">—</span>
-                      : <span className={codeTone(t.code, t.errors)} title={t.errors ? `${t.errors} errors` : undefined}>{t.code}</span>}
+                      : (
+                        <ValueMenu field={{ built: 'http_status_code' }} value={String(t.code)} onFilter={filterOn}>
+                          <span className={codeTone(t.code, t.errors)} title={t.errors ? `${t.errors} errors` : undefined}>{t.code}</span>
+                        </ValueMenu>
+                      )}
                   </Td>
                   <Td numeric>{t.dur}</Td>
                   <Td className="max-md:hidden"><button type="button" onClick={(e) => { e.stopPropagation(); copy(t.id) }} className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm font-mono text-caption text-muted-foreground hover:text-foreground" title={t.id} aria-label={`Copy trace id ${t.id}`}>{shortId(t.id)}<Copy className="size-3" aria-hidden /></button></Td>
