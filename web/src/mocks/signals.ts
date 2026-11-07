@@ -39,17 +39,6 @@ export const BACKEND: Record<string, SignalView> = {
         foot: 'A job is a span with messaging.operation = process, or a span you mark with ferristrace.job = true. Scheduled jobs show their next run.',
         empty: ['No jobs yet', 'Jobs appear when your workers send consumer spans (messaging.operation = process) or spans tagged ferristrace.job.', 'span.setAttribute("ferristrace.job", true)']
       },
-      cache: {
-        title: 'Cache', subtitle: 'Cache reads and writes, from Redis and Memcached client spans', group: ['Key pattern', 'Store'],
-        kpis: [['Hit rate', '93.4 %', '−1.2 pts vs previous hour', '', 'muted'], ['Operations', '2,410/s', '81 % reads', '', 'muted'], ['Misses', '134/s', 'most on cart:*', 'warn-text', 'warn-text'], ['p95', '1.8 ms', 'p99 6 ms', '', 'muted']],
-        chart: ['Hit rate', 'solid: hit rate · dashed: 90 % target', '100 %', '90 %', '80 %', 'Hit rate between 92 and 95 percent, dipping at 14:05'],
-        a: (i: number) => (i >= 33 ? 92 : 94.6) + (rnd() - 0.5) * 1.6, lo: 80, hi: 100, b: () => 90,
-        table: ['Key patterns', 'keys with ids replaced by *', 'Filter keys'],
-        cols: [C('Key pattern'), C('Store', 'cw-110'), C('Hits', 'num cw-100'), C('Misses', 'num cw-100'), C('Hit rate', 'cw-160', 'ascending'), C('Writes', 'num cw-90'), C('p95', 'num cw-80')],
-        rows: [['cart:*', 'redis', '142/s', '61/s', 70, '58/s', '2.1 ms', true], ['psp:token:*', 'redis', '9.1/s', '3.2/s', 74, '3.2/s', '1.9 ms', true], ['session:*', 'redis', '610/s', '12/s', 98, '14/s', '1.1 ms'], ['product:*', 'redis', '1,120/s', '38/s', 97, '6/s', '1.4 ms'], ['rate:*', 'redis', '380/s', '0/s', 100, '380/s', '0.6 ms'], ['tpl:*', 'memcached', '96/s', '20/s', 83, '1/s', '0.9 ms']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono'), X(r[4] + ' %', 'mono sm ' + (r[7] ? 'warn-text strong' : ''), { bar: r[4], barColor: r[7] ? 'bar-w' : 'bar-o', warn: r[7] }), X(r[5], 'num mono'), X(r[6], 'num mono')]),
-        foot: 'Hits and misses come from db.system = redis or memcached spans; a GET that returns nothing counts as a miss. Amber under 80 %.',
-        empty: ['No cache operations yet', 'Cache appears once your Redis or Memcached client is instrumented. Most client libraries have an OpenTelemetry instrumentation.', 'npm i @opentelemetry/instrumentation-ioredis']
-      },
       emails: {
         title: 'Emails', subtitle: 'Outgoing mail, from mailer spans', group: ['Template', 'Provider'],
         kpis: [['Sent', '3,904', 'last hour', '', 'muted'], ['Failed', '64', '1.6 % · SMTP 421 from provider', 'warn-text', 'warn-text'], ['Send time p95', '880 ms', 'provider round trip', '', 'muted'], ['Queued now', '12', 'oldest 40 s', '', 'muted']],
