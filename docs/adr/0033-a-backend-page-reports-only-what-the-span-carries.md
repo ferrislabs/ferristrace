@@ -33,7 +33,9 @@ window, project, environment and Kubernetes placement filter:
 
 - **Requests**: a server span carrying `http.request.method` (or the
   older `http.method`), or any server span with a status code. The route
-  is `http.route`, falling back to the span name. A 5xx is
+  is `http.route`, falling back to the span name. The code is the
+  `http_status_code` column, which the sink fills from
+  `http.response.status_code` (or the older `http.status_code`). A 5xx is
   `http_status_code >= 500`, falling back to `status = 'error'` when no
   code was recorded.
 - **Jobs**: a consumer span, or any span whose

@@ -9,7 +9,8 @@ use serde::Serialize;
 use serde_repr::Serialize_repr;
 use uuid::Uuid;
 
-const HTTP_STATUS_CODE: &str = "http.status_code";
+const HTTP_STATUS_CODE: &str = "http.response.status_code";
+const HTTP_STATUS_CODE_WAS: &str = "http.status_code";
 
 pub(crate) const EXCEPTION_TYPE: &str = "exception.type";
 pub(crate) const EXCEPTION_MESSAGE: &str = "exception.message";
@@ -99,6 +100,7 @@ impl<'a> SpanRow<'a> {
             http_status_code: span
                 .attributes
                 .get(HTTP_STATUS_CODE)
+                .or_else(|| span.attributes.get(HTTP_STATUS_CODE_WAS))
                 .and_then(|value| value.parse().ok()),
             attributes: span
                 .attributes
