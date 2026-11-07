@@ -14,9 +14,9 @@ pub use query::{
     Scalar, Stream, Test, Value,
 };
 pub use value_objects::{
-    AttributeFilter, DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan,
-    MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, SeenAttribute, SeenValue,
-    SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries,
-    ServiceSummary, SpanFilter, SpanOrder, SparseLine, TableFilter, TableRow, TraceFilter,
-    TraceOrder, TraceSummary, Window,
+    AttributeFilter, CacheGrouping, CachePoint, CacheSeries, CacheSummary, DurationRange,
+    FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan, MAX_ATTRIBUTES, MAX_FACETS,
+    MAX_GROUPS, MAX_VALUES, Measure, SeenAttribute, SeenValue, SeriesFilter, SeriesLine,
+    SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, SpanFilter,
+    SpanOrder, SparseLine, TableFilter, TableRow, TraceFilter, TraceOrder, TraceSummary, Window,
 };

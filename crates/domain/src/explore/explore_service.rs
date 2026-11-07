@@ -5,9 +5,9 @@ use std::borrow::Cow;
 use super::query::AttributeKey;
 use super::value_objects::Window;
 use super::value_objects::{
-    AttributeFilter, FacetFilter, Facets, ListedSpan, SeenAttribute, SeenValue, SeriesFilter,
-    SeriesResult, ServiceFilter, ServiceSeries, ServiceSummary, SpanFilter, TableFilter, TableRow,
-    TraceFilter, TraceSummary,
+    AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
+    ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -65,6 +65,31 @@ where
         Ok(self
             .reader
             .series(org, service, &filter)
+            .await?
+            .filled(&filter))
+    }
+
+    pub async fn caches(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: CacheGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<CacheSummary>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.caches(org, grouping, &filter).await?)
+    }
+
+    pub async fn cache_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<CacheSeries, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self
+            .reader
+            .cache_series(org, &filter)
             .await?
             .filled(&filter))
     }

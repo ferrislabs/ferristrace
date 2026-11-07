@@ -504,3 +504,99 @@ impl ServiceSeries {
         self
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CacheGrouping {
+    #[default]
+    Operation,
+    Store,
+    KeyPattern,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheSummary {
+    pub operation: Box<str>,
+    pub store: Box<str>,
+    pub calls: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub p50_nanos: u64,
+    pub p95_nanos: u64,
+    pub last_seen_unix_nanos: u64,
+}
+
+impl CacheSummary {
+    pub fn hit_rate(&self) -> Option<f64> {
+        hit_rate(self.hits, self.misses)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CachePoint {
+    pub start_unix_nanos: u64,
+    pub calls: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub p95_nanos: Option<u64>,
+}
+
+impl CachePoint {
+    pub fn idle(start_unix_nanos: u64) -> Self {
+        Self {
+            start_unix_nanos,
+            calls: 0,
+            hits: 0,
+            misses: 0,
+            p95_nanos: None,
+        }
+    }
+
+    pub fn hit_rate(&self) -> Option<f64> {
+        hit_rate(self.hits, self.misses)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CacheSeries {
+    pub step_nanos: u64,
+    pub calls: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub p50_nanos: Option<u64>,
+    pub p95_nanos: Option<u64>,
+    pub p99_nanos: Option<u64>,
+    pub points: Vec<CachePoint>,
+}
+
+impl CacheSeries {
+    pub fn hit_rate(&self) -> Option<f64> {
+        hit_rate(self.hits, self.misses)
+    }
+
+    #[must_use]
+    pub fn filled(mut self, filter: &ServiceFilter) -> Self {
+        let mut served = core::mem::take(&mut self.points).into_iter().peekable();
+        self.step_nanos = filter.step_nanos();
+        self.points = filter
+            .slot_starts()
+            .map(|start| {
+                while served
+                    .peek()
+                    .is_some_and(|point| point.start_unix_nanos < start)
+                {
+                    served.next();
+                }
+                served
+                    .next_if(|point| point.start_unix_nanos == start)
+                    .unwrap_or_else(|| CachePoint::idle(start))
+            })
+            .collect();
+        self
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn hit_rate(hits: u64, misses: u64) -> Option<f64> {
+    let asked = hits.checked_add(misses).filter(|total| *total > 0)?;
+    Some(hits as f64 / asked as f64)
+}

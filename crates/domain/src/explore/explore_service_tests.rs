@@ -6,8 +6,8 @@ use super::errors::{BadWindow, ExploreError};
 use super::explore_service::Explore;
 use super::ports::SpanReader;
 use super::value_objects::{
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, TraceFilter, TraceOrder,
-    TraceSummary, Window,
+    CacheGrouping, CacheSeries, CacheSummary, ServiceFilter, ServicePoint, ServiceSeries,
+    ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window,
 };
 use crate::access::key_ring_tests::Ring;
 use crate::access::{KeyScope, KeyScopes, Reader, Readers};
@@ -182,6 +182,29 @@ impl SpanReader for &Asked {
                 p95_nanos: Some(70),
             }],
         })
+    }
+
+    async fn caches(
+        &self,
+        tenant: TenantId,
+        _grouping: CacheGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<CacheSummary>, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
+        Ok(Vec::new())
+    }
+
+    async fn cache_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<CacheSeries, StoreError> {
+        self.tenants.lock().expect("the lock").push(tenant);
+        self.projects.lock().expect("the lock").push(filter.project);
+        self.placed(&filter.placement);
+        Ok(CacheSeries::default())
     }
 
     async fn traces(
@@ -836,4 +859,76 @@ async fn a_service_is_sighted_in_the_project_of_the_key_and_a_stranger_sees_noth
     assert_eq!(wide.project, None);
     assert_eq!(stranger, Err(ExploreError::NotYours));
     assert_eq!(asked.projects(), vec![Some(a_project(OURS)), None]);
+}
+
+#[tokio::test]
+async fn the_cache_of_another_organisation_is_refused_before_the_store_is_asked() {
+    let asked = Asked::default();
+    let explore = exploring(&asked);
+    let window = Window::new(0, 1000).expect("a window");
+
+    let operations = explore
+        .caches(
+            &session(TOKEN),
+            an_org(THEIRS),
+            CacheGrouping::Operation,
+            &ServiceFilter::over(window),
+        )
+        .await;
+    let series = explore
+        .cache_series(
+            &session(TOKEN),
+            an_org(THEIRS),
+            &ServiceFilter::over(window),
+        )
+        .await;
+
+    assert_eq!(operations, Err(ExploreError::NotYours));
+    assert_eq!(series, Err(ExploreError::NotYours));
+    assert!(
+        asked.tenants.lock().expect("the lock").is_empty(),
+        "the span store must not be asked at all"
+    );
+}
+
+#[tokio::test]
+async fn a_project_bound_read_key_reads_the_cache_of_its_project_alone() {
+    let keys = Ring::default();
+    let secret = keys.holding(an_org(MINE), Some(a_project(OURS)), reading());
+    let asked = Asked::default();
+    let explore = keyed(&keys, &asked);
+    let window = Window::new(0, 1000).expect("a window");
+
+    explore
+        .caches(
+            &Reader::Key(secret),
+            an_org(MINE),
+            CacheGrouping::Operation,
+            &ServiceFilter::over(window),
+        )
+        .await
+        .expect("a read key may read its project");
+
+    assert_eq!(asked.projects(), vec![Some(a_project(OURS))]);
+}
+
+#[tokio::test]
+async fn an_empty_cache_series_is_filled_slot_by_slot() {
+    let asked = Asked::default();
+    let explore = exploring(&asked);
+    let filter = ServiceFilter::over(Window::new(0, 600_000_000_000).expect("ten minutes"));
+
+    let series = explore
+        .cache_series(&session(TOKEN), an_org(MINE), &filter)
+        .await
+        .expect("a member may read");
+
+    assert_eq!(series.step_nanos, filter.step_nanos());
+    assert_eq!(
+        series.points.len(),
+        filter.slot_starts().count(),
+        "a chart draws every slot of the window, idle ones included"
+    );
+    assert!(series.points.iter().all(|point| point.calls == 0));
+    assert_eq!(series.hit_rate(), None);
 }

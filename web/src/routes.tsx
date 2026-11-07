@@ -6,6 +6,7 @@ import { reauthenticate } from '@/auth/oidc'
 import { AppShell } from '@/components/layout/AppShell'
 import { Ai } from '@/pages/Ai'
 import { Alerts } from '@/pages/Alerts'
+import { CachePage } from '@/pages/backend/CachePage'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
 import { Kubernetes } from '@/pages/Infra'
@@ -165,8 +166,8 @@ const routeTree = rootRoute.addChildren([
     inShell('/traces/$id', TraceDetail, {}),
     inShell('/logs', Logs, timed),
     inShell('/metrics', Metrics, timed),
-    inShell('/backend/$view', () => <SignalPage group="backend" />),
-    inShell('/frontend/$view', () => <SignalPage group="frontend" />),
+    inShell('/backend/cache', CachePage, timed),
+    inShell('/backend/$view', SignalPage),
     inShell('/status-page', StatusPageEditor, real),
     settingsRoute.addChildren(settingsChildren),
     inShell('$', NotFound, real),

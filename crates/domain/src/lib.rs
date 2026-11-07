@@ -66,12 +66,13 @@ pub use cluster::{
     PodReason, WorkloadSummary, assess, fresh_window,
 };
 pub use explore::{
-    AttributeFilter, AttributeKey, BadQuery, BadWindow, Clause, DurationRange, Explore,
-    ExploreError, Expr, FACET_VALUES, FacetFilter, FacetValues, Facets, Field, ListedSpan,
-    MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, Number, Op, Query, Scalar,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint,
-    ServiceSeries, ServiceSummary, SpanFilter, SpanOrder, SpanReader, SparseLine, Stream,
-    TableFilter, TableRow, Test, TraceFilter, TraceOrder, TraceSummary, Value, Window,
+    AttributeFilter, AttributeKey, BadQuery, BadWindow, CacheGrouping, CachePoint, CacheSeries,
+    CacheSummary, Clause, DurationRange, Explore, ExploreError, Expr, FACET_VALUES, FacetFilter,
+    FacetValues, Facets, Field, ListedSpan, MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES,
+    Measure, Number, Op, Query, Scalar, SeenAttribute, SeenValue, SeriesFilter, SeriesLine,
+    SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, SpanFilter,
+    SpanOrder, SpanReader, SparseLine, Stream, TableFilter, TableRow, Test, TraceFilter,
+    TraceOrder, TraceSummary, Value, Window,
 };
 pub use export::{
     EXPORT_PAGE, ExportError, ExportGrant, ExportSource, ExportedSpan, Exporter, Prepared,
