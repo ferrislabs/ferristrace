@@ -57,8 +57,10 @@ tile stands in their place.
 - A Redis call reaches Cache and not Queries; a queue pop traced as a
   Redis client span reaches Cache and not Jobs. Both follow from
   `db.system.name` alone, which is what the span carries.
-- N+1 stays open. It needs `count()` per `(trace_id, statement)` over the
-  window, which the current filter cannot express, so it is its own lot.
-- Nothing is left of the backend mock but system metrics, so
-  `SignalPage`, `data/signals.ts` and `mocks/signals.ts` now serve one
-  page and come out with it.
+- N+1 is answered by a second query rather than a column: `count()` per
+  `(trace_id, statement)`, keeping the statements that pass a threshold.
+  It is a finding, not a measure of a row, so it reads as its own card.
+- Nothing is left of the backend mock. `SignalPage`, `data/signals.ts`
+  and `mocks/signals.ts` are gone, and System metrics reads the metric
+  store — see
+  [0034](0034-a-host-is-what-the-hostmetrics-receiver-reports.md).
