@@ -3,17 +3,20 @@ use std::collections::{BTreeMap, HashMap};
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, CacheGrouping, CachePoint, CacheSeries, CacheSummary,
-    DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan, MAX_ATTRIBUTES,
-    MAX_GROUPS, MAX_VALUES, ProjectId, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
+    DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, JobGrouping, JobSeries,
+    JobSummary, ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, RequestGrouping,
+    RequestSeries, RequestSummary, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
     ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter,
-    SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StoreError, TableFilter,
-    TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary,
+    SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StatementGrouping,
+    StatementSeries, StatementSummary, StoreError, TableFilter, TableRow, TenantId, TraceFilter,
+    TraceId, TraceOrder, TraceSummary,
 };
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::clickhouse::placement::{Held, Placed};
 use crate::clickhouse::query::Compiled;
+use crate::clickhouse::{job_read, request_read, statement_read};
 
 const SERVED: &str = "FROM spans FINAL \
    WHERE tenant_id = ? \
@@ -524,6 +527,57 @@ impl SpanReader for ClickhouseReader {
         })
     }
 
+    async fn requests(
+        &self,
+        tenant: TenantId,
+        grouping: RequestGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<RequestSummary>, StoreError> {
+        request_read::summaries(self, tenant, grouping, filter).await
+    }
+
+    async fn request_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<RequestSeries, StoreError> {
+        request_read::series(self, tenant, filter).await
+    }
+
+    async fn jobs(
+        &self,
+        tenant: TenantId,
+        grouping: JobGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<JobSummary>, StoreError> {
+        job_read::summaries(self, tenant, grouping, filter).await
+    }
+
+    async fn job_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<JobSeries, StoreError> {
+        job_read::series(self, tenant, filter).await
+    }
+
+    async fn statements(
+        &self,
+        tenant: TenantId,
+        grouping: StatementGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<StatementSummary>, StoreError> {
+        statement_read::summaries(self, tenant, grouping, filter).await
+    }
+
+    async fn statement_series(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<StatementSeries, StoreError> {
+        statement_read::series(self, tenant, filter).await
+    }
+
     async fn traces(
         &self,
         tenant: TenantId,
@@ -887,12 +941,12 @@ fn read_cache(row: CacheRow) -> CacheSummary {
     }
 }
 
-fn quantile(latency: &[f64], at: usize) -> u64 {
+pub(crate) fn quantile(latency: &[f64], at: usize) -> u64 {
     latency.get(at).copied().map_or(0, nanos_of)
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn nanos_of(value: f64) -> u64 {
+pub(crate) fn nanos_of(value: f64) -> u64 {
     if !value.is_finite() {
         return 0;
     }

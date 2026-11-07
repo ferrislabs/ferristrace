@@ -1,5 +1,6 @@
 use super::errors::BadWindow;
 use super::query::{Field, Query};
+use super::slots::{Slot, filled};
 use crate::catalogue::ProjectId;
 use crate::metrics::{MIN_STEP_NANOS, STEPS};
 use crate::placement::Placement;
@@ -460,14 +461,18 @@ pub struct ServicePoint {
     pub p95_nanos: Option<u64>,
 }
 
-impl ServicePoint {
-    pub fn idle(start_unix_nanos: u64) -> Self {
+impl Slot for ServicePoint {
+    fn idle(start_unix_nanos: u64) -> Self {
         Self {
             start_unix_nanos,
             requests: 0,
             errors: 0,
             p95_nanos: None,
         }
+    }
+
+    fn start_unix_nanos(self) -> u64 {
+        self.start_unix_nanos
     }
 }
 
@@ -485,22 +490,8 @@ pub struct ServiceSeries {
 impl ServiceSeries {
     #[must_use]
     pub fn filled(mut self, filter: &ServiceFilter) -> Self {
-        let mut served = core::mem::take(&mut self.points).into_iter().peekable();
         self.step_nanos = filter.step_nanos();
-        self.points = filter
-            .slot_starts()
-            .map(|start| {
-                while served
-                    .peek()
-                    .is_some_and(|point| point.start_unix_nanos < start)
-                {
-                    served.next();
-                }
-                served
-                    .next_if(|point| point.start_unix_nanos == start)
-                    .unwrap_or_else(|| ServicePoint::idle(start))
-            })
-            .collect();
+        self.points = filled(core::mem::take(&mut self.points), filter);
         self
     }
 }
@@ -540,8 +531,8 @@ pub struct CachePoint {
     pub p95_nanos: Option<u64>,
 }
 
-impl CachePoint {
-    pub fn idle(start_unix_nanos: u64) -> Self {
+impl Slot for CachePoint {
+    fn idle(start_unix_nanos: u64) -> Self {
         Self {
             start_unix_nanos,
             calls: 0,
@@ -551,6 +542,12 @@ impl CachePoint {
         }
     }
 
+    fn start_unix_nanos(self) -> u64 {
+        self.start_unix_nanos
+    }
+}
+
+impl CachePoint {
     pub fn hit_rate(&self) -> Option<f64> {
         hit_rate(self.hits, self.misses)
     }
@@ -575,22 +572,8 @@ impl CacheSeries {
 
     #[must_use]
     pub fn filled(mut self, filter: &ServiceFilter) -> Self {
-        let mut served = core::mem::take(&mut self.points).into_iter().peekable();
         self.step_nanos = filter.step_nanos();
-        self.points = filter
-            .slot_starts()
-            .map(|start| {
-                while served
-                    .peek()
-                    .is_some_and(|point| point.start_unix_nanos < start)
-                {
-                    served.next();
-                }
-                served
-                    .next_if(|point| point.start_unix_nanos == start)
-                    .unwrap_or_else(|| CachePoint::idle(start))
-            })
-            .collect();
+        self.points = filled(core::mem::take(&mut self.points), filter);
         self
     }
 }

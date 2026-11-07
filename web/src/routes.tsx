@@ -7,6 +7,9 @@ import { AppShell } from '@/components/layout/AppShell'
 import { Ai } from '@/pages/Ai'
 import { Alerts } from '@/pages/Alerts'
 import { CachePage } from '@/pages/backend/CachePage'
+import { JobsPage } from '@/pages/backend/JobsPage'
+import { QueriesPage } from '@/pages/backend/QueriesPage'
+import { RequestsPage } from '@/pages/backend/RequestsPage'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
 import { Kubernetes } from '@/pages/Infra'
@@ -167,6 +170,9 @@ const routeTree = rootRoute.addChildren([
     inShell('/logs', Logs, timed),
     inShell('/metrics', Metrics, timed),
     inShell('/backend/cache', CachePage, timed),
+    inShell('/backend/jobs', JobsPage, timed),
+    inShell('/backend/queries', QueriesPage, timed),
+    inShell('/backend/requests', RequestsPage, timed),
     inShell('/backend/$view', SignalPage),
     inShell('/status-page', StatusPageEditor, real),
     settingsRoute.addChildren(settingsChildren),

@@ -1,9 +1,10 @@
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, CacheGrouping, CacheSeries, CacheSummary, Clock, Explore,
-    ExploreError, FacetFilter, Facets, ListedSpan, Placements, ProjectId, Reader, Readers,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
-    ServiceSite, ServiceSummary, Span, SpanFilter, TableFilter, TableRow, TenantId, TraceFilter,
-    TraceId, TraceSummary, Whoami, Window,
+    ExploreError, FacetFilter, Facets, JobGrouping, JobSeries, JobSummary, ListedSpan, Placements,
+    ProjectId, Reader, Readers, RequestGrouping, RequestSeries, RequestSummary, SeenAttribute,
+    SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries, ServiceSite,
+    ServiceSummary, Span, SpanFilter, StatementGrouping, StatementSeries, StatementSummary,
+    TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceSummary, Whoami, Window,
 };
 
 use crate::registry::{ReadRepos, SiteRepos};
@@ -106,6 +107,117 @@ where
             reader,
         )
         .cache_series(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn requests(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: RequestGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<RequestSummary>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .requests(who, org, grouping, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn request_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<RequestSeries, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .request_series(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn jobs(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: JobGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<JobSummary>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .jobs(who, org, grouping, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn job_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<JobSeries, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .job_series(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn statements(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        grouping: StatementGrouping,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<StatementSummary>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .statements(who, org, grouping, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn statement_series(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<StatementSeries, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .statement_series(who, org, filter)
         .await
     }
 
