@@ -160,24 +160,50 @@ export function show(value: Chip['value']): string {
   return Array.isArray(value) ? value.join(', ') : String(value)
 }
 
-const managed = (chip: Chip, field: FieldRef) => sameField(chip.field, field) && (chip.op === 'eq' || chip.op === 'in')
+type Pair = { one: Op; many: Op }
 
-export function selectedValues(chips: Chip[], field: FieldRef): string[] {
-  const chip = chips.find((one) => managed(one, field))
+const KEPT: Pair = { one: 'eq', many: 'in' }
+
+const BARRED: Pair = { one: 'ne', many: 'not_in' }
+
+const holds = (chip: Chip, field: FieldRef, ops: Pair) =>
+  sameField(chip.field, field) && (chip.op === ops.one || chip.op === ops.many)
+
+const valuesOf = (chips: Chip[], field: FieldRef, ops: Pair): string[] => {
+  const chip = chips.find((one) => holds(one, field, ops))
   if (!chip || chip.value === undefined) return []
   return (Array.isArray(chip.value) ? chip.value : [chip.value]).map(String)
 }
 
-export function withValue(chips: Chip[], field: FieldRef, value: string, on: boolean, numeric: boolean): Chip[] {
-  const held = selectedValues(chips, field)
+function withChip(
+  chips: Chip[],
+  field: FieldRef,
+  value: string,
+  on: boolean,
+  numeric: boolean,
+  ops: Pair,
+): Chip[] {
+  const held = valuesOf(chips, field, ops)
   const next = on ? (held.includes(value) ? held : [...held, value]) : held.filter((one) => one !== value)
-  const at = chips.findIndex((one) => managed(one, field))
+  const at = chips.findIndex((one) => holds(one, field, ops))
   const typed = (text: string): Scalar => (numeric && Number.isFinite(Number(text)) ? Number(text) : text)
   const chip: Chip | null =
-    next.length === 0 ? null : next.length === 1 ? { field, op: 'eq', value: typed(next[0]) } : { field, op: 'in', value: next.map(typed) }
+    next.length === 0
+      ? null
+      : next.length === 1
+        ? { field, op: ops.one, value: typed(next[0]) }
+        : { field, op: ops.many, value: next.map(typed) }
   if (at === -1) return chip ? [...chips, chip] : chips
   return chip ? chips.map((one, index) => (index === at ? chip : one)) : chips.filter((_, index) => index !== at)
 }
+
+export const selectedValues = (chips: Chip[], field: FieldRef): string[] => valuesOf(chips, field, KEPT)
+
+export const withValue = (chips: Chip[], field: FieldRef, value: string, on: boolean, numeric: boolean): Chip[] =>
+  withChip(chips, field, value, on, numeric, KEPT)
+
+export const withoutValue = (chips: Chip[], field: FieldRef, value: string, on: boolean, numeric: boolean): Chip[] =>
+  withChip(chips, field, value, on, numeric, BARRED)
 
 const DURATION: FieldRef = { built: 'duration' }
 

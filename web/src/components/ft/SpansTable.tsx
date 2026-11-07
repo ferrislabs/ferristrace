@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Table, Td, Th } from '@/components/ui/misc'
 import { EmptyState, ServiceDot } from '@/components/ft/bits'
 import { because } from '@/auth/client'
+import { ValueMenu, type OnFilter } from '@/components/ft/ValueMenu'
 import type { SpanRow } from '@/data/spans'
 import { shortId } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -10,7 +11,7 @@ import { cn } from '@/lib/utils'
 const codeTone = (code: number, failed: boolean) =>
   code >= 500 || failed ? 'text-destructive-text' : code >= 400 ? 'text-warning-text' : 'text-muted-foreground'
 
-export function SpansTable({ rows, loading, failed, sifting, limit, cursor, density, onOpen, onCopy, onClear }: {
+export function SpansTable({ rows, loading, failed, sifting, limit, cursor, density, onOpen, onCopy, onClear, onFilter }: {
   rows: SpanRow[]
   loading: boolean
   failed: unknown
@@ -21,6 +22,7 @@ export function SpansTable({ rows, loading, failed, sifting, limit, cursor, dens
   onOpen: (row: SpanRow) => void
   onCopy: (id: string) => void
   onClear: () => void
+  onFilter: OnFilter
 }) {
   if (failed) return <EmptyState title="The spans could not be read">{because(failed, 'The span store did not answer')}</EmptyState>
   if (rows.length === 0) {
@@ -48,20 +50,34 @@ export function SpansTable({ rows, loading, failed, sifting, limit, cursor, dens
           {rows.map((row, index) => (
             <tr key={`${row.traceId}-${row.spanId}`} onClick={() => onOpen(row)} className={cn('cursor-pointer hover:[&>td]:bg-row-hover', index === cursor && '[&>td]:bg-accent-subtle')}>
               <Td className={cn(density === 'comfy' && 'h-10', 'font-mono text-control max-md:h-[52px] max-md:text-caption')}>{row.start}</Td>
-              <Td className="max-md:hidden"><span className="inline-flex items-center gap-1.5 text-control"><ServiceDot name={row.service} />{row.service}</span></Td>
+              <Td className="max-md:hidden">
+                <ValueMenu field={{ built: 'service' }} value={row.service} onFilter={onFilter}>
+                  <span className="inline-flex items-center gap-1.5 truncate text-control"><ServiceDot name={row.service} />{row.service}</span>
+                </ValueMenu>
+              </Td>
               <Td className="max-md:max-w-0">
                 <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-semibold text-foreground">{row.name}</span>
+                  <ValueMenu field={{ built: 'name' }} value={row.name} onFilter={onFilter}>
+                    <span className="truncate font-semibold text-foreground">{row.name}</span>
+                  </ValueMenu>
                   <span className="inline-flex items-center gap-1.5 truncate text-caption text-muted-foreground md:hidden"><ServiceDot name={row.service} />{row.service}</span>
                 </span>
               </Td>
-              <Td className="max-md:hidden"><span className="text-control text-muted-foreground">{row.kind}</span></Td>
+              <Td className="max-md:hidden">
+                <ValueMenu field={{ built: 'kind' }} value={row.kind} onFilter={onFilter}>
+                  <span className="text-control text-muted-foreground">{row.kind}</span>
+                </ValueMenu>
+              </Td>
               <Td numeric>
                 {row.code === null
                   ? row.status === 'error'
                     ? <span className="inline-flex text-destructive-text" title="The span failed"><CircleX className="size-3.5" aria-label="The span failed" /></span>
                     : <span className="text-muted-foreground">—</span>
-                  : <span className={codeTone(row.code, row.status === 'error')}>{row.code}</span>}
+                  : (
+                    <ValueMenu field={{ built: 'http_status_code' }} value={String(row.code)} onFilter={onFilter}>
+                      <span className={codeTone(row.code, row.status === 'error')}>{row.code}</span>
+                    </ValueMenu>
+                  )}
               </Td>
               <Td numeric>{row.dur}</Td>
               <Td className="max-md:hidden">
