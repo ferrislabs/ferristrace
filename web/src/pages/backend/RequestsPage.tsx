@@ -1,5 +1,5 @@
 import { Boxes, Search } from 'lucide-react'
-import { useId, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate as useRouterNavigate } from '@tanstack/react-router'
 import { useSearchParam } from '@/lib/router'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { EmptyState, Kpi, PageHeader, barBg } from '@/components/ft/bits'
+import { Bars, type Bar } from '@/components/ft/Histogram'
 import { PlacementPicker, placedCount } from '@/components/ft/Placement'
 import { usePlacement } from '@/data/placement'
 import {
@@ -17,7 +18,6 @@ import {
   groupingOf,
   useRequestRoutes,
   useRequestSeries,
-  type Point,
   type Route,
 } from '@/data/requests'
 import { useZoom } from '@/lib/bounds'
@@ -54,167 +54,6 @@ function sorted(routes: Route[], by: Sort): Route[] {
   return [...routes].sort(order[by])
 }
 
-const HEIGHT = 84
-const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
-const whole = new Intl.NumberFormat('en')
-const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8)
-const day = (ms: number) => new Date(ms).toISOString().slice(5, 10)
-const stamp = (ms: number) => `${day(ms)} ${clock(ms)}`
-
-function RequestBars({ points, loading, onZoom }: { points: Point[]; loading: boolean; onZoom: (from: number, to: number) => void }) {
-  const id = useId()
-  const box = useRef<HTMLDivElement>(null)
-  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
-  const [hover, setHover] = useState<number | null>(null)
-  const [cursor, setCursor] = useState<number | null>(null)
-  const [anchor, setAnchor] = useState<number | null>(null)
-
-  const step = points.length > 1 ? points[1].atMs - points[0].atMs : 0
-  const start = points[0]?.atMs ?? 0
-  const end = points.length > 0 ? points[points.length - 1].atMs + step : 0
-  const peak = Math.max(1, ...points.map((point) => point.requests))
-  const requests = points.reduce((sum, point) => sum + point.requests, 0)
-  const broken = points.reduce((sum, point) => sum + point.broken, 0)
-
-  const indexAt = (clientX: number): number => {
-    const rect = box.current?.getBoundingClientRect()
-    if (!rect || rect.width === 0 || points.length === 0) return 0
-    const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    return Math.min(points.length - 1, Math.floor(fraction * points.length))
-  }
-
-  const apply = (a: number, b: number) => {
-    if (points.length === 0) return
-    const low = Math.min(a, b)
-    const high = Math.max(a, b)
-    onZoom(points[low].atMs, points[high].atMs + step)
-  }
-
-  const selecting = drag ?? (cursor !== null && anchor !== null ? { from: anchor, to: cursor } : null)
-  const low = selecting ? Math.min(selecting.from, selecting.to) : 0
-  const high = selecting ? Math.max(selecting.from, selecting.to) : 0
-  const pointed = hover ?? cursor
-  const bar = pointed !== null ? points[pointed] : undefined
-  const left = pointed !== null && points.length > 0 ? ((pointed + 0.5) / points.length) * 100 : 0
-
-  if (points.length === 0 || requests === 0) {
-    return (
-      <div className="flex h-[84px] items-center justify-center rounded-lg border border-dashed text-caption text-muted-foreground" role="status">
-        {loading ? 'Counting the requests…' : 'No request matches in this window.'}
-      </div>
-    )
-  }
-
-  return (
-    <figure className="m-0 flex flex-col gap-2 rounded-lg border bg-card px-3 pb-2.5 pt-2.5">
-      <div className="flex items-baseline gap-2 text-caption">
-        <span className="font-semibold text-foreground">Requests over time</span>
-        <span className="text-muted-foreground">{whole.format(requests)} in all{broken > 0 ? `, ${whole.format(broken)} broken` : ''}</span>
-        <span className="ml-auto hidden text-faint-foreground sm:inline">Drag to zoom on a period</span>
-      </div>
-      <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
-        <div className="flex flex-col justify-between text-right font-mono text-[10px] leading-3 text-faint-foreground" style={{ height: HEIGHT }} aria-hidden>
-          <span>{compact.format(peak)}</span>
-          <span>0</span>
-        </div>
-        <div className="relative">
-          <div
-            ref={box}
-            role="application"
-            aria-roledescription="histogram with a time selection"
-            aria-label={`Requests over time, from ${stamp(start)} to ${stamp(end)}, ${whole.format(requests)} in all. Drag to zoom on a period, or use the arrow keys, Shift to select, Enter to zoom, Escape to cancel.`}
-            tabIndex={0}
-            className="relative flex cursor-crosshair touch-none select-none items-end gap-[2px] border-b border-border focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
-            style={{ height: HEIGHT, backgroundImage: 'linear-gradient(to bottom, var(--chart-grid) 1px, transparent 1px)', backgroundSize: '100% 50%' }}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId)
-              const at = indexAt(event.clientX)
-              setDrag({ from: at, to: at })
-              setCursor(null)
-              setAnchor(null)
-            }}
-            onPointerMove={(event) => {
-              const at = indexAt(event.clientX)
-              setHover(at)
-              if (drag) setDrag({ from: drag.from, to: at })
-            }}
-            onPointerUp={() => {
-              if (drag) apply(drag.from, drag.to)
-              setDrag(null)
-            }}
-            onPointerLeave={() => setHover(null)}
-            onPointerCancel={() => setDrag(null)}
-            onKeyDown={(event) => {
-              const last = points.length - 1
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                event.preventDefault()
-                const next = Math.min(last, Math.max(0, (cursor ?? (event.key === 'ArrowLeft' ? last : 0)) + (event.key === 'ArrowLeft' ? -1 : 1)))
-                if (event.shiftKey) setAnchor((was) => was ?? cursor ?? next)
-                else setAnchor(null)
-                setCursor(next)
-              } else if (event.key === 'Enter' && cursor !== null && anchor !== null) {
-                event.preventDefault()
-                apply(anchor, cursor)
-                setAnchor(null)
-                setCursor(null)
-              } else if (event.key === 'Escape') {
-                setAnchor(null)
-                setCursor(null)
-                setDrag(null)
-              }
-            }}
-            onBlur={() => { setAnchor(null); setCursor(null) }}
-          >
-            {points.map((one, index) => {
-              const tall = one.requests === 0 ? 0 : Math.max(3, (one.requests / peak) * 100)
-              const share = one.requests === 0 ? 0 : Math.min(1, one.broken / one.requests)
-              const dim = selecting !== null && (index < low || index > high)
-              return (
-                <div key={one.atMs} className="relative flex h-full min-w-0 flex-1 items-end" aria-hidden>
-                  <div
-                    className={cn('relative w-full overflow-hidden rounded-t-[3px] bg-primary transition-opacity', index === pointed ? 'opacity-100' : dim ? 'opacity-30' : 'opacity-60')}
-                    style={{ height: `${tall}%` }}
-                  >
-                    {share > 0 ? <div className="absolute inset-x-0 bottom-0 bg-destructive" style={{ height: `${Math.max(share * 100, 12)}%` }} /> : null}
-                  </div>
-                </div>
-              )
-            })}
-            {selecting ? (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-y-0 rounded-sm border border-primary bg-primary/10"
-                style={{ left: `${(low / points.length) * 100}%`, width: `${((high - low + 1) / points.length) * 100}%` }}
-              />
-            ) : null}
-          </div>
-          {bar ? (
-            <div
-              id={`${id}-tip`}
-              role="tooltip"
-              className="pointer-events-none absolute bottom-full z-20 mb-2 flex w-max max-w-[260px] -translate-x-1/2 flex-col gap-0.5 rounded-md border bg-popover px-2.5 py-1.5 text-caption shadow-md"
-              style={{ left: `clamp(70px, ${left}%, calc(100% - 70px))` }}
-            >
-              <span className="font-mono text-[11px] text-muted-foreground">{clock(bar.atMs)} to {clock(bar.atMs + step)}</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" aria-hidden /><span className="font-semibold">{whole.format(bar.requests)}</span> requests</span>
-              {bar.broken > 0 ? (
-                <span className="flex items-center gap-1.5 text-destructive-text"><span className="size-2 rounded-sm bg-destructive" aria-hidden /><span className="font-semibold">{whole.format(bar.broken)}</span> broken ({((bar.broken / Math.max(1, bar.requests)) * 100).toFixed(1)}%)</span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2 font-mono text-[10px] text-faint-foreground" aria-hidden>
-        <span />
-        <span className="flex justify-between">
-          <span>{stamp(start)}</span>
-          <span className="max-sm:hidden">{clock((start + end) / 2)}</span>
-          <span>{stamp(end)}</span>
-        </span>
-      </div>
-    </figure>
-  )
-}
 
 export function RequestsPage() {
   const goTo = useRouterNavigate()
@@ -256,6 +95,10 @@ export function RequestsPage() {
     [routes, sort, q],
   )
   const totalUs = useMemo(() => rows.reduce((sum, row) => sum + row.totalUs, 0), [rows])
+  const bars = useMemo<Bar[]>(
+    () => (series?.points ?? []).map((point) => ({ at: point.atMs, count: point.requests, errors: point.broken })),
+    [series],
+  )
   const { noun, field } = groupingNoun(group)
   const requests = series?.requests ?? 0
   const seconds = zoom ? (zoom.to - zoom.from) / 1000 : windowMs / 1000
@@ -303,7 +146,7 @@ export function RequestsPage() {
             <Button size="sm" variant="ghost" onClick={() => zoomTo(0, undefined)}>Back to the last {label}</Button>
           </div>
         ) : null}
-        <RequestBars points={series?.points ?? []} loading={seriesPending} onZoom={(from, to) => zoomTo(from, to)} />
+        <Bars bars={bars} loading={seriesPending} onZoom={(from, to) => zoomTo(from, to)} noun="requests" title="Requests over time" />
       </div>
 
       <Card className="overflow-hidden">
