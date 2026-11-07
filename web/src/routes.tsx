@@ -10,6 +10,7 @@ import { CachePage } from '@/pages/backend/CachePage'
 import { JobsPage } from '@/pages/backend/JobsPage'
 import { QueriesPage } from '@/pages/backend/QueriesPage'
 import { RequestsPage } from '@/pages/backend/RequestsPage'
+import { SystemPage } from '@/pages/backend/SystemPage'
 import { IncidentDetail } from '@/pages/IncidentDetail'
 import { Incidents } from '@/pages/Incidents'
 import { Kubernetes } from '@/pages/Infra'
@@ -25,7 +26,6 @@ import { PublicPostmortem, PublicStatus } from '@/pages/PublicStatus'
 import { ReleaseDetail, Releases } from '@/pages/Releases'
 import { ServiceDetail } from '@/pages/ServiceDetail'
 import { Services } from '@/pages/Services'
-import { SignalPage } from '@/pages/SignalPage'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
 import { Traces } from '@/pages/Traces'
@@ -173,7 +173,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/backend/jobs', JobsPage, timed),
     inShell('/backend/queries', QueriesPage, timed),
     inShell('/backend/requests', RequestsPage, timed),
-    inShell('/backend/$view', SignalPage),
+    inShell('/backend/system', SystemPage, timed),
     inShell('/status-page', StatusPageEditor, real),
     settingsRoute.addChildren(settingsChildren),
     inShell('$', NotFound, real),

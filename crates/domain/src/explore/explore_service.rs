@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use super::jobs::{JobGrouping, JobSeries, JobSummary};
 use super::query::AttributeKey;
 use super::requests::{RequestGrouping, RequestSeries, RequestSummary};
-use super::statements::{StatementGrouping, StatementSeries, StatementSummary};
+use super::statements::{Fanout, StatementGrouping, StatementSeries, StatementSummary};
 use super::value_objects::Window;
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
@@ -166,6 +166,16 @@ where
             .statement_series(org, &filter)
             .await?
             .filled(&filter))
+    }
+
+    pub async fn statement_fanouts(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<Fanout>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.statement_fanouts(org, &filter).await?)
     }
 
     async fn narrowed<'f>(

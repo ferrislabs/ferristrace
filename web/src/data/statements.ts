@@ -168,3 +168,24 @@ export function useStatementSeries(rangeMs: number, environment = '', placement:
   })
   return { series: data ?? null, pending: isPending, failed: error }
 }
+
+export type Fanout = { statement: string; traces: number; worst: number; calls: number }
+
+type Fanning = { least: number; statements: Fanout[] }
+
+export function useStatementFanouts(rangeMs: number, environment = '', placement: Placement = NOWHERE) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const zoom = useZoom()
+  const { data, isPending, error } = useQuery({
+    queryKey: ['statements', active?.org, project, 'fanouts', environment.trim(), rangeMs, zoomKey(zoom), placement],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    queryFn: async () => {
+      const { from, to } = boundsOf(rangeMs, zoom)
+      const params = spanning(from, to, project, environment, placement)
+      return json<Fanning>(await get(`/api/orgs/${active?.org}/statements/fanouts?${params.toString()}`))
+    },
+  })
+  return { fanouts: data?.statements ?? [], least: data?.least ?? 0, pending: isPending, failed: error }
+}

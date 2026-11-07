@@ -4,8 +4,8 @@ use std::time::Duration;
 use clickhouse::Client;
 use ferristrace_clickhouse::{BatchLimits, ClickhouseMigrator, ClickhouseReader, ClickhouseSink};
 use ferristrace_domain::{
-    ProjectId, Scope, ServiceFilter, Span, SpanId, SpanKind, SpanReader, SpanSink, SpanStatus,
-    StatementGrouping, TenantId, TraceId, Window,
+    LEAST_FANOUT, ProjectId, Scope, ServiceFilter, Span, SpanId, SpanKind, SpanReader, SpanSink,
+    SpanStatus, StatementGrouping, TenantId, TraceId, Window,
 };
 use ferristrace_infra::FixedClock;
 use uuid::Uuid;
@@ -60,6 +60,7 @@ fn project(seed: u128) -> ProjectId {
 
 struct Sent {
     seed: u32,
+    trace: Option<u32>,
     service: &'static str,
     name: &'static str,
     at: u64,
@@ -77,6 +78,7 @@ impl Sent {
     fn queried(seed: u32, name: &'static str, at: u64, took: u64) -> Self {
         Self {
             seed,
+            trace: None,
             service: "api",
             name,
             at,
@@ -89,6 +91,11 @@ impl Sent {
             database: None,
             operation: None,
         }
+    }
+
+    fn in_trace(mut self, trace: u32) -> Self {
+        self.trace = Some(trace);
+        self
     }
 
     fn texted(mut self, text: &'static str) -> Self {
@@ -154,7 +161,7 @@ impl Sent {
     fn span(&self) -> Span {
         let id = self.seed.to_be_bytes();
         let mut trace = [9u8; 16];
-        trace[12..].copy_from_slice(&id);
+        trace[12..].copy_from_slice(&self.trace.unwrap_or(self.seed).to_be_bytes());
         let mut span = [7u8; 8];
         span[4..].copy_from_slice(&id);
         let mut attributes: BTreeMap<Box<str>, Box<str>> = BTreeMap::new();
@@ -576,4 +583,67 @@ async fn a_project_bound_read_only_counts_the_statements_of_that_project() {
 
     let names: Vec<&str> = rows.iter().map(|row| &*row.statement).collect();
     assert_eq!(names, vec!["SELECT ?"]);
+}
+
+fn repeats() -> u32 {
+    u32::try_from(LEAST_FANOUT).expect("the fanout threshold fits a u32")
+}
+
+#[tokio::test]
+async fn a_statement_repeated_inside_one_trace_is_a_possible_fanout() {
+    let Some(client) = prepared("ferristrace_statement_fanout").await else {
+        return;
+    };
+    let mut sent: Vec<Sent> = (0..repeats())
+        .map(|i| {
+            Sent::queried(100 + i, "query", SECOND + u64::from(i) * MILLI, MILLI)
+                .in_trace(1)
+                .texted("SELECT price FROM products WHERE sku = 1")
+        })
+        .collect();
+    sent.extend((0..3).map(|i| {
+        Sent::queried(200 + i, "query", 2 * SECOND, MILLI)
+            .in_trace(2)
+            .texted("SELECT * FROM orders WHERE id = 1")
+    }));
+    written(&client, Scope::of(org(MINE)), &sent).await;
+
+    let found = ClickhouseReader::new(client)
+        .statement_fanouts(org(MINE), &the_hour())
+        .await
+        .expect("the fanouts read");
+
+    assert_eq!(found.len(), 1, "only the repeated statement fans out");
+    let worst = &found[0];
+    assert_eq!(
+        &*worst.statement,
+        "SELECT price FROM products WHERE sku = ?"
+    );
+    assert_eq!(worst.worst, LEAST_FANOUT);
+    assert_eq!(worst.traces, 1);
+    assert_eq!(worst.calls, LEAST_FANOUT);
+}
+
+#[tokio::test]
+async fn a_statement_spread_over_many_traces_is_no_fanout() {
+    let Some(client) = prepared("ferristrace_statement_spread").await else {
+        return;
+    };
+    let sent: Vec<Sent> = (0..repeats() + 10)
+        .map(|i| {
+            Sent::queried(300 + i, "query", SECOND + u64::from(i) * MILLI, MILLI)
+                .texted("SELECT price FROM products WHERE sku = 1")
+        })
+        .collect();
+    written(&client, Scope::of(org(MINE)), &sent).await;
+
+    let found = ClickhouseReader::new(client)
+        .statement_fanouts(org(MINE), &the_hour())
+        .await
+        .expect("the fanouts read");
+
+    assert!(
+        found.is_empty(),
+        "one call per trace is the opposite of an N+1"
+    );
 }

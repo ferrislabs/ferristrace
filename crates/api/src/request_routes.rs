@@ -55,7 +55,7 @@ pub(crate) struct Taken {
     per_second: f64,
     p50_us: u64,
     p95_us: u64,
-    total_nanos: u64,
+    total_us: u64,
     last_seen_ms: u64,
 }
 
@@ -78,7 +78,7 @@ fn taken(summary: RequestSummary, seconds: f64) -> Taken {
         broken: summary.broken,
         p50_us: summary.p50_nanos / NANOS_PER_MICRO,
         p95_us: summary.p95_nanos / NANOS_PER_MICRO,
-        total_nanos: summary.total_nanos,
+        total_us: summary.total_nanos / NANOS_PER_MICRO,
         last_seen_ms: summary.last_seen_unix_nanos / NANOS_PER_MILLI,
     }
 }

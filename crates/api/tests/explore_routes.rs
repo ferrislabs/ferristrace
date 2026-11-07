@@ -10,12 +10,14 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, AttributeFilter, AttributeKey, CacheGrouping, CachePoint, CacheSeries, CacheSummary,
-    DurationRange, Expr, FacetFilter, FacetValues, Facets, Field, ListedSpan, Measure, Membership,
-    Memberships, NoPhotos, OrgRole, Placement, PlacementName, PlacementReader, Placements,
-    ProjectId, SeenAttribute, SeenPod, SeenValue, SeenWorkload, SeriesFilter, SeriesLine,
-    SeriesResult, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Session,
-    SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent, SpanFilter, SpanId,
-    SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus, StoreError, TableFilter,
+    DurationRange, Expr, FacetFilter, FacetValues, Facets, Fanout, Field, JobGrouping, JobPoint,
+    JobSeries, JobSummary, LEAST_FANOUT, ListedSpan, Measure, Membership, Memberships, NoPhotos,
+    OrgRole, Placement, PlacementName, PlacementReader, Placements, ProjectId, RequestGrouping,
+    RequestPoint, RequestSeries, RequestSummary, SeenAttribute, SeenPod, SeenValue, SeenWorkload,
+    SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries,
+    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent,
+    SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus,
+    StatementGrouping, StatementPoint, StatementSeries, StatementSummary, StoreError, TableFilter,
     TableRow, TenantId, Test, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
     WhoamiError, Window, Workload, WorkloadKind,
 };
@@ -204,6 +206,121 @@ impl SpanReader for TwoSpans {
                 p95_nanos: Some(2_100_000),
             }],
         })
+    }
+
+    async fn requests(
+        &self,
+        _tenant: TenantId,
+        _grouping: RequestGrouping,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<RequestSummary>, StoreError> {
+        Ok(vec![
+            a_route("POST /pay", 10, 7, 1, 2),
+            a_route("GET /healthz", 4, 4, 0, 0),
+        ])
+    }
+
+    async fn request_series(
+        &self,
+        _tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<RequestSeries, StoreError> {
+        Ok(RequestSeries {
+            step_nanos: filter.step_nanos(),
+            requests: 10,
+            answered: 7,
+            refused: 1,
+            broken: 2,
+            p50_nanos: Some(900_000),
+            p95_nanos: Some(2_100_000),
+            p99_nanos: None,
+            points: vec![RequestPoint {
+                start_unix_nanos: filter.window.from_unix_nanos(),
+                requests: 10,
+                refused: 1,
+                broken: 2,
+                p95_nanos: Some(2_100_000),
+            }],
+        })
+    }
+
+    async fn jobs(
+        &self,
+        _tenant: TenantId,
+        _grouping: JobGrouping,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<JobSummary>, StoreError> {
+        Ok(vec![
+            a_job("payments.capture", 8, 2),
+            a_job("mail.send", 5, 0),
+        ])
+    }
+
+    async fn job_series(
+        &self,
+        _tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<JobSeries, StoreError> {
+        Ok(JobSeries {
+            step_nanos: filter.step_nanos(),
+            processed: 8,
+            failed: 2,
+            p50_nanos: Some(900_000),
+            p95_nanos: Some(2_100_000),
+            p99_nanos: None,
+            points: vec![JobPoint {
+                start_unix_nanos: filter.window.from_unix_nanos(),
+                processed: 8,
+                failed: 2,
+                p95_nanos: Some(2_100_000),
+            }],
+        })
+    }
+
+    async fn statements(
+        &self,
+        _tenant: TenantId,
+        _grouping: StatementGrouping,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<StatementSummary>, StoreError> {
+        Ok(vec![
+            a_statement("SELECT * FROM orders WHERE id = ?", 6, 1),
+            a_statement("SET x = ?", 2, 0),
+        ])
+    }
+
+    async fn statement_series(
+        &self,
+        _tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<StatementSeries, StoreError> {
+        Ok(StatementSeries {
+            step_nanos: filter.step_nanos(),
+            calls: 6,
+            errors: 1,
+            p50_nanos: Some(900_000),
+            p95_nanos: Some(2_100_000),
+            p99_nanos: None,
+            points: vec![StatementPoint {
+                start_unix_nanos: filter.window.from_unix_nanos(),
+                calls: 6,
+                errors: 1,
+                p95_nanos: Some(2_100_000),
+            }],
+        })
+    }
+
+    async fn statement_fanouts(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<Fanout>, StoreError> {
+        Ok(vec![Fanout {
+            statement: "SELECT price FROM products WHERE sku = ?".into(),
+            traces: 3,
+            worst: 41,
+            calls: 97,
+        }])
     }
 
     async fn traces(
@@ -1670,4 +1787,244 @@ async fn an_organisation_this_session_does_not_belong_to_reads_no_cache() {
     let (status, _) = served(TwoSpans, looking(&uri, Some(&session()))).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+fn a_route(route: &str, requests: u64, answered: u64, refused: u64, broken: u64) -> RequestSummary {
+    RequestSummary {
+        route: route.into(),
+        service: "checkout".into(),
+        method: "POST".into(),
+        requests,
+        answered,
+        refused,
+        broken,
+        p50_nanos: 900_000,
+        p95_nanos: 2_100_000,
+        total_nanos: 9_000_000,
+        last_seen_unix_nanos: 1_700_000_000_123_456_789,
+    }
+}
+
+fn a_job(job: &str, processed: u64, failed: u64) -> JobSummary {
+    JobSummary {
+        job: job.into(),
+        queue: "payments".into(),
+        system: "rabbitmq".into(),
+        processed,
+        failed,
+        p50_nanos: 900_000,
+        p95_nanos: 2_100_000,
+        total_nanos: 9_000_000,
+        last_seen_unix_nanos: 1_700_000_000_123_456_789,
+    }
+}
+
+fn a_statement(statement: &str, calls: u64, errors: u64) -> StatementSummary {
+    StatementSummary {
+        statement: statement.into(),
+        database: "orders".into(),
+        system: "postgresql".into(),
+        calls,
+        errors,
+        p50_nanos: 900_000,
+        p95_nanos: 2_100_000,
+        total_nanos: 9_000_000,
+        last_seen_unix_nanos: 1_700_000_000_123_456_789,
+    }
+}
+
+#[tokio::test]
+async fn the_requests_page_reads_its_routes_by_status_class() {
+    let uri = format!(
+        "/api/orgs/{}/requests?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let taken = &read["routes"][0];
+    assert_eq!(taken["route"], "POST /pay");
+    assert_eq!(taken["service"], "checkout");
+    assert_eq!(taken["method"], "POST");
+    assert_eq!(taken["requests"], 10);
+    assert_eq!(taken["answered"], 7);
+    assert_eq!(taken["refused"], 1);
+    assert_eq!(taken["broken"], 2);
+    assert_eq!(taken["broken_rate"], 0.2);
+    assert_eq!(taken["p95_us"], 2100);
+    assert_eq!(taken["total_us"], 9000);
+    assert_eq!(
+        taken["last_seen_ms"], 1_700_000_000_123u64,
+        "a time a browser can hold without losing digits"
+    );
+}
+
+#[tokio::test]
+async fn a_route_that_never_broke_serialises_a_nought_rate_not_a_null() {
+    let uri = format!(
+        "/api/orgs/{}/requests?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let healthy = &read["routes"][1];
+    assert_eq!(healthy["route"], "GET /healthz");
+    assert_eq!(healthy["broken"], 0);
+    assert_eq!(
+        healthy["broken_rate"], 0.0,
+        "a route that served requests has a rate, even at nought: {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_request_series_carries_each_status_class_per_point() {
+    let uri = format!(
+        "/api/orgs/{}/requests/series?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(read["requests"], 10);
+    assert_eq!(read["refused"], 1);
+    assert_eq!(read["broken"], 2);
+    assert_eq!(read["broken_rate"], 0.2);
+    assert!(read["points"][0].is_array(), "a point is a tuple: {body}");
+}
+
+#[tokio::test]
+async fn the_jobs_page_reads_its_jobs_with_a_failure_rate() {
+    let uri = format!(
+        "/api/orgs/{}/jobs?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let done = &read["jobs"][0];
+    assert_eq!(done["job"], "payments.capture");
+    assert_eq!(done["queue"], "payments");
+    assert_eq!(done["system"], "rabbitmq");
+    assert_eq!(done["processed"], 8);
+    assert_eq!(done["failed"], 2);
+    assert_eq!(done["failure_rate"], 0.25);
+    assert_eq!(done["total_us"], 9000);
+    assert!(
+        done.get("wait_p95_us").is_none() && done.get("retries").is_none(),
+        "no attribute carries a wait time or a retry count: {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_job_series_carries_the_failures_per_point() {
+    let uri = format!(
+        "/api/orgs/{}/jobs/series?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(read["processed"], 8);
+    assert_eq!(read["failed"], 2);
+    assert_eq!(read["failure_rate"], 0.25);
+    assert!(read["points"][0].is_array(), "a point is a tuple: {body}");
+}
+
+#[tokio::test]
+async fn the_queries_page_reads_its_statements_normalised() {
+    let uri = format!(
+        "/api/orgs/{}/statements?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let said = &read["statements"][0];
+    assert_eq!(said["statement"], "SELECT * FROM orders WHERE id = ?");
+    assert_eq!(said["database"], "orders");
+    assert_eq!(said["system"], "postgresql");
+    assert_eq!(said["calls"], 6);
+    assert_eq!(said["errors"], 1);
+    assert_eq!(said["total_us"], 9000);
+    assert!(
+        said.get("rows_avg").is_none(),
+        "no attribute reliably carries a row count: {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_statement_series_carries_the_errors_per_point() {
+    let uri = format!(
+        "/api/orgs/{}/statements/series?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(read["calls"], 6);
+    assert_eq!(read["errors"], 1);
+    assert!(read["points"][0].is_array(), "a point is a tuple: {body}");
+}
+
+#[tokio::test]
+async fn the_fanout_route_names_the_threshold_it_counted_against() {
+    let uri = format!(
+        "/api/orgs/{}/statements/fanouts?from=1700000000000&to=1700000100000",
+        org(MINE)
+    );
+
+    let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let read: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(
+        read["least"], LEAST_FANOUT,
+        "the page must not hard-code the threshold the store used: {body}"
+    );
+    let spread = &read["statements"][0];
+    assert_eq!(
+        spread["statement"],
+        "SELECT price FROM products WHERE sku = ?"
+    );
+    assert_eq!(spread["traces"], 3);
+    assert_eq!(spread["worst"], 41);
+    assert_eq!(spread["calls"], 97);
+}
+
+#[tokio::test]
+async fn the_new_backend_routes_refuse_an_organisation_that_is_not_yours() {
+    for path in [
+        "requests",
+        "requests/series",
+        "jobs",
+        "jobs/series",
+        "statements",
+        "statements/series",
+        "statements/fanouts",
+    ] {
+        let uri = format!("/api/orgs/{}/{path}?from=1&to=2", org(THEIRS));
+
+        let (status, body) = served(TwoSpans, looking(&uri, Some(&session()))).await;
+
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{path} must not say whether the organisation exists: {body}"
+        );
+    }
 }

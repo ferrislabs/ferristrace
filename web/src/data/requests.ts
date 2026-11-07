@@ -37,7 +37,7 @@ export type Route = {
   p95: string
   p95Us: number
   seen: string
-  totalNanos: number
+  totalUs: number
 }
 
 export type Point = { atMs: number; requests: number; refused: number; broken: number; p95Ms: number | null }
@@ -71,7 +71,7 @@ type Taken = {
   p50_us: number
   p95_us: number
   last_seen_ms: number
-  total_nanos: number
+  total_us: number
 }
 
 type Flowing = {
@@ -109,7 +109,7 @@ const taken = (row: Taken): Route => ({
   p95: dur(row.p95_us / 1000),
   p95Us: row.p95_us,
   seen: since(row.last_seen_ms),
-  totalNanos: row.total_nanos,
+  totalUs: row.total_us,
 })
 
 const flowing = (steps: Flowing, seconds: number): Series => ({

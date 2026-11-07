@@ -15,6 +15,7 @@ import {
   GROUPINGS,
   groupingNoun,
   groupingOf,
+  useStatementFanouts,
   useStatements,
   useStatementSeries,
   type Point,
@@ -120,6 +121,7 @@ export function QueriesPage() {
   const { placement, place } = usePlacement()
   const { statements, pending, failed } = useStatements(group, windowMs, settledEnv, placement)
   const { series } = useStatementSeries(windowMs, settledEnv, placement)
+  const { fanouts, least } = useStatementFanouts(windowMs, settledEnv, placement)
 
   const show = (part: Record<string, string | undefined>) =>
     void goTo({
@@ -181,6 +183,16 @@ export function QueriesPage() {
           value={series?.p95Ms === null || series?.p95Ms === undefined ? '—' : dur(series.p95Ms)}
           sub={series?.p99Ms === null || series?.p99Ms === undefined ? 'no p99 yet' : `p99 ${dur(series.p99Ms)}`}
         />
+        <Kpi
+          label="Possible N+1"
+          value={fanouts.length === 0 ? '—' : String(fanouts.length)}
+          sub={
+            fanouts.length === 0
+              ? `no statement ran ${least || 20}+ times in one trace`
+              : `worst: ${fanouts[0].worst.toLocaleString()} calls in one trace`
+          }
+          tone={fanouts.length > 0 ? 'warn' : undefined}
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -192,6 +204,47 @@ export function QueriesPage() {
         ) : null}
         <QueryHistogram series={series} pending={pending} onZoom={(from, to) => zoomTo(from, to)} />
       </div>
+
+      {fanouts.length > 0 ? (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
+            <h2 className="text-[15px] font-bold">Possible N+1</h2>
+            <span className="text-caption text-muted-foreground">
+              {fanouts.length} statement{fanouts.length === 1 ? '' : 's'} ran {least}+ times inside one trace
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <Table aria-label="Statements that fan out inside a trace">
+              <thead>
+                <tr>
+                  <Th>Statement</Th>
+                  <Th numeric className="w-[110px]">Worst trace</Th>
+                  <Th numeric className="w-[90px]">Traces</Th>
+                  <Th numeric className="w-[90px]">Calls</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {fanouts.map((fanout) => (
+                  <Tr key={fanout.statement}>
+                    <Td>
+                      <span className="truncate font-mono text-control" title={fanout.statement}>
+                        {fanout.statement}
+                      </span>
+                    </Td>
+                    <Td numeric className="font-semibold text-warning-text">{fanout.worst.toLocaleString()}</Td>
+                    <Td numeric>{fanout.traces.toLocaleString()}</Td>
+                    <Td numeric>{fanout.calls.toLocaleString()}</Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+          <p className="m-0 px-4 py-2.5 text-caption text-muted-foreground">
+            The same normalised statement ran {least} or more times inside a single trace, which is what an N+1 looks
+            like. Counted over the spans in this window, so a trace that started before it is counted only in part.
+          </p>
+        </Card>
+      ) : null}
 
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">

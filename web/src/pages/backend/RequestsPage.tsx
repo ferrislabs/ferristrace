@@ -255,7 +255,7 @@ export function RequestsPage() {
       ),
     [routes, sort, q],
   )
-  const totalNanos = useMemo(() => rows.reduce((sum, row) => sum + row.totalNanos, 0), [rows])
+  const totalUs = useMemo(() => rows.reduce((sum, row) => sum + row.totalUs, 0), [rows])
   const { noun, field } = groupingNoun(group)
   const requests = series?.requests ?? 0
   const seconds = zoom ? (zoom.to - zoom.from) / 1000 : windowMs / 1000
@@ -381,7 +381,7 @@ export function RequestsPage() {
               <tbody>
                 {rows.map((row) => {
                   const broken = row.brokenRate !== null && row.brokenRate > BROKEN_THRESHOLD
-                  const share = totalNanos === 0 ? 0 : (row.totalNanos / totalNanos) * 100
+                  const share = totalUs === 0 ? 0 : (row.totalUs / totalUs) * 100
                   return (
                     <Tr key={`${row.route} ${row.service} ${row.method}`}>
                       <Td><span className="font-mono font-semibold">{row.route}</span></Td>

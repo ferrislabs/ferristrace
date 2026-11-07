@@ -3,7 +3,7 @@ use core::future::Future;
 use super::jobs::{JobGrouping, JobSeries, JobSummary};
 use super::query::AttributeKey;
 use super::requests::{RequestGrouping, RequestSeries, RequestSummary};
-use super::statements::{StatementGrouping, StatementSeries, StatementSummary};
+use super::statements::{Fanout, StatementGrouping, StatementSeries, StatementSummary};
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
     SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
@@ -162,6 +162,14 @@ pub trait SpanReader {
         _filter: &ServiceFilter,
     ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
         async { Ok(StatementSeries::default()) }
+    }
+
+    fn statement_fanouts(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<Fanout>, StoreError>> + Send {
+        async { Ok(Vec::new()) }
     }
 }
 
@@ -325,6 +333,14 @@ impl<T: SpanReader + Sync> SpanReader for &T {
     ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
         (*self).statement_series(tenant, filter)
     }
+
+    fn statement_fanouts(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<Fanout>, StoreError>> + Send {
+        (*self).statement_fanouts(tenant, filter)
+    }
 }
 
 impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
@@ -486,5 +502,13 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         filter: &ServiceFilter,
     ) -> impl Future<Output = Result<StatementSeries, StoreError>> + Send {
         self.as_ref().statement_series(tenant, filter)
+    }
+
+    fn statement_fanouts(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<Fanout>, StoreError>> + Send {
+        self.as_ref().statement_fanouts(tenant, filter)
     }
 }

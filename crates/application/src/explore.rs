@@ -1,10 +1,11 @@
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, CacheGrouping, CacheSeries, CacheSummary, Clock, Explore,
-    ExploreError, FacetFilter, Facets, JobGrouping, JobSeries, JobSummary, ListedSpan, Placements,
-    ProjectId, Reader, Readers, RequestGrouping, RequestSeries, RequestSummary, SeenAttribute,
-    SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries, ServiceSite,
-    ServiceSummary, Span, SpanFilter, StatementGrouping, StatementSeries, StatementSummary,
-    TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceSummary, Whoami, Window,
+    ExploreError, FacetFilter, Facets, Fanout, JobGrouping, JobSeries, JobSummary, ListedSpan,
+    Placements, ProjectId, Reader, Readers, RequestGrouping, RequestSeries, RequestSummary,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
+    ServiceSite, ServiceSummary, Span, SpanFilter, StatementGrouping, StatementSeries,
+    StatementSummary, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
+    Window,
 };
 
 use crate::registry::{ReadRepos, SiteRepos};
@@ -218,6 +219,24 @@ where
             reader,
         )
         .statement_series(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn statement_fanouts(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<Fanout>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .statement_fanouts(who, org, filter)
         .await
     }
 
