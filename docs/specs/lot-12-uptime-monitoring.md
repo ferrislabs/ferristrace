@@ -42,11 +42,20 @@ Glossary
   Monitor      A definition: url, method, interval, timeout, expectation.
                Not "check" — a check is one run of it.
   Probe        One execution of a monitor, with its outcome and latency.
-  Outcome      Up, or Down with a reason. Never "error": a 500 the monitor
-               expects is Up.
-  Uptime       The share of a monitor's probes that passed over a window.
-               Measured. Not derived from span error rates, and never
-               called availability, which this does not measure either.
+  Outcome      Up, Down with a reason, or Inconclusive with a fault.
+               Never "error": a 500 the monitor expects is Up.
+  Fault        A failure on this side — no egress, our resolver, a tick
+               that overran. The target's health is unknown, not bad.
+  Confirmation The rule that a component flips to down only after
+               `CONFIRM_FAILURES` consecutive Down probes. One failed
+               probe is a blip, not an outage.
+  Reading      What the status page is told: Measured, Stale, or
+               Unmeasured. A page that admits it does not know is
+               reliable; one showing a stale green is worse than none,
+               because it silences the people about to report the outage.
+  Uptime       The share of a monitor's *conclusive* probes that passed
+               over a window. Measured. Not derived from span error rates,
+               and never called availability, which this does not measure.
 
 Invariants
   - A monitor's interval is one of a fixed set, never free-form.  [type: `Interval` enum]
@@ -60,10 +69,27 @@ Invariants
   - One replica probes a given monitor in a given tick.  [test, over `pg_try_advisory_xact_lock`]
   - A day with no probe is absent from the history, never reported as up.  [test]
   - A monitor belongs to one organisation and every read is narrowed to it.  [test]
+  - A probe this side could not carry out is Inconclusive, never Down, so
+    our own trouble never publishes someone else's outage.  [type: `Outcome::Inconclusive`]
+  - A component flips to down only after `CONFIRM_FAILURES` consecutive
+    Down probes; one Up in between resets the count.  [test, pure function]
+  - An Inconclusive probe counts in neither the numerator nor the
+    denominator of an uptime figure, so our trouble neither lowers nor
+    flatters the number.  [test]
+  - A monitor whose newest probe is older than `STALE_AFTER_INTERVALS`
+    intervals reads Stale, and one that never probed reads Unmeasured.
+    Neither ever reads as its last known status.  [type: `Reading` enum]
 
 Out of scope
-  - Agents in other regions. One origin only; the public page says so.
-    A regional outage is indistinguishable from a global one in this lot.
+  - Agents in other regions, and the quorum between them. One origin only;
+    the public page says so. A regional outage is indistinguishable from a
+    global one in this lot, and a fault on this side takes every monitor
+    with it at once — which is why such a probe is Inconclusive and not
+    Down. Lot 13.
+  - Hosting the status page outside the product's failure domain. A page
+    served by the stack it describes cannot report that stack's own
+    outage; the dead man's switch below is the honest admission, not a
+    fix. Lot 13.
   - TCP, ICMP and DNS checks. HTTP(S) only, so the model carries one case
     rather than an enum of protocols nothing asks for yet.
   - Raising an alert or opening an incident when a monitor goes down.
@@ -86,20 +112,39 @@ Design
     `Expectation { status: ExpectedStatus, body: Option<ExpectedText> }`
     `ExpectedStatus` — enum Exact(u16) | Successful (2xx)
     `Probe { monitor: MonitorId, at_ms, outcome: Outcome, latency_ms: Option<u32> }`
-    `Outcome` — enum Up | Down(Reason)
+    `Outcome` — enum Up | Down(Reason) | Inconclusive(Fault)
     `Reason` — enum Status(u16), Body, Timeout, Dns, Connect, Tls, Refused
-    `Uptime { probes: u64, up: u64 }` with `percent() -> Option<f64>`,
-      absent rather than 100 when no probe ran
-    `DayOfUptime { day_ms, probes: u64, up: u64, status: ComponentStatus }`
-    Use cases: `judge(&Monitor, &Probe) -> Outcome` is the adapter's job;
-      the domain owns `status_of(&Probe) -> ComponentStatus`,
-      `uptime_of(&[DayOfUptime]) -> Uptime` and `due(&Monitor, last_ms, now_ms) -> bool`.
+                 — the target's failure
+    `Fault`  — enum NoEgress, OurResolver, Overran, ShuttingDown
+                 — this side's failure, so the target is unknown
+    `CONFIRM_FAILURES: u8 = 3`
+    `STALE_AFTER_INTERVALS: u32 = 3`
+    `HISTORY_DAYS: u16 = 90`
+    `Uptime { conclusive: u64, up: u64 }` with `percent() -> Option<f64>`,
+      absent rather than 100 when nothing conclusive ran. Inconclusive
+      probes are in neither field.
+    `DayOfUptime { day_ms, up: u64, down: u64, inconclusive: u64 }` with
+      `reading() -> Reading`, so a day we did not measure renders as its
+      own thing and not as a green bar.
+    `Reading` — enum Measured(ComponentStatus) | Stale { at_ms } | Unmeasured
+    Pure functions the domain owns, all testable with no adapter:
+      `due(&Monitor, last_ms, now_ms) -> bool`
+      `confirmed(recent: &[Probe]) -> ComponentStatus` — down only when the
+        newest `CONFIRM_FAILURES` probes are all Down; one Up resets it;
+        Inconclusive probes are skipped, never counted as either
+      `read(recent: &[Probe], interval: Interval, now_ms) -> Reading`
+      `uptime_of(&[DayOfUptime]) -> Uptime`
+    Judging a response against an `Expectation` is the adapter's job; the
+    domain never sees an HTTP type.
 
   Ports: owned by `domain::monitoring::ports`, all generic (static dispatch,
     per rust-dev: no dyn, no async-trait)
     `Monitors`     — list, one, create, update, remove, `due(now_ms, limit)`
     `Prober`       — `probe(&Monitor) -> impl Future<Output = Probe>`
-    `ProbeStore`   — `record(&[Probe])`, `latest(&[MonitorId])`,
+    `ProbeStore`   — `record(&[Probe])`,
+                     `recent(&[MonitorId], take)` — the newest few per
+                       monitor, because confirmation and freshness both
+                       need more than the single latest probe,
                      `history(MonitorId, days) -> Vec<DayOfUptime>`
 
   Adapters
@@ -143,18 +188,35 @@ Acceptance (Gherkin)
   @spec-l12-8  A monitor's uptime over a window with no probe is absent,
                not a hundred per cent.
   @spec-l12-9  A status page component linked to a monitor reads down when
-               the monitor's latest probe is down, including when its
-               service sent no spans at all.
+               the monitor's last three probes are all down, including when
+               its service sent no spans at all.
   @spec-l12-10 A monitor read never crosses organisations.
   @spec-l12-11 Every monitor create, update and delete appears in the audit log.
+  @spec-l12-12 A single failed probe between passing ones leaves the
+               component operational, and a third consecutive failure
+               flips it to down.
+  @spec-l12-13 A probe this side could not carry out is stored as
+               inconclusive, leaves the component's status unchanged, and
+               moves neither the numerator nor the denominator of uptime.
+  @spec-l12-14 A monitor whose newest probe is older than three intervals
+               reads stale and not its last status, and one that never
+               probed reads unmeasured.
+  @spec-l12-15 A day holding only inconclusive probes renders as its own
+               state in the ninety-day history, not as an operational day.
+  @spec-l12-16 When no probe at all has been recorded for longer than
+               three intervals, the public page says it is not measuring
+               rather than showing the last known status.
 
 Simulation
-  Yes, for the scheduler only. `due(&Monitor, last_ms, now_ms)` and the
-  tick are time-dependent and are pure domain functions driven by
-  `FixedClock` in unit tests: a monitor not yet due, one due exactly on its
-  interval, one whose last probe is missing, and a tick that skips. No real
-  time passes. The prober itself is an adapter and is tested against a
-  local server in an integration test, not simulated.
+  Yes, and it now carries most of the lot's value. `due`, `confirmed` and
+  `read` are pure domain functions over a sequence of probes and a clock,
+  so the cases that matter are unit tests with `FixedClock` and no real
+  time: a monitor not yet due; one due exactly on its interval; a single
+  failure between passes; three consecutive failures; an Inconclusive in
+  the middle of a failing run; a newest probe three intervals old; no probe
+  at all. These are the states a false outage or a stale green comes from,
+  and none of them needs a network. The prober is an adapter and is tested
+  against a local server in an integration test, not simulated.
 
 Workstreams
   W1 domain + ports        — owns `crates/domain/src/monitoring/**`, no deps
@@ -182,9 +244,10 @@ Frozen contracts
   pub trait ProbeStore {
       fn record(&self, probes: &[Probe]) -> impl Future<Output = Result<(), StoreError>> + Send;
 
-      fn latest(
+      fn recent(
           &self,
           monitors: &[MonitorId],
+          take: u8,
       ) -> impl Future<Output = Result<Vec<Probe>, StoreError>> + Send;
 
       fn history(
@@ -196,9 +259,19 @@ Frozen contracts
   ```
 
 Risks / open questions
-  - A probe from the server's own network is not an outside view. The
-    public page must say which origin measured it, or the number overstates
-    what is known. Owner: W6, wording reviewed with the user.
+  - The structural one: a status page served by the stack it describes
+    cannot report that stack's own outage. If the server stops, no probe
+    runs, and without the dead man's switch the page would sit on its last
+    green while everything burned. `Reading::Stale` and `Unmeasured` are
+    the admission; they are not a fix. Only a second origin outside this
+    failure domain is, and that is lot 13. The public page says which
+    origin measured it, or the number overstates what is known.
+    Owner: W6, wording reviewed with the user.
+  - `CONFIRM_FAILURES = 3` trades detection delay for false outages: at a
+    thirty-second interval a real outage is published after about ninety
+    seconds. Shrinking it publishes blips; growing it hides short
+    outages. The number is a starting point to be measured, not a truth.
+    Owner: W1.
   - No redirects means a monitor on an http url that permanently redirects
     to https records 301. Mitigation: `ExpectedStatus::Exact(301)` works,
     and the editor warns when a url is http. A safe redirect follower
