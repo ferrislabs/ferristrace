@@ -67,6 +67,7 @@ struct Sent {
     kind: SpanKind,
     store: Option<(&'static str, &'static str)>,
     hit: Option<bool>,
+    key: Option<&'static str>,
 }
 
 impl Sent {
@@ -80,7 +81,13 @@ impl Sent {
             kind: SpanKind::Client,
             store: Some(("db.system.name", "redis")),
             hit: None,
+            key: None,
         }
+    }
+
+    fn keyed(mut self, key: &'static str) -> Self {
+        self.key = Some(key);
+        self
     }
 
     fn hit(mut self) -> Self {
@@ -130,6 +137,9 @@ impl Sent {
         }
         if let Some(hit) = self.hit {
             attributes.insert("cache.hit".into(), hit.to_string().into());
+        }
+        if let Some(key) = self.key {
+            attributes.insert("cache.key".into(), key.into());
         }
         Span {
             trace_id: TraceId::try_from(trace.as_slice()).expect("sixteen bytes"),
@@ -465,4 +475,81 @@ async fn a_project_bound_read_only_counts_the_operations_of_that_project() {
 
     let names: Vec<&str> = rows.iter().map(|row| &*row.operation).collect();
     assert_eq!(names, vec!["GET"]);
+}
+
+#[tokio::test]
+async fn a_key_is_grouped_by_its_pattern() {
+    let Some(client) = prepared("ferristrace_cache_key_patterns").await else {
+        return;
+    };
+    written(
+        &client,
+        Scope::of(org(MINE)),
+        &[
+            Sent::asked(1, "GET", SECOND, MILLI)
+                .keyed("cart:4812")
+                .hit(),
+            Sent::asked(2, "GET", 2 * SECOND, MILLI)
+                .keyed("cart:4813")
+                .missed(),
+            Sent::asked(3, "GET", 3 * SECOND, MILLI)
+                .keyed("session:a3f9b2c1d4e5")
+                .hit(),
+            Sent::asked(4, "GET", 4 * SECOND, MILLI)
+                .keyed("user:42:prefs")
+                .hit(),
+            Sent::asked(5, "GET", 5 * SECOND, MILLI)
+                .keyed("product:sku-9983")
+                .hit(),
+        ],
+    )
+    .await;
+
+    let rows = ClickhouseReader::new(client)
+        .caches(org(MINE), CacheGrouping::KeyPattern, &the_hour())
+        .await
+        .expect("the key patterns read");
+
+    let mut patterns: Vec<&str> = rows.iter().map(|row| &*row.operation).collect();
+    patterns.sort_unstable();
+    assert_eq!(
+        patterns,
+        vec!["cart:*", "product:sku-*", "session:*", "user:*:prefs"],
+        "numbers and identifiers are replaced, the shape is kept"
+    );
+    let cart = rows
+        .iter()
+        .find(|row| &*row.operation == "cart:*")
+        .expect("the two cart keys fold into one pattern");
+    assert_eq!(cart.calls, 2);
+    assert_eq!(cart.hit_rate(), Some(0.5));
+}
+
+#[tokio::test]
+async fn a_cache_span_carrying_no_key_is_grouped_under_unknown() {
+    let Some(client) = prepared("ferristrace_cache_keyless").await else {
+        return;
+    };
+    written(
+        &client,
+        Scope::of(org(MINE)),
+        &[
+            Sent::asked(1, "GET", SECOND, MILLI).keyed("cart:1").hit(),
+            Sent::asked(2, "SET", 2 * SECOND, MILLI),
+        ],
+    )
+    .await;
+
+    let rows = ClickhouseReader::new(client)
+        .caches(org(MINE), CacheGrouping::KeyPattern, &the_hour())
+        .await
+        .expect("the key patterns read");
+
+    let mut patterns: Vec<&str> = rows.iter().map(|row| &*row.operation).collect();
+    patterns.sort_unstable();
+    assert_eq!(
+        patterns,
+        vec!["cart:*", "unknown"],
+        "a call with no key is counted, not dropped"
+    );
 }

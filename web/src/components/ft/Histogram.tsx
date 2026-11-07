@@ -1,4 +1,5 @@
 import { useId, useMemo, useRef, useState } from 'react'
+import { useCacheSeries } from '@/data/caches'
 import { useLogSeries } from '@/data/logs'
 import type { Placement } from '@/data/placement'
 import { useSpanSeries } from '@/data/spanSeries'
@@ -33,6 +34,15 @@ export function Histogram({ items, rangeMs, onZoom }: { items: Node[]; rangeMs: 
 export function LogHistogram({ items, rangeMs, onZoom, placement, live }: { items: Node[]; rangeMs: number; onZoom: (from: number, to: number) => void; placement: Placement; live: boolean }) {
   const found = useLogSeries(items, rangeMs, placement, live)
   return <Bars bars={found.bars} loading={found.loading} onZoom={onZoom} noun="records" title="Records over time" />
+}
+
+export function CacheHistogram({ rangeMs, onZoom, environment, placement }: { rangeMs: number; onZoom: (from: number, to: number) => void; environment: string; placement: Placement }) {
+  const { series, pending } = useCacheSeries(rangeMs, environment, placement)
+  const bars = useMemo<Bar[]>(
+    () => (series?.points ?? []).map((point) => ({ at: point.atMs, count: point.calls, errors: point.misses })),
+    [series],
+  )
+  return <Bars bars={bars} loading={pending} onZoom={onZoom} noun="operations" title="Cache operations over time" />
 }
 
 function Bars({ bars, loading, onZoom, noun, title }: { bars: Bar[]; loading: boolean; onZoom: (from: number, to: number) => void; noun: string; title: string }) {

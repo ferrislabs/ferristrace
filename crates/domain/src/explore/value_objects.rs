@@ -510,6 +510,7 @@ pub enum CacheGrouping {
     #[default]
     Operation,
     Store,
+    KeyPattern,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

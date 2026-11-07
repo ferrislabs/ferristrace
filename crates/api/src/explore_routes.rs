@@ -1074,6 +1074,7 @@ pub enum Grouped {
     #[default]
     Operation,
     Store,
+    Key,
 }
 
 impl From<Grouped> for CacheGrouping {
@@ -1081,6 +1082,7 @@ impl From<Grouped> for CacheGrouping {
         match grouped {
             Grouped::Operation => Self::Operation,
             Grouped::Store => Self::Store,
+            Grouped::Key => Self::KeyPattern,
         }
     }
 }

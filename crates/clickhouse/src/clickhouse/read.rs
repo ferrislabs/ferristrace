@@ -83,6 +83,15 @@ const CACHE_BY_STORE: &str = "SELECT {store} AS operation, {store} AS store, \
      {counted} {cached} \
    GROUP BY operation, store ORDER BY calls DESC, store LIMIT 500";
 
+const KEY_PATTERN: &str = "if(attributes['cache.key'] = '', 'unknown', \
+   replaceRegexpAll( \
+     replaceRegexpAll(attributes['cache.key'], '[0-9a-fA-F-]{8,}', '*'), \
+     '[0-9]+', '*'))";
+
+const CACHE_BY_KEY: &str = "SELECT {pattern} AS operation, {store} AS store, \
+     {counted} {cached} \
+   GROUP BY operation, store ORDER BY calls DESC, operation, store LIMIT 500";
+
 const CACHE_STEPS: &str = "SELECT \
      toInt64(intDiv(toUnixTimestamp64Nano(start_time) - {from}, {step})) AS slot, \
      count() AS calls, \
@@ -333,6 +342,7 @@ impl ClickhouseReader {
             .query(
                 &sql.replace("{counted}", CACHE_COUNTED)
                     .replace("{cached}", CACHED)
+                    .replace("{pattern}", KEY_PATTERN)
                     .replace("{store}", STORE)
                     .replace("{placed}", &placed.and()),
             )
@@ -462,6 +472,7 @@ impl SpanReader for ClickhouseReader {
         let sql = match grouping {
             CacheGrouping::Operation => CACHE_BY_OPERATION,
             CacheGrouping::Store => CACHE_BY_STORE,
+            CacheGrouping::KeyPattern => CACHE_BY_KEY,
         };
         let rows: Vec<CacheRow> = self
             .cached(sql, tenant, filter)

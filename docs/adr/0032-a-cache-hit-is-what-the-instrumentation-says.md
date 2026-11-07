@@ -18,8 +18,9 @@ silently miscounts every cache that does not. Or read a verdict the
 instrumentation states, as Sentry's SDKs already do with `cache.hit`.
 
 Grouping the table had the same shape of choice. `cache.key` is high
-cardinality and often holds user data, so normalising it into a pattern
-would mean reading keys we would rather never store.
+cardinality and often holds user data: grouped raw it fills the table
+with rows of one call each and prints real identifiers in the UI, so it
+is only usable once reduced to a pattern.
 
 ## Decision
 A span is a cache operation when it is a client span and either carries
@@ -31,7 +32,13 @@ carrying neither is counted in the calls and in no verdict. The hit rate
 is `hits / (hits + misses)` and is **absent**, not zero, when the window
 holds no verdict at all.
 
-The table groups by span name and store. `cache.key` is never read.
+The table groups by span name and store, by store alone, or by key
+pattern: `cache.key` with every run of digits, and every hexadecimal run
+of eight characters or more, replaced by `*`. So `cart:4812` reads
+`cart:*`, `session:a3f9b2c1d4e5` reads `session:*`, and `user:42:prefs`
+keeps its shape as `user:*:prefs`. A call carrying no key reads
+`unknown`. The raw key is never shown and never derived into anything
+else.
 
 ## Consequences
 - A stack whose cache client sets no `cache.hit` sees its calls, its
@@ -39,7 +46,12 @@ The table groups by span name and store. `cache.key` is never read.
   what to instrument rather than draw nought per cent.
 - The operation column is the span name, so it is only as readable as the
   instrumentation makes it: `GET` from `ioredis`, `cache.get` from an
-  application wrapper. There is no key pattern column.
+  application wrapper.
+- The pattern is computed at read time, so the rule can change without a
+  migration, and it costs two `replaceRegexpAll` per row read. A key
+  whose identifiers are plain words (`cart:winter-sale`) is not reduced,
+  and a word that is all hexadecimal letters and long enough
+  (`deadbeef`) is reduced although it names nothing.
 - A Redis call that is not caching (a queue pop, a lock) counts as a
   cache operation. Grouping by operation keeps it visible rather than
   folded into a single number.
