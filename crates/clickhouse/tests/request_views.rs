@@ -67,7 +67,7 @@ struct Sent {
     kind: SpanKind,
     method: Option<(&'static str, &'static str)>,
     route: Option<&'static str>,
-    code: Option<u16>,
+    code: Option<(&'static str, u16)>,
     status: SpanStatus,
 }
 
@@ -82,7 +82,7 @@ impl Sent {
             kind: SpanKind::Server,
             method: Some(("http.request.method", "GET")),
             route: None,
-            code: Some(200),
+            code: Some(("http.response.status_code", 200)),
             status: SpanStatus::Ok,
         }
     }
@@ -93,7 +93,12 @@ impl Sent {
     }
 
     fn coded(mut self, code: u16) -> Self {
-        self.code = Some(code);
+        self.code = Some(("http.response.status_code", code));
+        self
+    }
+
+    fn coded_on_the_older_key(mut self, code: u16) -> Self {
+        self.code = Some(("http.status_code", code));
         self
     }
 
@@ -146,8 +151,8 @@ impl Sent {
         if let Some(route) = self.route {
             attributes.insert("http.route".into(), route.into());
         }
-        if let Some(code) = self.code {
-            attributes.insert("http.status_code".into(), code.to_string().into());
+        if let Some((key, code)) = self.code {
+            attributes.insert(key.into(), code.to_string().into());
         }
         Span {
             trace_id: TraceId::try_from(trace.as_slice()).expect("sixteen bytes"),
@@ -538,4 +543,41 @@ async fn a_request_series_buckets_requests_into_steps_and_totals_the_whole_windo
         .find(|point| point.requests > 0)
         .expect("a step holding the first two requests");
     assert_eq!((first.requests, first.refused, first.broken), (2, 1, 0));
+}
+
+#[tokio::test]
+async fn the_older_http_status_code_key_still_counts() {
+    let Some(client) = prepared("ferristrace_request_older_code").await else {
+        return;
+    };
+    written(
+        &client,
+        Scope::of(org(MINE)),
+        &[
+            Sent::served(1, "POST /pay", SECOND, MILLI)
+                .routed("/pay")
+                .coded_on_the_older_key(503),
+            Sent::served(2, "POST /pay", 2 * SECOND, MILLI)
+                .routed("/pay")
+                .coded(201),
+        ],
+    )
+    .await;
+
+    let rows = ClickhouseReader::new(client)
+        .requests(org(MINE), RequestGrouping::Route, &the_hour())
+        .await
+        .expect("the requests read");
+
+    assert_eq!(rows.len(), 1, "both spans are the same route and method");
+    let route = &rows[0];
+    assert_eq!(route.requests, 2);
+    assert_eq!(
+        route.answered, 1,
+        "the 201 on the current key is answered: {route:?}"
+    );
+    assert_eq!(
+        route.broken, 1,
+        "the 503 on the older key must still read as broken: {route:?}"
+    );
 }
