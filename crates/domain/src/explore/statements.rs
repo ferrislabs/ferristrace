@@ -79,3 +79,13 @@ impl StatementSeries {
 fn rate(part: u64, whole: u64) -> Option<f64> {
     (whole > 0).then(|| part as f64 / whole as f64)
 }
+
+pub const LEAST_FANOUT: u64 = 20;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fanout {
+    pub statement: Box<str>,
+    pub traces: u64,
+    pub worst: u64,
+    pub calls: u64,
+}

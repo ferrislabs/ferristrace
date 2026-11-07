@@ -68,8 +68,8 @@ pub use cluster::{
 pub use explore::{
     AttributeFilter, AttributeKey, BadQuery, BadWindow, CacheGrouping, CachePoint, CacheSeries,
     CacheSummary, Clause, DurationRange, Explore, ExploreError, Expr, FACET_VALUES, FacetFilter,
-    FacetValues, Facets, Field, JobGrouping, JobPoint, JobSeries, JobSummary, ListedSpan,
-    MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, Number, Op, Query,
+    FacetValues, Facets, Fanout, Field, JobGrouping, JobPoint, JobSeries, JobSummary, LEAST_FANOUT,
+    ListedSpan, MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, Number, Op, Query,
     RequestGrouping, RequestPoint, RequestSeries, RequestSummary, Scalar, SeenAttribute, SeenValue,
     SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries,
     ServiceSummary, SpanFilter, SpanOrder, SpanReader, SparseLine, StatementGrouping,

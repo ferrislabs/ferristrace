@@ -241,6 +241,10 @@ where
             "/api/orgs/{org}/statements/series",
             get(crate::statement_routes::statement_series::<S>),
         )
+        .route(
+            "/api/orgs/{org}/statements/fanouts",
+            get(crate::statement_routes::statement_fanouts::<S>),
+        )
         .route("/api/orgs/{org}/series", get(org_series::<S>))
         .route("/api/orgs/{org}/traces", get(traces::<S>))
         .route("/api/orgs/{org}/traces/search", post(search::<S>))

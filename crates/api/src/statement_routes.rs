@@ -3,7 +3,9 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ReadRepos;
-use ferristrace_domain::{StatementGrouping, StatementSeries, StatementSummary, TenantId};
+use ferristrace_domain::{
+    LEAST_FANOUT, StatementGrouping, StatementSeries, StatementSummary, TenantId,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -158,4 +160,48 @@ where
         .statement_series(&who, TenantId::new(org), &filter)
         .await?;
     Ok(Json(series.into()))
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct Fanning {
+    least: u64,
+    statements: Vec<Spread>,
+}
+
+#[derive(Debug, Serialize)]
+struct Spread {
+    statement: String,
+    traces: u64,
+    worst: u64,
+    calls: u64,
+}
+
+pub(crate) async fn statement_fanouts<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Fanning>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let filter = over.filter()?;
+
+    let found = state
+        .app
+        .statement_fanouts(&who, TenantId::new(org), &filter)
+        .await?
+        .into_iter()
+        .map(|fanout| Spread {
+            statement: fanout.statement.into_string(),
+            traces: fanout.traces,
+            worst: fanout.worst,
+            calls: fanout.calls,
+        })
+        .collect();
+    Ok(Json(Fanning {
+        least: LEAST_FANOUT,
+        statements: found,
+    }))
 }

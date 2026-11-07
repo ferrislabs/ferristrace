@@ -19,7 +19,9 @@ pub use query::{
     Scalar, Stream, Test, Value,
 };
 pub use requests::{RequestGrouping, RequestPoint, RequestSeries, RequestSummary};
-pub use statements::{StatementGrouping, StatementPoint, StatementSeries, StatementSummary};
+pub use statements::{
+    Fanout, LEAST_FANOUT, StatementGrouping, StatementPoint, StatementSeries, StatementSummary,
+};
 pub use value_objects::{
     AttributeFilter, CacheGrouping, CachePoint, CacheSeries, CacheSummary, DurationRange,
     FACET_VALUES, FacetFilter, FacetValues, Facets, ListedSpan, MAX_ATTRIBUTES, MAX_FACETS,

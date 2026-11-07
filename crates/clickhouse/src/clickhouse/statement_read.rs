@@ -1,7 +1,7 @@
 use clickhouse::Row;
 use ferristrace_domain::{
-    ServiceFilter, StatementGrouping, StatementPoint, StatementSeries, StatementSummary,
-    StoreError, TenantId,
+    Fanout, LEAST_FANOUT, ServiceFilter, StatementGrouping, StatementPoint, StatementSeries,
+    StatementSummary, StoreError, TenantId,
 };
 use serde::Deserialize;
 
@@ -198,4 +198,43 @@ pub(crate) async fn series(
             })
             .collect(),
     })
+}
+
+const FANOUT: &str = "SELECT statement, count() AS traces, max(calls) AS worst, \
+     sum(calls) AS total \
+   FROM ( \
+     SELECT {statement} AS statement, trace_id, count() AS calls \
+       {queried} \
+     GROUP BY statement, trace_id \
+     HAVING calls >= {least} \
+   ) \
+   GROUP BY statement ORDER BY worst DESC, statement LIMIT 50";
+
+#[derive(Debug, Row, Deserialize)]
+struct FanoutRow {
+    statement: String,
+    traces: u64,
+    worst: u64,
+    total: u64,
+}
+
+pub(crate) async fn fanouts(
+    reader: &ClickhouseReader,
+    tenant: TenantId,
+    filter: &ServiceFilter,
+) -> Result<Vec<Fanout>, StoreError> {
+    let asked = FANOUT.replace("{least}", &LEAST_FANOUT.to_string());
+    let rows: Vec<FanoutRow> = bound(reader, &asked, tenant, filter)
+        .fetch_all()
+        .await
+        .map_err(|error| refused(&error))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| Fanout {
+            statement: row.statement.into(),
+            traces: row.traces,
+            worst: row.worst,
+            calls: row.total,
+        })
+        .collect())
 }

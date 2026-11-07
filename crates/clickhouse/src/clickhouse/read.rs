@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use clickhouse::{Client, Row};
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, CacheGrouping, CachePoint, CacheSeries, CacheSummary,
-    DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, JobGrouping, JobSeries,
+    DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, Fanout, JobGrouping, JobSeries,
     JobSummary, ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, RequestGrouping,
     RequestSeries, RequestSummary, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
     ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter,
@@ -576,6 +576,14 @@ impl SpanReader for ClickhouseReader {
         filter: &ServiceFilter,
     ) -> Result<StatementSeries, StoreError> {
         statement_read::series(self, tenant, filter).await
+    }
+
+    async fn statement_fanouts(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<Fanout>, StoreError> {
+        statement_read::fanouts(self, tenant, filter).await
     }
 
     async fn traces(
