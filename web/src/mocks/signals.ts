@@ -39,17 +39,6 @@ export const BACKEND: Record<string, SignalView> = {
         foot: 'A job is a span with messaging.operation = process, or a span you mark with ferristrace.job = true. Scheduled jobs show their next run.',
         empty: ['No jobs yet', 'Jobs appear when your workers send consumer spans (messaging.operation = process) or spans tagged ferristrace.job.', 'span.setAttribute("ferristrace.job", true)']
       },
-      emails: {
-        title: 'Emails', subtitle: 'Outgoing mail, from mailer spans', group: ['Template', 'Provider'],
-        kpis: [['Sent', '3,904', 'last hour', '', 'muted'], ['Failed', '64', '1.6 % · SMTP 421 from provider', 'warn-text', 'warn-text'], ['Send time p95', '880 ms', 'provider round trip', '', 'muted'], ['Queued now', '12', 'oldest 40 s', '', 'muted']],
-        chart: ['Emails sent per minute', 'solid: sent · dashed: failed ×20', '100', '50', '0', 'About 65 emails per minute; failures appear after 14:10'],
-        a: (i: number) => 65 + Math.sin(i / 7) * 10 + (rnd() - 0.5) * 8, lo: 0, hi: 100, b: (i: number) => (i >= 38 ? 2.5 : 0.2) * 20 + (rnd() - 0.5) * 4,
-        table: ['Templates', '9 templates', 'Filter templates'],
-        cols: [C('Template'), C('Provider', 'cw-120'), C('Sent', 'num cw-90'), C('Failed', 'num cw-90', 'descending'), C('Send p95', 'num cw-90'), C('Last sent', 'cw-110')],
-        rows: [['order_confirmation', 'smtp · mailgun', '1,210', '41', '940 ms', '14:32:02', true], ['welcome_email', 'smtp · mailgun', '88', '9', '820 ms', '14:31:40', true], ['shipping_update', 'smtp · mailgun', '1,402', '8', '860 ms', '14:32:01'], ['cart_reminder', 'smtp · mailgun', '960', '6', '790 ms', '14:30:00'], ['invoice', 'smtp · mailgun', '244', '0', '1.1 s', '14:12:44']].map((r: R) => [X(r[0], 'mono strong'), X(r[1], 'mono sm muted'), X(r[2], 'num mono'), X(r[3], 'num mono ' + (r[6] ? 'warn-text strong' : ''), { warn: r[6] }), X(r[4], 'num mono'), X(r[5], 'mono sm')]),
-        foot: 'FerrisTrace records the template, recipient domain and result, never the address or the body. Recipients show as *@domain.',
-        empty: ['No emails yet', 'Emails appear when your mailer sends a span named email.send with ferristrace.email.template. Addresses and bodies are not recorded.', 'span.setAttribute("ferristrace.email.template", "order_confirmation")']
-      },
       queries: {
         title: 'Queries', subtitle: 'Database statements, from db client spans', group: ['Statement', 'Database'],
         kpis: [['Queries', '1,340/s', 'postgresql 92 %', '', 'muted'], ['Slow', '38/min', 'over 100 ms', 'warn-text', 'warn-text'], ['p95', '9.4 ms', 'p99 62 ms', '', 'muted'], ['Possible N+1', '3', 'same statement 20+ times in one trace', 'warn-text', 'warn-text']],
