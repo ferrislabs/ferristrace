@@ -196,3 +196,30 @@ async fn a_read_key_lists_channels() {
 
     assert_eq!(listed, Ok(Vec::new()));
 }
+
+#[tokio::test]
+async fn a_chat_channel_needs_no_seal_and_carries_no_secret() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+
+    let issued = book(OrgRole::Admin, &ledger, &notebook, &keys)
+        .create(
+            &token(),
+            an_org(MINE),
+            &named("team-chat"),
+            &Destination::parse(
+                ChannelKind::Slack,
+                "https://hooks.slack.com/services/T000/B000/XXXX",
+            )
+            .expect("a slack hook"),
+            &Couriered::default(),
+        )
+        .await
+        .expect("a channel");
+
+    assert!(issued.secret.is_none());
+    assert!(!issued.channel.has_secret);
+    assert_eq!(
+        notebook.entries()[0].detail.get("kind"),
+        Some(Some("slack"))
+    );
+}

@@ -15,7 +15,7 @@ Context
 
   One pull request per part, in this order:
     13A  Incident context, read when the incident page opens
-    13B  Chat surface (Slack first)           spec only, see Open
+    13B  Slack and Discord                    13B1 delivered, 13B2 and 13B3 next
     13C  Insights: MTTA, MTTR, frequency per service
 
 Glossary
@@ -61,10 +61,32 @@ Design
     Web: a "Context" card on the incident page, each row a link to the
     release, issue, resource or trace. Empty sections are hidden.
 
-  13B Chat surface
-    Declare, update, resolve and comment from Slack; one channel per
-    incident; the timeline mirrors both ways. Needs a Slack app, OAuth and
-    an inbound endpoint. See Open.
+  13B Slack and Discord
+    Three steps, each its own pull request, cheapest first.
+    13B1  Alerts to a chat channel. New channel kinds `slack` and `discord`
+          next to `email` and `webhook`. The target is the incoming webhook
+          URL the service gives; it is accepted only on the service's own
+          host and path (`hooks.slack.com/services/`, `discord.com/api/
+          webhooks/` and its ptb, canary and discordapp.com spellings), over
+          https. No app, no OAuth, no secret: it works the same on a cloud
+          and a self-hosted deployment. Delivery rides the alert outbox
+          (retries, abandonment, private-address guard) with a payload per
+          service: a coloured Slack attachment, a Discord embed, each with
+          the alert, severity, change, value, labels, culprit pods and
+          versions, and a link to the alert. User-controlled text is
+          escaped (Slack) or sent with `allowed_mentions` empty (Discord),
+          so a rule name cannot ping a channel.
+    13B2  Incident events to a chat channel. A project names one chat
+          channel; opening, status, severity and owner changes and public
+          comments post there as the incident timeline grows.
+    13B3  Commands. A Slack app (slash command, buttons) and a Discord
+          application (interactions endpoint) to declare, acknowledge,
+          resolve and comment. Inbound calls are verified (Slack signing
+          secret HMAC with a 5 minute window, Discord Ed25519). A chat
+          user acts as a FerrisTrace account only after linking: Slack by
+          verified email, Discord by a one-time code typed in the app.
+          Needs a hosted app per deployment; self-hosted admins bring
+          their own app credentials.
 
   13C Insights
     MTTA, MTTR and incident count per service and per severity over a
@@ -73,8 +95,8 @@ Design
 Open
   Q1  Who uses it: an SRE team living in Slack, or small teams wanting one
       tool? Decides whether 13B comes before 13C.
-  Q2  Slack needs a hosted app and OAuth. Cloud only, or also self-hosted
-      with the admin's own Slack app?
+  Q2  13B3 needs an app per deployment. Cloud only, or also self-hosted
+      with the admin's own app credentials (the draft assumes both)?
   Q3  Is "first seen inside the window" the right test for a new issue, or
       also an issue whose rate rose sharply?
 
@@ -107,3 +129,12 @@ Delivered with 13A
   hours before the incident opened until it resolved, or now. Resource
   figures are read over the five minutes before the end of the window.
   Q3 stays open: a new issue is one first seen inside the window.
+
+Delivered with 13B1
+  Channel kinds `slack` and `discord` (migration `20261121000001`). A chat
+  channel has no secret and needs no at-rest seal. Alerts only; incident
+  events follow in 13B2.
+  @spec-l13-7  A Slack or Discord channel accepts only its service's own
+               webhook URL and carries no secret.
+  @spec-l13-8  An alert state change reaches a chat channel as that
+               service's message, and a rule name cannot mention anyone.

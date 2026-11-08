@@ -73,7 +73,7 @@ export type AlertEvent = {
   context?: AlertContext
 }
 
-export type ChannelKind = 'email' | 'webhook'
+export type ChannelKind = 'email' | 'webhook' | 'slack' | 'discord'
 
 export type Channel = { id: string; name: string; kind: ChannelKind; target: string; has_secret: boolean }
 

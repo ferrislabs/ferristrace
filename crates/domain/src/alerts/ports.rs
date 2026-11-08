@@ -7,8 +7,8 @@ use super::entities::{
 };
 use super::errors::{DeliveryError, ProbeError};
 use super::value_objects::{
-    ChannelId, ChannelName, Destination, Duty, EmailList, Labels, NotificationId, RuleId, Signal,
-    WebhookSecret, WebhookUrl,
+    ChannelId, ChannelName, Chat, Destination, Duty, EmailList, Labels, NotificationId, RuleId,
+    Signal, WebhookSecret, WebhookUrl,
 };
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
@@ -199,6 +199,13 @@ pub trait WebhookSender {
         secret: &WebhookSecret,
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
+
+    fn send_chat(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        dispatch: &Dispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
 }
 
 impl<T: WebhookSender + Sync> WebhookSender for &T {
@@ -214,6 +221,15 @@ impl<T: WebhookSender + Sync> WebhookSender for &T {
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
         (*self).send(url, secret, dispatch)
     }
+
+    fn send_chat(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        dispatch: &Dispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        (*self).send_chat(chat, url, dispatch)
+    }
 }
 
 impl<T: WebhookSender + Send + Sync> WebhookSender for std::sync::Arc<T> {
@@ -228,6 +244,15 @@ impl<T: WebhookSender + Send + Sync> WebhookSender for std::sync::Arc<T> {
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
         self.as_ref().send(url, secret, dispatch)
+    }
+
+    fn send_chat(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        dispatch: &Dispatch,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        self.as_ref().send_chat(chat, url, dispatch)
     }
 }
 

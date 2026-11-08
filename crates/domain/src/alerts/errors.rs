@@ -37,6 +37,8 @@ pub enum BadChannel {
     Address,
     #[error("a webhook is an http or https url with a host and no credentials")]
     Url,
+    #[error("a {0} channel takes the incoming webhook url that {0} gives")]
+    ChatHook(&'static str),
     #[error("a channel keeps its kind; create another one instead")]
     KindChanged,
 }

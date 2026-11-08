@@ -263,3 +263,29 @@ async fn a_webhook_to_a_private_address_is_never_sent() {
     assert_eq!(ledger.notifications()[0].attempt, 1);
     let _ = AlertRules::list(&ledger, org()).await;
 }
+
+#[tokio::test]
+async fn spec_l13_8_a_chat_channel_is_sent_its_message_without_a_secret() {
+    let ledger = AlertLedger::default();
+    let slack = channel(
+        &ledger,
+        "ops",
+        ChannelKind::Slack,
+        "https://hooks.slack.com/services/T000/B000/XXXX",
+    )
+    .await;
+    a_firing(&ledger, &[slack]).await;
+    let (mailer, hooks) = (Couriered::default(), Couriered::default());
+
+    courier(&ledger, &mailer, &hooks)
+        .drain(UnixSeconds::new(NOW))
+        .await
+        .expect("a drain");
+
+    let sent = hooks.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        &*sent[0].0,
+        "https://hooks.slack.com/services/T000/B000/XXXX"
+    );
+}

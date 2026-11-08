@@ -641,3 +641,36 @@ async fn spec_l2_3_two_replicas_never_evaluate_the_same_tick_twice() {
         .expect("a slot");
     assert_eq!(u64::try_from(slot).expect("positive"), (NOW + 60) / 60);
 }
+
+#[tokio::test]
+async fn a_chat_channel_is_kept_without_a_secret_and_reads_back_as_its_service() {
+    let Some(pool) = control_plane("alerts_chat_channel", 2).await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+
+    let made = committed!(pg, |channels: AlertChannels| {
+        let slack = channels
+            .create(
+                org,
+                &ChannelName::try_from("ops").expect("a name"),
+                &Destination::parse(
+                    ChannelKind::Slack,
+                    "https://hooks.slack.com/services/T000/B000/XXXX",
+                )
+                .expect("a hook"),
+                None,
+                owner,
+            )
+            .await
+            .expect("kept")
+            .expect("fresh");
+        let listed = channels.list(org).await.expect("listed");
+        (slack, listed)
+    });
+
+    assert!(!made.0.has_secret);
+    assert_eq!(made.1.len(), 1);
+    assert_eq!(made.1[0].kind(), ChannelKind::Slack);
+}
