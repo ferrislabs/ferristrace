@@ -80,6 +80,7 @@ fn definition(channels: Vec<ChannelId>) -> Definition {
         no_data: NoDataPolicy::Ok,
         channels,
         page: None,
+        mentions: Default::default(),
     })
     .expect("a definition")
 }

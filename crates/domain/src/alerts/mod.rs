@@ -34,8 +34,8 @@ pub use culprits::{
     CulpritPod, Culprits, MAX_CULPRIT_FACETS, MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS,
 };
 pub use design::{
-    Colors, CustomField, Design, Fact, MAX_CUSTOM_FIELDS, MAX_PINGS, Shown, Template, colour,
-    snowflake, thumbnail,
+    Colors, CustomField, Design, Fact, MAX_CUSTOM_FIELDS, MAX_PINGS, Mentions, Shown, Template,
+    colour, snowflake, thumbnail,
 };
 pub use entities::{
     AlertEvent, Channel, ChannelChange, ChannelView, Claimed, Delivery, Dispatch, Drained,

@@ -11,7 +11,9 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use crate::alert_codec::{culprits_of, decode, encode, encode_culprits, encode_labels, labels_of};
+use crate::alert_codec::{
+    culprits_of, decode, encode, encode_culprits, encode_labels, labels_of, mentions_of,
+};
 use crate::design_codec;
 use crate::keys::to_nanos;
 use crate::unit_of_work::{Postgres, SharedTx};
@@ -431,6 +433,12 @@ impl PostgresAlertOutbox {
                 labels: labels_of(row.get::<&str, _>("labels")).ok_or_else(|| refused("labels"))?,
                 at_ms,
                 context: row.get::<Option<&str>, _>("context").and_then(culprits_of),
+                mentions: row
+                    .get::<Option<&str>, _>("mentions")
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                    .map_or_else(Default::default, |held| {
+                        mentions_of(Some(&held)).unwrap_or_default()
+                    }),
             },
             channel: Channel {
                 id: channel,
@@ -477,7 +485,7 @@ impl AlertOutbox for PostgresAlertOutbox {
              e.labels::text AS labels, e.from_status AS from_status, e.to_status AS to_status, \
              e.value AS value, e.at_ms AS at_ms, e.context::text AS context, \
              c.name AS channel_name, c.kind AS kind, c.target AS target, \
-             c.secret_sealed AS secret_sealed \
+             c.secret_sealed AS secret_sealed, (a.definition->'mentions')::text AS mentions \
              FROM alert_outbox o \
              JOIN alerts a ON a.id = o.rule_id \
              JOIN alert_events e ON e.id = o.event_id \

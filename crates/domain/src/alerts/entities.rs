@@ -1,5 +1,5 @@
 use super::culprits::{CulpritPod, Culprits};
-use super::design::Design;
+use super::design::{Design, Mentions};
 use super::errors::DeliveryError;
 use super::value_objects::{
     AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Condition, Definition,
@@ -49,6 +49,7 @@ pub struct RulePatch {
     pub no_data: Option<NoDataPolicy>,
     pub channels: Option<Vec<ChannelId>>,
     pub page: Option<Option<ScheduleId>>,
+    pub mentions: Option<Mentions>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -160,6 +161,7 @@ pub struct Dispatch {
     pub labels: Labels,
     pub at_ms: u64,
     pub context: Option<Culprits>,
+    pub mentions: Mentions,
 }
 
 impl Dispatch {
@@ -190,6 +192,7 @@ impl Dispatch {
                 vec!["2.4.1".into()],
                 &Labels::default(),
             )),
+            mentions: Mentions::default(),
         }
     }
 }

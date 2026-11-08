@@ -12,9 +12,9 @@ use ferristrace_domain::{
     Aggregation, AlertError, AlertEvent, AlertSeverity, AlertStatus, BadChannel, BadDesign,
     BadRule, ChannelChange, ChannelId, ChannelKind, ChannelName, ChannelView, Chat, Comparison,
     Condition, Definition, DefinitionParts, Delivery, Destination, IssuedChannel, Labels, LlmGroup,
-    LlmMeasure, LlmSignal, LogSignal, MetricSignal, NoDataPolicy, Preview, ProjectId, RuleDraft,
-    RuleId, RuleName, RulePatch, ScheduleId, SeriesState, Severity, Signal, TenantId, TraceMeasure,
-    TraceSignal, Watched,
+    LlmMeasure, LlmSignal, LogSignal, Mentions, MetricSignal, NoDataPolicy, Preview, ProjectId,
+    RuleDraft, RuleId, RuleName, RulePatch, ScheduleId, SeriesState, Severity, Signal, TenantId,
+    TraceMeasure, TraceSignal, Watched,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
@@ -312,6 +312,29 @@ pub struct RuleBody {
     channels: Vec<Uuid>,
     #[serde(default)]
     page: Option<PageBody>,
+    #[serde(default)]
+    mentions: MentionsBody,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MentionsBody {
+    #[serde(default)]
+    roles: Vec<String>,
+    #[serde(default)]
+    users: Vec<String>,
+}
+
+impl MentionsBody {
+    fn mentions(&self) -> Result<Mentions, BadDesign> {
+        Mentions::new(&self.roles, &self.users)
+    }
+
+    fn of(mentions: &Mentions) -> Self {
+        Self {
+            roles: mentions.roles().iter().map(ToString::to_string).collect(),
+            users: mentions.users().iter().map(ToString::to_string).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -350,6 +373,7 @@ impl RuleBody {
             no_data: no_data_of(&self.no_data)?,
             channels: channels_of(self.channels),
             page: self.page.map(PageBody::schedule),
+            mentions: self.mentions.mentions()?,
         };
         Ok((
             self.name,
@@ -408,6 +432,8 @@ pub struct RulePatchBody {
     channels: Option<Vec<Uuid>>,
     #[serde(default)]
     page: Given<PageBody>,
+    #[serde(default)]
+    mentions: Option<MentionsBody>,
 }
 
 impl RulePatchBody {
@@ -436,6 +462,11 @@ impl RulePatchBody {
                 Given::Cleared => Some(None),
                 Given::Set(page) => Some(Some(page.schedule())),
             },
+            mentions: self
+                .mentions
+                .as_ref()
+                .map(MentionsBody::mentions)
+                .transpose()?,
         })
     }
 }
@@ -479,6 +510,7 @@ pub struct RuleView {
     no_data: &'static str,
     channels: Vec<Uuid>,
     page: Option<PageBody>,
+    mentions: MentionsBody,
     state: StateBody,
 }
 
@@ -520,6 +552,7 @@ impl From<Watched> for RuleView {
             page: definition.page().map(|schedule| PageBody {
                 schedule: schedule.as_uuid(),
             }),
+            mentions: MentionsBody::of(definition.mentions()),
             state: StateBody {
                 status: overall.status.as_str(),
                 value: overall.value,
