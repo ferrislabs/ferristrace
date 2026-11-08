@@ -1,26 +1,32 @@
 use super::entities::{InboxItem, InboxItemDraft};
 use super::errors::InboxError;
-use super::ports::InboxStore;
-use super::value_objects::{InboxItemId, PAGE_LIMIT};
+use super::ports::{InboxStore, NotificationSettings};
+use super::value_objects::{InboxItemId, NotificationPreferences, PAGE_LIMIT};
 use crate::identity::{AccountId, SessionStore};
 use crate::organisation::{Memberships, Whoami};
 use crate::secret::SessionToken;
 use crate::telemetry::TenantId;
 
 #[derive(Debug)]
-pub struct InboxDesk<S, G, I> {
+pub struct InboxDesk<S, G, I, N> {
     whoami: Whoami<S, G>,
     store: I,
+    settings: N,
 }
 
-impl<S, G, I> InboxDesk<S, G, I>
+impl<S, G, I, N> InboxDesk<S, G, I, N>
 where
     S: SessionStore,
     G: Memberships,
     I: InboxStore,
+    N: NotificationSettings,
 {
-    pub fn new(whoami: Whoami<S, G>, store: I) -> Self {
-        Self { whoami, store }
+    pub fn new(whoami: Whoami<S, G>, store: I, settings: N) -> Self {
+        Self {
+            whoami,
+            store,
+            settings,
+        }
     }
 
     async fn standing(&self, token: &SessionToken, org: TenantId) -> Result<AccountId, InboxError> {
@@ -64,14 +70,38 @@ where
         Ok(self.store.mark_all_read(account, org, now_ms).await?)
     }
 
+    pub async fn notification_preferences(
+        &self,
+        token: &SessionToken,
+    ) -> Result<NotificationPreferences, InboxError> {
+        let who = self.whoami.of(token).await?;
+        Ok(self.settings.of(who.account).await?.unwrap_or_default())
+    }
+
+    pub async fn set_notification_preferences(
+        &self,
+        token: &SessionToken,
+        preferences: &NotificationPreferences,
+    ) -> Result<NotificationPreferences, InboxError> {
+        let who = self.whoami.of(token).await?;
+        self.settings.set(who.account, preferences).await?;
+        Ok(preferences.clone())
+    }
+
     /// Called by a future producer (not over HTTP): raises one item for one
-    /// account in one organisation. No session of its own - the caller already
-    /// knows who it is raising this for.
+    /// account in one organisation, unless that account turned the in-app
+    /// channel off for this kind - then there is nothing to raise and this
+    /// returns `None`. No session of its own - the caller already knows who
+    /// it is raising this for.
     pub async fn notify(
         &self,
         draft: &InboxItemDraft,
         now_ms: u64,
-    ) -> Result<InboxItem, InboxError> {
-        Ok(self.store.create(draft, now_ms).await?)
+    ) -> Result<Option<InboxItem>, InboxError> {
+        let preferences = self.settings.of(draft.account).await?.unwrap_or_default();
+        if !preferences.channels_for(draft.kind).in_app {
+            return Ok(None);
+        }
+        Ok(Some(self.store.create(draft, now_ms).await?))
     }
 }

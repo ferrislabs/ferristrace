@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
@@ -7,11 +9,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use ferristrace_application::Stack;
-use ferristrace_application::registry::ProfileRepos;
+use ferristrace_application::registry::{InboxRepos, ProfileRepos};
 use ferristrace_domain::{
-    AccountId, AccountName, AccountTimezone, BadAccountName, BadPhoto, BadTimezone,
-    MAX_PHOTO_BYTES, Photo, PhotoError, Portrait, Preferences, ProfileError, RowDensity, StartPage,
-    TenantId, TimestampPrecision, Who,
+    AccountId, AccountName, AccountTimezone, BadAccountName, BadPhoto, BadTimezone, Channels,
+    InboxError, InboxItemKind, KINDS, MAX_PHOTO_BYTES, NotificationPreferences, Photo, PhotoError,
+    Portrait, Preferences, ProfileError, RowDensity, StartPage, TenantId, TimestampPrecision, Who,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -114,13 +116,17 @@ impl PreferencesAsked {
 
 pub fn me_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S::Repos: ProfileRepos,
+    S::Repos: ProfileRepos + InboxRepos,
 {
     Router::new()
         .route("/auth/me", get(standing::<S>).patch(rename::<S>))
         .route(
             "/auth/me/preferences",
             get(preferences::<S>).put(set_preferences::<S>),
+        )
+        .route(
+            "/auth/me/notification-preferences",
+            get(notification_preferences::<S>).put(set_notification_preferences::<S>),
         )
         .route(
             "/auth/me/photo",
@@ -187,6 +193,106 @@ where
     let token = carried(&state, &headers).await?;
     let preferences = asked.preferences()?;
     let saved = state.app.set_preferences(&token, &preferences).await?;
+    Ok(Json(saved.into()))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChannelBody {
+    kind: &'static str,
+    in_app: bool,
+    email: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NotificationPreferencesBody {
+    email_enabled: bool,
+    weekly_digest: bool,
+    channels: Vec<ChannelBody>,
+}
+
+impl From<NotificationPreferences> for NotificationPreferencesBody {
+    fn from(preferences: NotificationPreferences) -> Self {
+        Self {
+            email_enabled: preferences.email_enabled,
+            weekly_digest: preferences.weekly_digest,
+            channels: KINDS
+                .into_iter()
+                .map(|kind| {
+                    let picked = preferences.channels_for(kind);
+                    ChannelBody {
+                        kind: kind.as_str(),
+                        in_app: picked.in_app,
+                        email: picked.email,
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChannelAsked {
+    kind: String,
+    in_app: bool,
+    email: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NotificationPreferencesAsked {
+    email_enabled: bool,
+    weekly_digest: bool,
+    channels: Vec<ChannelAsked>,
+}
+
+impl NotificationPreferencesAsked {
+    fn preferences(&self) -> Result<NotificationPreferences, StandingRefused> {
+        let mut channels = BTreeMap::new();
+        for row in &self.channels {
+            let kind = InboxItemKind::parse(&row.kind)
+                .ok_or(StandingRefused::Malformed("channels.kind"))?;
+            channels.insert(
+                kind,
+                Channels {
+                    in_app: row.in_app,
+                    email: row.email,
+                },
+            );
+        }
+        Ok(NotificationPreferences {
+            email_enabled: self.email_enabled,
+            weekly_digest: self.weekly_digest,
+            channels,
+        })
+    }
+}
+
+async fn notification_preferences<S: Stack>(
+    State(state): State<AppState<S>>,
+    headers: HeaderMap,
+) -> Result<Json<NotificationPreferencesBody>, StandingRefused>
+where
+    S::Repos: InboxRepos,
+{
+    let token = carried(&state, &headers).await?;
+    Ok(Json(
+        state.app.notification_preferences(&token).await?.into(),
+    ))
+}
+
+async fn set_notification_preferences<S: Stack>(
+    State(state): State<AppState<S>>,
+    headers: HeaderMap,
+    Json(asked): Json<NotificationPreferencesAsked>,
+) -> Result<Json<NotificationPreferencesBody>, StandingRefused>
+where
+    S::Repos: InboxRepos,
+{
+    let token = carried(&state, &headers).await?;
+    let preferences = asked.preferences()?;
+    let saved = state
+        .app
+        .set_notification_preferences(&token, &preferences)
+        .await?;
     Ok(Json(saved.into()))
 }
 
@@ -271,6 +377,17 @@ impl From<ProfileError> for StandingRefused {
             ProfileError::NoPhoto => Self::NoPhoto,
             ProfileError::Photos(refusal) => Self::NoStore(refusal),
             ProfileError::StoreUnreachable => Self::Unavailable,
+        }
+    }
+}
+
+impl From<InboxError> for StandingRefused {
+    fn from(error: InboxError) -> Self {
+        match error {
+            InboxError::NoSession => Self::NoSession,
+            InboxError::NotYours | InboxError::NoSuchItem | InboxError::StoreUnreachable => {
+                Self::Unavailable
+            }
         }
     }
 }

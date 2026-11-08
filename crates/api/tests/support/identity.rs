@@ -6,9 +6,11 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountDirectory, AccountId, AccountName, Accounts, AuthError, Membership, Memberships, Photos,
-    Portrait, Preferences, ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionStore,
-    SessionToken, StoreError, UserTokens, WhoamiError,
+    AccountDirectory, AccountId, AccountName, Accounts, AuthError, InboxItem, InboxItemDraft,
+    InboxItemId, InboxStore, Membership, Memberships, NotificationPreferences,
+    NotificationSettings, Photos, Portrait, Preferences, ProvisionPolicy, ResolvedIdentity,
+    Session, SessionError, SessionStore, SessionToken, StoreError, TenantId, UserTokens,
+    WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -67,6 +69,66 @@ impl AccountDirectory for Nowhere {
         _policy: ProvisionPolicy,
     ) -> Result<AccountId, AuthError> {
         Err(AuthError::ProviderUnreachable)
+    }
+}
+
+/// A test stack that does not model notifications gets this: every call is
+/// refused, the same way `Nowhere` refuses profile calls. Nothing in these
+/// tests exercises it; it exists only so routers that also require
+/// `InboxRepos` (because they live under the same `/auth/me` prefix) still
+/// have something to build.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoInbox;
+
+impl InboxStore for NoInbox {
+    async fn list(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _limit: u32,
+    ) -> Result<Vec<InboxItem>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn create(&self, _draft: &InboxItemDraft, _at_ms: u64) -> Result<InboxItem, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn mark_read(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _id: InboxItemId,
+        _at_ms: u64,
+    ) -> Result<bool, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn mark_all_read(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _at_ms: u64,
+    ) -> Result<u64, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn prune(&self, _older_than_ms: u64) -> Result<u64, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+}
+
+impl NotificationSettings for NoInbox {
+    async fn of(&self, _account: AccountId) -> Result<Option<NotificationPreferences>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn set(
+        &self,
+        _account: AccountId,
+        _preferences: &NotificationPreferences,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unreachable)
     }
 }
 
@@ -231,6 +293,17 @@ where
 
     fn build(&self, (): &()) -> Self::Repo {
         self.accounts.clone()
+    }
+}
+
+impl<S, M, A> RepoFor<domain::Inbox> for Fakes<S, M, A>
+where
+    Self: Untransacted,
+{
+    type Repo = NoInbox;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        NoInbox
     }
 }
 

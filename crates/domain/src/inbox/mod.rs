@@ -11,5 +11,8 @@ mod value_objects_tests;
 pub use desk::InboxDesk;
 pub use entities::{InboxItem, InboxItemDraft};
 pub use errors::InboxError;
-pub use ports::InboxStore;
-pub use value_objects::{InboxItemId, InboxItemKind, PAGE_LIMIT, RETENTION_DAYS};
+pub use ports::{InboxStore, NotificationSettings};
+pub use value_objects::{
+    Channels, InboxItemId, InboxItemKind, KINDS, NotificationPreferences, PAGE_LIMIT,
+    RETENTION_DAYS,
+};

@@ -5,8 +5,8 @@ use uuid::Uuid;
 use super::desk::InboxDesk;
 use super::entities::{InboxItem, InboxItemDraft};
 use super::errors::InboxError;
-use super::ports::InboxStore;
-use super::value_objects::{InboxItemId, InboxItemKind};
+use super::ports::{InboxStore, NotificationSettings};
+use super::value_objects::{Channels, InboxItemId, InboxItemKind, NotificationPreferences};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
@@ -114,6 +114,26 @@ impl InboxStore for &Ledger {
     }
 }
 
+#[derive(Default)]
+struct Settings {
+    kept: Mutex<Option<NotificationPreferences>>,
+}
+
+impl NotificationSettings for &Settings {
+    async fn of(&self, _account: AccountId) -> Result<Option<NotificationPreferences>, StoreError> {
+        Ok(self.kept.lock().expect("the lock").clone())
+    }
+
+    async fn set(
+        &self,
+        _account: AccountId,
+        preferences: &NotificationPreferences,
+    ) -> Result<(), StoreError> {
+        *self.kept.lock().expect("the lock") = Some(preferences.clone());
+        Ok(())
+    }
+}
+
 struct OneSession;
 
 impl SessionStore for OneSession {
@@ -144,8 +164,11 @@ impl Memberships for MemberOfOrg {
     }
 }
 
-fn desk(ledger: &Ledger) -> InboxDesk<OneSession, MemberOfOrg, &Ledger> {
-    InboxDesk::new(Whoami::new(OneSession, MemberOfOrg), ledger)
+fn desk<'a>(
+    ledger: &'a Ledger,
+    settings: &'a Settings,
+) -> InboxDesk<OneSession, MemberOfOrg, &'a Ledger, &'a Settings> {
+    InboxDesk::new(Whoami::new(OneSession, MemberOfOrg), ledger, settings)
 }
 
 fn draft(kind: InboxItemKind) -> InboxItemDraft {
@@ -159,13 +182,21 @@ fn draft(kind: InboxItemKind) -> InboxItemDraft {
     }
 }
 
+async fn raise(
+    desk: &InboxDesk<OneSession, MemberOfOrg, &Ledger, &Settings>,
+    kind: InboxItemKind,
+) -> InboxItem {
+    desk.notify(&draft(kind), 1_000)
+        .await
+        .expect("raised")
+        .expect("not suppressed by a preference")
+}
+
 #[tokio::test]
 async fn an_item_raised_for_an_account_is_listed_unread() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
-    desk.notify(&draft(InboxItemKind::Membership), 1_000)
-        .await
-        .expect("raised");
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
+    raise(&desk, InboxItemKind::Membership).await;
 
     let items = desk.list(&token(), org(ORG)).await.expect("a read");
 
@@ -176,8 +207,8 @@ async fn an_item_raised_for_an_account_is_listed_unread() {
 
 #[tokio::test]
 async fn a_stranger_to_the_org_cannot_list_its_items() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
 
     let refused = desk.list(&token(), org(OTHER_ORG)).await;
 
@@ -186,15 +217,10 @@ async fn a_stranger_to_the_org_cannot_list_its_items() {
 
 #[tokio::test]
 async fn marking_one_item_read_sets_when_and_leaves_the_rest_alone() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
-    let raised = desk
-        .notify(&draft(InboxItemKind::Issue), 1_000)
-        .await
-        .expect("raised");
-    desk.notify(&draft(InboxItemKind::Usage), 1_000)
-        .await
-        .expect("raised");
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
+    let raised = raise(&desk, InboxItemKind::Issue).await;
+    raise(&desk, InboxItemKind::Usage).await;
 
     desk.mark_read(&token(), org(ORG), raised.id, 2_000)
         .await
@@ -209,8 +235,8 @@ async fn marking_one_item_read_sets_when_and_leaves_the_rest_alone() {
 
 #[tokio::test]
 async fn marking_an_unknown_item_is_refused() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
 
     let refused = desk
         .mark_read(&token(), org(ORG), InboxItemId::fresh(), 2_000)
@@ -221,14 +247,10 @@ async fn marking_an_unknown_item_is_refused() {
 
 #[tokio::test]
 async fn mark_all_read_flips_every_unread_item_and_counts_them() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
-    desk.notify(&draft(InboxItemKind::Issue), 1_000)
-        .await
-        .expect("raised");
-    desk.notify(&draft(InboxItemKind::Usage), 1_000)
-        .await
-        .expect("raised");
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
+    raise(&desk, InboxItemKind::Issue).await;
+    raise(&desk, InboxItemKind::Usage).await;
 
     let flipped = desk
         .mark_all_read(&token(), org(ORG), 2_000)
@@ -241,9 +263,62 @@ async fn mark_all_read_flips_every_unread_item_and_counts_them() {
 }
 
 #[tokio::test]
+async fn an_account_that_turned_off_in_app_for_a_kind_raises_nothing() {
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let mut muted = NotificationPreferences::default();
+    muted.channels.insert(
+        InboxItemKind::Issue,
+        Channels {
+            in_app: false,
+            email: false,
+        },
+    );
+    (&settings)
+        .set(account(ACCOUNT), &muted)
+        .await
+        .expect("kept");
+    let desk = desk(&ledger, &settings);
+
+    let raised = desk
+        .notify(&draft(InboxItemKind::Issue), 1_000)
+        .await
+        .expect("no store error");
+
+    assert_eq!(raised, None);
+    assert!(
+        desk.list(&token(), org(ORG))
+            .await
+            .expect("a read")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn preferences_default_until_chosen_then_round_trip() {
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
+    let defaults = desk.notification_preferences(&token()).await.expect("read");
+    assert_eq!(defaults, NotificationPreferences::default());
+
+    let chosen = NotificationPreferences {
+        email_enabled: false,
+        weekly_digest: true,
+        ..NotificationPreferences::default()
+    };
+    let kept = desk
+        .set_notification_preferences(&token(), &chosen)
+        .await
+        .expect("kept");
+    let read_back = desk.notification_preferences(&token()).await.expect("read");
+
+    assert_eq!(kept, chosen);
+    assert_eq!(read_back, chosen);
+}
+
+#[tokio::test]
 async fn a_token_with_no_session_is_refused() {
-    let ledger = Ledger::default();
-    let desk = desk(&ledger);
+    let (ledger, settings) = (Ledger::default(), Settings::default());
+    let desk = desk(&ledger, &settings);
 
     let refused = desk
         .list(&SessionToken::for_subject("nope"), org(ORG))

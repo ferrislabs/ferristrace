@@ -20,7 +20,7 @@ use uuid::Uuid;
 #[path = "support/identity.rs"]
 mod identity;
 
-use identity::Nowhere;
+use identity::{NoInbox, Nowhere};
 
 const TOKEN: &str = "ft.person.0123456789";
 const ACCOUNT: u128 = 9;
@@ -193,6 +193,14 @@ impl RepoFor<domain::Accounts> for Fakes {
 
     fn build(&self, (): &()) -> Self::Repo {
         Nowhere
+    }
+}
+
+impl RepoFor<domain::Inbox> for Fakes {
+    type Repo = NoInbox;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        NoInbox
     }
 }
 

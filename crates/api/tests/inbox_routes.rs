@@ -11,8 +11,8 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore, Membership,
-    Memberships, NoPhotos, OrgRole, Session, SessionError, SessionStore, SessionToken, StoreError,
-    TenantId, UnixSeconds, WhoamiError,
+    Memberships, NoPhotos, NotificationPreferences, NotificationSettings, OrgRole, Session,
+    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -73,6 +73,7 @@ impl Memberships for MemberOfMine {
 #[derive(Debug, Default)]
 struct Ledger {
     items: Mutex<Vec<InboxItem>>,
+    prefs: Mutex<Option<NotificationPreferences>>,
 }
 
 impl Ledger {
@@ -163,6 +164,21 @@ impl InboxStore for Shared {
 
     async fn prune(&self, _older_than_ms: u64) -> Result<u64, StoreError> {
         Ok(0)
+    }
+}
+
+impl NotificationSettings for Shared {
+    async fn of(&self, _account: AccountId) -> Result<Option<NotificationPreferences>, StoreError> {
+        Ok(self.0.prefs.lock().expect("the lock").clone())
+    }
+
+    async fn set(
+        &self,
+        _account: AccountId,
+        preferences: &NotificationPreferences,
+    ) -> Result<(), StoreError> {
+        *self.0.prefs.lock().expect("the lock") = Some(preferences.clone());
+        Ok(())
     }
 }
 
