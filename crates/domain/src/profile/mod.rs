@@ -10,4 +10,7 @@ mod value_objects_tests;
 pub use errors::{BadAccountName, BadPhoto, PhotoError, ProfileError};
 pub use ports::{Accounts, NoPhotos, Photos};
 pub use profile_service::Profile;
-pub use value_objects::{AccountName, MAX_PHOTO_BYTES, Photo, PhotoKind, Pictured, Portrait};
+pub use value_objects::{
+    AccountName, AccountTimezone, MAX_PHOTO_BYTES, Photo, PhotoKind, Pictured, Portrait,
+    Preferences, RowDensity, StartPage, TimestampPrecision,
+};

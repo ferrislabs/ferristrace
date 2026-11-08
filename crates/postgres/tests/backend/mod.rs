@@ -157,6 +157,8 @@ forward!(Accounts: Accounts {
     fn rename(&self, account: AccountId, name: Option<&AccountName>) -> Result<(), StoreError>;
     fn portrait_of(&self, account: AccountId) -> Result<Option<Portrait>, StoreError>;
     fn set_portrait(&self, account: AccountId, portrait: Option<&Portrait>) -> Result<(), StoreError>;
+    fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError>;
+    fn set_preferences(&self, account: AccountId, preferences: &Preferences) -> Result<(), StoreError>;
 });
 
 forward!(Accounts: AccountDirectory {

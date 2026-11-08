@@ -7,8 +7,8 @@ use ferristrace_application::testing::{Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountDirectory, AccountId, AccountName, Accounts, AuthError, Membership, Memberships, Photos,
-    Portrait, ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionStore, SessionToken,
-    StoreError, UserTokens, WhoamiError,
+    Portrait, Preferences, ProvisionPolicy, ResolvedIdentity, Session, SessionError, SessionStore,
+    SessionToken, StoreError, UserTokens, WhoamiError,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -43,6 +43,18 @@ impl Accounts for Nowhere {
         &self,
         _account: AccountId,
         _portrait: Option<&Portrait>,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn preferences_of(&self, _account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn set_preferences(
+        &self,
+        _account: AccountId,
+        _preferences: &Preferences,
     ) -> Result<(), StoreError> {
         Err(StoreError::Unreachable)
     }
@@ -100,6 +112,18 @@ impl<T: Send + Sync> Accounts for Directed<T> {
     ) -> Result<(), StoreError> {
         Nowhere.set_portrait(account, portrait).await
     }
+
+    async fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        Nowhere.preferences_of(account).await
+    }
+
+    async fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> Result<(), StoreError> {
+        Nowhere.set_preferences(account, preferences).await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +148,18 @@ impl<T: Accounts + Send + Sync> Accounts for Profiled<T> {
         portrait: Option<&Portrait>,
     ) -> Result<(), StoreError> {
         self.0.set_portrait(account, portrait).await
+    }
+
+    async fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        self.0.preferences_of(account).await
+    }
+
+    async fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> Result<(), StoreError> {
+        self.0.set_preferences(account, preferences).await
     }
 }
 

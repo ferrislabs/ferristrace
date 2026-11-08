@@ -1,5 +1,6 @@
 use ferristrace_domain::{
-    AccountId, AccountName, Photo, PhotoKind, Profile, ProfileError, SessionToken, Who, Whoami,
+    AccountId, AccountName, Photo, PhotoKind, Preferences, Profile, ProfileError, SessionToken,
+    Who, Whoami,
 };
 
 use crate::registry::ProfileRepos;
@@ -42,6 +43,24 @@ where
     pub async fn remove_profile_photo(&self, token: &SessionToken) -> Result<Who, ProfileError> {
         Profile::new(Whoami::new(sessions, memberships), accounts, &self.photos)
             .remove_photo(token)
+            .await
+    }
+
+    #[transactional(sessions, memberships, accounts, unavailable = ProfileError::StoreUnreachable)]
+    pub async fn preferences(&self, token: &SessionToken) -> Result<Preferences, ProfileError> {
+        Profile::new(Whoami::new(sessions, memberships), accounts, &self.photos)
+            .preferences(token)
+            .await
+    }
+
+    #[transactional(sessions, memberships, accounts, unavailable = ProfileError::StoreUnreachable)]
+    pub async fn set_preferences(
+        &self,
+        token: &SessionToken,
+        preferences: &Preferences,
+    ) -> Result<Preferences, ProfileError> {
+        Profile::new(Whoami::new(sessions, memberships), accounts, &self.photos)
+            .set_preferences(token, preferences)
             .await
     }
 
