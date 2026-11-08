@@ -6,14 +6,14 @@ export const Dialog = D.Root
 export const DialogTrigger = D.Trigger
 export const DialogClose = D.Close
 
-export function DialogContent({ className, children, size = 'sm', title, description, ...p }: D.DialogContentProps & { size?: 'sm' | 'md' | 'lg'; title: React.ReactNode; description?: React.ReactNode }) {
+export function DialogContent({ className, children, size = 'sm', title, description, ...p }: D.DialogContentProps & { size?: 'sm' | 'md' | 'lg' | 'xl'; title: React.ReactNode; description?: React.ReactNode }) {
   return (
     <D.Portal>
       <D.Overlay className="fixed inset-0 z-40 bg-overlay" />
       <D.Content
         className={cn(
           'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-48px)] w-[calc(100%-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-xl border bg-popover p-5 shadow-lg focus:outline-none',
-          size === 'sm' ? 'max-w-[440px]' : size === 'md' ? 'max-w-[560px]' : 'max-w-[720px]',
+          size === 'sm' ? 'max-w-[440px]' : size === 'md' ? 'max-w-[560px]' : size === 'lg' ? 'max-w-[720px]' : 'max-w-[1080px]',
           className,
         )}
         {...p}

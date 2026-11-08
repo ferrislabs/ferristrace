@@ -75,11 +75,55 @@ export type AlertEvent = {
 
 export type ChannelKind = 'email' | 'webhook' | 'slack' | 'discord'
 
-export type Channel = { id: string; name: string; kind: ChannelKind; target: string; has_secret: boolean }
+export type DesignFact = 'severity' | 'change' | 'value' | 'labels' | 'culprits' | 'link' | 'timestamp'
+
+export type DesignField = { name: string; value: string; inline: boolean }
+
+export type Design = {
+  content: string | null
+  title: string | null
+  description: string | null
+  author: string | null
+  footer: string | null
+  thumbnail: string | null
+  colors: { firing: string | null; resolved: string | null; pending: string | null; no_data: string | null }
+  shown: Record<DesignFact, boolean>
+  fields: DesignField[]
+  ping_roles: string[]
+  ping_users: string[]
+}
+
+export const DESIGN_FACTS: { key: DesignFact; label: string }[] = [
+  { key: 'severity', label: 'Severity' },
+  { key: 'change', label: 'State change' },
+  { key: 'value', label: 'Value' },
+  { key: 'labels', label: 'Labels' },
+  { key: 'culprits', label: 'Pods, nodes, versions' },
+  { key: 'link', label: 'Link to the alert' },
+  { key: 'timestamp', label: 'Time' },
+]
+
+export const PLACEHOLDERS = ['alert', 'state', 'severity', 'value', 'from', 'to', 'link', 'pods', 'versions', 'nodes', 'label.service']
+
+export const emptyDesign = (): Design => ({
+  content: null,
+  title: null,
+  description: null,
+  author: null,
+  footer: null,
+  thumbnail: null,
+  colors: { firing: null, resolved: null, pending: null, no_data: null },
+  shown: { severity: true, change: true, value: true, labels: true, culprits: true, link: true, timestamp: false },
+  fields: [],
+  ping_roles: [],
+  ping_users: [],
+})
+
+export type Channel = { id: string; name: string; kind: ChannelKind; target: string; has_secret: boolean; design?: Design }
 
 export type IssuedChannel = Channel & { secret?: string }
 
-export type ChannelDraft = { name: string; kind: ChannelKind; target: string }
+export type ChannelDraft = { name: string; kind: ChannelKind; target: string; design?: Design }
 
 export type Preview = { step_ns: number; points: [number, number | null][]; threshold: number; would_fire: boolean }
 
@@ -220,9 +264,27 @@ export const useCreateChannel = () =>
   )
 
 export const useUpdateChannel = () =>
-  useRefreshing<{ id: string; name: string; target: string }, Channel>(channelKey, async (org, asked) =>
-    json(await patch(`/api/orgs/${org}/channels/${asked.id}`, { name: asked.name, target: asked.target })),
+  useRefreshing<{ id: string; name: string; target: string; design?: Design }, Channel>(channelKey, async (org, asked) =>
+    json(await patch(`/api/orgs/${org}/channels/${asked.id}`, { name: asked.name, target: asked.target, design: asked.design })),
   )
+
+export type DiscordEmbed = {
+  title?: string
+  description?: string
+  url?: string
+  color?: number
+  author?: { name: string }
+  footer?: { text: string }
+  thumbnail?: { url: string }
+  timestamp?: string
+  fields?: { name: string; value: string; inline: boolean }[]
+}
+
+export type DiscordMessage = { content?: string; embeds?: DiscordEmbed[] }
+
+export async function previewDesign(org: string, design: Design, state: AlertStatus): Promise<DiscordMessage> {
+  return (await json<{ message: DiscordMessage }>(await post(`/api/orgs/${org}/channels/preview`, { kind: 'discord', design, state }))).message
+}
 
 export const useDeleteChannel = () =>
   useRefreshing<string, void>(channelKey, async (org, id) => {

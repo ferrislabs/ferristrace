@@ -1,4 +1,5 @@
 use super::channel_book::ChannelBook;
+use super::entities::ChannelChange;
 use super::errors::{AlertError, BadChannel};
 use super::value_objects::{ChannelKind, ChannelName, Destination};
 use crate::access::key_ring_tests::{
@@ -139,8 +140,11 @@ async fn a_channel_is_renamed_retargeted_within_its_kind_and_deleted_by_an_admin
             &token(),
             an_org(MINE),
             id,
-            Some(&named("paging")),
-            Some("https://b.example.com/"),
+            ChannelChange {
+                name: Some(&named("paging")),
+                target: Some("https://b.example.com/"),
+                design: None,
+            },
             &hooks,
         )
         .await
@@ -150,8 +154,11 @@ async fn a_channel_is_renamed_retargeted_within_its_kind_and_deleted_by_an_admin
             &token(),
             an_org(MINE),
             id,
-            None,
-            Some("ops@example.com"),
+            ChannelChange {
+                name: None,
+                target: Some("ops@example.com"),
+                design: None,
+            },
             &hooks,
         )
         .await;

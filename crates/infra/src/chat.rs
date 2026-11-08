@@ -1,4 +1,4 @@
-use ferristrace_domain::{AlertSeverity, AlertStatus, Dispatch};
+use ferristrace_domain::{AlertSeverity, AlertStatus, Design, Dispatch, Fact, Shown, Template};
 use serde_json::{Value, json};
 
 const MAX_TITLE: usize = 200;
@@ -47,21 +47,29 @@ fn absolute(link: &str) -> Option<&str> {
     (link.starts_with("https://") || link.starts_with("http://")).then_some(link)
 }
 
-fn facts(dispatch: &Dispatch) -> Vec<(String, String)> {
-    let mut facts = vec![
-        ("Severity".to_owned(), dispatch.severity.as_str().to_owned()),
-        (
+fn facts(dispatch: &Dispatch, shown: Shown) -> Vec<(String, String)> {
+    let mut facts = Vec::new();
+    if shown.holds(Fact::Severity) {
+        facts.push(("Severity".to_owned(), dispatch.severity.as_str().to_owned()));
+    }
+    if shown.holds(Fact::Change) {
+        facts.push((
             "Change".to_owned(),
             format!("{} → {}", dispatch.from.as_str(), dispatch.to.as_str()),
-        ),
-    ];
-    if let Some(value) = dispatch.value.filter(|value| value.is_finite()) {
+        ));
+    }
+    if let Some(value) = dispatch
+        .value
+        .filter(|value| value.is_finite() && shown.holds(Fact::Value))
+    {
         facts.push(("Value".to_owned(), format!("{value}")));
     }
-    for (key, value) in dispatch.labels.pairs() {
-        facts.push((key.to_string(), shortened(value, MAX_FIELD)));
+    if shown.holds(Fact::Labels) {
+        for (key, value) in dispatch.labels.pairs() {
+            facts.push((key.to_string(), shortened(value, MAX_FIELD)));
+        }
     }
-    if let Some(context) = &dispatch.context {
+    if let (Some(context), true) = (&dispatch.context, shown.holds(Fact::Culprits)) {
         let pods: Vec<&str> = context.pods().iter().map(|pod| &*pod.name).collect();
         if !pods.is_empty() {
             let more = match context.others() {
@@ -98,7 +106,7 @@ pub fn slack(dispatch: &Dispatch, link: &str) -> Value {
             "color": slack_color(dispatch),
             "fallback": slack_text(&title),
             "title": slack_text(&title),
-            "fields": facts(dispatch)
+            "fields": facts(dispatch, Shown::default())
                 .into_iter()
                 .map(|(name, value)| json!({
                     "title": slack_text(&name),
@@ -116,24 +124,171 @@ pub fn slack(dispatch: &Dispatch, link: &str) -> Value {
     body
 }
 
-pub fn discord(dispatch: &Dispatch, link: &str) -> Value {
-    let mut body = json!({
-        "allowed_mentions": {"parse": []},
-        "embeds": [{
-            "title": title(dispatch),
-            "color": discord_color(dispatch),
-            "fields": facts(dispatch)
-                .into_iter()
-                .map(|(name, value)| json!({
-                    "name": shortened(&name, 200),
-                    "value": shortened(&value, MAX_FIELD),
-                    "inline": true,
-                }))
-                .collect::<Vec<_>>(),
-        }],
+const DEFAULT_TITLE: &str = "{state}: {alert}";
+const MAX_EMBED_FIELDS: usize = 12;
+
+fn neutral(text: &str) -> String {
+    text.replace('@', "@\u{200b}").replace('<', "<\u{200b}")
+}
+
+fn placeholder(dispatch: &Dispatch, link: &str, name: &str) -> Option<String> {
+    let context = dispatch.context.as_ref();
+    let joined = |names: Vec<&str>| (!names.is_empty()).then(|| names.join(", "));
+    let value = match name {
+        "alert" => dispatch.name.to_string(),
+        "severity" => dispatch.severity.as_str().to_owned(),
+        "state" => verdict(dispatch).to_owned(),
+        "from" => dispatch.from.as_str().to_owned(),
+        "to" => dispatch.to.as_str().to_owned(),
+        "value" => dispatch
+            .value
+            .filter(|value| value.is_finite())?
+            .to_string(),
+        "link" => absolute(link)?.to_owned(),
+        "pods" => joined(context?.pods().iter().map(|pod| &*pod.name).collect())?,
+        "versions" => joined(context?.versions().iter().map(AsRef::as_ref).collect())?,
+        "nodes" => joined(context?.nodes().iter().map(AsRef::as_ref).collect())?,
+        other => {
+            let key = other.strip_prefix("label.")?;
+            dispatch
+                .labels
+                .pairs()
+                .iter()
+                .find(|(held, _)| &***held == key)
+                .map(|(_, value)| value.to_string())?
+        }
+    };
+    Some(neutral(&value))
+}
+
+fn rendered(template: &Template, dispatch: &Dispatch, link: &str, most: usize) -> String {
+    shortened(
+        template
+            .render(|name| placeholder(dispatch, link, name))
+            .trim(),
+        most,
+    )
+}
+
+fn default_title() -> Template {
+    Template::parse(DEFAULT_TITLE, 100).expect("the built-in title is made of known placeholders")
+}
+
+fn embed_colour(design: &Design, dispatch: &Dispatch) -> u32 {
+    let chosen = match dispatch.to {
+        AlertStatus::Firing => design.colors.firing,
+        AlertStatus::Ok => design.colors.resolved,
+        AlertStatus::Pending => design.colors.pending,
+        AlertStatus::NoData => design.colors.no_data,
+    };
+    chosen.unwrap_or_else(|| discord_color(dispatch))
+}
+
+fn iso(at_ms: u64) -> Option<String> {
+    let seconds = i64::try_from(at_ms / 1_000).ok()?;
+    let at = time::OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute(),
+        at.second()
+    ))
+}
+
+fn discord_fields(design: &Design, dispatch: &Dispatch, link: &str) -> Vec<Value> {
+    let mut fields: Vec<Value> = facts(dispatch, design.shown)
+        .into_iter()
+        .map(|(name, value)| {
+            json!({
+                "name": shortened(&name, 200),
+                "value": shortened(&value, MAX_FIELD),
+                "inline": true,
+            })
+        })
+        .collect();
+    for field in &design.fields {
+        let name = rendered(&field.name, dispatch, link, 200);
+        let value = rendered(&field.value, dispatch, link, MAX_FIELD);
+        if !name.is_empty() && !value.is_empty() {
+            fields.push(json!({"name": name, "value": value, "inline": field.inline}));
+        }
+    }
+    fields.truncate(MAX_EMBED_FIELDS);
+    fields
+}
+
+fn pinged(design: &Design, dispatch: &Dispatch) -> (String, Value) {
+    if dispatch.to != AlertStatus::Firing
+        || (design.ping_roles.is_empty() && design.ping_users.is_empty())
+    {
+        return (String::new(), json!({"parse": []}));
+    }
+    let mentions: Vec<String> = design
+        .ping_roles
+        .iter()
+        .map(|id| format!("<@&{id}>"))
+        .chain(design.ping_users.iter().map(|id| format!("<@{id}>")))
+        .collect();
+    (
+        mentions.join(" "),
+        json!({"parse": [], "roles": design.ping_roles, "users": design.ping_users}),
+    )
+}
+
+pub fn discord(design: &Design, dispatch: &Dispatch, link: &str) -> Value {
+    let title = design.title.clone().unwrap_or_else(default_title);
+    let mut embed = json!({
+        "title": rendered(&title, dispatch, link, 256),
+        "color": embed_colour(design, dispatch),
+        "fields": discord_fields(design, dispatch, link),
     });
-    if let (Some(link), Some(embed)) = (absolute(link), body["embeds"][0].as_object_mut()) {
-        embed.insert("url".to_owned(), json!(link));
+    let Some(object) = embed.as_object_mut() else {
+        return Value::Null;
+    };
+    if let Some(template) = &design.description {
+        let text = rendered(template, dispatch, link, 4_000);
+        if !text.is_empty() {
+            object.insert("description".to_owned(), json!(text));
+        }
+    }
+    if let (true, Some(link)) = (design.shown.holds(Fact::Link), absolute(link)) {
+        object.insert("url".to_owned(), json!(link));
+    }
+    if let Some(template) = &design.author {
+        let text = rendered(template, dispatch, link, 256);
+        if !text.is_empty() {
+            object.insert("author".to_owned(), json!({"name": text}));
+        }
+    }
+    if let Some(template) = &design.footer {
+        let text = rendered(template, dispatch, link, 2_000);
+        if !text.is_empty() {
+            object.insert("footer".to_owned(), json!({"text": text}));
+        }
+    }
+    if let Some(url) = &design.thumbnail {
+        object.insert("thumbnail".to_owned(), json!({"url": url}));
+    }
+    if let (true, Some(stamp)) = (design.shown.holds(Fact::Timestamp), iso(dispatch.at_ms)) {
+        object.insert("timestamp".to_owned(), json!(stamp));
+    }
+    let (pings, allowed) = pinged(design, dispatch);
+    let mut content = pings;
+    if let Some(template) = &design.content {
+        let text = rendered(template, dispatch, link, 1_800);
+        if !text.is_empty() {
+            if !content.is_empty() {
+                content.push(' ');
+            }
+            content.push_str(&text);
+        }
+    }
+    let mut body = json!({"allowed_mentions": allowed, "embeds": [embed]});
+    if let (false, Some(fields)) = (content.is_empty(), body.as_object_mut()) {
+        fields.insert("content".to_owned(), json!(content));
     }
     body
 }
@@ -142,7 +297,10 @@ pub fn discord(dispatch: &Dispatch, link: &str) -> Value {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ferristrace_domain::{AlertSeverity, AlertStatus, Dispatch, Labels, RuleId, TenantId};
+    use ferristrace_domain::{
+        AlertSeverity, AlertStatus, Colors, CustomField, Design, Dispatch, Fact, Labels, RuleId,
+        Shown, Template, TenantId,
+    };
     use uuid::Uuid;
 
     use super::{discord, slack};
@@ -197,10 +355,14 @@ mod tests {
 
     #[test]
     fn a_discord_message_is_an_embed_that_mentions_nobody() {
-        let body = discord(&dispatch("@everyone", AlertStatus::Ok), "https://x/a");
+        let body = discord(
+            &Design::default(),
+            &dispatch("@everyone", AlertStatus::Ok),
+            "https://x/a",
+        );
 
         assert_eq!(body["allowed_mentions"]["parse"], serde_json::json!([]));
-        assert_eq!(body["embeds"][0]["title"], "Resolved: @everyone");
+        assert_eq!(body["embeds"][0]["title"], "Resolved: @\u{200b}everyone");
         assert_eq!(body["embeds"][0]["color"], 0x0012_b76a);
         assert_eq!(body["embeds"][0]["url"], "https://x/a");
     }
@@ -209,7 +371,7 @@ mod tests {
     fn a_link_that_is_not_absolute_is_left_out_because_discord_refuses_the_message() {
         let firing = dispatch("Checkout errors", AlertStatus::Firing);
 
-        let embed = discord(&firing, "/alerts?rule=7");
+        let embed = discord(&Design::default(), &firing, "/alerts?rule=7");
         let attachment = slack(&firing, "/alerts?rule=7");
 
         assert!(embed["embeds"][0].get("url").is_none());
@@ -221,7 +383,7 @@ mod tests {
         let mut firing = dispatch("Checkout errors", AlertStatus::Firing);
         firing.labels = Labels::new(BTreeMap::from([("env".into(), String::new().into())]));
 
-        let body = discord(&firing, "https://x/a");
+        let body = discord(&Design::default(), &firing, "https://x/a");
 
         let fields = body["embeds"][0]["fields"].as_array().expect("fields");
         assert!(fields.iter().all(|field| field["name"] != "env"));
@@ -229,9 +391,131 @@ mod tests {
 
     #[test]
     fn a_very_long_name_is_cut_to_what_the_services_accept() {
-        let body = discord(&dispatch(&"a".repeat(1_000), AlertStatus::Firing), "u");
+        let body = discord(
+            &Design::default(),
+            &dispatch(&"a".repeat(1_000), AlertStatus::Firing),
+            "u",
+        );
 
         let title = body["embeds"][0]["title"].as_str().expect("a title");
         assert!(title.chars().count() <= 256);
+    }
+
+    fn template(text: &str) -> Template {
+        Template::parse(text, 500).expect("a template")
+    }
+
+    fn designed() -> Design {
+        Design {
+            content: Some(template("on call for {label.service}")),
+            title: Some(template("{state} · {alert}")),
+            description: Some(template("{value} errors per minute on {pods}")),
+            author: Some(template("FerrisTrace")),
+            footer: Some(template("severity {severity}")),
+            thumbnail: Some("https://cdn.example.com/logo.png".into()),
+            colors: Colors {
+                firing: Some(0x00ff_0000),
+                ..Colors::default()
+            },
+            fields: vec![CustomField {
+                name: template("Service"),
+                value: template("{label.service}"),
+                inline: false,
+            }],
+            ping_roles: vec!["123456789012345678".into()],
+            ping_users: vec!["223456789012345678".into()],
+            ..Design::default()
+        }
+    }
+
+    #[test]
+    fn spec_l13_9_a_design_renders_into_the_delivered_embed() {
+        let mut firing = dispatch("Checkout errors", AlertStatus::Firing);
+        firing.context = None;
+        let design = Design {
+            shown: Shown::default().with(Fact::Timestamp, true),
+            ..designed()
+        };
+
+        let body = discord(&design, &firing, "https://x/a");
+
+        let embed = &body["embeds"][0];
+        assert_eq!(embed["title"], "Firing · Checkout errors");
+        assert_eq!(embed["description"], "7.5 errors per minute on");
+        assert_eq!(embed["color"], 0x00ff_0000);
+        assert_eq!(embed["author"]["name"], "FerrisTrace");
+        assert_eq!(embed["footer"]["text"], "severity critical");
+        assert_eq!(
+            embed["thumbnail"]["url"],
+            "https://cdn.example.com/logo.png"
+        );
+        assert_eq!(embed["timestamp"], "2023-11-14T22:13:20.000Z");
+        let fields = embed["fields"].as_array().expect("fields");
+        assert!(
+            fields.iter().any(|f| f["name"] == "Service"
+                && f["value"] == "checkout"
+                && f["inline"] == false)
+        );
+        assert_eq!(
+            body["content"],
+            "<@&123456789012345678> <@223456789012345678> on call for checkout"
+        );
+        assert_eq!(
+            body["allowed_mentions"],
+            serde_json::json!({
+                "parse": [],
+                "roles": ["123456789012345678"],
+                "users": ["223456789012345678"],
+            })
+        );
+    }
+
+    #[test]
+    fn the_pings_are_sent_only_when_the_alert_fires() {
+        let resolved = discord(&designed(), &dispatch("Checkout", AlertStatus::Ok), "u");
+
+        assert_eq!(resolved["content"], "on call for checkout");
+        assert_eq!(
+            resolved["allowed_mentions"],
+            serde_json::json!({"parse": []})
+        );
+    }
+
+    #[test]
+    fn spec_l13_10_alert_data_cannot_mention_anyone_through_a_placeholder() {
+        let mut hostile = dispatch("<@&1> @everyone @here", AlertStatus::Firing);
+        hostile.labels = Labels::new(BTreeMap::from([("service".into(), "@everyone".into())]));
+        let design = Design {
+            content: Some(template("{alert} {label.service}")),
+            description: Some(template("{alert}")),
+            ..Design::default()
+        };
+
+        let body = discord(&design, &hostile, "u");
+
+        let content = body["content"].as_str().expect("content");
+        let described = body["embeds"][0]["description"].as_str().expect("text");
+        for text in [content, described] {
+            assert!(
+                !text.contains("@everyone") && !text.contains("@here"),
+                "{text}"
+            );
+            assert!(!text.contains("<@"), "{text}");
+        }
+        assert_eq!(body["allowed_mentions"], serde_json::json!({"parse": []}));
+    }
+
+    #[test]
+    fn without_a_design_the_message_is_the_standard_one() {
+        let body = discord(
+            &Design::default(),
+            &dispatch("Checkout errors", AlertStatus::Firing),
+            "https://x/a",
+        );
+
+        assert!(body.get("content").is_none());
+        assert_eq!(body["embeds"][0]["title"], "Firing: Checkout errors");
+        assert!(body["embeds"][0].get("footer").is_none());
+        assert!(body["embeds"][0].get("timestamp").is_none());
     }
 }

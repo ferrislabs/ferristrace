@@ -43,16 +43,18 @@ pub use agents::{
 };
 pub use alerts::{
     AlertBook, AlertChannels, AlertDuty, AlertError, AlertEvent, AlertEvents, AlertMailer,
-    AlertOutbox, AlertRules, AlertSeverity, AlertStates, AlertStatus, BadChannel, BadRule, Channel,
-    ChannelBook, ChannelId, ChannelKind, ChannelName, ChannelView, Chat, Claimed, Comparison,
-    Condition, Courier, CulpritPod, CulpritReader, Culprits, Definition, DefinitionParts, Delivery,
-    DeliveryError, DeliveryStatus, Destination, Dispatch, Drained, Duty, EmailList, Evaluator,
-    EventId, HISTORY_DAYS, IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal,
-    MAX_CULPRIT_FACETS, MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS, MetricSignal, NoDataPolicy,
+    AlertOutbox, AlertRules, AlertSeverity, AlertStates, AlertStatus, BadChannel, BadDesign,
+    BadRule, Channel, ChannelBook, ChannelChange, ChannelId, ChannelKind, ChannelName, ChannelView,
+    Chat, Claimed, Colors, Comparison, Condition, Courier, CulpritPod, CulpritReader, Culprits,
+    CustomField, Definition, DefinitionParts, Delivery, DeliveryError, DeliveryStatus, Design,
+    Destination, Dispatch, Drained, Duty, EmailList, Evaluator, EventId, Fact, HISTORY_DAYS,
+    IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MAX_CULPRIT_FACETS,
+    MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS, MAX_CUSTOM_FIELDS, MAX_PINGS, MetricSignal, NoDataPolicy,
     Notification, NotificationId, Observation, Overall, PREVIEW_POINTS, Preview, ProbeError,
     RETRY_AFTER_SECS, Rule, RuleDraft, RuleId, RuleName, RulePatch, RuleState, SeriesState,
-    Settlement, Signal, SignalProbe, TICK_SECS, Tick, TraceMeasure, TraceSignal, Transition,
-    Watched, WebhookSecret, WebhookSender, WebhookUrl, next_state,
+    Settlement, Shown, Signal, SignalProbe, TICK_SECS, Template, Tick, TraceMeasure, TraceSignal,
+    Transition, Watched, WebhookSecret, WebhookSender, WebhookUrl, colour, next_state, snowflake,
+    thumbnail,
 };
 pub use audit::{
     Action, Actor, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPage, AuditTrail, Cursor,

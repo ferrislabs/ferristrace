@@ -29,13 +29,13 @@ pub async fn deliver<M: AlertMailer, W: WebhookSender>(
             }
             webhooks.send(url, secret, dispatch).await
         }
-        Destination::Chat(chat, url) => {
+        Destination::Chat(chat, url, design) => {
             if !webhooks.admits(url) {
                 return Err(DeliveryError::new(
                     "this deployment does not send webhooks to private addresses",
                 ));
             }
-            webhooks.send_chat(*chat, url, dispatch).await
+            webhooks.send_chat(*chat, url, design, dispatch).await
         }
     }
 }

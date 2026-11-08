@@ -1171,3 +1171,107 @@ async fn a_slack_or_discord_channel_needs_no_seal_and_only_its_own_hook_url() {
     assert!(made.get("secret").is_none_or(Value::is_null));
     assert_eq!(wrong_host, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+fn designed() -> Value {
+    json!({
+        "title": "{state} · {alert}",
+        "description": "{value} errors on {label.service}",
+        "footer": "severity {severity}",
+        "colors": {"firing": "#ff0000"},
+        "thumbnail": "https://cdn.example.com/logo.png",
+        "shown": {"labels": false, "timestamp": true},
+        "fields": [{"name": "Service", "value": "{label.service}", "inline": false}],
+        "ping_roles": ["123456789012345678"],
+    })
+}
+
+#[tokio::test]
+async fn spec_l13_9_a_discord_design_is_kept_read_back_changed_and_previewed() {
+    let harness = Harness::unsealed();
+    let url = "https://discord.com/api/webhooks/1/abc";
+
+    let (made_status, made) = harness
+        .admin(
+            Method::POST,
+            &channels(MINE),
+            Some(json!({"name": "dev", "kind": "discord", "target": url, "design": designed()})),
+        )
+        .await;
+    let (_, listed) = harness.admin(Method::GET, &channels(MINE), None).await;
+    let (patched_status, patched) = harness
+        .admin(
+            Method::PATCH,
+            &format!("{}/{}", channels(MINE), made["id"].as_str().expect("an id")),
+            Some(json!({"design": {"title": "Only {alert}"}})),
+        )
+        .await;
+    let (preview_status, preview) = harness
+        .admin(
+            Method::POST,
+            &format!("{}/preview", channels(MINE)),
+            Some(json!({"kind": "discord", "design": designed(), "state": "firing"})),
+        )
+        .await;
+
+    assert_eq!(made_status, StatusCode::CREATED);
+    assert_eq!(made["design"]["title"], "{state} · {alert}");
+    assert_eq!(made["design"]["colors"]["firing"], "#ff0000");
+    assert_eq!(made["design"]["shown"]["labels"], false);
+    assert_eq!(made["design"]["shown"]["severity"], true);
+    assert_eq!(listed["channels"][0]["design"], made["design"]);
+    assert_eq!(patched_status, StatusCode::OK);
+    assert_eq!(patched["design"]["title"], "Only {alert}");
+    assert_eq!(patched["design"]["description"], Value::Null);
+    assert_eq!(preview_status, StatusCode::OK);
+    assert!(preview["message"].is_object());
+}
+
+#[tokio::test]
+async fn spec_l13_11_a_bad_design_is_refused_and_only_chat_channels_take_one() {
+    let harness = Harness::unsealed();
+    let url = "https://discord.com/api/webhooks/1/abc";
+    let mut refused = Vec::new();
+    for design in [
+        json!({"title": "{nope}"}),
+        json!({"colors": {"firing": "red"}}),
+        json!({"thumbnail": "http://cdn.example.com/a.png"}),
+        json!({"ping_roles": ["everyone"]}),
+        json!({"fields": (0..6).map(|n| json!({"name": format!("n{n}"), "value": "v"})).collect::<Vec<_>>()}),
+    ] {
+        refused.push(
+            harness
+                .admin(
+                    Method::POST,
+                    &channels(MINE),
+                    Some(
+                        json!({"name": "dev", "kind": "discord", "target": url, "design": design}),
+                    ),
+                )
+                .await
+                .0,
+        );
+    }
+    let (on_email, _) = harness
+        .admin(
+            Method::POST,
+            &channels(MINE),
+            Some(
+                json!({"name": "ops", "kind": "email", "target": "ops@example.com", "design": {}}),
+            ),
+        )
+        .await;
+    let (member_preview, _) = harness
+        .served(
+            OrgRole::Member,
+            as_session(
+                Method::POST,
+                &format!("{}/preview", channels(MINE)),
+                Some(json!({"kind": "discord", "design": {}})),
+            ),
+        )
+        .await;
+
+    assert_eq!(refused, vec![StatusCode::UNPROCESSABLE_ENTITY; 5]);
+    assert_eq!(on_email, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(member_preview, StatusCode::FORBIDDEN);
+}

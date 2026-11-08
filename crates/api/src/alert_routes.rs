@@ -9,17 +9,20 @@ use axum::routing::{get, patch, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::AlertRepos;
 use ferristrace_domain::{
-    Aggregation, AlertError, AlertEvent, AlertSeverity, BadChannel, BadRule, ChannelId,
-    ChannelKind, ChannelName, ChannelView, Comparison, Condition, Definition, DefinitionParts,
-    Delivery, Destination, IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal,
-    MetricSignal, NoDataPolicy, Preview, ProjectId, RuleDraft, RuleId, RuleName, RulePatch,
-    ScheduleId, SeriesState, Severity, Signal, TenantId, TraceMeasure, TraceSignal, Watched,
+    Aggregation, AlertError, AlertEvent, AlertSeverity, AlertStatus, BadChannel, BadDesign,
+    BadRule, ChannelChange, ChannelId, ChannelKind, ChannelName, ChannelView, Chat, Comparison,
+    Condition, Definition, DefinitionParts, Delivery, Destination, IssuedChannel, Labels, LlmGroup,
+    LlmMeasure, LlmSignal, LogSignal, MetricSignal, NoDataPolicy, Preview, ProjectId, RuleDraft,
+    RuleId, RuleName, RulePatch, ScheduleId, SeriesState, Severity, Signal, TenantId, TraceMeasure,
+    TraceSignal, Watched,
 };
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::carried::{NotCarried, carried, reading};
 use crate::context_body::ContextBody;
+use crate::design_body::DesignBody;
 use crate::placement::PlacementBody;
 use crate::state::AppState;
 
@@ -43,6 +46,10 @@ where
         .route(
             "/api/orgs/{org}/channels",
             get(channels::<S>).post(create_channel::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/channels/preview",
+            post(preview_channel::<S>),
         )
         .route(
             "/api/orgs/{org}/channels/{id}",
@@ -619,6 +626,8 @@ pub struct ChannelBody {
     target: String,
     has_secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    design: Option<DesignBody>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     secret: Option<String>,
 }
 
@@ -630,6 +639,7 @@ impl From<ChannelView> for ChannelBody {
             kind: channel.kind().as_str(),
             target: channel.destination.target(),
             has_secret: channel.has_secret,
+            design: channel.destination.design().map(DesignBody::from),
             secret: None,
         }
     }
@@ -658,6 +668,17 @@ pub struct ChannelAsked {
     name: String,
     kind: String,
     target: String,
+    #[serde(default)]
+    design: Option<DesignBody>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PreviewAsked {
+    kind: String,
+    #[serde(default)]
+    design: DesignBody,
+    #[serde(default)]
+    state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -666,6 +687,8 @@ pub struct ChannelPatch {
     name: Option<String>,
     #[serde(default)]
     target: Option<String>,
+    #[serde(default)]
+    design: Option<DesignBody>,
 }
 
 async fn list<S: Stack>(
@@ -880,6 +903,11 @@ where
     let name = ChannelName::try_from(asked.name.as_str())?;
     let kind = ChannelKind::parse(asked.kind.trim()).ok_or(AlertRefused::Malformed("kind"))?;
     let destination = Destination::parse(kind, &asked.target)?;
+    let destination = match asked.design {
+        None => destination,
+        Some(_) if destination.design().is_none() => return Err(BadChannel::NoDesign.into()),
+        Some(design) => destination.designed(design.into_design()?),
+    };
     let issued = state
         .app
         .create_channel(&token, TenantId::new(org), &name, &destination)
@@ -903,17 +931,55 @@ where
         .as_deref()
         .map(ChannelName::try_from)
         .transpose()?;
+    let design = asked.design.map(DesignBody::into_design).transpose()?;
     let changed = state
         .app
         .update_channel(
             &token,
             TenantId::new(org),
             ChannelId::new(id),
-            name.as_ref(),
-            asked.target.as_deref(),
+            ChannelChange {
+                name: name.as_ref(),
+                target: asked.target.as_deref(),
+                design: design.as_ref(),
+            },
         )
         .await?;
     Ok(Json(changed.into()))
+}
+
+async fn preview_channel<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+    Json(asked): Json<PreviewAsked>,
+) -> Result<Json<serde_json::Value>, AlertRefused>
+where
+    S::Repos: AlertRepos,
+{
+    let token = carried(&state, &headers).await?;
+    let chat = match ChannelKind::parse(asked.kind.trim()) {
+        Some(ChannelKind::Slack) => Chat::Slack,
+        Some(ChannelKind::Discord) => Chat::Discord,
+        _ => return Err(AlertRefused::Malformed("kind")),
+    };
+    let to = match asked.state.as_deref() {
+        None => AlertStatus::Firing,
+        Some(given) => AlertStatus::parse(given.trim()).ok_or(AlertRefused::Malformed("state"))?,
+    };
+    let message = state
+        .app
+        .preview_channel_design(
+            &token,
+            TenantId::new(org),
+            chat,
+            &asked.design.into_design()?,
+            to,
+        )
+        .await?;
+    let message: serde_json::Value =
+        serde_json::from_str(&message).map_err(|_| AlertRefused::Malformed("design"))?;
+    Ok(Json(json!({"message": message})))
 }
 
 async fn delete_channel<S: Stack>(
@@ -943,6 +1009,8 @@ pub enum AlertRefused {
     Rule(#[from] BadRule),
     #[error(transparent)]
     Channel(#[from] BadChannel),
+    #[error(transparent)]
+    Design(#[from] BadDesign),
     #[error(transparent)]
     Refused(AlertError),
 }
@@ -983,7 +1051,7 @@ impl IntoResponse for AlertRefused {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             Self::Reaching(refused) => return refused.into_response(),
-            Self::Malformed(_) | Self::Rule(_) | Self::Channel(_) => {
+            Self::Malformed(_) | Self::Rule(_) | Self::Channel(_) | Self::Design(_) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, self.to_string())
             }
             Self::Refused(AlertError::NotYours) => {

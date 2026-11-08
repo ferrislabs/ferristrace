@@ -76,6 +76,21 @@ Design
           versions, and a link to the alert. User-controlled text is
           escaped (Slack) or sent with `allowed_mentions` empty (Discord),
           so a rule name cannot ping a channel.
+    13B1b A Discord message designer. A Discord channel carries an optional
+          design: text templates (message text, title, description, author,
+          footer), a colour per state, a thumbnail, which standard facts to
+          show (severity, change, value, labels, culprits, link, time),
+          up to 5 custom fields, and roles or users to ping when an alert
+          fires. Templates take placeholders `{alert}` `{severity}`
+          `{state}` `{from}` `{to}` `{value}` `{link}` `{pods}`
+          `{versions}` `{nodes}` and `{label.<key>}`; an unknown name is
+          refused when the design is saved. Substituted values can never
+          mention anyone (an `@` or `<` from alert data is neutralised);
+          only the roles and users the admin names are pinged, and only on
+          firing, never `@everyone` or `@here`. No design means today's
+          message. The channel editor gets a design panel with a live
+          preview rendered by the server, so the preview and the delivery
+          cannot drift. Slack keeps its fixed look for now.
     13B2  Incident events to a chat channel. A project names one chat
           channel; opening, status, severity and owner changes and public
           comments post there as the incident timeline grows.
@@ -138,3 +153,10 @@ Delivered with 13B1
                webhook URL and carries no secret.
   @spec-l13-8  An alert state change reaches a chat channel as that
                service's message, and a rule name cannot mention anyone.
+
+Delivered with 13B1b
+  @spec-l13-9   A design with a template, a colour, extra fields and a role
+                ping renders into the Discord message that is delivered.
+  @spec-l13-10  Alert data cannot mention anyone through a placeholder.
+  @spec-l13-11  A design naming an unknown placeholder, a bad colour, a
+                non-https thumbnail or more than 5 custom fields is refused.

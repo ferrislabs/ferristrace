@@ -1,6 +1,7 @@
 use core::future::Future;
 
 use super::culprits::Culprits;
+use super::design::Design;
 use super::entities::{
     AlertEvent, Channel, ChannelView, Claimed, Dispatch, Notification, Observation, Rule,
     RuleDraft, SeriesState, Settlement,
@@ -204,8 +205,11 @@ pub trait WebhookSender {
         &self,
         chat: Chat,
         url: &WebhookUrl,
+        design: &Design,
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
+
+    fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String;
 }
 
 impl<T: WebhookSender + Sync> WebhookSender for &T {
@@ -226,9 +230,14 @@ impl<T: WebhookSender + Sync> WebhookSender for &T {
         &self,
         chat: Chat,
         url: &WebhookUrl,
+        design: &Design,
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
-        (*self).send_chat(chat, url, dispatch)
+        (*self).send_chat(chat, url, design, dispatch)
+    }
+
+    fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
+        (*self).render_chat(chat, design, dispatch)
     }
 }
 
@@ -250,9 +259,14 @@ impl<T: WebhookSender + Send + Sync> WebhookSender for std::sync::Arc<T> {
         &self,
         chat: Chat,
         url: &WebhookUrl,
+        design: &Design,
         dispatch: &Dispatch,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
-        self.as_ref().send_chat(chat, url, dispatch)
+        self.as_ref().send_chat(chat, url, design, dispatch)
+    }
+
+    fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
+        self.as_ref().render_chat(chat, design, dispatch)
     }
 }
 

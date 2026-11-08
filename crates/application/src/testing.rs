@@ -87,9 +87,19 @@ impl WebhookSender for Inert {
         &self,
         _chat: ferristrace_domain::Chat,
         _url: &WebhookUrl,
+        _design: &ferristrace_domain::Design,
         _dispatch: &Dispatch,
     ) -> Result<(), DeliveryError> {
         Err(DeliveryError::new("no webhook sender is configured"))
+    }
+
+    fn render_chat(
+        &self,
+        _chat: ferristrace_domain::Chat,
+        _design: &ferristrace_domain::Design,
+        _dispatch: &Dispatch,
+    ) -> String {
+        String::from("{}")
     }
 }
 
