@@ -52,6 +52,8 @@ fn the_spellings_are_stable_and_dotted() {
             "alert.deleted",
             "alert.enabled",
             "alert.disabled",
+            "alert.silenced",
+            "alert.unsilenced",
             "channel.created",
             "channel.updated",
             "channel.deleted",
