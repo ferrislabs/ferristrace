@@ -641,6 +641,25 @@ impl crate::alerts::WebhookSender for Couriered {
     ) -> Result<(), crate::alerts::DeliveryError> {
         self.note(url.as_str().into(), dispatch)
     }
+
+    async fn send_chat(
+        &self,
+        _chat: crate::alerts::Chat,
+        url: &crate::alerts::WebhookUrl,
+        _design: &crate::alerts::Design,
+        dispatch: &crate::alerts::Dispatch,
+    ) -> Result<(), crate::alerts::DeliveryError> {
+        self.note(url.as_str().into(), dispatch)
+    }
+
+    fn render_chat(
+        &self,
+        _chat: crate::alerts::Chat,
+        _design: &crate::alerts::Design,
+        dispatch: &crate::alerts::Dispatch,
+    ) -> String {
+        format!("{{\"alert\":\"{}\"}}", dispatch.name)
+    }
 }
 
 impl crate::alerts::AlertMailer for Couriered {

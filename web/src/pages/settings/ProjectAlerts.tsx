@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Field, Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Alert, Table, Td, Th, Tr } from '@/components/ui/misc'
-import { isForbidden, isNotConfigured, useChannels, useCreateChannel, useDeleteChannel, useUpdateChannel, type Channel, type ChannelKind, type IssuedChannel } from '@/data/alerts'
+import { isForbidden, isNotConfigured, useChannels, useCreateChannel, useDeleteChannel, useUpdateChannel, type Channel, type ChannelKind, type Design, type IssuedChannel, emptyDesign } from '@/data/alerts'
+import { DiscordDesigner } from './DiscordDesigner'
 import { H } from './parts'
 
 type Editing = { channel: Channel | null } | null
@@ -27,6 +28,8 @@ function problemOf(kind: ChannelKind, name: string, target: string): string | nu
   }
   try {
     const url = new URL(target.trim())
+    if (kind === 'slack') return url.protocol === 'https:' && url.hostname === 'hooks.slack.com' && url.pathname.startsWith('/services/') ? null : 'Use the incoming webhook URL Slack gives you: https://hooks.slack.com/services/…'
+    if (kind === 'discord') return url.protocol === 'https:' && /^(ptb\.|canary\.)?discord(app)?\.com$/.test(url.hostname) && url.pathname.startsWith('/api/webhooks/') ? null : 'Use the webhook URL Discord gives you: https://discord.com/api/webhooks/…'
     return url.protocol === 'https:' || url.protocol === 'http:' ? null : 'The URL must start with https://'
   } catch {
     return 'The URL is not valid'
@@ -43,6 +46,7 @@ export function ProjectAlerts() {
   const [kind, setKind] = useState<ChannelKind>('email')
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
+  const [design, setDesign] = useState<Design>(emptyDesign())
   const [issued, setIssued] = useState<IssuedChannel | null>(null)
   const [deleting, setDeleting] = useState<Channel | null>(null)
   const mayChange = active?.role === 'owner' || active?.role === 'admin'
@@ -56,22 +60,24 @@ export function ProjectAlerts() {
     setName('')
     setTarget('')
     setKind('email')
+    setDesign(emptyDesign())
   }
   const begin = (channel: Channel | null) => {
     setEditing({ channel })
     setName(channel?.name ?? '')
     setTarget(channel?.target ?? '')
     setKind(channel?.kind ?? 'email')
+    setDesign(channel?.design ?? emptyDesign())
   }
   const normal = shape === 'email' ? addresses(target).join(', ') : target.trim()
 
   const submit = () => {
     if (problem) return
     if (editingExisting) {
-      update.mutate({ id: editingExisting.id, name: name.trim(), target: normal }, { onSuccess: () => { toast.success('Channel saved'); close() }, onError: (error) => toast.error(because(error, 'The channel was not saved')) })
+      update.mutate({ id: editingExisting.id, name: name.trim(), target: normal, design: shape === 'discord' ? design : undefined }, { onSuccess: () => { toast.success('Channel saved'); close() }, onError: (error) => toast.error(because(error, 'The channel was not saved')) })
       return
     }
-    create.mutate({ name: name.trim(), kind, target: normal }, {
+    create.mutate({ name: name.trim(), kind, target: normal, design: kind === 'discord' ? design : undefined }, {
       onSuccess: (made) => {
         if (made.secret) setIssued(made)
         else { toast.success('Channel created'); close() }
@@ -82,7 +88,7 @@ export function ProjectAlerts() {
 
   return (
     <>
-      <H title="Alert channels" sub="Where an alert goes: email addresses or a signed webhook. Rules pick their channels in the rule editor.">
+      <H title="Alert channels" sub="Where an alert goes: email addresses, a Slack or Discord channel, or a signed webhook. Rules pick their channels in the rule editor.">
         {mayChange ? <Button variant="primary" size="sm" onClick={() => begin(null)}><Plus />New channel</Button> : null}
       </H>
       {channels && !mayChange ? <span className="text-control text-muted-foreground">Read only. Only an owner or an administrator can change a channel.</span> : null}
@@ -112,7 +118,7 @@ export function ProjectAlerts() {
       )}
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && close()}>
-        <DialogContent size="md" title={issued ? `Secret for ${issued.name}` : editingExisting ? 'Edit channel' : 'New channel'} description={issued ? 'Signs every delivery to this webhook.' : undefined}>
+        <DialogContent size={shape === 'discord' && !issued ? 'xl' : 'md'} title={issued ? `Secret for ${issued.name}` : editingExisting ? 'Edit channel' : 'New channel'} description={issued ? 'Signs every delivery to this webhook.' : undefined}>
           {issued?.secret ? (
             <>
               <Alert variant="warning" icon={<AlertTriangle />}>Copy this secret now. It is shown once and cannot be retrieved later.</Alert>
@@ -122,11 +128,12 @@ export function ProjectAlerts() {
             </>
           ) : (
             <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); submit() }}>
-              {editingExisting ? null : <Field label="Kind"><div><Segmented label="Kind" value={kind} onChange={setKind} options={[{ value: 'email', label: 'Email' }, { value: 'webhook', label: 'Webhook' }]} /></div></Field>}
+              {editingExisting ? null : <Field label="Kind"><div><Segmented label="Kind" value={kind} onChange={setKind} options={[{ value: 'email', label: 'Email' }, { value: 'slack', label: 'Slack' }, { value: 'discord', label: 'Discord' }, { value: 'webhook', label: 'Webhook' }]} /></div></Field>}
               <Field label="Name" htmlFor="ch-n"><Input id="ch-n" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
-              <Field label={shape === 'email' ? 'Addresses' : 'URL'} htmlFor="ch-t" hint={shape === 'email' ? 'Comma separated.' : 'Private, loopback and link-local addresses are refused unless the deployment allows them.'}>
-                <Input id="ch-t" mono value={target} placeholder={shape === 'email' ? 'oncall@example.com, team@example.com' : 'https://hooks.example.com/ferristrace'} onChange={(e) => setTarget(e.target.value)} />
+              <Field label={shape === 'email' ? 'Addresses' : 'URL'} htmlFor="ch-t" hint={shape === 'email' ? 'Comma separated.' : shape === 'slack' ? 'Create an incoming webhook in your Slack workspace and paste its URL.' : shape === 'discord' ? 'In the channel settings, open Integrations, create a webhook and copy its URL.' : 'Private, loopback and link-local addresses are refused unless the deployment allows them.'}>
+                <Input id="ch-t" mono value={target} placeholder={shape === 'email' ? 'oncall@example.com, team@example.com' : shape === 'slack' ? 'https://hooks.slack.com/services/T000/B000/XXXX' : shape === 'discord' ? 'https://discord.com/api/webhooks/123/abc' : 'https://hooks.example.com/ferristrace'} onChange={(e) => setTarget(e.target.value)} />
               </Field>
+              {shape === 'discord' ? <DiscordDesigner design={design} onChange={setDesign} /> : null}
               {problem && (name || target) ? <span className="text-caption text-destructive-text">{problem}</span> : null}
               <DialogFooter><Button type="button" onClick={close}>Cancel</Button><Button variant="primary" type="submit" disabled={problem !== null || create.isPending || update.isPending}>{editingExisting ? 'Save channel' : 'Create channel'}</Button></DialogFooter>
             </form>

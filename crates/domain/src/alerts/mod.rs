@@ -10,6 +10,7 @@ mod courier_tests;
 mod culprits;
 #[cfg(test)]
 mod culprits_tests;
+mod design;
 mod entities;
 mod errors;
 mod evaluator;
@@ -32,12 +33,16 @@ pub use courier::{Courier, DRAIN_BATCH, RETRY_AFTER_SECS, deliver, settlement_af
 pub use culprits::{
     CulpritPod, Culprits, MAX_CULPRIT_FACETS, MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS,
 };
-pub use entities::{
-    AlertEvent, Channel, ChannelView, Claimed, Delivery, Dispatch, Drained, IssuedChannel,
-    Notification, Observation, Overall, Preview, Rule, RuleDraft, RulePatch, RuleState,
-    SeriesState, Settlement, Tick, Transition, Watched,
+pub use design::{
+    Colors, CustomField, Design, Fact, MAX_CUSTOM_FIELDS, MAX_PINGS, Shown, Template, colour,
+    snowflake, thumbnail,
 };
-pub use errors::{AlertError, BadChannel, BadRule, DeliveryError, ProbeError};
+pub use entities::{
+    AlertEvent, Channel, ChannelChange, ChannelView, Claimed, Delivery, Dispatch, Drained,
+    IssuedChannel, Notification, Observation, Overall, Preview, Rule, RuleDraft, RulePatch,
+    RuleState, SeriesState, Settlement, Tick, Transition, Watched,
+};
+pub use errors::{AlertError, BadChannel, BadDesign, BadRule, DeliveryError, ProbeError};
 pub use evaluator::{Evaluator, TICK_SECS};
 pub use ports::{
     AlertChannels, AlertDuty, AlertEvents, AlertMailer, AlertOutbox, AlertRules, AlertStates,
@@ -45,7 +50,7 @@ pub use ports::{
 };
 pub use state_machine::next_state;
 pub use value_objects::{
-    AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Comparison, Condition,
+    AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Chat, Comparison, Condition,
     Definition, DefinitionParts, DeliveryStatus, Destination, Duty, EmailList, EventId,
     HISTORY_DAYS, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MAX_ADDRESSES,
     MAX_CHANNEL_NAME_BYTES, MAX_PENDING_SECS, MAX_RULE_NAME_BYTES, MAX_WINDOW_SECS,

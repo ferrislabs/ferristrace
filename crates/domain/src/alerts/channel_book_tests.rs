@@ -1,4 +1,5 @@
 use super::channel_book::ChannelBook;
+use super::entities::ChannelChange;
 use super::errors::{AlertError, BadChannel};
 use super::value_objects::{ChannelKind, ChannelName, Destination};
 use crate::access::key_ring_tests::{
@@ -139,8 +140,11 @@ async fn a_channel_is_renamed_retargeted_within_its_kind_and_deleted_by_an_admin
             &token(),
             an_org(MINE),
             id,
-            Some(&named("paging")),
-            Some("https://b.example.com/"),
+            ChannelChange {
+                name: Some(&named("paging")),
+                target: Some("https://b.example.com/"),
+                design: None,
+            },
             &hooks,
         )
         .await
@@ -150,8 +154,11 @@ async fn a_channel_is_renamed_retargeted_within_its_kind_and_deleted_by_an_admin
             &token(),
             an_org(MINE),
             id,
-            None,
-            Some("ops@example.com"),
+            ChannelChange {
+                name: None,
+                target: Some("ops@example.com"),
+                design: None,
+            },
             &hooks,
         )
         .await;
@@ -195,4 +202,31 @@ async fn a_read_key_lists_channels() {
         .await;
 
     assert_eq!(listed, Ok(Vec::new()));
+}
+
+#[tokio::test]
+async fn a_chat_channel_needs_no_seal_and_carries_no_secret() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+
+    let issued = book(OrgRole::Admin, &ledger, &notebook, &keys)
+        .create(
+            &token(),
+            an_org(MINE),
+            &named("team-chat"),
+            &Destination::parse(
+                ChannelKind::Slack,
+                "https://hooks.slack.com/services/T000/B000/XXXX",
+            )
+            .expect("a slack hook"),
+            &Couriered::default(),
+        )
+        .await
+        .expect("a channel");
+
+    assert!(issued.secret.is_none());
+    assert!(!issued.channel.has_secret);
+    assert_eq!(
+        notebook.entries()[0].detail.get("kind"),
+        Some(Some("slack"))
+    );
 }

@@ -8,6 +8,7 @@ mod api_keys;
 mod audit;
 mod decisions;
 mod deploys;
+mod design_codec;
 mod export;
 mod history;
 mod inbox;

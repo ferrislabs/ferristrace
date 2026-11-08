@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use ferristrace_domain::{
-    Culprits, DeliveryError, Dispatch, WebhookSecret, WebhookSender, WebhookUrl,
+    Chat, Culprits, DeliveryError, Design, Dispatch, WebhookSecret, WebhookSender, WebhookUrl,
 };
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
@@ -163,22 +163,12 @@ fn literal(host: &str) -> Option<IpAddr> {
         .ok()
 }
 
-impl WebhookSender for HttpWebhooks {
-    fn admits(&self, url: &WebhookUrl) -> bool {
-        if self.settings.allow_private {
-            return true;
-        }
-        match literal(url.host()) {
-            Some(address) => !private(address),
-            None => !named_privately(url.host()),
-        }
-    }
-
-    async fn send(
+impl HttpWebhooks {
+    async fn post(
         &self,
         url: &WebhookUrl,
-        secret: &WebhookSecret,
-        dispatch: &Dispatch,
+        body: Vec<u8>,
+        signed_with: Option<&WebhookSecret>,
     ) -> Result<(), DeliveryError> {
         if !self.admits(url) {
             return Err(DeliveryError::new(
@@ -212,21 +202,17 @@ impl WebhookSender for HttpWebhooks {
             .resolve_to_addrs(&host, &addresses)
             .build()
             .map_err(|_| DeliveryError::new("the webhook client could not be prepared"))?;
-        let body = self.body_of(dispatch);
-        let answer = client
-            .post(parsed)
-            .header(CONTENT_TYPE, "application/json")
-            .header(SIGNATURE_HEADER, signature(secret, &body))
-            .body(body)
-            .send()
-            .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    DeliveryError::new("the webhook did not answer in time")
-                } else {
-                    DeliveryError::new("the webhook could not be reached")
-                }
-            })?;
+        let mut request = client.post(parsed).header(CONTENT_TYPE, "application/json");
+        if let Some(secret) = signed_with {
+            request = request.header(SIGNATURE_HEADER, signature(secret, &body));
+        }
+        let answer = request.body(body).send().await.map_err(|error| {
+            if error.is_timeout() {
+                DeliveryError::new("the webhook did not answer in time")
+            } else {
+                DeliveryError::new("the webhook could not be reached")
+            }
+        })?;
         if answer.status().is_success() {
             Ok(())
         } else {
@@ -234,6 +220,47 @@ impl WebhookSender for HttpWebhooks {
                 format!("the webhook answered {}", answer.status().as_u16()).into(),
             ))
         }
+    }
+}
+
+impl WebhookSender for HttpWebhooks {
+    fn admits(&self, url: &WebhookUrl) -> bool {
+        if self.settings.allow_private {
+            return true;
+        }
+        match literal(url.host()) {
+            Some(address) => !private(address),
+            None => !named_privately(url.host()),
+        }
+    }
+
+    async fn send(
+        &self,
+        url: &WebhookUrl,
+        secret: &WebhookSecret,
+        dispatch: &Dispatch,
+    ) -> Result<(), DeliveryError> {
+        self.post(url, self.body_of(dispatch), Some(secret)).await
+    }
+
+    async fn send_chat(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        design: &Design,
+        dispatch: &Dispatch,
+    ) -> Result<(), DeliveryError> {
+        let message = self.render_chat(chat, design, dispatch);
+        self.post(url, message.into_bytes(), None).await
+    }
+
+    fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
+        let link = self.link_to(dispatch);
+        match chat {
+            Chat::Slack => crate::chat::slack(dispatch, &link),
+            Chat::Discord => crate::chat::discord(design, dispatch, &link),
+        }
+        .to_string()
     }
 }
 

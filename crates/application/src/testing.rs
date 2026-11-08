@@ -82,6 +82,25 @@ impl WebhookSender for Inert {
     ) -> Result<(), DeliveryError> {
         Err(DeliveryError::new("no webhook sender is configured"))
     }
+
+    async fn send_chat(
+        &self,
+        _chat: ferristrace_domain::Chat,
+        _url: &WebhookUrl,
+        _design: &ferristrace_domain::Design,
+        _dispatch: &Dispatch,
+    ) -> Result<(), DeliveryError> {
+        Err(DeliveryError::new("no webhook sender is configured"))
+    }
+
+    fn render_chat(
+        &self,
+        _chat: ferristrace_domain::Chat,
+        _design: &ferristrace_domain::Design,
+        _dispatch: &Dispatch,
+    ) -> String {
+        String::from("{}")
+    }
 }
 
 impl ferristrace_domain::CulpritReader for Inert {

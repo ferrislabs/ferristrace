@@ -1,8 +1,9 @@
 use super::alert_book::standing;
-use super::entities::{ChannelView, IssuedChannel};
+use super::design::Design;
+use super::entities::{ChannelChange, ChannelView, Dispatch, IssuedChannel};
 use super::errors::{AlertError, BadChannel};
 use super::ports::{AlertChannels, WebhookSender};
-use super::value_objects::{ChannelId, ChannelName, Destination, WebhookSecret};
+use super::value_objects::{AlertStatus, ChannelId, ChannelName, Chat, Destination, WebhookSecret};
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::identity::{AccountId, SessionStore};
@@ -49,6 +50,12 @@ where
         let by = standing(self.readers.whoami(), token, org).await?;
         let secret = match destination {
             Destination::Email(_) => None,
+            Destination::Chat(_, url, _) => {
+                if !webhooks.admits(url) {
+                    return Err(AlertError::PrivateTarget);
+                }
+                None
+            }
             Destination::Webhook(url) => {
                 if !webhooks.admits(url) {
                     return Err(AlertError::PrivateTarget);
@@ -82,10 +89,14 @@ where
         token: &SessionToken,
         org: TenantId,
         id: ChannelId,
-        name: Option<&ChannelName>,
-        target: Option<&str>,
+        change: ChannelChange<'_>,
         webhooks: &W,
     ) -> Result<ChannelView, AlertError> {
+        let ChannelChange {
+            name,
+            target,
+            design,
+        } = change;
         let by = standing(self.readers.whoami(), token, org).await?;
         let held = self.channels.list(org).await?;
         let kept = held
@@ -100,13 +111,24 @@ where
             return Err(AlertError::NameTaken);
         }
         let destination = match target {
-            Some(target) => Destination::parse(kept.kind(), target)?,
+            Some(target) => {
+                let parsed = Destination::parse(kept.kind(), target)?;
+                match kept.destination.design() {
+                    Some(old) => parsed.designed(old.clone()),
+                    None => parsed,
+                }
+            }
             None => kept.destination.clone(),
+        };
+        let destination = match design {
+            Some(design) if destination.design().is_some() => destination.designed(design.clone()),
+            Some(_) => return Err(BadChannel::NoDesign.into()),
+            None => destination,
         };
         if destination.kind() != kept.kind() {
             return Err(BadChannel::KindChanged.into());
         }
-        if let Destination::Webhook(url) = &destination
+        if let Destination::Webhook(url) | Destination::Chat(_, url, _) = &destination
             && !webhooks.admits(url)
         {
             return Err(AlertError::PrivateTarget);
@@ -128,6 +150,19 @@ where
             destination,
             has_secret: kept.has_secret,
         })
+    }
+
+    pub async fn preview<W: WebhookSender>(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        chat: Chat,
+        design: &Design,
+        to: AlertStatus,
+        webhooks: &W,
+    ) -> Result<String, AlertError> {
+        standing(self.readers.whoami(), token, org).await?;
+        Ok(webhooks.render_chat(chat, design, &Dispatch::sample(org, to)))
     }
 
     pub async fn delete(

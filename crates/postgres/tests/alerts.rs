@@ -641,3 +641,93 @@ async fn spec_l2_3_two_replicas_never_evaluate_the_same_tick_twice() {
         .expect("a slot");
     assert_eq!(u64::try_from(slot).expect("positive"), (NOW + 60) / 60);
 }
+
+#[tokio::test]
+async fn a_chat_channel_is_kept_without_a_secret_and_reads_back_as_its_service() {
+    let Some(pool) = control_plane("alerts_chat_channel", 2).await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+
+    let made = committed!(pg, |channels: AlertChannels| {
+        let slack = channels
+            .create(
+                org,
+                &ChannelName::try_from("ops").expect("a name"),
+                &Destination::parse(
+                    ChannelKind::Slack,
+                    "https://hooks.slack.com/services/T000/B000/XXXX",
+                )
+                .expect("a hook"),
+                None,
+                owner,
+            )
+            .await
+            .expect("kept")
+            .expect("fresh");
+        let listed = channels.list(org).await.expect("listed");
+        (slack, listed)
+    });
+
+    assert!(!made.0.has_secret);
+    assert_eq!(made.1.len(), 1);
+    assert_eq!(made.1[0].kind(), ChannelKind::Slack);
+}
+
+#[tokio::test]
+async fn a_discord_design_is_kept_with_its_channel_and_changed_in_place() {
+    let Some(pool) = control_plane("alerts_discord_design", 2).await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+    let design = ferristrace_domain::Design {
+        title: Some(ferristrace_domain::Template::parse("{state}: {alert}", 100).expect("a title")),
+        ping_roles: vec!["123456789012345678".into()],
+        ..ferristrace_domain::Design::default()
+    };
+    let hook = Destination::parse(
+        ChannelKind::Discord,
+        "https://discord.com/api/webhooks/1/abc",
+    )
+    .expect("a hook");
+
+    let (id, kept, changed) = committed!(pg, |channels: AlertChannels| {
+        let made = channels
+            .create(
+                org,
+                &ChannelName::try_from("dev").expect("a name"),
+                &hook.clone().designed(design.clone()),
+                None,
+                owner,
+            )
+            .await
+            .expect("kept")
+            .expect("fresh");
+        let kept = channels
+            .armed(org, made.id)
+            .await
+            .expect("read")
+            .expect("held");
+        let restyled = hook.clone().designed(ferristrace_domain::Design::default());
+        let moved = channels
+            .update(org, made.id, &made.name, &restyled)
+            .await
+            .expect("updated");
+        let changed = channels
+            .armed(org, made.id)
+            .await
+            .expect("read")
+            .expect("held");
+        assert!(moved);
+        (made.id, kept, changed)
+    });
+
+    assert_eq!(kept.destination.design(), Some(&design));
+    assert_eq!(
+        changed.destination.design(),
+        Some(&ferristrace_domain::Design::default())
+    );
+    let _ = id;
+}

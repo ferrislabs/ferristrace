@@ -214,3 +214,49 @@ fn a_secret_is_thirty_two_random_bytes_in_hex_and_never_printed() {
     assert_ne!(one, other);
     assert_eq!(format!("{one:?}"), "WebhookSecret(redacted)");
 }
+
+#[test]
+fn a_chat_channel_takes_only_the_incoming_webhook_url_its_service_gives() {
+    for (kind, url) in [
+        (
+            ChannelKind::Slack,
+            "https://hooks.slack.com/services/T000/B000/XXXX",
+        ),
+        (
+            ChannelKind::Discord,
+            "https://discord.com/api/webhooks/123/abc",
+        ),
+        (
+            ChannelKind::Discord,
+            "https://canary.discord.com/api/webhooks/123/abc",
+        ),
+    ] {
+        let parsed = Destination::parse(kind, url).expect(url);
+        assert_eq!(parsed.kind(), kind);
+        assert_eq!(parsed.target(), url);
+    }
+    for (kind, url) in [
+        (ChannelKind::Slack, "http://hooks.slack.com/services/T/B/X"),
+        (
+            ChannelKind::Slack,
+            "https://hooks.slack.com.evil.test/services/T/B/X",
+        ),
+        (
+            ChannelKind::Slack,
+            "https://evil.test/hooks.slack.com/services/T/B/X",
+        ),
+        (ChannelKind::Slack, "https://hooks.slack.com/other/T/B/X"),
+        (ChannelKind::Slack, "https://discord.com/api/webhooks/1/a"),
+        (
+            ChannelKind::Discord,
+            "https://discord.com.evil.test/api/webhooks/1/a",
+        ),
+        (ChannelKind::Discord, "https://discord.com/channels/1/2"),
+        (
+            ChannelKind::Discord,
+            "https://hooks.slack.com/services/T/B/X",
+        ),
+    ] {
+        assert!(Destination::parse(kind, url).is_err(), "{url}");
+    }
+}
