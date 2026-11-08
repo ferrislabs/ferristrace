@@ -31,9 +31,9 @@ export function LineChart({ title, legend, values, second, threshold, lo = 0, hi
           {second ? <polyline points={pts(second, lo, hi, height)} fill="none" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" /> : null}
           <polyline points={p} fill="none" stroke="var(--chart-line)" strokeWidth="1.75" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         </svg>
-        {markers.map((m) => {
+        {markers.map((m, index) => {
           const left = `${(m.at / Math.max(1, values.length - 1)) * 100}%`
-          const tag = <span className="absolute -top-0.5 left-1 whitespace-nowrap rounded-sm border bg-background px-1 font-mono text-[10px] leading-4 text-foreground shadow-sm">▲ {m.label}</span>
+          const tag = <span className="absolute left-1 whitespace-nowrap rounded-sm border bg-background px-1 font-mono text-[10px] leading-4 text-foreground shadow-sm" style={{ top: `${(index % 3) * 16}px` }}>▲ {m.label}</span>
           return (
             <span key={`${m.label}-${m.at}`} className="absolute inset-y-0 border-l border-dashed border-foreground/60" style={{ left }}>
               {m.to ? <Link to={m.to} aria-label={`Release ${m.label}`} className="no-underline">{tag}</Link> : tag}
