@@ -4,7 +4,7 @@ use super::courier::deliver;
 use super::entities::{
     AlertEvent, Delivery, Dispatch, Preview, Rule, RuleDraft, RulePatch, RuleState, Watched,
 };
-use super::errors::AlertError;
+use super::errors::{AlertError, BadSilence};
 use super::ports::{
     AlertChannels, AlertEvents, AlertMailer, AlertRules, AlertStates, SignalProbe, WebhookSender,
 };
@@ -256,6 +256,74 @@ where
         .await
     }
 
+    pub async fn silence(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        id: RuleId,
+        until_ms: u64,
+        now: UnixSeconds,
+    ) -> Result<Watched, AlertError> {
+        let by = self.standing(token, org).await?;
+        let held = self
+            .rules
+            .get(org, id)
+            .await?
+            .ok_or(AlertError::NoSuchRule)?;
+        validate_silence(until_ms, now.get() * MILLIS_PER_SECOND)?;
+        let changed = Rule {
+            silenced_until_ms: Some(until_ms),
+            ..held
+        };
+        if !self.rules.update(&changed).await? {
+            return Err(AlertError::NoSuchRule);
+        }
+        self.note(
+            org,
+            by,
+            Action::AlertSilenced,
+            id,
+            Detail::default()
+                .with("name", &changed.name)
+                .with("until_ms", until_ms),
+        )
+        .await?;
+        self.watched(changed).await
+    }
+
+    pub async fn unsilence(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        id: RuleId,
+    ) -> Result<Watched, AlertError> {
+        let by = self.standing(token, org).await?;
+        let held = self
+            .rules
+            .get(org, id)
+            .await?
+            .ok_or(AlertError::NoSuchRule)?;
+        if held.silenced_until_ms.is_none() {
+            return self.watched(held).await;
+        }
+        let changed = Rule {
+            silenced_until_ms: None,
+            ..held
+        };
+        if !self.rules.update(&changed).await? {
+            return Err(AlertError::NoSuchRule);
+        }
+        self.note(
+            org,
+            by,
+            Action::AlertUnsilenced,
+            id,
+            Detail::default().with("name", &changed.name),
+        )
+        .await?;
+        self.watched(changed).await
+    }
+
     pub async fn preview<Q: SignalProbe>(
         &self,
         who: &Reader,
@@ -478,7 +546,22 @@ fn merged(held: &Rule, patch: RulePatch) -> Result<Rule, AlertError> {
         enabled: patch.enabled.unwrap_or(held.enabled),
         definition: Definition::new(parts)?,
         created_ms: held.created_ms,
+        silenced_until_ms: held.silenced_until_ms,
     })
+}
+
+const SILENCE_MAX_DAYS: u32 = 30;
+
+fn validate_silence(until_ms: u64, now_ms: u64) -> Result<(), BadSilence> {
+    if until_ms <= now_ms {
+        return Err(BadSilence::InThePast);
+    }
+    if until_ms - now_ms > u64::from(SILENCE_MAX_DAYS) * MILLIS_PER_DAY {
+        return Err(BadSilence::TooLong {
+            max_days: SILENCE_MAX_DAYS,
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn window_ending(at_ms: u64, window_secs: u64) -> Result<Window, AlertError> {

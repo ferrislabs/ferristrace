@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::alert_book::{AlertBook, PREVIEW_POINTS};
 use super::culprits::Culprits;
 use super::entities::{AlertEvent, Observation, RuleDraft, RulePatch};
-use super::errors::{AlertError, BadRule, ProbeError};
+use super::errors::{AlertError, BadRule, BadSilence, ProbeError};
 use super::ports::{AlertChannels, SignalProbe};
 use super::value_objects::{
     AlertSeverity, AlertStatus, ChannelId, ChannelName, Comparison, Condition, Definition,
@@ -327,6 +327,141 @@ async fn a_deleted_rule_is_gone_and_its_deletion_is_audited() {
         Some(AlertError::NoSuchRule)
     );
     assert_eq!(notebook.entries()[1].action, Action::AlertDeleted);
+}
+
+const HOUR_MS: u64 = 3_600_000;
+const DAY_MS: u64 = 24 * HOUR_MS;
+
+#[tokio::test]
+async fn an_admin_silences_a_rule_and_the_log_records_it() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+    let admin = book(OrgRole::Admin, &ledger, &notebook, &keys);
+    let id = admin
+        .create(&token(), an_org(MINE), &draft("One", None, Vec::new()))
+        .await
+        .expect("created")
+        .rule
+        .id;
+    let until_ms = NOW * 1_000 + 4 * HOUR_MS;
+
+    let watched = admin
+        .silence(&token(), an_org(MINE), id, until_ms, UnixSeconds::new(NOW))
+        .await
+        .expect("an admin silences a rule");
+
+    assert_eq!(watched.rule.silenced_until_ms, Some(until_ms));
+    assert_eq!(notebook.entries()[1].action, Action::AlertSilenced);
+}
+
+#[tokio::test]
+async fn an_admin_lifts_a_silence_early_and_the_log_records_it() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+    let admin = book(OrgRole::Admin, &ledger, &notebook, &keys);
+    let id = admin
+        .create(&token(), an_org(MINE), &draft("One", None, Vec::new()))
+        .await
+        .expect("created")
+        .rule
+        .id;
+    admin
+        .silence(
+            &token(),
+            an_org(MINE),
+            id,
+            NOW * 1_000 + 4 * HOUR_MS,
+            UnixSeconds::new(NOW),
+        )
+        .await
+        .expect("silenced");
+
+    let watched = admin
+        .unsilence(&token(), an_org(MINE), id)
+        .await
+        .expect("an admin lifts a silence");
+
+    assert_eq!(watched.rule.silenced_until_ms, None);
+    assert_eq!(notebook.entries()[2].action, Action::AlertUnsilenced);
+}
+
+#[tokio::test]
+async fn a_member_cannot_silence_or_unsilence() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+    let admin = book(OrgRole::Admin, &ledger, &notebook, &keys);
+    let id = admin
+        .create(&token(), an_org(MINE), &draft("One", None, Vec::new()))
+        .await
+        .expect("created")
+        .rule
+        .id;
+    let member = book(OrgRole::Member, &ledger, &notebook, &keys);
+
+    let silenced = member
+        .silence(
+            &token(),
+            an_org(MINE),
+            id,
+            NOW * 1_000 + 4 * HOUR_MS,
+            UnixSeconds::new(NOW),
+        )
+        .await;
+    let unsilenced = member.unsilence(&token(), an_org(MINE), id).await;
+
+    assert_eq!(silenced.err(), Some(AlertError::NotYoursToChange));
+    assert_eq!(unsilenced.err(), Some(AlertError::NotYoursToChange));
+}
+
+#[tokio::test]
+async fn silencing_in_the_past_is_refused() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+    let admin = book(OrgRole::Admin, &ledger, &notebook, &keys);
+    let id = admin
+        .create(&token(), an_org(MINE), &draft("One", None, Vec::new()))
+        .await
+        .expect("created")
+        .rule
+        .id;
+
+    let refused = admin
+        .silence(
+            &token(),
+            an_org(MINE),
+            id,
+            NOW * 1_000 - 1,
+            UnixSeconds::new(NOW),
+        )
+        .await;
+
+    assert_eq!(
+        refused.err(),
+        Some(AlertError::Silence(BadSilence::InThePast))
+    );
+}
+
+#[tokio::test]
+async fn silencing_beyond_thirty_days_is_refused() {
+    let (ledger, notebook, keys) = (AlertLedger::default(), Notebook::default(), Ring::default());
+    let admin = book(OrgRole::Admin, &ledger, &notebook, &keys);
+    let id = admin
+        .create(&token(), an_org(MINE), &draft("One", None, Vec::new()))
+        .await
+        .expect("created")
+        .rule
+        .id;
+
+    let refused = admin
+        .silence(
+            &token(),
+            an_org(MINE),
+            id,
+            NOW * 1_000 + 30 * DAY_MS + HOUR_MS,
+            UnixSeconds::new(NOW),
+        )
+        .await;
+
+    assert_eq!(
+        refused.err(),
+        Some(AlertError::Silence(BadSilence::TooLong { max_days: 30 }))
+    );
 }
 
 #[tokio::test]

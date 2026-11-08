@@ -107,6 +107,8 @@ pub enum Action {
     AlertDeleted,
     AlertEnabled,
     AlertDisabled,
+    AlertSilenced,
+    AlertUnsilenced,
     ChannelCreated,
     ChannelUpdated,
     ChannelDeleted,
@@ -141,7 +143,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Self; 61] = [
+    pub const ALL: [Self; 63] = [
         Self::OrgFounded,
         Self::OrgRenamed,
         Self::OrgLogoSet,
@@ -172,6 +174,8 @@ impl Action {
         Self::AlertDeleted,
         Self::AlertEnabled,
         Self::AlertDisabled,
+        Self::AlertSilenced,
+        Self::AlertUnsilenced,
         Self::ChannelCreated,
         Self::ChannelUpdated,
         Self::ChannelDeleted,
@@ -237,6 +241,8 @@ impl Action {
             Self::AlertDeleted => "alert.deleted",
             Self::AlertEnabled => "alert.enabled",
             Self::AlertDisabled => "alert.disabled",
+            Self::AlertSilenced => "alert.silenced",
+            Self::AlertUnsilenced => "alert.unsilenced",
             Self::ChannelCreated => "channel.created",
             Self::ChannelUpdated => "channel.updated",
             Self::ChannelDeleted => "channel.deleted",

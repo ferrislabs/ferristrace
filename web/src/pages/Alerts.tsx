@@ -1,4 +1,4 @@
-import { BellRing, Plus, TriangleAlert } from 'lucide-react'
+import { BellOff, BellRing, Plus, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { because } from '@/auth/client'
@@ -87,7 +87,7 @@ function RuleRow({ rule, project, mayChange, busy, onOpen, onToggle }: { rule: R
       </Td>
       <Td><Badge variant="outline">{rule.signal.kind}</Badge></Td>
       <Td><span className={cn('text-control font-semibold', rule.severity === 'critical' ? 'text-destructive-text' : rule.severity === 'warning' ? 'text-warning-text' : 'text-muted-foreground')}>{rule.severity}</span></Td>
-      <Td><span className="flex flex-wrap items-center gap-1.5"><StateBadge status={state.status} /><span className="font-mono text-caption text-muted-foreground">since {stamp(state.since_ms)}</span></span></Td>
+      <Td><span className="flex flex-wrap items-center gap-1.5"><StateBadge status={state.status} />{rule.silenced_until_ms !== null && rule.silenced_until_ms > Date.now() ? <BellOff className="size-3.5 shrink-0 text-warning-text" aria-label="Silenced" /> : null}<span className="font-mono text-caption text-muted-foreground">since {stamp(state.since_ms)}</span></span></Td>
       <Td className="text-control">{project}</Td>
       {mayChange ? <Td numeric><Switch checked={rule.enabled} disabled={busy} onCheckedChange={onToggle} aria-label={`Enable ${rule.name}`} /></Td> : null}
     </Tr>

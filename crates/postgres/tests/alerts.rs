@@ -257,9 +257,19 @@ async fn rules_channels_states_and_events_read_back_whole() {
         assert!(rules.enabled().await.expect("read").is_empty());
         assert!(rules.update(&rule).await.expect("updated"));
         assert_eq!(rules.enabled().await.expect("read"), vec![rule.clone()]);
+        let mut silenced = rule.clone();
+        silenced.silenced_until_ms = Some(NOW * 1_000 + 3_600_000);
+        assert!(rules.update(&silenced).await.expect("updated"));
+        assert_eq!(rules.get(org, rule.id).await.expect("read"), Some(silenced));
+        assert!(rules.update(&rule).await.expect("updated"));
+        assert_eq!(
+            rules.get(org, rule.id).await.expect("read"),
+            Some(rule.clone())
+        );
         rule
     });
     assert_eq!(rule.created_ms, NOW * 1_000);
+    assert_eq!(rule.silenced_until_ms, None);
 
     let labelled = Labels::new(BTreeMap::from([("queue".into(), "mail".into())]));
     committed!(pg, |states: AlertStates, events: AlertEvents| {

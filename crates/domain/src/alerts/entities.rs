@@ -26,6 +26,13 @@ pub struct Rule {
     pub enabled: bool,
     pub definition: Definition,
     pub created_ms: u64,
+    pub silenced_until_ms: Option<u64>,
+}
+
+impl Rule {
+    pub fn silenced(&self, now_ms: u64) -> bool {
+        self.silenced_until_ms.is_some_and(|until| until > now_ms)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

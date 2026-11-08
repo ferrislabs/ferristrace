@@ -512,6 +512,57 @@ async fn a_rule_is_created_read_patched_and_deleted_in_the_frozen_shape() {
 }
 
 #[tokio::test]
+async fn an_admin_silences_and_unsilences_a_rule_over_http() {
+    let harness = Harness::new();
+    let rule = created(&harness, checkout("Checkout errors", None, &[])).await;
+    let rule_id = rule["id"].as_str().expect("an id").to_owned();
+    let until_ms = NOW * 1_000 + 4 * 3_600_000;
+
+    let (silenced_status, silenced) = harness
+        .admin(
+            Method::POST,
+            &format!("{}/{rule_id}/silence", alerts(MINE)),
+            Some(json!({"until_ms": until_ms})),
+        )
+        .await;
+    let (refused_status, refused) = harness
+        .admin(
+            Method::POST,
+            &format!("{}/{rule_id}/silence", alerts(MINE)),
+            Some(json!({"until_ms": NOW * 1_000 - 1})),
+        )
+        .await;
+    let (unsilenced_status, unsilenced) = harness
+        .admin(
+            Method::DELETE,
+            &format!("{}/{rule_id}/silence", alerts(MINE)),
+            None,
+        )
+        .await;
+    let (member_status, _) = harness
+        .served(
+            OrgRole::Member,
+            as_session(
+                Method::POST,
+                &format!("{}/{rule_id}/silence", alerts(MINE)),
+                Some(json!({"until_ms": until_ms})),
+            ),
+        )
+        .await;
+
+    assert_eq!(silenced_status, StatusCode::OK, "{silenced}");
+    assert_eq!(silenced["silenced_until_ms"], until_ms);
+    assert_eq!(
+        refused_status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{refused}"
+    );
+    assert_eq!(unsilenced_status, StatusCode::OK, "{unsilenced}");
+    assert_eq!(unsilenced["silenced_until_ms"], Value::Null);
+    assert_eq!(member_status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn a_malformed_rule_is_refused_with_422() {
     let harness = Harness::new();
     let mut short = checkout("Short", None, &[]);

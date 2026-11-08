@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use super::culprits::{CulpritPod, Culprits};
-use super::entities::{AlertEvent, Observation, RuleDraft, Tick};
+use super::entities::{AlertEvent, Observation, Rule, RuleDraft, Tick};
 use super::errors::ProbeError;
 use super::evaluator::Evaluator;
 use super::ports::{AlertChannels, AlertRules, SignalProbe};
@@ -252,6 +252,48 @@ async fn a_rule_goes_pending_then_firing_then_ok_with_one_event_per_change() {
             .notifications()
             .iter()
             .all(|notification| notification.attempt == 0)
+    );
+}
+
+#[tokio::test]
+async fn a_silenced_rule_still_evaluates_and_records_events_but_notifies_nobody() {
+    let ledger = AlertLedger::default();
+    let channels = two_channels(&ledger).await;
+    a_rule(&ledger, parts(checkout(), channels.clone()), true).await;
+    let rule = ledger.rules()[0].clone();
+    AlertRules::update(
+        &ledger,
+        &Rule {
+            silenced_until_ms: Some(minute(10).get() * 1_000),
+            ..rule
+        },
+    )
+    .await
+    .expect("silenced");
+    let probe = Scripted::values(&[Some(1.0), Some(9.0), Some(9.0), Some(9.0), Some(2.0)]);
+    let evaluating = evaluator(&ledger, &probe);
+
+    for at in 0..5 {
+        evaluating.tick(minute(at)).await.expect("a tick");
+    }
+
+    let changes: Vec<(AlertStatus, AlertStatus)> = ledger
+        .events()
+        .iter()
+        .map(|event| (event.from, event.to))
+        .collect();
+    assert_eq!(
+        changes,
+        vec![
+            (AlertStatus::Ok, AlertStatus::Pending),
+            (AlertStatus::Pending, AlertStatus::Firing),
+            (AlertStatus::Firing, AlertStatus::Ok),
+        ],
+        "a silenced rule still evaluates and its history still records every change"
+    );
+    assert!(
+        ledger.notifications().is_empty(),
+        "a silenced rule notifies nobody"
     );
 }
 
