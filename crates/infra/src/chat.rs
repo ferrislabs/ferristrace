@@ -326,7 +326,7 @@ mod tests {
             labels: Labels::new(BTreeMap::from([("service".into(), "checkout".into())])),
             at_ms: 1_700_000_000_000,
             context: None,
-            mentions: Default::default(),
+            mentions: ferristrace_domain::Mentions::default(),
         }
     }
 

@@ -150,7 +150,7 @@ fn parts(signal: Signal, channels: Vec<ChannelId>) -> DefinitionParts {
         no_data: NoDataPolicy::Ok,
         channels,
         page: None,
-        mentions: Default::default(),
+        mentions: crate::Mentions::default(),
     }
 }
 

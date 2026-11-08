@@ -1063,7 +1063,7 @@ async fn spec_l2_5_a_firing_alert_pages_escalates_and_stops_once_acknowledged() 
                 no_data: ferristrace_domain::NoDataPolicy::Ok,
                 channels: Vec::new(),
                 page: Some(weekly().id),
-                mentions: Default::default(),
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },
