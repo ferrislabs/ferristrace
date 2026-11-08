@@ -178,6 +178,7 @@ async fn a_rule(pg: &Postgres<FixedClock>, crew: &Crew, page: Option<ScheduleId>
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
                     page,
+                    mentions: Default::default(),
                 })
                 .expect("a definition"),
             },

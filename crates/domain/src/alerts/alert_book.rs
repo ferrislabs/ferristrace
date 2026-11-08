@@ -401,6 +401,7 @@ where
             labels: Labels::new(BTreeMap::from([("test".into(), "true".into())])),
             at_ms: now.get() * MILLIS_PER_SECOND,
             context: None,
+            mentions: rule.definition.mentions().clone(),
         };
         let mut deliveries = Vec::new();
         for channel in rule.definition.channels() {
@@ -537,6 +538,7 @@ fn merged(held: &Rule, patch: RulePatch) -> Result<Rule, AlertError> {
         no_data: patch.no_data.unwrap_or(base.no_data),
         channels: patch.channels.unwrap_or_else(|| base.channels.clone()),
         page: patch.page.unwrap_or(base.page),
+        mentions: patch.mentions.unwrap_or_else(|| base.mentions.clone()),
     };
     Ok(Rule {
         id: held.id,

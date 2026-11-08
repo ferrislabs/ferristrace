@@ -237,6 +237,15 @@ export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: b
             </NativeSelect>
           </Field>
 
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-control font-semibold">Mention on Discord</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Role ids" htmlFor="ar-mr" hint="Discord ids, separated by spaces or commas."><Input id="ar-mr" mono value={form.mentionRoles} onChange={(e) => set({ mentionRoles: e.target.value })} /></Field>
+              <Field label="User ids" htmlFor="ar-mu"><Input id="ar-mu" mono value={form.mentionUsers} onChange={(e) => set({ mentionUsers: e.target.value })} /></Field>
+            </div>
+            <span className="text-caption text-muted-foreground">Pinged when the rule starts firing, in every Discord channel it uses, on top of the pings set on the channel itself. Never @everyone.</span>
+          </fieldset>
+
           <div className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-control font-semibold">Preview</span>

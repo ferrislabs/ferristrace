@@ -52,6 +52,7 @@ export type RuleDefinition = {
   no_data: NoData
   channels: string[]
   page: { schedule: string } | null
+  mentions: { roles: string[]; users: string[] }
 }
 
 export type Rule = RuleDefinition & { id: string; state: RuleState; silenced_until_ms: number | null }
@@ -321,6 +322,7 @@ export const definitionOf = (rule: Rule): RuleDefinition => ({
   no_data: rule.no_data,
   channels: rule.channels,
   page: rule.page,
+  mentions: rule.mentions,
 })
 
 export function duration(seconds: number): string {

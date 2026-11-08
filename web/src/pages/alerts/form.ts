@@ -47,6 +47,8 @@ export type Form = {
   noData: NoData
   channels: string[]
   page: string
+  mentionRoles: string
+  mentionUsers: string
   enabled: boolean
 }
 
@@ -80,8 +82,12 @@ export const BLANK: Form = {
   noData: 'no_data',
   channels: [],
   page: '',
+  mentionRoles: '',
+  mentionUsers: '',
   enabled: true,
 }
+
+const ids = (text: string) => text.split(/[\s,]+/).filter((part) => part.length > 0)
 
 const list = (text: string) => text.split(/[,\n]/).map((part) => part.trim()).filter((part) => part.length > 0)
 
@@ -101,6 +107,8 @@ export function formOf(rule: Rule): Form {
     noData: rule.no_data,
     channels: rule.channels,
     page: rule.page?.schedule ?? '',
+    mentionRoles: rule.mentions?.roles.join(', ') ?? '',
+    mentionUsers: rule.mentions?.users.join(', ') ?? '',
     enabled: rule.enabled,
   }
   const signal = rule.signal
@@ -203,6 +211,7 @@ export function definitionFrom(form: Form): { definition: RuleDefinition } | { p
       no_data: form.noData,
       channels: form.channels,
       page: form.page ? { schedule: form.page } : null,
+      mentions: { roles: ids(form.mentionRoles), users: ids(form.mentionUsers) },
     },
   }
 }

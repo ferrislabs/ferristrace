@@ -160,3 +160,11 @@ Delivered with 13B1b
   @spec-l13-10  Alert data cannot mention anyone through a placeholder.
   @spec-l13-11  A design naming an unknown placeholder, a bad colour, a
                 non-https thumbnail or more than 5 custom fields is refused.
+
+Delivered with 13B1c
+  A rule carries `mentions {roles, users}` (Discord ids). When it starts
+  firing, every Discord channel it uses pings them, joined with the pings
+  of the channel design and without duplicates. Never on resolution, never
+  `@everyone`. Slack ids differ, so a Slack channel does not use them yet.
+  @spec-l13-12  A rule keeps its mentions, refuses a bad id, and a firing
+                notification pings the rule's and the channel's ids once.

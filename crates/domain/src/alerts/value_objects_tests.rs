@@ -30,6 +30,7 @@ fn parts(signal: Signal, window_secs: u64, pending_secs: u64) -> DefinitionParts
         no_data: NoDataPolicy::Ok,
         channels: Vec::new(),
         page: None,
+        mentions: Default::default(),
     }
 }
 

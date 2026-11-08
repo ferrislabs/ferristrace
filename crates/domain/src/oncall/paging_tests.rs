@@ -126,6 +126,7 @@ impl World {
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
                     page,
+                    mentions: Default::default(),
                 })
                 .expect("a definition"),
             },

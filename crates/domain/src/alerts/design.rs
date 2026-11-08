@@ -199,6 +199,50 @@ pub fn thumbnail(given: &str) -> Result<Box<str>, BadDesign> {
     Ok(kept.into())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Mentions {
+    roles: Vec<Box<str>>,
+    users: Vec<Box<str>>,
+}
+
+impl Mentions {
+    pub fn new(roles: &[String], users: &[String]) -> Result<Self, BadDesign> {
+        if roles.len() > MAX_PINGS || users.len() > MAX_PINGS {
+            return Err(BadDesign::TooManyPings { max: MAX_PINGS });
+        }
+        let checked = |given: &[String]| -> Result<Vec<Box<str>>, BadDesign> {
+            let mut ids: Vec<Box<str>> = Vec::new();
+            for one in given {
+                let id = snowflake(one)?;
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+            Ok(ids)
+        };
+        Ok(Self {
+            roles: checked(roles)?,
+            users: checked(users)?,
+        })
+    }
+
+    pub fn from_ids(roles: Vec<Box<str>>, users: Vec<Box<str>>) -> Self {
+        Self { roles, users }
+    }
+
+    pub fn roles(&self) -> &[Box<str>] {
+        &self.roles
+    }
+
+    pub fn users(&self) -> &[Box<str>] {
+        &self.users
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.roles.is_empty() && self.users.is_empty()
+    }
+}
+
 pub fn colour(given: u32) -> Result<u32, BadDesign> {
     if given <= 0x00ff_ffff {
         Ok(given)

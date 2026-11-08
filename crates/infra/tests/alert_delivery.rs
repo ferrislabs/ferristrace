@@ -163,6 +163,7 @@ async fn a_rule(ledger: &AlertLedger, channels: Vec<ChannelId>) {
                 no_data: NoDataPolicy::Ok,
                 channels,
                 page: None,
+                mentions: Default::default(),
             })
             .expect("a definition"),
         },
@@ -409,6 +410,7 @@ async fn a_guarded_deployment_never_reaches_a_loopback_webhook() {
         labels: Labels::none(),
         at_ms: 0,
         context: None,
+        mentions: Default::default(),
     };
 
     let refused = ferristrace_domain::WebhookSender::send(

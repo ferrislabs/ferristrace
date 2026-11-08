@@ -49,12 +49,12 @@ pub use alerts::{
     CustomField, Definition, DefinitionParts, Delivery, DeliveryError, DeliveryStatus, Design,
     Destination, Dispatch, Drained, Duty, EmailList, Evaluator, EventId, Fact, HISTORY_DAYS,
     IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MAX_CULPRIT_FACETS,
-    MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS, MAX_CUSTOM_FIELDS, MAX_PINGS, MetricSignal, NoDataPolicy,
-    Notification, NotificationId, Observation, Overall, PREVIEW_POINTS, Preview, ProbeError,
-    RETRY_AFTER_SECS, Rule, RuleDraft, RuleId, RuleName, RulePatch, RuleState, SeriesState,
-    Settlement, Shown, Signal, SignalProbe, TICK_SECS, Template, Tick, TraceMeasure, TraceSignal,
-    Transition, Watched, WebhookSecret, WebhookSender, WebhookUrl, colour, next_state, snowflake,
-    thumbnail,
+    MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS, MAX_CUSTOM_FIELDS, MAX_PINGS, Mentions, MetricSignal,
+    NoDataPolicy, Notification, NotificationId, Observation, Overall, PREVIEW_POINTS, Preview,
+    ProbeError, RETRY_AFTER_SECS, Rule, RuleDraft, RuleId, RuleName, RulePatch, RuleState,
+    SeriesState, Settlement, Shown, Signal, SignalProbe, TICK_SECS, Template, Tick, TraceMeasure,
+    TraceSignal, Transition, Watched, WebhookSecret, WebhookSender, WebhookUrl, colour, next_state,
+    snowflake, thumbnail,
 };
 pub use audit::{
     Action, Actor, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPage, AuditTrail, Cursor,
