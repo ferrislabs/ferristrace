@@ -8,16 +8,17 @@ use ferristrace_domain::{
     AccountId, Admission, AgentToken, AgentTokens, Aggregation, AlertMailer, ApiKey, ApiKeys,
     ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, Buckets, CallPage, CallQuery, Clock,
     ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
-    Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, IngestKey, IssueFilter,
-    IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter, LlmReader, LogBucket, LogPage,
-    LogQuery, LogReader, LogRecord, LogSink, Metric, MetricDescriptor, MetricKind, MetricQuery,
-    MetricReader, MetricSink, Occurrence, PageDispatch, PageSize, ProjectId, QuotaPolicy,
-    ReadGrant, Release, ReleaseDetail, ReleaseFilter, ReleaseReader, Scope, SeenModel, SeriesSet,
-    ServiceFilter, ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor,
-    SpanPage, SpanPages, SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError,
-    TenantDirectory, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds,
-    UnknownKey, UsageMeter, UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret,
-    WebhookSender, WebhookUrl, Window,
+    Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, InfraFilter,
+    InfraReader, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
+    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
+    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
+    PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
+    ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
+    ServiceSummary, SessionToken, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
+    SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory, TenantId,
+    TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter,
+    UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl,
+    Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -317,6 +318,17 @@ impl ClusterReader for Inert {
         _filter: &ClusterFilter,
     ) -> Result<ClusterSnapshot, StoreError> {
         Ok(ClusterSnapshot::default())
+    }
+}
+
+impl InfraReader for Inert {
+    async fn resources(
+        &self,
+        _org: TenantId,
+        _figures: Window,
+        _filter: &InfraFilter,
+    ) -> Result<Vec<Resource>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

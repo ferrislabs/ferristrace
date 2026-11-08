@@ -12,6 +12,7 @@ pub mod explore;
 pub mod export;
 pub mod identity;
 pub mod incidents;
+pub mod infrastructure;
 pub mod issue;
 pub mod llm;
 pub mod logs;
@@ -91,6 +92,9 @@ pub use incidents::{
     IncidentAttachments, IncidentDesk, IncidentDraft, IncidentError, IncidentFilter, IncidentId,
     IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
     IncidentTitle, Incidents, Person, Reference, TimelineEntry, TimelineId,
+};
+pub use infrastructure::{
+    InfraFilter, InfraReader, Inventory, Resource, ResourceKind, ResourceStatus, SILENT_SECS,
 };
 pub use issue::{
     BadFingerprint, Counted, Decision, EXCEPTION_EVENT, Fingerprint, Issue, IssueDecisions,

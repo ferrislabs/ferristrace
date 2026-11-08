@@ -36,7 +36,10 @@ export const AXES: NavAxis[] = [
   },
   {
     key: 'infra', label: 'Infra', icon: Boxes,
-    tabs: [{ label: 'Kubernetes', to: '/infra/kubernetes', icon: Boxes }],
+    tabs: [
+      { label: 'Overview', to: '/infra', icon: LayoutGrid },
+      { label: 'Kubernetes', to: '/infra/kubernetes', icon: Boxes },
+    ],
   },
   {
     key: 'reliability', label: 'Reliability', icon: ShieldAlert,

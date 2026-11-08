@@ -10,10 +10,11 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
-    ClusterSnapshot, Exemplar, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships,
-    MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, OrgRole, ProjectId,
-    ReadGrant, Series, SeriesSet, Session, SessionError, SessionStore, SessionToken, SpanId,
-    StoreError, TenantId, TraceId, UnixSeconds, WhoamiError, Window,
+    ClusterSnapshot, Exemplar, InfraFilter, InfraReader, IssuedKey, KeyId, KeyName, KeyScopes,
+    Membership, Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos,
+    OrgRole, ProjectId, ReadGrant, Resource, Series, SeriesSet, Session, SessionError,
+    SessionStore, SessionToken, SpanId, StoreError, TenantId, TraceId, UnixSeconds, WhoamiError,
+    Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -229,6 +230,17 @@ impl ClusterReader for Store {
         _filter: &ClusterFilter,
     ) -> Result<ClusterSnapshot, StoreError> {
         Ok(ClusterSnapshot::default())
+    }
+}
+
+impl InfraReader for Store {
+    async fn resources(
+        &self,
+        _org: TenantId,
+        _figures: Window,
+        _filter: &InfraFilter,
+    ) -> Result<Vec<Resource>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

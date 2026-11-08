@@ -786,9 +786,9 @@ async fn the_migration_rolls_back_and_forward() {
         .expect("a count");
     let forward = migrator.up().await.expect("rolled forward");
 
-    assert_eq!(reverted, vec![11, 10]);
+    assert_eq!(reverted, vec![12, 11, 10]);
     assert_eq!(tables, 0);
-    assert_eq!(forward, vec![10, 11]);
+    assert_eq!(forward, vec![10, 11, 12]);
 }
 
 #[tokio::test]

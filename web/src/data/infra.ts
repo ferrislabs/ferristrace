@@ -145,3 +145,49 @@ service:
       receivers: [otlp]
       processors: [k8sattributes, resource, batch]
       exporters: [otlphttp]`
+
+export type ResourceKind = 'cluster' | 'host' | 'container'
+
+export type InfraResource = {
+  kind: ResourceKind
+  id: string
+  name: string
+  cluster: string | null
+  environment: string | null
+  provider: string | null
+  region: string | null
+  zone: string | null
+  host_type: string | null
+  first_seen_at_ms: number
+  last_seen_at_ms: number
+  silent: boolean
+  cpu_percent: number | null
+  memory_bytes: number | null
+}
+
+export function useInfrastructure() {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const found = useQuery({
+    queryKey: ['infrastructure', active?.org, project],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    refetchInterval: FRESH_MS,
+    retry: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (project) params.set('project', project)
+      const body = await json<{ resources: InfraResource[] }>(await get(`/api/orgs/${active?.org}/infrastructure?${params.toString()}`))
+      return body.resources
+    },
+  })
+  return { resources: found.data ?? [], pending: found.isPending, failed: found.error }
+}
+
+export const KIND_LABEL: Record<ResourceKind, string> = { cluster: 'Clusters', host: 'Hosts', container: 'Containers' }
+
+export const RECEIVER: Record<ResourceKind, string> = {
+  cluster: 'k8s_cluster and kubeletstats, with k8s.cluster.name set on the resource',
+  host: 'hostmetrics, with the resourcedetection processor so host.name is set',
+  container: 'docker_stats, for containers that do not run in Kubernetes',
+}
