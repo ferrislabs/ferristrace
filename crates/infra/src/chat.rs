@@ -1,4 +1,7 @@
-use ferristrace_domain::{AlertSeverity, AlertStatus, Design, Dispatch, Fact, Shown, Template};
+use ferristrace_domain::{
+    AlertSeverity, AlertStatus, Design, Dispatch, Fact, IncidentNotice, IncidentStatus, Shown,
+    Template,
+};
 use serde_json::{Value, json};
 
 const MAX_TITLE: usize = 200;
@@ -302,6 +305,71 @@ pub fn discord(design: &Design, dispatch: &Dispatch, link: &str) -> Value {
     body
 }
 
+fn incident_title(notice: &IncidentNotice) -> String {
+    shortened(
+        &format!("[{}] {}", notice.severity.as_str(), notice.title),
+        MAX_TITLE,
+    )
+}
+
+fn incident_color(status: IncidentStatus) -> &'static str {
+    match status {
+        IncidentStatus::Investigating => "#d92d20",
+        IncidentStatus::Identified => "#f79009",
+        IncidentStatus::Monitoring => "#2e90fa",
+        IncidentStatus::Resolved => "#12b76a",
+    }
+}
+
+fn incident_text(notice: &IncidentNotice) -> String {
+    match &notice.text {
+        Some(text) => shortened(&format!("{}\n{}", notice.headline, text), 1_500),
+        None => notice.headline.to_string(),
+    }
+}
+
+pub fn slack_incident(notice: &IncidentNotice, link: &str) -> Value {
+    let title = incident_title(notice);
+    let mut body = json!({
+        "text": slack_text(&format!("{} · {}", title, notice.headline)),
+        "attachments": [{
+            "color": incident_color(notice.status),
+            "title": slack_text(&title),
+            "text": slack_text(&incident_text(notice)),
+            "fields": [
+                {"title": "Status", "value": notice.status.as_str(), "short": true},
+                {"title": "Severity", "value": notice.severity.as_str(), "short": true},
+            ],
+            "ts": notice.at_ms / 1_000,
+        }],
+    });
+    if let (Some(link), Some(attachment)) = (absolute(link), body["attachments"][0].as_object_mut())
+    {
+        attachment.insert("title_link".to_owned(), json!(link));
+    }
+    body
+}
+
+pub fn discord_incident(notice: &IncidentNotice, link: &str) -> Value {
+    let color = u32::from_str_radix(&incident_color(notice.status)[1..], 16).unwrap_or(0x0098_a2b3);
+    let mut embed = json!({
+        "title": incident_title(notice),
+        "description": neutral(&incident_text(notice)),
+        "color": color,
+        "fields": [
+            {"name": "Status", "value": notice.status.as_str(), "inline": true},
+            {"name": "Severity", "value": notice.severity.as_str(), "inline": true},
+        ],
+    });
+    if let (Some(link), Some(object)) = (absolute(link), embed.as_object_mut()) {
+        object.insert("url".to_owned(), json!(link));
+    }
+    if let (Some(stamp), Some(object)) = (iso(notice.at_ms), embed.as_object_mut()) {
+        object.insert("timestamp".to_owned(), json!(stamp));
+    }
+    json!({"allowed_mentions": {"parse": []}, "embeds": [embed]})
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -561,5 +629,54 @@ mod tests {
             bare["content"],
             "<@&123456789012345678> <@&323456789012345678> <@423456789012345678>"
         );
+    }
+
+    fn notice(headline: &str, text: Option<&str>) -> ferristrace_domain::IncidentNotice {
+        ferristrace_domain::IncidentNotice {
+            org: TenantId::new(Uuid::from_u128(1)),
+            incident: ferristrace_domain::IncidentId::new(Uuid::from_u128(5)),
+            title: "Checkout errors".into(),
+            severity: ferristrace_domain::IncidentSeverity::Sev2,
+            status: ferristrace_domain::IncidentStatus::Identified,
+            kind: ferristrace_domain::EntryKind::Comment,
+            headline: headline.into(),
+            text: text.map(Into::into),
+            at_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn an_incident_update_is_an_embed_with_its_status_severity_link_and_text() {
+        let body = super::discord_incident(
+            &notice("New comment", Some("rolled back")),
+            "https://x/incidents/5",
+        );
+
+        let embed = &body["embeds"][0];
+        assert_eq!(embed["title"], "[sev2] Checkout errors");
+        assert_eq!(embed["description"], "New comment\nrolled back");
+        assert_eq!(embed["color"], 0x00f7_9009);
+        assert_eq!(embed["url"], "https://x/incidents/5");
+        assert_eq!(body["allowed_mentions"], serde_json::json!({"parse": []}));
+    }
+
+    #[test]
+    fn a_comment_cannot_mention_anyone_through_an_incident_update() {
+        let hostile = notice("New comment", Some("@everyone <@&123> <!channel>"));
+
+        let discord = super::discord_incident(&hostile, "u");
+        let slack = super::slack_incident(&hostile, "u");
+
+        let described = discord["embeds"][0]["description"].as_str().expect("text");
+        assert!(!described.contains("@everyone") && !described.contains("<@"));
+        let text = slack["attachments"][0]["text"].as_str().expect("text");
+        assert!(!text.contains('<') && text.contains("&lt;!channel&gt;"));
+    }
+
+    #[test]
+    fn a_slack_incident_update_leaves_out_a_link_that_is_not_absolute() {
+        let body = super::slack_incident(&notice("Status", None), "/incidents/5");
+
+        assert!(body["attachments"][0].get("title_link").is_none());
     }
 }

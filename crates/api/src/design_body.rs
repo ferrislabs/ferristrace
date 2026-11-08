@@ -67,6 +67,7 @@ pub struct DesignBody {
     fields: Vec<FieldBody>,
     ping_roles: Vec<String>,
     ping_users: Vec<String>,
+    incident_updates: bool,
 }
 
 fn template(given: Option<&str>, most: usize) -> Result<Option<Template>, BadDesign> {
@@ -137,6 +138,7 @@ impl DesignBody {
                 .iter()
                 .map(|id| snowflake(id))
                 .collect::<Result<_, _>>()?,
+            incident_updates: self.incident_updates,
         }
         .checked()
     }
@@ -170,6 +172,7 @@ impl From<&Design> for DesignBody {
                 .collect(),
             ping_roles: design.ping_roles.iter().map(ToString::to_string).collect(),
             ping_users: design.ping_users.iter().map(ToString::to_string).collect(),
+            incident_updates: design.incident_updates,
         }
     }
 }

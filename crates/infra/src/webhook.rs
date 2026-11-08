@@ -2,7 +2,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use ferristrace_domain::{
-    Chat, Culprits, DeliveryError, Design, Dispatch, WebhookSecret, WebhookSender, WebhookUrl,
+    Chat, Culprits, DeliveryError, Design, Dispatch, IncidentNotice, WebhookSecret, WebhookSender,
+    WebhookUrl,
 };
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
@@ -252,6 +253,24 @@ impl WebhookSender for HttpWebhooks {
     ) -> Result<(), DeliveryError> {
         let message = self.render_chat(chat, design, dispatch);
         self.post(url, message.into_bytes(), None).await
+    }
+
+    async fn send_incident(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        notice: &IncidentNotice,
+    ) -> Result<(), DeliveryError> {
+        let link = format!(
+            "{}/incidents/{}",
+            self.settings.base_url.trim_end_matches('/'),
+            notice.incident
+        );
+        let message = match chat {
+            Chat::Slack => crate::chat::slack_incident(notice, &link),
+            Chat::Discord => crate::chat::discord_incident(notice, &link),
+        };
+        self.post(url, message.to_string().into_bytes(), None).await
     }
 
     fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {

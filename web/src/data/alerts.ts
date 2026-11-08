@@ -92,6 +92,7 @@ export type Design = {
   fields: DesignField[]
   ping_roles: string[]
   ping_users: string[]
+  incident_updates: boolean
 }
 
 export const DESIGN_FACTS: { key: DesignFact; label: string }[] = [
@@ -118,6 +119,7 @@ export const emptyDesign = (): Design => ({
   fields: [],
   ping_roles: [],
   ping_users: [],
+  incident_updates: false,
 })
 
 export type Channel = { id: string; name: string; kind: ChannelKind; target: string; has_secret: boolean; design?: Design }

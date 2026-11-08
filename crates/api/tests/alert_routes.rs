@@ -1182,6 +1182,7 @@ fn designed() -> Value {
         "shown": {"labels": false, "timestamp": true},
         "fields": [{"name": "Service", "value": "{label.service}", "inline": false}],
         "ping_roles": ["123456789012345678"],
+        "incident_updates": true,
     })
 }
 
@@ -1218,6 +1219,7 @@ async fn spec_l13_9_a_discord_design_is_kept_read_back_changed_and_previewed() {
     assert_eq!(made["design"]["colors"]["firing"], "#ff0000");
     assert_eq!(made["design"]["shown"]["labels"], false);
     assert_eq!(made["design"]["shown"]["severity"], true);
+    assert_eq!(made["design"]["incident_updates"], true);
     assert_eq!(listed["channels"][0]["design"], made["design"]);
     assert_eq!(patched_status, StatusCode::OK);
     assert_eq!(patched["design"]["title"], "Only {alert}");

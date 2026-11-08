@@ -33,9 +33,9 @@ mod views;
 pub use accounts::{AccountError, PostgresAccounts};
 pub use agents::PostgresAgents;
 pub use alerts::{
-    ANNOUNCE_LOCK, DELIVER_LOCK, DEPLOYS_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, PostgresAlertChannels,
-    PostgresAlertDuty, PostgresAlertEvents, PostgresAlertOutbox, PostgresAlertRules,
-    PostgresAlertStates,
+    ANNOUNCE_LOCK, DELIVER_LOCK, DEPLOYS_LOCK, ESCALATE_LOCK, EVALUATE_LOCK, NARRATE_LOCK,
+    PostgresAlertChannels, PostgresAlertDuty, PostgresAlertEvents, PostgresAlertOutbox,
+    PostgresAlertRules, PostgresAlertStates, PostgresIncidentOutbox,
 };
 pub use api_keys::PostgresApiKeys;
 pub use audit::PostgresAuditTrail;

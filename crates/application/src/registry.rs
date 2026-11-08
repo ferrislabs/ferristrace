@@ -3,10 +3,10 @@ use core::future::Future;
 use ferristrace_domain::{
     AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, ControlPlane, DeployMarks,
-    ExplorerViews, ExportSource, InboxStore, IncidentAttachments, IncidentTimeline, Incidents,
-    IssueDecisions, Memberships, ModelPrices as ModelPriceBook, NotificationSettings, Orgs, Pages,
-    Postmortems, Projects, Roll, Schedules, SessionStore, SessionSwitch, Squads, StatusOutbox,
-    StatusPages, StatusSubscribers, UsageHistory,
+    ExplorerViews, ExportSource, InboxStore, IncidentAttachments, IncidentOutbox, IncidentTimeline,
+    Incidents, IssueDecisions, Memberships, ModelPrices as ModelPriceBook, NotificationSettings,
+    Orgs, Pages, Postmortems, Projects, Roll, Schedules, SessionStore, SessionSwitch, Squads,
+    StatusOutbox, StatusPages, StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +68,8 @@ pub mod domain {
     pub struct Export;
     #[derive(Debug)]
     pub struct Inbox;
+    #[derive(Debug)]
+    pub struct IncidentOutbox;
     #[derive(Debug)]
     pub struct IncidentAttachments;
     #[derive(Debug)]
@@ -359,6 +361,17 @@ pub trait PostmortemRepos: IncidentRepos + RepoFor<domain::Postmortems, Repo: Po
 
 impl<R> PostmortemRepos for R where
     R: IncidentRepos + RepoFor<domain::Postmortems, Repo: Postmortems>
+{
+}
+
+pub trait NarrateRepos:
+    RepoFor<domain::IncidentOutbox, Repo: IncidentOutbox> + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+{
+}
+
+impl<R> NarrateRepos for R where
+    R: RepoFor<domain::IncidentOutbox, Repo: IncidentOutbox>
+        + RepoFor<domain::AlertDuty, Repo: AlertDuty>
 {
 }
 

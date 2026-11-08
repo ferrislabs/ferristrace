@@ -14,6 +14,7 @@ use super::value_objects::{
 use crate::catalogue::ProjectId;
 use crate::explore::Window;
 use crate::identity::{AccountId, Email};
+use crate::incidents::IncidentNotice;
 use crate::oncall::PageDispatch;
 use crate::store::StoreError;
 use crate::telemetry::TenantId;
@@ -210,6 +211,13 @@ pub trait WebhookSender {
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
 
     fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String;
+
+    fn send_incident(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        notice: &IncidentNotice,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send;
 }
 
 impl<T: WebhookSender + Sync> WebhookSender for &T {
@@ -239,6 +247,15 @@ impl<T: WebhookSender + Sync> WebhookSender for &T {
     fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
         (*self).render_chat(chat, design, dispatch)
     }
+
+    fn send_incident(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        notice: &IncidentNotice,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        (*self).send_incident(chat, url, notice)
+    }
 }
 
 impl<T: WebhookSender + Send + Sync> WebhookSender for std::sync::Arc<T> {
@@ -267,6 +284,15 @@ impl<T: WebhookSender + Send + Sync> WebhookSender for std::sync::Arc<T> {
 
     fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
         self.as_ref().render_chat(chat, design, dispatch)
+    }
+
+    fn send_incident(
+        &self,
+        chat: Chat,
+        url: &WebhookUrl,
+        notice: &IncidentNotice,
+    ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
+        self.as_ref().send_incident(chat, url, notice)
     }
 }
 

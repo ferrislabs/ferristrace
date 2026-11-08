@@ -574,11 +574,14 @@ type Sent = Vec<(Box<str>, crate::alerts::Dispatch)>;
 type Paged = Vec<(Box<str>, crate::oncall::PageDispatch)>;
 type Lettered = Vec<(Box<str>, crate::status::Letter)>;
 
+pub type Announced = Vec<(Box<str>, crate::incidents::IncidentNotice)>;
+
 #[derive(Debug, Clone, Default)]
 pub struct Couriered {
     sent: Arc<Mutex<Sent>>,
     paged: Arc<Mutex<Paged>>,
     lettered: Arc<Mutex<Lettered>>,
+    announced: Arc<Mutex<Announced>>,
     failing: Arc<Mutex<bool>>,
     private: bool,
 }
@@ -597,6 +600,10 @@ impl Couriered {
 
     pub fn sent(&self) -> Sent {
         self.sent.lock().expect("the courier lock").clone()
+    }
+
+    pub fn announced(&self) -> Announced {
+        self.announced.lock().expect("the courier lock").clone()
     }
 
     pub fn paged(&self) -> Paged {
@@ -660,6 +667,19 @@ impl crate::alerts::WebhookSender for Couriered {
         dispatch: &crate::alerts::Dispatch,
     ) -> String {
         format!("{{\"alert\":\"{}\"}}", dispatch.name)
+    }
+
+    async fn send_incident(
+        &self,
+        _chat: crate::alerts::Chat,
+        url: &crate::alerts::WebhookUrl,
+        notice: &crate::incidents::IncidentNotice,
+    ) -> Result<(), crate::alerts::DeliveryError> {
+        self.announced
+            .lock()
+            .expect("the courier lock")
+            .push((url.as_str().into(), notice.clone()));
+        Ok(())
     }
 }
 

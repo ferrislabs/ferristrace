@@ -95,12 +95,13 @@ pub use inbox::{
     PAGE_LIMIT as INBOX_PAGE_LIMIT, RETENTION_DAYS as INBOX_RETENTION_DAYS,
 };
 pub use incidents::{
-    AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,
-    Briefed, Change, Chronicle, CommentBody, Dossier, EntryKind, Followers, Incident,
-    IncidentAttachments, IncidentContext, IncidentDesk, IncidentDraft, IncidentError,
-    IncidentFilter, IncidentId, IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus,
-    IncidentTimeline, IncidentTitle, Incidents, LeftOut, Person, Reference, Surroundings,
-    TimelineEntry, TimelineId,
+    ANNOUNCED, AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author,
+    BadIncident, Briefed, Change, Chronicle, ClaimedIncidentNotice, CommentBody, Dossier,
+    EntryKind, Followers, Incident, IncidentAttachments, IncidentContext, IncidentDesk,
+    IncidentDraft, IncidentError, IncidentFilter, IncidentId, IncidentNotice, IncidentOutbox,
+    IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
+    IncidentTitle, Incidents, LeftOut, Narrator, Person, Reference, Surroundings, TimelineEntry,
+    TimelineId,
 };
 pub use infrastructure::{
     InfraFilter, InfraReader, Inventory, Resource, ResourceKind, ResourceStatus, SILENT_SECS,
