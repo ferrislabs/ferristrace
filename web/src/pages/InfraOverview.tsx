@@ -92,8 +92,18 @@ function ClusterCard({ resource, pods }: { resource: InfraResource; pods: Cluste
         <span><span className="tabular text-[20px] font-semibold text-foreground">{resource.silent ? '—' : pods.length}</span> pods</span>
         {resource.provider || resource.region ? <span className="truncate font-mono">{[resource.provider, resource.region].filter(Boolean).join(' · ')}</span> : null}
       </span>
+      {resource.services.length ? <span className="truncate font-mono text-[11.5px] text-muted-foreground">{resource.services.slice(0, 4).join(' · ')}{resource.services.length > 4 ? ` +${resource.services.length - 4}` : ''}</span> : null}
       <span className="text-[11.5px] text-faint-foreground">{resource.silent ? <Seen ms={resource.last_seen_at_ms} /> : 'Open the Kubernetes view'}</span>
     </Link>
+  )
+}
+
+function Services({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className="text-faint-foreground">—</span>
+  return (
+    <span className="inline-flex flex-wrap gap-x-2 gap-y-0.5 font-mono">
+      {names.map((name) => <Link key={name} to={`/services/${encodeURIComponent(name)}`} className="text-accent-text no-underline hover:underline">{name}</Link>)}
+    </span>
   )
 }
 
@@ -119,6 +129,7 @@ function HostTable({ hosts }: { hosts: InfraResource[] }) {
             <Th className="min-w-[200px]">Host</Th>
             <Th>Where</Th>
             <Th className="w-[130px]">Environment</Th>
+            <Th className="min-w-[160px]">Services</Th>
             <Th className="w-[200px]">Status</Th>
             <Th className="w-[130px]"><span className="sr-only">Open</span></Th>
           </tr>
@@ -129,6 +140,7 @@ function HostTable({ hosts }: { hosts: InfraResource[] }) {
               <Td className="font-mono">{host.name}</Td>
               <Td><Where resource={host} /></Td>
               <Td><Muted>{host.environment}</Muted></Td>
+              <Td><Services names={host.services} /></Td>
               <Td><Status resource={host} /></Td>
               <Td><Link to="/backend/system" className="text-control text-accent-text no-underline hover:underline" aria-label={`System metrics for ${host.name}`}>System metrics</Link></Td>
             </tr>
@@ -148,6 +160,7 @@ function ContainerTable({ containers }: { containers: InfraResource[] }) {
             <Th className="min-w-[200px]">Container</Th>
             <Th>Where</Th>
             <Th className="w-[130px]">Environment</Th>
+            <Th className="min-w-[160px]">Services</Th>
             <Th className="w-[80px]">CPU</Th>
             <Th className="w-[90px]">Memory</Th>
             <Th className="w-[200px]">Status</Th>
@@ -159,6 +172,7 @@ function ContainerTable({ containers }: { containers: InfraResource[] }) {
               <Td className="font-mono">{container.name}</Td>
               <Td><Where resource={container} /></Td>
               <Td><Muted>{container.environment}</Muted></Td>
+              <Td><Services names={container.services} /></Td>
               <Td className="tabular">{container.cpu_percent === null ? '—' : `${container.cpu_percent.toFixed(1)} %`}</Td>
               <Td className="tabular">{bytes(container.memory_bytes)}</Td>
               <Td><Status resource={container} /></Td>

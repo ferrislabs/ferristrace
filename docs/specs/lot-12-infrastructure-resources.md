@@ -94,3 +94,9 @@ Delivered with 12A to 12C
   region and environment filters, clusters as cards, hosts and containers
   as tables with CPU and memory for containers. The cloud facets (12D) are
   already stored and filterable, so 12D only has to add what is missing.
+
+Delivered with 12F
+  Each resource lists up to 20 services whose spans ran on it in the last
+  10 minutes, read from the resource attributes stored on spans. The
+  overview shows them, and a service page has a "Runs on" card built from
+  the same list, so there is no second route.

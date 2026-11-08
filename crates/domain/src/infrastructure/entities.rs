@@ -18,6 +18,7 @@ pub struct Resource {
     pub silent: bool,
     pub cpu_percent: Option<f64>,
     pub memory_bytes: Option<u64>,
+    pub services: Vec<Box<str>>,
 }
 
 impl Resource {

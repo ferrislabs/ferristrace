@@ -163,6 +163,7 @@ export type InfraResource = {
   silent: boolean
   cpu_percent: number | null
   memory_bytes: number | null
+  services: string[]
 }
 
 export function useInfrastructure() {
