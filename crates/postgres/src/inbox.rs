@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore, StoreError,
-    TenantId,
+    AccountId, Channels, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore, KINDS,
+    NotificationPreferences, NotificationSettings, StoreError, TenantId,
 };
+use serde_json::{Map, Value, json};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -45,8 +48,62 @@ fn read_item(row: &PgRow) -> Result<InboxItem, StoreError> {
     })
 }
 
+fn encode_channels(channels: &BTreeMap<InboxItemKind, Channels>) -> String {
+    let map: Map<String, Value> = channels
+        .iter()
+        .map(|(kind, held)| {
+            (
+                kind.as_str().to_owned(),
+                json!({ "in_app": held.in_app, "email": held.email }),
+            )
+        })
+        .collect();
+    Value::Object(map).to_string()
+}
+
+fn decode_channels(text: &str) -> BTreeMap<InboxItemKind, Channels> {
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) else {
+        return BTreeMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(key, value)| {
+            let kind = InboxItemKind::parse(&key)?;
+            let in_app = value.get("in_app")?.as_bool()?;
+            let email = value.get("email")?.as_bool()?;
+            Some((kind, Channels { in_app, email }))
+        })
+        .collect()
+}
+
+fn read_preferences(row: &PgRow) -> NotificationPreferences {
+    let chosen = row
+        .get::<Option<String>, _>("notify_channels")
+        .map(|text| decode_channels(&text))
+        .unwrap_or_default();
+    NotificationPreferences {
+        email_enabled: row
+            .get::<Option<bool>, _>("notify_email_enabled")
+            .unwrap_or(true),
+        weekly_digest: row
+            .get::<Option<bool>, _>("notify_weekly_digest")
+            .unwrap_or(false),
+        channels: KINDS
+            .into_iter()
+            .map(|kind| {
+                (
+                    kind,
+                    chosen
+                        .get(&kind)
+                        .copied()
+                        .unwrap_or_else(|| kind.default_channels()),
+                )
+            })
+            .collect(),
+    }
+}
+
 #[repository(domain = Inbox, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PostgresInbox {
     tx: SharedTx,
 }
@@ -163,5 +220,40 @@ impl InboxStore for PostgresInbox {
             .await
             .map_err(unreachable("prune the inbox"))?;
         Ok(done.rows_affected())
+    }
+}
+
+impl NotificationSettings for PostgresInbox {
+    async fn of(&self, account: AccountId) -> Result<Option<NotificationPreferences>, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let row = sqlx::query(
+            "SELECT notify_email_enabled, notify_weekly_digest, notify_channels::text AS notify_channels \
+             FROM accounts WHERE id = $1",
+        )
+        .bind(account.as_uuid())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(unreachable("read notification preferences"))?;
+        Ok(row.as_ref().map(read_preferences))
+    }
+
+    async fn set(
+        &self,
+        account: AccountId,
+        preferences: &NotificationPreferences,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.tx.lock().await;
+        sqlx::query(
+            "UPDATE accounts SET notify_email_enabled = $2, notify_weekly_digest = $3, \
+             notify_channels = $4::jsonb WHERE id = $1",
+        )
+        .bind(account.as_uuid())
+        .bind(preferences.email_enabled)
+        .bind(preferences.weekly_digest)
+        .bind(encode_channels(&preferences.channels))
+        .execute(&mut **tx)
+        .await
+        .map_err(unreachable("keep notification preferences"))?;
+        Ok(())
     }
 }

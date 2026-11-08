@@ -1,4 +1,7 @@
-use ferristrace_domain::{AccountId, InboxItemDraft, InboxItemKind, InboxStore, TenantId};
+use ferristrace_domain::{
+    AccountId, Channels, InboxItemDraft, InboxItemKind, InboxStore, NotificationPreferences,
+    NotificationSettings, TenantId,
+};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
 use sqlx::postgres::PgPoolOptions;
@@ -250,4 +253,54 @@ async fn pruning_drops_only_what_is_older_than_the_cutoff() {
         .expect("read"));
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].created_ms, 9_000);
+}
+
+#[tokio::test]
+async fn an_account_with_no_notification_preferences_set_reads_the_defaults() {
+    let Some(pool) = control_plane("inbox_notify_prefs_defaults").await else {
+        return;
+    };
+    let pg = at(&pool, NOW);
+    let (_org, account) = an_org(&pool, "Acme", "person@example.com").await;
+
+    let preferences = committed!(pg, |inbox: Inbox| inbox
+        .of(account)
+        .await
+        .expect("read")
+        .expect("the account exists"));
+
+    assert_eq!(preferences, NotificationPreferences::default());
+}
+
+#[tokio::test]
+async fn chosen_notification_preferences_travel_through_postgres() {
+    let Some(pool) = control_plane("inbox_notify_prefs_round_trip").await else {
+        return;
+    };
+    let pg = at(&pool, NOW);
+    let (_org, account) = an_org(&pool, "Acme", "person@example.com").await;
+    let mut chosen = NotificationPreferences {
+        email_enabled: false,
+        weekly_digest: true,
+        ..NotificationPreferences::default()
+    };
+    chosen.channels.insert(
+        InboxItemKind::Issue,
+        Channels {
+            in_app: true,
+            email: false,
+        },
+    );
+
+    committed!(pg, |inbox: Inbox| inbox
+        .set(account, &chosen)
+        .await
+        .expect("kept"));
+    let read_back = committed!(pg, |inbox: Inbox| inbox
+        .of(account)
+        .await
+        .expect("read")
+        .expect("the account exists"));
+
+    assert_eq!(read_back, chosen);
 }

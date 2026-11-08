@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { get, json, post } from '@/auth/client'
+import { get, json, post, put } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 
 export type NotificationKind = 'issue' | 'service_silent' | 'status_page' | 'api_key_expiring' | 'usage' | 'membership'
@@ -53,5 +53,31 @@ export function useMarkAllRead() {
   return useMutation({
     mutationFn: async () => json<{ marked: number }>(await post(`/api/orgs/${active?.org}/notifications/read-all`)),
     onSuccess: () => void client.invalidateQueries({ queryKey: key(active?.org) }),
+  })
+}
+
+export type Channel = { kind: NotificationKind; in_app: boolean; email: boolean }
+
+export type NotificationPreferences = {
+  email_enabled: boolean
+  weekly_digest: boolean
+  channels: Channel[]
+}
+
+const preferencesKey = ['auth', 'notification-preferences']
+
+export function useNotificationPreferences() {
+  return useQuery({
+    queryKey: preferencesKey,
+    staleTime: 60_000,
+    queryFn: async () => json<NotificationPreferences>(await get('/auth/me/notification-preferences')),
+  })
+}
+
+export function useSetNotificationPreferences() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (asked: NotificationPreferences) => json<NotificationPreferences>(await put('/auth/me/notification-preferences', asked)),
+    onSuccess: (preferences) => client.setQueryData(preferencesKey, preferences),
   })
 }

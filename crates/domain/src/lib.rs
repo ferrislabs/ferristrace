@@ -88,7 +88,8 @@ pub use identity::{
     UserTokens,
 };
 pub use inbox::{
-    InboxDesk, InboxError, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore,
+    Channels, InboxDesk, InboxError, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind,
+    InboxStore, KINDS, NotificationPreferences, NotificationSettings,
     PAGE_LIMIT as INBOX_PAGE_LIMIT, RETENTION_DAYS as INBOX_RETENTION_DAYS,
 };
 pub use incidents::{
