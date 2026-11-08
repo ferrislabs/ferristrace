@@ -49,6 +49,12 @@ where
         let by = standing(self.readers.whoami(), token, org).await?;
         let secret = match destination {
             Destination::Email(_) => None,
+            Destination::Chat(_, url) => {
+                if !webhooks.admits(url) {
+                    return Err(AlertError::PrivateTarget);
+                }
+                None
+            }
             Destination::Webhook(url) => {
                 if !webhooks.admits(url) {
                     return Err(AlertError::PrivateTarget);
@@ -106,7 +112,7 @@ where
         if destination.kind() != kept.kind() {
             return Err(BadChannel::KindChanged.into());
         }
-        if let Destination::Webhook(url) = &destination
+        if let Destination::Webhook(url) | Destination::Chat(_, url) = &destination
             && !webhooks.admits(url)
         {
             return Err(AlertError::PrivateTarget);

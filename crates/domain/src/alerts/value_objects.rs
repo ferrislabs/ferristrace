@@ -187,12 +187,50 @@ impl AlertStatus {
 pub enum ChannelKind {
     Email,
     Webhook,
+    Slack,
+    Discord,
 }
 
 spelled!(ChannelKind {
     Email => "email",
     Webhook => "webhook",
+    Slack => "slack",
+    Discord => "discord",
 });
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Chat {
+    Slack,
+    Discord,
+}
+
+impl Chat {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Slack => "Slack",
+            Self::Discord => "Discord",
+        }
+    }
+
+    fn admits(self, url: &WebhookUrl) -> bool {
+        let lowered = url.as_str().to_ascii_lowercase();
+        let (hosts, path): (&[&str], &str) = match self {
+            Self::Slack => (&["hooks.slack.com"], "/services/"),
+            Self::Discord => (
+                &[
+                    "discord.com",
+                    "ptb.discord.com",
+                    "canary.discord.com",
+                    "discordapp.com",
+                ],
+                "/api/webhooks/",
+            ),
+        };
+        hosts
+            .iter()
+            .any(|host| lowered.starts_with(&format!("https://{host}{path}")))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeliveryStatus {
@@ -729,6 +767,7 @@ impl fmt::Debug for WebhookSecret {
 pub enum Destination {
     Email(EmailList),
     Webhook(WebhookUrl),
+    Chat(Chat, WebhookUrl),
 }
 
 impl Destination {
@@ -736,6 +775,17 @@ impl Destination {
         match kind {
             ChannelKind::Email => EmailList::try_from(target).map(Self::Email),
             ChannelKind::Webhook => WebhookUrl::try_from(target).map(Self::Webhook),
+            ChannelKind::Slack => Self::chat(Chat::Slack, target),
+            ChannelKind::Discord => Self::chat(Chat::Discord, target),
+        }
+    }
+
+    fn chat(chat: Chat, target: &str) -> Result<Self, BadChannel> {
+        let url = WebhookUrl::try_from(target)?;
+        if chat.admits(&url) {
+            Ok(Self::Chat(chat, url))
+        } else {
+            Err(BadChannel::ChatHook(chat.name()))
         }
     }
 
@@ -743,13 +793,15 @@ impl Destination {
         match self {
             Self::Email(_) => ChannelKind::Email,
             Self::Webhook(_) => ChannelKind::Webhook,
+            Self::Chat(Chat::Slack, _) => ChannelKind::Slack,
+            Self::Chat(Chat::Discord, _) => ChannelKind::Discord,
         }
     }
 
     pub fn target(&self) -> String {
         match self {
             Self::Email(list) => list.target(),
-            Self::Webhook(url) => url.as_str().to_owned(),
+            Self::Webhook(url) | Self::Chat(_, url) => url.as_str().to_owned(),
         }
     }
 }

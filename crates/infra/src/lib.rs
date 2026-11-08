@@ -1,3 +1,4 @@
+mod chat;
 mod clock;
 mod directory;
 mod jwks;

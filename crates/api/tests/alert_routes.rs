@@ -1135,3 +1135,39 @@ async fn a_preview_charts_an_llm_rule_without_saving_it() {
     assert_eq!(preview["would_fire"], false);
     assert!(harness.ledger.rules().is_empty());
 }
+
+#[tokio::test]
+async fn a_slack_or_discord_channel_needs_no_seal_and_only_its_own_hook_url() {
+    let harness = Harness::unsealed();
+
+    let (slack, made) = harness
+        .admin(
+            Method::POST,
+            &channels(MINE),
+            Some(json!({"name": "ops", "kind": "slack",
+                        "target": "https://hooks.slack.com/services/T000/B000/XXXX"})),
+        )
+        .await;
+    let (discord, _) = harness
+        .admin(
+            Method::POST,
+            &channels(MINE),
+            Some(json!({"name": "dev", "kind": "discord",
+                        "target": "https://discord.com/api/webhooks/1/abc"})),
+        )
+        .await;
+    let (wrong_host, _) = harness
+        .admin(
+            Method::POST,
+            &channels(MINE),
+            Some(json!({"name": "bad", "kind": "slack", "target": "https://example.com/services/T/B/X"})),
+        )
+        .await;
+
+    assert_eq!(slack, StatusCode::CREATED);
+    assert_eq!(discord, StatusCode::CREATED);
+    assert_eq!(made["kind"], "slack");
+    assert_eq!(made["has_secret"], false);
+    assert!(made.get("secret").is_none_or(Value::is_null));
+    assert_eq!(wrong_host, StatusCode::UNPROCESSABLE_ENTITY);
+}

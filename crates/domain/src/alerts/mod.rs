@@ -45,7 +45,7 @@ pub use ports::{
 };
 pub use state_machine::next_state;
 pub use value_objects::{
-    AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Comparison, Condition,
+    AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Chat, Comparison, Condition,
     Definition, DefinitionParts, DeliveryStatus, Destination, Duty, EmailList, EventId,
     HISTORY_DAYS, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MAX_ADDRESSES,
     MAX_CHANNEL_NAME_BYTES, MAX_PENDING_SECS, MAX_RULE_NAME_BYTES, MAX_WINDOW_SECS,

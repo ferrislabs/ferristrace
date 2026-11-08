@@ -44,8 +44,8 @@ pub use agents::{
 pub use alerts::{
     AlertBook, AlertChannels, AlertDuty, AlertError, AlertEvent, AlertEvents, AlertMailer,
     AlertOutbox, AlertRules, AlertSeverity, AlertStates, AlertStatus, BadChannel, BadRule, Channel,
-    ChannelBook, ChannelId, ChannelKind, ChannelName, ChannelView, Claimed, Comparison, Condition,
-    Courier, CulpritPod, CulpritReader, Culprits, Definition, DefinitionParts, Delivery,
+    ChannelBook, ChannelId, ChannelKind, ChannelName, ChannelView, Chat, Claimed, Comparison,
+    Condition, Courier, CulpritPod, CulpritReader, Culprits, Definition, DefinitionParts, Delivery,
     DeliveryError, DeliveryStatus, Destination, Dispatch, Drained, Duty, EmailList, Evaluator,
     EventId, HISTORY_DAYS, IssuedChannel, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal,
     MAX_CULPRIT_FACETS, MAX_CULPRIT_LABELS, MAX_CULPRIT_PODS, MetricSignal, NoDataPolicy,
