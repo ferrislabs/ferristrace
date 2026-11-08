@@ -171,6 +171,7 @@ async fn rule(ledger: &AlertLedger, signal: LlmSignal, threshold: f64, no_data: 
                 no_data,
                 channels: Vec::new(),
                 page: None,
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },

@@ -1275,3 +1275,42 @@ async fn spec_l13_11_a_bad_design_is_refused_and_only_chat_channels_take_one() {
     assert_eq!(on_email, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(member_preview, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn spec_l13_12_a_rule_keeps_the_roles_and_users_it_pings_and_refuses_a_bad_id() {
+    let harness = Harness::new();
+    let mut body = checkout("Pinging", None, &[]);
+    body["mentions"] = json!({"roles": ["123456789012345678"], "users": ["223456789012345678"]});
+
+    let (created, made) = harness
+        .admin(Method::POST, &alerts(MINE), Some(body.clone()))
+        .await;
+    let (patched, moved) = harness
+        .admin(
+            Method::PATCH,
+            &format!("{}/{}", alerts(MINE), made["id"].as_str().expect("an id")),
+            Some(json!({"mentions": {"roles": [], "users": ["323456789012345678"]}})),
+        )
+        .await;
+    let (untouched_status, untouched) = harness
+        .admin(
+            Method::PATCH,
+            &format!("{}/{}", alerts(MINE), made["id"].as_str().expect("an id")),
+            Some(json!({"enabled": false})),
+        )
+        .await;
+    body["mentions"] = json!({"roles": ["everyone"]});
+    let (bad, _) = harness.admin(Method::POST, &alerts(MINE), Some(body)).await;
+
+    assert_eq!(created, StatusCode::CREATED);
+    assert_eq!(made["mentions"]["roles"], json!(["123456789012345678"]));
+    assert_eq!(made["mentions"]["users"], json!(["223456789012345678"]));
+    assert_eq!(patched, StatusCode::OK);
+    assert_eq!(
+        moved["mentions"],
+        json!({"roles": [], "users": ["323456789012345678"]})
+    );
+    assert_eq!(untouched_status, StatusCode::OK);
+    assert_eq!(untouched["mentions"], moved["mentions"]);
+    assert_eq!(bad, StatusCode::UNPROCESSABLE_ENTITY);
+}

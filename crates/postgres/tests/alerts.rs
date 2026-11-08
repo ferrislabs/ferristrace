@@ -120,6 +120,8 @@ fn checkout(channels: Vec<ferristrace_domain::ChannelId>) -> Definition {
         no_data: NoDataPolicy::Ok,
         channels,
         page: None,
+        mentions: ferristrace_domain::Mentions::new(&["123456789012345678".to_owned()], &[])
+            .expect("a role id"),
     })
     .expect("a definition")
 }
@@ -468,6 +470,10 @@ async fn a_retried_notification_waits_and_an_abandoned_one_is_never_claimed_agai
         assert_eq!(claimed[0].dispatch.name.as_ref(), "Checkout errors");
         assert_eq!(claimed[0].dispatch.severity, AlertSeverity::Critical);
         assert_eq!(claimed[0].dispatch.context, Some(blamed()));
+        assert_eq!(
+            claimed[0].dispatch.mentions.roles(),
+            [Box::<str>::from("123456789012345678")]
+        );
         outbox
             .settle(
                 claimed[0].notification.id,

@@ -140,6 +140,7 @@ fn definition(signal: LlmSignal) -> Result<Definition, super::errors::BadRule> {
         no_data: NoDataPolicy::Ok,
         channels: Vec::new(),
         page: None,
+        mentions: crate::Mentions::default(),
     })
 }
 

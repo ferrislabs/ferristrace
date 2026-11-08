@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::design::Design;
+use super::design::{Design, Mentions};
 use super::errors::{BadChannel, BadRule};
 use crate::catalogue::ProjectId;
 use crate::explore::{ServiceFilter, Window};
@@ -487,6 +487,7 @@ pub struct DefinitionParts {
     pub no_data: NoDataPolicy,
     pub channels: Vec<ChannelId>,
     pub page: Option<ScheduleId>,
+    pub mentions: Mentions,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -549,6 +550,10 @@ impl Definition {
 
     pub fn channels(&self) -> &[ChannelId] {
         &self.0.channels
+    }
+
+    pub fn mentions(&self) -> &Mentions {
+        &self.0.mentions
     }
 
     pub fn page(&self) -> Option<ScheduleId> {

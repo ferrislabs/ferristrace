@@ -220,21 +220,30 @@ fn discord_fields(design: &Design, dispatch: &Dispatch, link: &str) -> Vec<Value
     fields
 }
 
+fn merged(first: &[Box<str>], second: &[Box<str>]) -> Vec<Box<str>> {
+    let mut ids: Vec<Box<str>> = first.to_vec();
+    for id in second {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    ids
+}
+
 fn pinged(design: &Design, dispatch: &Dispatch) -> (String, Value) {
-    if dispatch.to != AlertStatus::Firing
-        || (design.ping_roles.is_empty() && design.ping_users.is_empty())
-    {
+    let roles = merged(&design.ping_roles, dispatch.mentions.roles());
+    let users = merged(&design.ping_users, dispatch.mentions.users());
+    if dispatch.to != AlertStatus::Firing || (roles.is_empty() && users.is_empty()) {
         return (String::new(), json!({"parse": []}));
     }
-    let mentions: Vec<String> = design
-        .ping_roles
+    let mentions: Vec<String> = roles
         .iter()
         .map(|id| format!("<@&{id}>"))
-        .chain(design.ping_users.iter().map(|id| format!("<@{id}>")))
+        .chain(users.iter().map(|id| format!("<@{id}>")))
         .collect();
     (
         mentions.join(" "),
-        json!({"parse": [], "roles": design.ping_roles, "users": design.ping_users}),
+        json!({"parse": [], "roles": roles, "users": users}),
     )
 }
 
@@ -317,6 +326,7 @@ mod tests {
             labels: Labels::new(BTreeMap::from([("service".into(), "checkout".into())])),
             at_ms: 1_700_000_000_000,
             context: None,
+            mentions: ferristrace_domain::Mentions::default(),
         }
     }
 
@@ -517,5 +527,39 @@ mod tests {
         assert_eq!(body["embeds"][0]["title"], "Firing: Checkout errors");
         assert!(body["embeds"][0].get("footer").is_none());
         assert!(body["embeds"][0].get("timestamp").is_none());
+    }
+
+    #[test]
+    fn spec_l13_12_the_rule_mentions_join_the_channel_pings_once_and_only_on_firing() {
+        let mut firing = dispatch("Checkout", AlertStatus::Firing);
+        firing.mentions = ferristrace_domain::Mentions::new(
+            &[
+                "123456789012345678".to_owned(),
+                "323456789012345678".to_owned(),
+            ],
+            &["423456789012345678".to_owned()],
+        )
+        .expect("ids");
+        let mut resolved = firing.clone();
+        resolved.to = AlertStatus::Ok;
+
+        let loud = discord(&designed(), &firing, "u");
+        let quiet = discord(&designed(), &resolved, "u");
+        let bare = discord(&Design::default(), &firing, "u");
+
+        assert_eq!(
+            loud["allowed_mentions"]["roles"],
+            serde_json::json!(["123456789012345678", "323456789012345678"])
+        );
+        assert_eq!(
+            loud["allowed_mentions"]["users"],
+            serde_json::json!(["223456789012345678", "423456789012345678"])
+        );
+        assert!(loud["content"].as_str().expect("content").starts_with("<@&123456789012345678> <@&323456789012345678> <@223456789012345678> <@423456789012345678>"));
+        assert_eq!(quiet["allowed_mentions"], serde_json::json!({"parse": []}));
+        assert_eq!(
+            bare["content"],
+            "<@&123456789012345678> <@&323456789012345678> <@423456789012345678>"
+        );
     }
 }

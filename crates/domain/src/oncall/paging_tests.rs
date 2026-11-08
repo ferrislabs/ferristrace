@@ -126,6 +126,7 @@ impl World {
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
                     page,
+                    mentions: crate::Mentions::default(),
                 })
                 .expect("a definition"),
             },

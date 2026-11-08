@@ -399,6 +399,7 @@ impl Harness {
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
                     page: None,
+                    mentions: ferristrace_domain::Mentions::default(),
                 })
                 .expect("a definition"),
             },

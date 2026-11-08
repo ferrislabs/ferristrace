@@ -106,6 +106,7 @@ async fn a_rule(pg: &Postgres<FixedClock>, org: TenantId, by: AccountId) -> Rule
                     no_data: NoDataPolicy::Ok,
                     channels: Vec::new(),
                     page: None,
+                    mentions: ferristrace_domain::Mentions::default(),
                 })
                 .expect("a definition"),
             },

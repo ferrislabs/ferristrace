@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use ferristrace_domain::{
     Aggregation, AlertSeverity, ChannelId, Comparison, Condition, CulpritPod, Culprits, Definition,
-    DefinitionParts, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MetricSignal,
+    DefinitionParts, Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, Mentions, MetricSignal,
     NoDataPolicy, Placement, PlacementName, ProjectId, ScheduleId, Severity, Signal, TraceMeasure,
     TraceSignal, Workload,
 };
@@ -137,6 +137,10 @@ pub(crate) fn encode(definition: &Definition) -> String {
                 .map(|channel| Value::String(channel.to_string()))
                 .collect()
         ),
+        "mentions": {
+            "roles": definition.mentions().roles(),
+            "users": definition.mentions().users(),
+        },
         "page": definition
             .page()
             .map_or(Value::Null, |schedule| json!({"schedule": schedule.to_string()})),
@@ -145,6 +149,23 @@ pub(crate) fn encode(definition: &Definition) -> String {
 }
 
 struct Unreadable;
+
+pub(crate) fn mentions_of(held: Option<&Value>) -> Option<Mentions> {
+    let Some(held) = held.filter(|held| !held.is_null()) else {
+        return Some(Mentions::default());
+    };
+    let ids = |key: &str| -> Option<Vec<String>> {
+        match held.get(key) {
+            None | Some(Value::Null) => Some(Vec::new()),
+            Some(list) => list
+                .as_array()?
+                .iter()
+                .map(|one| one.as_str().map(str::to_owned))
+                .collect(),
+        }
+    };
+    Mentions::new(&ids("roles")?, &ids("users")?).ok()
+}
 
 fn decode_page(value: &Value) -> Result<Option<ScheduleId>, Unreadable> {
     match value.get("page") {
@@ -248,6 +269,7 @@ pub(crate) fn decode(text: &str) -> Option<Definition> {
             .map(|channel| Uuid::try_parse(channel).ok().map(ChannelId::new))
             .collect::<Option<Vec<_>>>()?,
         page: decode_page(&value).ok()?,
+        mentions: mentions_of(value.get("mentions"))?,
     })
     .ok()
 }
@@ -328,8 +350,8 @@ mod tests {
 
     use ferristrace_domain::{
         Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-        Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MetricSignal, NoDataPolicy, ProjectId,
-        ScheduleId, Severity, Signal, TraceMeasure, TraceSignal,
+        Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, Mentions, MetricSignal, NoDataPolicy,
+        ProjectId, ScheduleId, Severity, Signal, TraceMeasure, TraceSignal,
     };
     use uuid::Uuid;
 
@@ -386,6 +408,11 @@ mod tests {
             no_data: NoDataPolicy::NoData,
             channels: vec![ChannelId::new(Uuid::from_u128(3))],
             page: Some(ScheduleId::new(Uuid::from_u128(4))),
+            mentions: Mentions::new(
+                &["123456789012345678".to_owned()],
+                &["223456789012345678".to_owned()],
+            )
+            .expect("ids"),
         })
         .expect("a definition")
     }
