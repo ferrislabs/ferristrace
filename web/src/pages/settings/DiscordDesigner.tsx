@@ -123,7 +123,7 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
               </Field>
             ))}
           </div>
-          <Field label="Thumbnail" htmlFor="dd-thumb" hint="An https image URL. Empty for none."><Input id="dd-thumb" mono value={design.thumbnail ?? ''} onChange={(e) => onChange({ ...design, thumbnail: e.target.value === '' ? null : e.target.value })} placeholder="https://cdn.example.com/logo.png" /></Field>
+          <Field label="Thumbnail" htmlFor="dd-thumb" hint="An https image URL as png, jpg, gif or webp. Discord does not draw svg. Empty for none."><Input id="dd-thumb" mono value={design.thumbnail ?? ''} onChange={(e) => onChange({ ...design, thumbnail: e.target.value === '' ? null : e.target.value })} placeholder="https://cdn.example.com/logo.png" /></Field>
         </Section>
         <Section title="Facts">
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">

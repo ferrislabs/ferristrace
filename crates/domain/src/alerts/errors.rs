@@ -55,7 +55,9 @@ pub enum BadDesign {
     Placeholder(Box<str>),
     #[error("a colour is a number up to 0xFFFFFF")]
     Colour,
-    #[error("a thumbnail is an https url with no spaces")]
+    #[error(
+        "a thumbnail is an https image url with no spaces, as png, jpg, gif or webp: Discord does not draw svg"
+    )]
     Thumbnail,
     #[error("a design holds at most {max} custom fields")]
     TooManyFields { max: usize },

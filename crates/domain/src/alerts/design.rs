@@ -189,6 +189,10 @@ pub fn thumbnail(given: &str) -> Result<Box<str>, BadDesign> {
         || kept.contains(char::is_whitespace)
         || !kept.to_ascii_lowercase().starts_with("https://")
         || kept.len() <= "https://".len()
+        || kept
+            .split(['?', '#'])
+            .next()
+            .is_some_and(|path| path.to_ascii_lowercase().ends_with(".svg"))
     {
         return Err(BadDesign::Thumbnail);
     }
@@ -278,6 +282,8 @@ mod tests {
             "https://",
             "https://a b/c.png",
             "javascript:alert(1)",
+            "https://ferrislabs.fr/logo.svg",
+            "https://cdn.example.com/LOGO.SVG?v=2",
         ] {
             assert_eq!(thumbnail(bad).err(), Some(BadDesign::Thumbnail), "{bad}");
         }
