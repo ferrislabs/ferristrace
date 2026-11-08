@@ -16,7 +16,7 @@ Context
   One pull request per part, in this order:
     13A  Incident context, read when the incident page opens
     13B  Slack and Discord                    13B1 and 13B2 delivered, 13B3 next
-    13C  Insights: MTTA, MTTR, frequency per service
+    13C  Insights: MTTA, MTTR, frequency per service    delivered
 
 Glossary
   Context     what the product knows about an incident's services over a
@@ -118,8 +118,20 @@ Design
           their own app credentials.
 
   13C Insights
-    MTTA, MTTR and incident count per service and per severity over a
-    window, from the timeline. Read-only, no new data.
+    `GET /api/orgs/{org}/incidents/insights?from_ms&to_ms&project`, default
+    the last 30 days, at most 366. Over the incidents opened in the window:
+    count, open and resolved, and for each group the time to acknowledge
+    and the time to resolve as a mean and a median with their sample count.
+    Groups: overall, by severity, by service, and a count per UTC day.
+    Time to resolve is opened to resolved, over resolved incidents only.
+    Time to acknowledge is opened to the first response: a status change,
+    an owner taken, or an acknowledged page (an owner cleared does not
+    count). An incident with no response is left out of that average, not
+    counted as zero. By service uses the services of the alert that opened
+    the incident, counts the incident under each of them, and groups a
+    hand-declared incident under none; the total counts it once. Read-only,
+    narrowed to the caller's project, nothing new is stored.
+    Web: an Insights tab under Reliability.
 
 Open
   Q1  Who uses it: an SRE team living in Slack, or small teams wanting one
@@ -189,3 +201,8 @@ Delivered with 13B2
   @spec-l13-13  An announced entry reaches each subscribed chat channel once
                 and no other channel; alerts, deploys and attachments are
                 not announced.
+
+Delivered with 13C
+  @spec-l13-14  The insights count the incidents opened in a window and time
+                their acknowledgement and resolution, per severity and per
+                service.

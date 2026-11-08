@@ -11,9 +11,9 @@ use ferristrace_application::registry::IncidentRepos;
 use ferristrace_domain::{
     AccountId, AgentId, AlertRef, Attachment, AttachmentKind, AttachmentLabel, Author, BadIncident,
     Briefed, Change, Chronicle, CommentBody, Dossier, IncidentContext, IncidentDraft,
-    IncidentError, IncidentFilter, IncidentId, IncidentPatch, IncidentScope, IncidentSeverity,
-    IncidentStatus, IncidentTitle, Person, ProjectId, Reference, RuleId, ScheduleId, TenantId,
-    TimelineEntry,
+    IncidentError, IncidentFilter, IncidentGroup, IncidentId, IncidentInsights, IncidentPatch,
+    IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle, Person, ProjectId, Reference,
+    RuleId, ScheduleId, TenantId, TimelineEntry, Timing,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -33,6 +33,7 @@ where
             "/api/orgs/{org}/incidents/{id}",
             get(one::<S>).patch(amend::<S>),
         )
+        .route("/api/orgs/{org}/incidents/insights", get(insights::<S>))
         .route(
             "/api/orgs/{org}/incidents/{id}/context",
             get(surroundings::<S>),
@@ -745,4 +746,74 @@ where
         .incident_context(&who, TenantId::new(org), IncidentId::new(id))
         .await?;
     Ok(Json(SurroundingsBody::from(&found)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Window {
+    #[serde(default)]
+    from_ms: Option<u64>,
+    #[serde(default)]
+    to_ms: Option<u64>,
+    #[serde(default)]
+    project: Option<Uuid>,
+}
+
+fn timing_json(timing: &Timing) -> Value {
+    json!({
+        "samples": timing.samples,
+        "mean_ms": timing.mean_ms,
+        "median_ms": timing.median_ms,
+    })
+}
+
+fn group_json(group: &IncidentGroup) -> Value {
+    json!({
+        "incidents": group.incidents,
+        "open": group.open,
+        "resolved": group.resolved,
+        "acknowledge": timing_json(&group.acknowledge),
+        "resolve": timing_json(&group.resolve),
+    })
+}
+
+fn insights_json(found: &IncidentInsights) -> Value {
+    json!({
+        "from_ms": found.from_ms,
+        "to_ms": found.to_ms,
+        "overall": group_json(&found.overall),
+        "by_severity": found.by_severity.iter().map(|(severity, group)| {
+            let mut body = group_json(group);
+            body["severity"] = json!(severity.as_str());
+            body
+        }).collect::<Vec<_>>(),
+        "by_service": found.by_service.iter().map(|(service, group)| {
+            let mut body = group_json(group);
+            body["service"] = json!(service);
+            body
+        }).collect::<Vec<_>>(),
+        "per_day": found.per_day.iter().map(|(day_ms, count)| json!({"day_ms": day_ms, "incidents": count})).collect::<Vec<_>>(),
+    })
+}
+
+async fn insights<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(window): Query<Window>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, IncidentRefused>
+where
+    S::Repos: IncidentRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let found = state
+        .app
+        .incident_insights(
+            &who,
+            TenantId::new(org),
+            window.from_ms,
+            window.to_ms,
+            window.project.map(ProjectId::new),
+        )
+        .await?;
+    Ok(Json(insights_json(&found)))
 }

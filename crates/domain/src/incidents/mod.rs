@@ -7,6 +7,9 @@ mod desk_tests;
 mod entities;
 mod errors;
 mod followers;
+mod insights;
+#[cfg(test)]
+mod insights_tests;
 mod narration;
 #[cfg(test)]
 mod narration_tests;
@@ -26,6 +29,7 @@ pub use entities::{
 };
 pub use errors::{BadIncident, IncidentError};
 pub use followers::Followers;
+pub use insights::{DEFAULT_WINDOW_DAYS, Group, Insights, MAX_WINDOW_DAYS, Timing};
 pub use narration::{ANNOUNCED, ClaimedIncidentNotice, IncidentNotice, IncidentOutbox, Narrator};
 pub use ports::{IncidentAttachments, IncidentTimeline, Incidents};
 pub use value_objects::{

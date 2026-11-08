@@ -333,6 +333,39 @@ impl IncidentTimeline for PostgresIncidentTimeline {
             .map(|row| read_entry(row, org, incident))
             .collect()
     }
+
+    async fn first_responses(
+        &self,
+        org: TenantId,
+        incidents: &[IncidentId],
+    ) -> Result<std::collections::HashMap<IncidentId, u64>, StoreError> {
+        if incidents.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let ids: Vec<Uuid> = incidents.iter().map(|id| id.as_uuid()).collect();
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query(
+            "SELECT incident_id, min(at_ms) AS at_ms FROM incident_events \
+             WHERE org_id = $1 AND incident_id = ANY($2) \
+               AND (kind IN ('acknowledged', 'status') \
+                    OR (kind = 'owner' AND detail->>'to' IS NOT NULL)) \
+             GROUP BY incident_id",
+        )
+        .bind(org.as_uuid())
+        .bind(ids)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(unreachable("read the first responses to incidents"))?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    IncidentId::new(row.get("incident_id")),
+                    unsigned(row.get("at_ms")),
+                )
+            })
+            .collect())
+    }
 }
 
 #[repository(domain = IncidentAttachments, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]

@@ -138,6 +138,32 @@ export function useIncidentContext(id: string) {
   return { context: data, pending: isPending, failed: error }
 }
 
+export type Timing = { samples: number; mean_ms: number | null; median_ms: number | null }
+
+export type InsightGroup = { incidents: number; open: number; resolved: number; acknowledge: Timing; resolve: Timing }
+
+export type IncidentInsights = {
+  from_ms: number
+  to_ms: number
+  overall: InsightGroup
+  by_severity: (InsightGroup & { severity: IncidentSeverity })[]
+  by_service: (InsightGroup & { service: string | null })[]
+  per_day: { day_ms: number; incidents: number }[]
+}
+
+export function useIncidentInsights(days: number) {
+  const { active } = useOrganisations()
+  const { data, isPending, error } = useQuery({
+    queryKey: [...key(active?.org), 'insights', days],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    refetchInterval: 60_000,
+    retry: retryable,
+    queryFn: async () => json<IncidentInsights>(await get(`/api/orgs/${active?.org}/incidents/insights?from_ms=${Date.now() - days * 86_400_000}&to_ms=${Date.now() + 60_000}`)),
+  })
+  return { insights: data, pending: isPending, failed: error }
+}
+
 function useRefreshing<T, R>(send: (org: string, asked: T) => Promise<R>) {
   const { active } = useOrganisations()
   const client = useQueryClient()

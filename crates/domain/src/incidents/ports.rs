@@ -1,4 +1,5 @@
 use core::future::Future;
+use std::collections::HashMap;
 
 use super::entities::{Attachment, Incident, IncidentFilter, TimelineEntry};
 use super::value_objects::IncidentId;
@@ -43,6 +44,12 @@ pub trait IncidentTimeline {
         org: TenantId,
         incident: IncidentId,
     ) -> impl Future<Output = Result<Vec<TimelineEntry>, StoreError>> + Send;
+
+    fn first_responses(
+        &self,
+        org: TenantId,
+        incidents: &[IncidentId],
+    ) -> impl Future<Output = Result<HashMap<IncidentId, u64>, StoreError>> + Send;
 }
 
 pub trait IncidentAttachments {
