@@ -43,6 +43,10 @@ fn discord_color(dispatch: &Dispatch) -> u32 {
     u32::from_str_radix(&slack_color(dispatch)[1..], 16).unwrap_or(0x0098_a2b3)
 }
 
+fn absolute(link: &str) -> Option<&str> {
+    (link.starts_with("https://") || link.starts_with("http://")).then_some(link)
+}
+
 fn facts(dispatch: &Dispatch) -> Vec<(String, String)> {
     let mut facts = vec![
         ("Severity".to_owned(), dispatch.severity.as_str().to_owned()),
@@ -75,6 +79,7 @@ fn facts(dispatch: &Dispatch) -> Vec<(String, String)> {
             facts.push(("Nodes".to_owned(), nodes.join(", ")));
         }
     }
+    facts.retain(|(name, value)| !name.trim().is_empty() && !value.trim().is_empty());
     facts.truncate(MAX_FIELDS);
     facts
 }
@@ -87,13 +92,12 @@ fn slack_text(text: &str) -> String {
 
 pub fn slack(dispatch: &Dispatch, link: &str) -> Value {
     let title = title(dispatch);
-    json!({
+    let mut body = json!({
         "text": slack_text(&title),
         "attachments": [{
             "color": slack_color(dispatch),
             "fallback": slack_text(&title),
             "title": slack_text(&title),
-            "title_link": link,
             "fields": facts(dispatch)
                 .into_iter()
                 .map(|(name, value)| json!({
@@ -104,15 +108,19 @@ pub fn slack(dispatch: &Dispatch, link: &str) -> Value {
                 .collect::<Vec<_>>(),
             "ts": dispatch.at_ms / 1_000,
         }],
-    })
+    });
+    if let (Some(link), Some(attachment)) = (absolute(link), body["attachments"][0].as_object_mut())
+    {
+        attachment.insert("title_link".to_owned(), json!(link));
+    }
+    body
 }
 
 pub fn discord(dispatch: &Dispatch, link: &str) -> Value {
-    json!({
+    let mut body = json!({
         "allowed_mentions": {"parse": []},
         "embeds": [{
             "title": title(dispatch),
-            "url": link,
             "color": discord_color(dispatch),
             "fields": facts(dispatch)
                 .into_iter()
@@ -123,7 +131,11 @@ pub fn discord(dispatch: &Dispatch, link: &str) -> Value {
                 }))
                 .collect::<Vec<_>>(),
         }],
-    })
+    });
+    if let (Some(link), Some(embed)) = (absolute(link), body["embeds"][0].as_object_mut()) {
+        embed.insert("url".to_owned(), json!(link));
+    }
+    body
 }
 
 #[cfg(test)]
@@ -191,6 +203,28 @@ mod tests {
         assert_eq!(body["embeds"][0]["title"], "Resolved: @everyone");
         assert_eq!(body["embeds"][0]["color"], 0x0012_b76a);
         assert_eq!(body["embeds"][0]["url"], "https://x/a");
+    }
+
+    #[test]
+    fn a_link_that_is_not_absolute_is_left_out_because_discord_refuses_the_message() {
+        let firing = dispatch("Checkout errors", AlertStatus::Firing);
+
+        let embed = discord(&firing, "/alerts?rule=7");
+        let attachment = slack(&firing, "/alerts?rule=7");
+
+        assert!(embed["embeds"][0].get("url").is_none());
+        assert!(attachment["attachments"][0].get("title_link").is_none());
+    }
+
+    #[test]
+    fn a_label_without_a_value_is_not_sent_as_an_empty_field() {
+        let mut firing = dispatch("Checkout errors", AlertStatus::Firing);
+        firing.labels = Labels::new(BTreeMap::from([("env".into(), String::new().into())]));
+
+        let body = discord(&firing, "https://x/a");
+
+        let fields = body["embeds"][0]["fields"].as_array().expect("fields");
+        assert!(fields.iter().all(|field| field["name"] != "env"));
     }
 
     #[test]
