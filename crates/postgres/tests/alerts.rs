@@ -737,3 +737,28 @@ async fn a_discord_design_is_kept_with_its_channel_and_changed_in_place() {
     );
     let _ = id;
 }
+
+#[tokio::test]
+async fn every_duty_a_replica_may_lead_is_one_the_database_accepts() {
+    let Some(pool) = control_plane("alerts_every_duty", 2).await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+
+    let led = committed!(pg, |duty: AlertDuty| {
+        let mut led = Vec::new();
+        for one in [
+            ferristrace_domain::Duty::Evaluate,
+            ferristrace_domain::Duty::Deliver,
+            ferristrace_domain::Duty::Escalate,
+            ferristrace_domain::Duty::Announce,
+            ferristrace_domain::Duty::Deploys,
+            ferristrace_domain::Duty::Narrate,
+        ] {
+            led.push(ferristrace_domain::AlertDuty::lead(&duty, one, 1).await);
+        }
+        led
+    });
+
+    assert!(led.iter().all(|one| matches!(one, Ok(true))), "{led:?}");
+}

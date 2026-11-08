@@ -12,3 +12,6 @@ CREATE TABLE incident_outbox (
 );
 
 CREATE INDEX incident_outbox_due ON incident_outbox (next_at_ms) WHERE status = 'pending';
+
+ALTER TABLE alert_duties DROP CONSTRAINT alert_duties_duty_check;
+ALTER TABLE alert_duties ADD CONSTRAINT alert_duties_duty_check CHECK (duty IN ('evaluate', 'deliver', 'escalate', 'announce', 'deploys', 'narrate'));
