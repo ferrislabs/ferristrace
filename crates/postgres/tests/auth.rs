@@ -1,6 +1,7 @@
 use ferristrace_domain::{
-    AccountId, AccountName, Accounts, Email, PhotoKind, Portrait, ProvisionPolicy, SessionError,
-    SessionStore, SessionToken,
+    AccountId, AccountName, AccountTimezone, Accounts, Email, PhotoKind, Portrait, Preferences,
+    ProvisionPolicy, RowDensity, SessionError, SessionStore, SessionToken, StartPage,
+    TimestampPrecision,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{AccountError, CONTROL_PLANE, Postgres};
@@ -339,6 +340,50 @@ async fn a_dropped_portrait_leaves_both_columns_null() {
     .map(|row| (row.get("photo_token"), row.get("photo_type")))
     .expect("the account");
     assert_eq!(held, (None, None));
+}
+
+#[tokio::test]
+async fn an_account_with_no_preferences_set_reads_the_defaults() {
+    let Some(pool) = control_plane("auth_preferences_defaults").await else {
+        return;
+    };
+    let pg = at(&pool, NOW);
+    let account = an_account(&pool, "person@example.com").await;
+    let accounts = backend::accounts(&pg);
+
+    let preferences = accounts
+        .preferences_of(account)
+        .await
+        .expect("it is read")
+        .expect("the account exists");
+
+    assert_eq!(preferences, Preferences::default());
+}
+
+#[tokio::test]
+async fn chosen_preferences_travel_through_postgres() {
+    let Some(pool) = control_plane("auth_preferences_round_trip").await else {
+        return;
+    };
+    let pg = at(&pool, NOW);
+    let account = an_account(&pool, "person@example.com").await;
+    let accounts = backend::accounts(&pg);
+    let chosen = Preferences {
+        timezone: AccountTimezone::try_from("Europe/Paris").expect("a timezone"),
+        precision: TimestampPrecision::Nanos,
+        density: RowDensity::Comfortable,
+        start_page: StartPage::Traces,
+    };
+
+    accounts
+        .set_preferences(account, &chosen)
+        .await
+        .expect("it is kept");
+
+    assert_eq!(
+        accounts.preferences_of(account).await.expect("it is read"),
+        Some(chosen)
+    );
 }
 
 #[tokio::test]

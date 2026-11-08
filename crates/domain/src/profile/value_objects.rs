@@ -1,10 +1,139 @@
 use core::fmt;
+use jiff::tz::TimeZoneDatabase;
 
 use super::errors::{BadAccountName, BadPhoto};
 use crate::identity::AccountId;
+use crate::organisation::BadTimezone;
 use crate::telemetry::TenantId;
 
 pub(super) const MAX_NAME_BYTES: usize = 128;
+pub(super) const MAX_TIMEZONE_BYTES: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountTimezone(Box<str>);
+
+impl AccountTimezone {
+    pub fn utc() -> Self {
+        Self("UTC".into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for AccountTimezone {
+    fn default() -> Self {
+        Self::utc()
+    }
+}
+
+impl TryFrom<&str> for AccountTimezone {
+    type Error = BadTimezone;
+
+    fn try_from(chosen: &str) -> Result<Self, Self::Error> {
+        let kept = chosen.trim();
+        if kept.is_empty() || kept.len() > MAX_TIMEZONE_BYTES {
+            return Err(BadTimezone);
+        }
+        TimeZoneDatabase::bundled()
+            .get(kept)
+            .map_err(|_| BadTimezone)?;
+        Ok(Self(kept.into()))
+    }
+}
+
+impl fmt::Display for AccountTimezone {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimestampPrecision {
+    #[default]
+    Millis,
+    Micros,
+    Nanos,
+}
+
+impl TimestampPrecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Millis => "ms",
+            Self::Micros => "us",
+            Self::Nanos => "ns",
+        }
+    }
+
+    pub fn parse(spelling: &str) -> Option<Self> {
+        match spelling {
+            "ms" => Some(Self::Millis),
+            "us" => Some(Self::Micros),
+            "ns" => Some(Self::Nanos),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RowDensity {
+    #[default]
+    Compact,
+    Comfortable,
+}
+
+impl RowDensity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Comfortable => "comfortable",
+        }
+    }
+
+    pub fn parse(spelling: &str) -> Option<Self> {
+        match spelling {
+            "compact" => Some(Self::Compact),
+            "comfortable" => Some(Self::Comfortable),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StartPage {
+    #[default]
+    Overview,
+    Services,
+    Traces,
+}
+
+impl StartPage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Services => "services",
+            Self::Traces => "traces",
+        }
+    }
+
+    pub fn parse(spelling: &str) -> Option<Self> {
+        match spelling {
+            "overview" => Some(Self::Overview),
+            "services" => Some(Self::Services),
+            "traces" => Some(Self::Traces),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Preferences {
+    pub timezone: AccountTimezone,
+    pub precision: TimestampPrecision,
+    pub density: RowDensity,
+    pub start_page: StartPage,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountName(Box<str>);

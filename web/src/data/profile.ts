@@ -1,6 +1,6 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountQuery, renameMe, type Account } from '@/auth/api'
-import { del, json, offer } from '@/auth/client'
+import { del, get, json, offer, put } from '@/auth/client'
 import { useAccount, useOrganisations } from '@/auth/session'
 import { useMembers } from './members'
 import { useTeams } from './teams'
@@ -54,6 +54,37 @@ export function useRemovePhoto() {
   return useMutation({
     mutationFn: async () => json<Account>(await del('/auth/me/photo')),
     onSuccess: (standing) => client.setQueryData(accountQuery.queryKey, standing),
+  })
+}
+
+export type TimestampPrecision = 'ms' | 'us' | 'ns'
+
+export type RowDensity = 'compact' | 'comfortable'
+
+export type StartPage = 'overview' | 'services' | 'traces'
+
+export type AccountPreferences = {
+  timezone: string
+  precision: TimestampPrecision
+  density: RowDensity
+  start_page: StartPage
+}
+
+const preferencesKey = ['auth', 'preferences']
+
+export function usePreferences() {
+  return useQuery({
+    queryKey: preferencesKey,
+    staleTime: 60_000,
+    queryFn: async () => json<AccountPreferences>(await get('/auth/me/preferences')),
+  })
+}
+
+export function useSetPreferences() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (asked: AccountPreferences) => json<AccountPreferences>(await put('/auth/me/preferences', asked)),
+    onSuccess: (preferences) => client.setQueryData(preferencesKey, preferences),
   })
 }
 

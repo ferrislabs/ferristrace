@@ -9,8 +9,9 @@ use axum::routing::{get, post};
 use ferristrace_application::Stack;
 use ferristrace_application::registry::ProfileRepos;
 use ferristrace_domain::{
-    AccountId, AccountName, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, Photo, PhotoError, Portrait,
-    ProfileError, TenantId, Who,
+    AccountId, AccountName, AccountTimezone, BadAccountName, BadPhoto, BadTimezone,
+    MAX_PHOTO_BYTES, Photo, PhotoError, Portrait, Preferences, ProfileError, RowDensity, StartPage,
+    TenantId, TimestampPrecision, Who,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -70,12 +71,57 @@ pub struct Naming {
     name: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PreferencesBody {
+    timezone: String,
+    precision: &'static str,
+    density: &'static str,
+    start_page: &'static str,
+}
+
+impl From<Preferences> for PreferencesBody {
+    fn from(preferences: Preferences) -> Self {
+        Self {
+            timezone: preferences.timezone.as_str().to_owned(),
+            precision: preferences.precision.as_str(),
+            density: preferences.density.as_str(),
+            start_page: preferences.start_page.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PreferencesAsked {
+    timezone: String,
+    precision: String,
+    density: String,
+    start_page: String,
+}
+
+impl PreferencesAsked {
+    fn preferences(&self) -> Result<Preferences, StandingRefused> {
+        Ok(Preferences {
+            timezone: AccountTimezone::try_from(self.timezone.as_str())?,
+            precision: TimestampPrecision::parse(&self.precision)
+                .ok_or(StandingRefused::Malformed("precision"))?,
+            density: RowDensity::parse(&self.density)
+                .ok_or(StandingRefused::Malformed("density"))?,
+            start_page: StartPage::parse(&self.start_page)
+                .ok_or(StandingRefused::Malformed("start_page"))?,
+        })
+    }
+}
+
 pub fn me_router<S: Stack>(state: AppState<S>) -> Router
 where
     S::Repos: ProfileRepos,
 {
     Router::new()
         .route("/auth/me", get(standing::<S>).patch(rename::<S>))
+        .route(
+            "/auth/me/preferences",
+            get(preferences::<S>).put(set_preferences::<S>),
+        )
         .route(
             "/auth/me/photo",
             post(keep::<S>)
@@ -117,6 +163,31 @@ where
     let who = state.app.rename_profile(&token, name.as_ref()).await?;
     tracing::info!(account = %who.account, named = who.name.is_some(), "an account was renamed");
     Ok(Json(who.into()))
+}
+
+async fn preferences<S: Stack>(
+    State(state): State<AppState<S>>,
+    headers: HeaderMap,
+) -> Result<Json<PreferencesBody>, StandingRefused>
+where
+    S::Repos: ProfileRepos,
+{
+    let token = carried(&state, &headers).await?;
+    Ok(Json(state.app.preferences(&token).await?.into()))
+}
+
+async fn set_preferences<S: Stack>(
+    State(state): State<AppState<S>>,
+    headers: HeaderMap,
+    Json(asked): Json<PreferencesAsked>,
+) -> Result<Json<PreferencesBody>, StandingRefused>
+where
+    S::Repos: ProfileRepos,
+{
+    let token = carried(&state, &headers).await?;
+    let preferences = asked.preferences()?;
+    let saved = state.app.set_preferences(&token, &preferences).await?;
+    Ok(Json(saved.into()))
 }
 
 async fn keep<S: Stack>(
@@ -181,6 +252,10 @@ pub enum StandingRefused {
     Name(#[from] BadAccountName),
     #[error(transparent)]
     Picture(#[from] BadPhoto),
+    #[error(transparent)]
+    Timezone(#[from] BadTimezone),
+    #[error("the field {0} is not one this route understands")]
+    Malformed(&'static str),
     #[error("that account keeps no photo")]
     NoPhoto,
     #[error(transparent)]
@@ -205,7 +280,9 @@ impl IntoResponse for StandingRefused {
         let status = match self {
             Self::NoSession => StatusCode::UNAUTHORIZED,
             Self::Reaching(ref reaching) => return reaching.into_response(),
-            Self::Name(_) | Self::Picture(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Name(_) | Self::Picture(_) | Self::Timezone(_) | Self::Malformed(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             Self::NoPhoto => StatusCode::NOT_FOUND,
             Self::NoStore(_) | Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };

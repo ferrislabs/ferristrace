@@ -1,7 +1,8 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountDirectory, AccountId, AccountName, Accounts, AuthError, Email, PhotoKind, Portrait,
-    ProvisionPolicy, ResolvedIdentity, StoreError,
+    AccountDirectory, AccountId, AccountName, AccountTimezone, Accounts, AuthError, Email,
+    PhotoKind, Portrait, Preferences, ProvisionPolicy, ResolvedIdentity, RowDensity, StartPage,
+    StoreError, TimestampPrecision,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -203,6 +204,70 @@ impl Accounts for PostgresAccounts {
                 StoreError::Unreachable
             })?;
         Ok(())
+    }
+
+    async fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let found = sqlx::query(
+            "SELECT timezone, timestamp_precision, row_density, start_page \
+             FROM accounts WHERE id = $1",
+        )
+        .bind(account.as_uuid())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "the control plane refused to read preferences");
+            StoreError::Unreachable
+        })?;
+        Ok(found.as_ref().map(read_preferences))
+    }
+
+    async fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.tx.lock().await;
+        sqlx::query(
+            "UPDATE accounts SET timezone = $2, timestamp_precision = $3, \
+             row_density = $4, start_page = $5 WHERE id = $1",
+        )
+        .bind(account.as_uuid())
+        .bind(preferences.timezone.as_str())
+        .bind(preferences.precision.as_str())
+        .bind(preferences.density.as_str())
+        .bind(preferences.start_page.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "the control plane refused to keep preferences");
+            StoreError::Unreachable
+        })?;
+        Ok(())
+    }
+}
+
+fn read_preferences(row: &PgRow) -> Preferences {
+    Preferences {
+        timezone: row
+            .get::<Option<String>, _>("timezone")
+            .and_then(|held| AccountTimezone::try_from(held.as_str()).ok())
+            .unwrap_or_default(),
+        precision: row
+            .get::<Option<String>, _>("timestamp_precision")
+            .as_deref()
+            .and_then(TimestampPrecision::parse)
+            .unwrap_or_default(),
+        density: row
+            .get::<Option<String>, _>("row_density")
+            .as_deref()
+            .and_then(RowDensity::parse)
+            .unwrap_or_default(),
+        start_page: row
+            .get::<Option<String>, _>("start_page")
+            .as_deref()
+            .and_then(StartPage::parse)
+            .unwrap_or_default(),
     }
 }
 

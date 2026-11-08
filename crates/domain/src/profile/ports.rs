@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use super::errors::PhotoError;
-use super::value_objects::{AccountName, Photo, Pictured, Portrait};
+use super::value_objects::{AccountName, Photo, Pictured, Portrait, Preferences};
 use crate::identity::AccountId;
 use crate::store::StoreError;
 
@@ -21,6 +21,17 @@ pub trait Accounts {
         &self,
         account: AccountId,
         portrait: Option<&Portrait>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn preferences_of(
+        &self,
+        account: AccountId,
+    ) -> impl Future<Output = Result<Option<Preferences>, StoreError>> + Send;
+
+    fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -47,6 +58,21 @@ impl<T: Accounts + Sync> Accounts for &T {
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).set_portrait(account, portrait)
     }
+
+    fn preferences_of(
+        &self,
+        account: AccountId,
+    ) -> impl Future<Output = Result<Option<Preferences>, StoreError>> + Send {
+        (*self).preferences_of(account)
+    }
+
+    fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        (*self).set_preferences(account, preferences)
+    }
 }
 
 impl<T: Accounts + Send + Sync> Accounts for std::sync::Arc<T> {
@@ -71,6 +97,21 @@ impl<T: Accounts + Send + Sync> Accounts for std::sync::Arc<T> {
         portrait: Option<&Portrait>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().set_portrait(account, portrait)
+    }
+
+    fn preferences_of(
+        &self,
+        account: AccountId,
+    ) -> impl Future<Output = Result<Option<Preferences>, StoreError>> + Send {
+        self.as_ref().preferences_of(account)
+    }
+
+    fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        self.as_ref().set_preferences(account, preferences)
     }
 }
 

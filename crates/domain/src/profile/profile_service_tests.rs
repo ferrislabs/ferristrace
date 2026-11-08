@@ -4,7 +4,10 @@ use uuid::Uuid;
 use super::errors::{BadAccountName, PhotoError, ProfileError};
 use super::ports::{Accounts, NoPhotos, Photos};
 use super::profile_service::Profile;
-use super::value_objects::{AccountName, MAX_NAME_BYTES, Photo, PhotoKind, Pictured, Portrait};
+use super::value_objects::{
+    AccountName, AccountTimezone, MAX_NAME_BYTES, Photo, PhotoKind, Pictured, Portrait,
+    Preferences, RowDensity, StartPage, TimestampPrecision,
+};
 use crate::clock::UnixSeconds;
 use crate::identity::{AccountId, Email, Session, SessionError, SessionStore};
 use crate::organisation::{Membership, Memberships, OrgRole, Whoami, WhoamiError};
@@ -40,6 +43,7 @@ struct Kept {
     mine: Mutex<Option<Portrait>>,
     theirs: Mutex<Option<Portrait>>,
     writes: Mutex<Vec<Option<String>>>,
+    prefs: Mutex<Option<Preferences>>,
 }
 
 impl Kept {
@@ -97,6 +101,21 @@ impl Accounts for &Kept {
         portrait: Option<&Portrait>,
     ) -> Result<(), StoreError> {
         *self.column_of(account).lock().expect("the lock") = portrait.cloned();
+        Ok(())
+    }
+
+    async fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        assert_eq!(account, an_account(ACCOUNT));
+        Ok(self.prefs.lock().expect("the lock").clone())
+    }
+
+    async fn set_preferences(
+        &self,
+        account: AccountId,
+        preferences: &Preferences,
+    ) -> Result<(), StoreError> {
+        assert_eq!(account, an_account(ACCOUNT));
+        *self.prefs.lock().expect("the lock") = Some(preferences.clone());
         Ok(())
     }
 }
@@ -253,6 +272,45 @@ async fn emptying_the_name_takes_it_off_the_account() {
 
     assert_eq!(who.name, None);
     assert_eq!(kept.writes(), vec![None]);
+}
+
+#[tokio::test]
+async fn an_account_with_no_preferences_set_reads_the_defaults() {
+    let (kept, shelf) = (Kept::default(), Shelf::default());
+
+    let preferences = profile(&kept, &shelf)
+        .preferences(&token())
+        .await
+        .expect("a read");
+
+    assert_eq!(preferences, Preferences::default());
+    assert_eq!(preferences.timezone.as_str(), "UTC");
+    assert_eq!(preferences.precision, TimestampPrecision::Millis);
+    assert_eq!(preferences.density, RowDensity::Compact);
+    assert_eq!(preferences.start_page, StartPage::Overview);
+}
+
+#[tokio::test]
+async fn chosen_preferences_are_written_and_read_back() {
+    let (kept, shelf) = (Kept::default(), Shelf::default());
+    let chosen = Preferences {
+        timezone: AccountTimezone::try_from("Europe/Paris").expect("a timezone"),
+        precision: TimestampPrecision::Nanos,
+        density: RowDensity::Comfortable,
+        start_page: StartPage::Traces,
+    };
+
+    let kept_back = profile(&kept, &shelf)
+        .set_preferences(&token(), &chosen)
+        .await
+        .expect("a write");
+    let read_back = profile(&kept, &shelf)
+        .preferences(&token())
+        .await
+        .expect("a read");
+
+    assert_eq!(kept_back, chosen);
+    assert_eq!(read_back, chosen);
 }
 
 #[tokio::test]

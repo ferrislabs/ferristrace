@@ -7,8 +7,8 @@ use ferristrace_api::me_router;
 use ferristrace_application::testing::{Bearers, Inert};
 use ferristrace_domain::{
     AccountId, AccountName, Accounts, MAX_PHOTO_BYTES, Membership, Memberships, NoPhotos, OrgRole,
-    Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Session, SessionError, SessionStore,
-    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Preferences, Session, SessionError,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -31,6 +31,7 @@ struct Kept {
     name: Mutex<Option<String>>,
     portrait: Mutex<Option<Portrait>>,
     writes: Mutex<Vec<Option<String>>>,
+    prefs: Mutex<Option<Preferences>>,
 }
 
 impl Kept {
@@ -80,6 +81,22 @@ impl Accounts for Kept {
         portrait: Option<&Portrait>,
     ) -> Result<(), StoreError> {
         *self.portrait.lock().expect("the lock") = portrait.cloned();
+        Ok(())
+    }
+
+    async fn preferences_of(&self, account: AccountId) -> Result<Option<Preferences>, StoreError> {
+        if account != AccountId::new(Uuid::from_u128(ACCOUNT)) {
+            return Ok(None);
+        }
+        Ok(self.prefs.lock().expect("the lock").clone())
+    }
+
+    async fn set_preferences(
+        &self,
+        _account: AccountId,
+        preferences: &Preferences,
+    ) -> Result<(), StoreError> {
+        *self.prefs.lock().expect("the lock") = Some(preferences.clone());
         Ok(())
     }
 }
@@ -210,6 +227,24 @@ fn naming(spelling: &str, cookie: Option<&str>) -> Request<Body> {
     }
     let body = serde_json::json!({ "name": spelling }).to_string();
     request.body(Body::from(body)).expect("a request")
+}
+
+fn reading_preferences(cookie: Option<&str>) -> Request<Body> {
+    let mut request = Request::builder().uri("/auth/me/preferences");
+    if let Some(cookie) = cookie {
+        request = request.header(AUTHORIZATION, cookie);
+    }
+    request.body(Body::empty()).expect("a request")
+}
+
+fn setting_preferences(body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::PUT)
+        .uri("/auth/me/preferences")
+        .header(AUTHORIZATION, mine())
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("a request")
 }
 
 fn offering(bytes: Vec<u8>) -> Request<Body> {
@@ -451,6 +486,66 @@ async fn renaming_without_a_session_writes_nothing() {
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(kept.writes().is_empty());
+}
+
+#[tokio::test]
+async fn an_account_with_no_preferences_set_is_answered_the_defaults() {
+    let kept = Arc::new(Kept::default());
+
+    let (status, body) = served(&kept, TwoOrgs, reading_preferences(Some(&mine()))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let preferences = standing_in(&body);
+    assert_eq!(preferences["timezone"], "UTC");
+    assert_eq!(preferences["precision"], "ms");
+    assert_eq!(preferences["density"], "compact");
+    assert_eq!(preferences["start_page"], "overview");
+}
+
+#[tokio::test]
+async fn chosen_preferences_are_written_and_read_back_over_http() {
+    let kept = Arc::new(Kept::default());
+    let chosen = serde_json::json!({
+        "timezone": "Europe/Paris",
+        "precision": "ns",
+        "density": "comfortable",
+        "start_page": "traces",
+    });
+
+    let (set_status, set_body) = served(&kept, TwoOrgs, setting_preferences(&chosen)).await;
+    let (read_status, read_body) = served(&kept, TwoOrgs, reading_preferences(Some(&mine()))).await;
+
+    assert_eq!(set_status, StatusCode::OK);
+    assert_eq!(standing_in(&set_body), chosen);
+    assert_eq!(read_status, StatusCode::OK);
+    assert_eq!(standing_in(&read_body), chosen);
+}
+
+#[tokio::test]
+async fn an_unknown_timezone_or_precision_is_refused_with_422() {
+    let kept = Arc::new(Kept::default());
+    let bad_timezone = serde_json::json!({
+        "timezone": "Nowhere/At_All", "precision": "ms", "density": "compact", "start_page": "overview",
+    });
+    let bad_precision = serde_json::json!({
+        "timezone": "UTC", "precision": "fortnights", "density": "compact", "start_page": "overview",
+    });
+
+    let (timezone_status, _) = served(&kept, TwoOrgs, setting_preferences(&bad_timezone)).await;
+    let (precision_status, _) = served(&kept, TwoOrgs, setting_preferences(&bad_precision)).await;
+
+    assert_eq!(timezone_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(precision_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(kept.prefs.lock().expect("the lock").is_none());
+}
+
+#[tokio::test]
+async fn reading_preferences_without_a_session_is_unauthorized() {
+    let kept = Arc::new(Kept::default());
+
+    let (status, _) = served(&kept, TwoOrgs, reading_preferences(None)).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

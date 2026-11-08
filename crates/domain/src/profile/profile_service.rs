@@ -1,6 +1,6 @@
 use super::errors::ProfileError;
 use super::ports::{Accounts, Photos};
-use super::value_objects::{AccountName, Photo, PhotoKind, Pictured};
+use super::value_objects::{AccountName, Photo, PhotoKind, Pictured, Preferences};
 use crate::identity::{AccountId, SessionStore};
 use crate::organisation::{Memberships, Who, Whoami};
 use crate::secret::SessionToken;
@@ -73,6 +73,27 @@ where
             .remove(Pictured::Account(who.account), &kept)
             .await;
         self.read(token).await
+    }
+
+    pub async fn preferences(&self, token: &SessionToken) -> Result<Preferences, ProfileError> {
+        let who = self.read(token).await?;
+        Ok(self
+            .accounts
+            .preferences_of(who.account)
+            .await?
+            .unwrap_or_default())
+    }
+
+    pub async fn set_preferences(
+        &self,
+        token: &SessionToken,
+        preferences: &Preferences,
+    ) -> Result<Preferences, ProfileError> {
+        let who = self.read(token).await?;
+        self.accounts
+            .set_preferences(who.account, preferences)
+            .await?;
+        Ok(preferences.clone())
     }
 
     pub async fn photo(

@@ -142,8 +142,9 @@ pub use postmortems::{
     PostmortemId, PostmortemStatus, PostmortemSummary, Postmortems, Written, draft,
 };
 pub use profile::{
-    AccountName, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, NoPhotos, Photo, PhotoError,
-    PhotoKind, Photos, Pictured, Portrait, Profile, ProfileError,
+    AccountName, AccountTimezone, Accounts, BadAccountName, BadPhoto, MAX_PHOTO_BYTES, NoPhotos,
+    Photo, PhotoError, PhotoKind, Photos, Pictured, Portrait, Preferences, Profile, ProfileError,
+    RowDensity, StartPage, TimestampPrecision,
 };
 pub use provisioning::{
     Bootstrapped, ControlPlane, DEFAULT_PROJECT, FoundError, Founded, Founding, Issued, Minted,
