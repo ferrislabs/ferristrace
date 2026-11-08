@@ -11,6 +11,8 @@ use crate::clickhouse::read::{nanos, refused, unsigned, uuid_of};
 
 const MAX_RESOURCES: u32 = 2_000;
 const MAX_FIGURES: u32 = 50_000;
+const MAX_SERVICES: u32 = 20;
+const MAX_SERVED: u32 = 20_000;
 
 const CONTAINER_CPU: &str = "container.cpu.utilization";
 const CONTAINER_MEMORY: &str = "container.memory.usage.total";
@@ -53,6 +55,28 @@ const FIGURES: &str = "SELECT \
    GROUP BY resource_id, metric \
    LIMIT {limit}";
 
+const SERVED: &str = "SELECT resource_kind, resource_id, groupUniqArray({services})(service_name) AS names FROM ( \
+     SELECT 'cluster' AS resource_kind, attributes['k8s.cluster.name'] AS resource_id, service_name FROM spans \
+       WHERE {scoped} AND attributes['k8s.cluster.name'] != '' \
+     UNION ALL \
+     SELECT 'host', coalesce(nullIf(attributes['host.id'], ''), attributes['host.name']), service_name FROM spans \
+       WHERE {scoped} AND coalesce(nullIf(attributes['host.id'], ''), attributes['host.name']) != '' \
+     UNION ALL \
+     SELECT 'container', coalesce(nullIf(attributes['container.name'], ''), attributes['container.id']), service_name FROM spans \
+       WHERE {scoped} AND attributes['k8s.pod.name'] = '' \
+         AND coalesce(nullIf(attributes['container.name'], ''), attributes['container.id']) != '' \
+   ) GROUP BY resource_kind, resource_id LIMIT {limit}";
+
+const SCOPED: &str = "tenant_id = ? AND (? = 0 OR project_id = ?) \
+     AND start_time >= fromUnixTimestamp64Nano(?) AND start_time < fromUnixTimestamp64Nano(?)";
+
+#[derive(Debug, Row, Deserialize)]
+struct ServedRow {
+    resource_kind: String,
+    resource_id: String,
+    names: Vec<String>,
+}
+
 #[derive(Debug, Row, Deserialize)]
 struct ResourceRow {
     resource_kind: String,
@@ -91,6 +115,65 @@ fn bytes(value: f64) -> Option<u64> {
     (value.is_finite() && value >= 0.0).then(|| value.round() as u64)
 }
 
+impl ClickhouseMetricReader {
+    async fn container_figures(
+        &self,
+        org: TenantId,
+        figures: Window,
+        filter: &InfraFilter,
+    ) -> Result<BTreeMap<String, Figures>, StoreError> {
+        let sql = FIGURES.replace("{limit}", &MAX_FIGURES.to_string());
+        let found: Vec<FigureRow> = self
+            .client()
+            .query(&sql)
+            .bind(org.as_uuid())
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(nanos(figures.from_unix_nanos()))
+            .bind(nanos(figures.to_unix_nanos()))
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        let mut held: BTreeMap<String, Figures> = BTreeMap::new();
+        for row in found {
+            let entry = held.entry(row.resource_id).or_default();
+            match row.metric.as_str() {
+                CONTAINER_CPU => entry.cpu = Some(row.latest),
+                CONTAINER_MEMORY => entry.memory = Some(row.latest),
+                CONTAINER_WORKING_SET => entry.working_set = Some(row.latest),
+                _ => {}
+            }
+        }
+        Ok(held)
+    }
+
+    async fn served(
+        &self,
+        org: TenantId,
+        figures: Window,
+        filter: &InfraFilter,
+    ) -> Result<BTreeMap<(String, String), Vec<String>>, StoreError> {
+        let sql = SERVED
+            .replace("{scoped}", SCOPED)
+            .replace("{services}", &MAX_SERVICES.to_string())
+            .replace("{limit}", &MAX_SERVED.to_string());
+        let mut query = self.client().query(&sql);
+        for _ in 0..3 {
+            query = query
+                .bind(org.as_uuid())
+                .bind(u8::from(filter.project.is_some()))
+                .bind(uuid_of(filter.project))
+                .bind(nanos(figures.from_unix_nanos()))
+                .bind(nanos(figures.to_unix_nanos()));
+        }
+        let served: Vec<ServedRow> = query.fetch_all().await.map_err(|error| refused(&error))?;
+        Ok(served
+            .into_iter()
+            .map(|row| ((row.resource_kind, row.resource_id), row.names))
+            .collect())
+    }
+}
+
 impl InfraReader for ClickhouseMetricReader {
     async fn resources(
         &self,
@@ -125,31 +208,12 @@ impl InfraReader for ClickhouseMetricReader {
             .await
             .map_err(|error| refused(&error))?;
 
-        let wants_figures = rows.iter().any(|row| row.resource_kind == "container");
-        let mut held: BTreeMap<String, Figures> = BTreeMap::new();
-        if wants_figures {
-            let sql = FIGURES.replace("{limit}", &MAX_FIGURES.to_string());
-            let found: Vec<FigureRow> = self
-                .client()
-                .query(&sql)
-                .bind(org.as_uuid())
-                .bind(u8::from(filter.project.is_some()))
-                .bind(uuid_of(filter.project))
-                .bind(nanos(figures.from_unix_nanos()))
-                .bind(nanos(figures.to_unix_nanos()))
-                .fetch_all()
-                .await
-                .map_err(|error| refused(&error))?;
-            for row in found {
-                let entry = held.entry(row.resource_id).or_default();
-                match row.metric.as_str() {
-                    CONTAINER_CPU => entry.cpu = Some(row.latest),
-                    CONTAINER_MEMORY => entry.memory = Some(row.latest),
-                    CONTAINER_WORKING_SET => entry.working_set = Some(row.latest),
-                    _ => {}
-                }
-            }
-        }
+        let held = if rows.iter().any(|row| row.resource_kind == "container") {
+            self.container_figures(org, figures, filter).await?
+        } else {
+            BTreeMap::new()
+        };
+        let mut running = self.served(org, figures, filter).await?;
 
         Ok(rows
             .into_iter()
@@ -168,6 +232,13 @@ impl InfraReader for ClickhouseMetricReader {
                     memory_bytes: seen
                         .and_then(|figures| figures.memory.or(figures.working_set))
                         .and_then(bytes),
+                    services: {
+                        let mut names = running
+                            .remove(&(row.resource_kind.clone(), row.resource_id.clone()))
+                            .unwrap_or_default();
+                        names.sort();
+                        names.into_iter().map(Into::into).collect()
+                    },
                     id: row.resource_id.into(),
                     name: row.resource_name.into(),
                     cluster: row.resource_cluster.into(),

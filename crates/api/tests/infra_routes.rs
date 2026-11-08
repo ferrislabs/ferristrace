@@ -188,6 +188,7 @@ fn resource(kind: ResourceKind, name: &str, last_seen_secs: u64) -> Resource {
         silent: false,
         cpu_percent: Some(12.5),
         memory_bytes: Some(2048),
+        services: vec!["checkout".into(), "mailer".into()],
     }
 }
 
@@ -308,6 +309,10 @@ async fn a_member_lists_every_resource_with_its_silence_settled() {
     assert_eq!(listed[0]["silent"], false);
     assert_eq!(listed[1]["cpu_percent"], 12.5);
     assert_eq!(listed[1]["provider"], "aws");
+    assert_eq!(
+        listed[1]["services"],
+        serde_json::json!(["checkout", "mailer"])
+    );
     assert_eq!(listed[2]["silent"], true, "{body}");
     assert!(
         listed[2]["cpu_percent"].is_null(),

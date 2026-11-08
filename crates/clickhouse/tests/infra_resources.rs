@@ -2,20 +2,22 @@ use std::time::Duration;
 
 use clickhouse::Client;
 use ferristrace_clickhouse::{
-    BatchLimits, ClickhouseMetricReader, ClickhouseMetricSink, ClickhouseMigrator,
+    BatchLimits, ClickhouseMetricReader, ClickhouseMetricSink, ClickhouseMigrator, ClickhouseSink,
 };
 use ferristrace_domain::{
-    InfraFilter, InfraReader, MetricSink, PlacementName, Resource, ResourceKind, Scope, TenantId,
-    Window,
+    InfraFilter, InfraReader, MetricSink, PlacementName, Resource, ResourceKind, Scope, SpanSink,
+    TenantId, Window,
 };
 use ferristrace_infra::FixedClock;
-use ferristrace_otlp::metrics_of;
+use ferristrace_otlp::{metrics_of, spans_of};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value::Value};
 use opentelemetry_proto::tonic::metrics::v1::{
     Gauge, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data, number_data_point,
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as ProtoResource;
+use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as ProtoSpan};
 use uuid::Uuid;
 
 mod backend;
@@ -415,4 +417,87 @@ async fn a_hostile_name_in_a_filter_is_bound_not_spliced() {
 
     assert_eq!(listed(&client, org(MINE), &hostile).await.len(), 1);
     assert!(PlacementName::try_from("x' OR '1'='1").is_err());
+}
+
+fn worked(service: &str, seed: u8, pairs: &[(&str, &str)]) -> ResourceSpans {
+    let mut held = resource(pairs);
+    held.attributes.push(text("service.name", service));
+    ResourceSpans {
+        resource: Some(held),
+        scope_spans: vec![ScopeSpans {
+            spans: vec![ProtoSpan {
+                trace_id: vec![seed; 16],
+                span_id: vec![seed; 8],
+                name: "work".to_owned(),
+                kind: 2,
+                start_time_unix_nano: NOW - 2 * MINUTE,
+                end_time_unix_nano: NOW - 2 * MINUTE + 10_000_000,
+                ..ProtoSpan::default()
+            }],
+            ..ScopeSpans::default()
+        }],
+        ..ResourceSpans::default()
+    }
+}
+
+async fn spanned(client: &Client, tenant: TenantId, spans: Vec<ResourceSpans>) {
+    let spans = spans_of(ExportTraceServiceRequest {
+        resource_spans: spans,
+    })
+    .expect("a valid trace export");
+    let sink = ClickhouseSink::new(client, limits(), RETENTION, FixedClock::at(SINK_NOW));
+    sink.accept(Scope::of(tenant), spans)
+        .await
+        .expect("spans accepted");
+    sink.flush().await.expect("spans flushed");
+}
+
+#[tokio::test]
+async fn a_resource_lists_the_services_whose_spans_ran_on_it() {
+    let Some(client) = prepared("ft_infra_services").await else {
+        return;
+    };
+    seeded(&client).await;
+    spanned(
+        &client,
+        org(MINE),
+        vec![
+            worked(
+                "checkout",
+                1,
+                &[("host.name", "web-1"), ("k8s.cluster.name", "prod-eu")],
+            ),
+            worked("mailer", 2, &[("host.name", "web-1")]),
+            worked("api", 3, &[("container.name", "db")]),
+            worked(
+                "sidecar-app",
+                4,
+                &[("container.name", "x"), ("k8s.pod.name", "p-1")],
+            ),
+        ],
+    )
+    .await;
+    spanned(
+        &client,
+        org(THEIRS),
+        vec![worked("stranger-app", 9, &[("host.name", "web-1")])],
+    )
+    .await;
+
+    let all = listed(&client, org(MINE), &InfraFilter::default()).await;
+    let services = |kind, name: &str| -> Vec<String> {
+        one(&all, kind, name)
+            .services
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    };
+
+    assert_eq!(
+        services(ResourceKind::Host, "web-1"),
+        ["checkout", "mailer"]
+    );
+    assert_eq!(services(ResourceKind::Cluster, "prod-eu"), ["checkout"]);
+    assert_eq!(services(ResourceKind::Container, "db"), ["api"]);
+    assert!(services(ResourceKind::Cluster, "staging").is_empty());
 }

@@ -12,6 +12,7 @@ import { useWindow } from '@/lib/window'
 import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
 import { placementSearch, usePlacement } from '@/data/placement'
 import { PlacementPicker } from '@/components/ft/Placement'
+import { RunsOn } from '@/components/ft/RunsOn'
 import { because } from '@/auth/client'
 import { dur, num } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -97,6 +98,7 @@ export function ServiceDetail() {
           </div>
         ))}
       </Card>
+      <RunsOn service={name} />
       {!pending && !s ? <EmptyState title="Nothing measured yet">This service served no span in the last {label}{environment ? ` in ${environment}` : ''}.</EmptyState> : null}
     </>
   )

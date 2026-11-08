@@ -19,6 +19,7 @@ fn resource(last_seen: u64) -> Resource {
         silent: false,
         cpu_percent: Some(12.0),
         memory_bytes: Some(1024),
+        services: Vec::new(),
     }
 }
 

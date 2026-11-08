@@ -95,6 +95,7 @@ struct ShownResource {
     silent: bool,
     cpu_percent: Option<f64>,
     memory_bytes: Option<u64>,
+    services: Vec<String>,
 }
 
 fn present(held: Box<str>) -> Option<String> {
@@ -118,6 +119,11 @@ impl From<Resource> for ShownResource {
             silent: resource.silent,
             cpu_percent: resource.cpu_percent.filter(|value| value.is_finite()),
             memory_bytes: resource.memory_bytes,
+            services: resource
+                .services
+                .into_iter()
+                .map(str::into_string)
+                .collect(),
         }
     }
 }
