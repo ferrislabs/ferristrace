@@ -10,8 +10,8 @@ starting with 1 and 2.
 | # | Mission | Depends on | Status |
 |---|---------|------------|--------|
 | 1 | Display preferences (timezone, timestamp precision, row density, start page) persisted per account | none | **done** — merged |
-| 2 | In-app notification center foundation (storage, API, dedicated page), empty, no producers yet | none | **done** — PR open, see below |
-| 3 | Notification preferences storage (the "notify me when X" matrix) + email/digest toggles | 2 | pending |
+| 2 | In-app notification center foundation (storage, API, dedicated page), empty, no producers yet | none | **done** — merged |
+| 3 | Notification preferences storage (the "notify me when X" matrix) + email/digest toggles | 2 | **done** — PR #299 open |
 | 4 | Wire status-page events and member join/leave into the notification system | 2, 3 | pending |
 | 5 | New detector: a service stops sending spans (no detector exists today) | 2, 3 | pending |
 | 6 | New detector: a new exception/issue type is seen | 2, 3 | pending |
@@ -83,6 +83,30 @@ confirmed live on the local stack (`\d inbox_items`); two test rows seeded direc
 in Postgres for manual UI verification since the Chrome extension was unavailable
 this session — nobody has visually confirmed the `/notifications` page renders yet.
 
+## Workstream 3 — done
+
+Branch `feat/notification-preferences-matrix` (PR #299). Domain:
+`NotificationPreferences` (`email_enabled`, `weekly_digest`, a `BTreeMap<InboxItemKind,
+Channels>`), `Channels { in_app, email }`, `InboxItemKind::default_channels()`
+(`StatusPage`/`Membership` default in-app only, the rest both — matches the old
+mock table), new `NotificationSettings` port (`of`/`set`). `InboxDesk` gained a
+4th generic (`N: NotificationSettings`); `notify()` now reads the account's
+preferences first and returns `Ok(None)` without writing anything when the kind
+is turned off in-app. Postgres: 3 nullable columns on `accounts` (migration
+`20261121000001_notification_preferences`), `PostgresInbox` also implements
+`NotificationSettings`, channels stored as one `jsonb` column. API:
+`GET`/`PUT /auth/me/notification-preferences`. Frontend:
+`useNotificationPreferences`/`useSetNotificationPreferences` in
+`web/src/data/notifications.ts`, `Preferences.tsx`'s Notifications section wired
+for real (same draft/save pattern as the Display card).
+
+Verified: 786 domain, 7 live postgres (two new: defaults, round-trip), api suite
+green, `tsc -b` clean. Route existence checked live (`401` without a bearer, not
+`404`/`405`). No dedicated HTTP-level test for the two new routes — the JSON body
+mirrors the already-tested `PreferencesBody` pattern and the business logic is
+covered at the domain layer; see the PR body. Not visually confirmed in a browser
+this session (Chrome extension unavailable throughout).
+
 ## Decisions
 
 - Theme is **not** moved to the backend. It's a per-browser cosmetic setting today
@@ -104,12 +128,24 @@ this session — nobody has visually confirmed the `/notifications` page renders
   same pattern as `ResourceKind::parse`/`AlertStatus::parse` elsewhere), 422 on
   `None`, mirroring the existing `Malformed`/`Misplaced` convention.
 
-## Frozen contracts (for workstreams 2+)
+## Frozen contracts (for workstreams 4+)
 
-Nothing is frozen yet for workstream 2 onward — it hasn't been designed. Whoever
-picks this up next should write its own mini-spec (in-app notification storage
-shape, bell/inbox UI, how a "read" state works) before touching code, per
-`spec-driven`.
+- `InboxDesk::notify(draft, now_ms) -> Result<Option<InboxItem>, InboxError>` —
+  a producer calls this and gets `None` back when the account suppressed that
+  kind in-app. Every future detector (5, 6, 7, 8) goes through this, never
+  `InboxStore::create` directly, or preferences are bypassed.
+- `InboxItemKind::{Issue, ServiceSilent, StatusPage, ApiKeyExpiring, Usage,
+  Membership}` and their spellings (`as_str`/`parse`) are fixed — workstream 4's
+  wiring and 5-8's new detectors raise exactly these kinds, no new variants
+  without updating the preferences matrix and the frontend's `LABELS` map in
+  `Preferences.tsx`.
+- Workstream 7 still needs an API key expiry field on the domain before it can
+  raise `ApiKeyExpiring` — nothing added here.
+- Workstream 8 still needs usage/billing threshold math — nothing added here.
+
+Whoever picks up 4+ should still write its own mini-spec per `spec-driven`
+where it introduces something new (a detector, a job) — this section only
+freezes what workstream 3 already decided.
 
 ## Verify (workstream 1)
 
