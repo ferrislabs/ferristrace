@@ -12,7 +12,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { Switch } from '@/components/ui/switch'
 import { Alert, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { isForbidden, isNotConfigured, useChannels, useCreateChannel, useDeleteChannel, useUpdateChannel, type Channel, type ChannelKind, type Design, type IssuedChannel, emptyDesign } from '@/data/alerts'
-import { DiscordDesigner } from './DiscordDesigner'
+import { ChatDesigner } from './ChatDesigner'
 import { H } from './parts'
 
 type Editing = { channel: Channel | null } | null
@@ -119,7 +119,7 @@ export function ProjectAlerts() {
       )}
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && close()}>
-        <DialogContent size={shape === 'discord' && !issued ? 'xl' : 'md'} title={issued ? `Secret for ${issued.name}` : editingExisting ? 'Edit channel' : 'New channel'} description={issued ? 'Signs every delivery to this webhook.' : undefined}>
+        <DialogContent size={(shape === 'discord' || shape === 'slack') && !issued ? 'xl' : 'md'} title={issued ? `Secret for ${issued.name}` : editingExisting ? 'Edit channel' : 'New channel'} description={issued ? 'Signs every delivery to this webhook.' : undefined}>
           {issued?.secret ? (
             <>
               <Alert variant="warning" icon={<AlertTriangle />}>Copy this secret now. It is shown once and cannot be retrieved later.</Alert>
@@ -135,7 +135,7 @@ export function ProjectAlerts() {
                 <Input id="ch-t" mono value={target} placeholder={shape === 'email' ? 'oncall@example.com, team@example.com' : shape === 'slack' ? 'https://hooks.slack.com/services/T000/B000/XXXX' : shape === 'discord' ? 'https://discord.com/api/webhooks/123/abc' : 'https://hooks.example.com/ferristrace'} onChange={(e) => setTarget(e.target.value)} />
               </Field>
               {shape === 'discord' || shape === 'slack' ? <Switch label="Also post incident updates here" checked={design.incident_updates} onCheckedChange={(on) => setDesign({ ...design, incident_updates: on })} /> : null}
-              {shape === 'discord' ? <DiscordDesigner design={design} onChange={setDesign} /> : null}
+              {shape === 'discord' || shape === 'slack' ? <ChatDesigner kind={shape} design={design} onChange={setDesign} /> : null}
               {problem && (name || target) ? <span className="text-caption text-destructive-text">{problem}</span> : null}
               <DialogFooter><Button type="button" onClick={close}>Cancel</Button><Button variant="primary" type="submit" disabled={problem !== null || create.isPending || update.isPending}>{editingExisting ? 'Save channel' : 'Create channel'}</Button></DialogFooter>
             </form>

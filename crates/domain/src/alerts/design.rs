@@ -177,7 +177,13 @@ pub struct Design {
 
 pub fn snowflake(given: &str) -> Result<Box<str>, BadDesign> {
     let kept = given.trim();
-    if (17..=20).contains(&kept.len()) && kept.bytes().all(|b| b.is_ascii_digit()) {
+    let discord = (17..=20).contains(&kept.len()) && kept.bytes().all(|b| b.is_ascii_digit());
+    let slack = (9..=13).contains(&kept.len())
+        && kept.starts_with(['U', 'W', 'S'])
+        && kept
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase());
+    if discord || slack {
         Ok(kept.into())
     } else {
         Err(BadDesign::Snowflake)
@@ -335,12 +341,17 @@ mod tests {
     }
 
     #[test]
-    fn a_role_or_user_to_ping_is_a_discord_id() {
+    fn a_role_or_user_to_ping_is_a_discord_or_slack_id() {
         assert!(snowflake("123456789012345678").is_ok());
+        assert!(snowflake("U024BE7LH").is_ok());
+        assert!(snowflake("S0614TZR7").is_ok());
         for bad in [
             "123",
             "everyone",
             "12345678901234567x",
+            "u024be7lh",
+            "C024BE7LH",
+            "U12",
             "123456789012345678901",
         ] {
             assert_eq!(snowflake(bad).err(), Some(BadDesign::Snowflake), "{bad}");

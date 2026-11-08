@@ -285,8 +285,23 @@ export type DiscordEmbed = {
 
 export type DiscordMessage = { content?: string; embeds?: DiscordEmbed[] }
 
-export async function previewDesign(org: string, design: Design, state: AlertStatus): Promise<DiscordMessage> {
-  return (await json<{ message: DiscordMessage }>(await post(`/api/orgs/${org}/channels/preview`, { kind: 'discord', design, state }))).message
+export type SlackAttachment = {
+  color?: string
+  title?: string
+  title_link?: string
+  text?: string
+  author_name?: string
+  footer?: string
+  thumb_url?: string
+  fields?: { title: string; value: string; short: boolean }[]
+}
+
+export type SlackMessage = { text?: string; attachments?: SlackAttachment[] }
+
+export type ChatKind = 'discord' | 'slack'
+
+export async function previewDesign(org: string, kind: ChatKind, design: Design, state: AlertStatus): Promise<DiscordMessage & SlackMessage> {
+  return (await json<{ message: DiscordMessage & SlackMessage }>(await post(`/api/orgs/${org}/channels/preview`, { kind, design, state }))).message
 }
 
 export const useDeleteChannel = () =>

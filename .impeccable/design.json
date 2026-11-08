@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T06:00:00Z",
+  "title": "Design System: FerrisTrace",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Signal Indigo", "canonical": "#4f46e5", "tonalRamp": ["#1e1b4b", "#312e81", "#3730a3", "#4338ca", "#4f46e5", "#818cf8", "#c7d2fe", "#eef2ff"] },
+      "series": { "role": "primary", "displayName": "Data Indigo", "canonical": "#4f46e5" },
+      "foreground": { "role": "neutral", "displayName": "Ink", "canonical": "#09090b", "tonalRamp": ["#09090b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#e4e4e7", "#fafafa"] },
+      "muted-foreground": { "role": "neutral", "displayName": "Graphite", "canonical": "#52525b" },
+      "faint-foreground": { "role": "neutral", "displayName": "Ash", "canonical": "#71717a" },
+      "border": { "role": "neutral", "displayName": "Hairline", "canonical": "#e4e4e7" },
+      "sidebar": { "role": "neutral", "displayName": "Sidebar Haze", "canonical": "#fafafa" },
+      "muted": { "role": "neutral", "displayName": "Zinc Wash", "canonical": "#f4f4f5" },
+      "destructive": { "role": "state", "displayName": "Broken", "canonical": "#dc2626" },
+      "warning-text": { "role": "state", "displayName": "Degraded", "canonical": "#92400e" },
+      "success-text": { "role": "state", "displayName": "Healthy", "canonical": "#15803d" }
+    },
+    "severities": {
+      "light": { "trace": ["#52525b", "#f4f4f5", "#d4d4d8"], "debug": ["#0e7490", "#ecfeff", "#a5f3fc"], "info": ["#1d4ed8", "#eff6ff", "#bfdbfe"], "warn": ["#92400e", "#fffbeb", "#fcd34d"], "error": ["#b91c1c", "#fef2f2", "#fecaca"], "fatal": ["#ffffff", "#9f1239", "#9f1239"] },
+      "dark": { "trace": ["#a1a1aa", "#1f1f23", "#3a3a41"], "debug": ["#67e8f9", "#0b2429", "#155e6b"], "info": ["#93c5fd", "#0f1d33", "#1e3a8a"], "warn": ["#fcd34d", "#271d07", "#6b4a0f"], "error": ["#fca5a5", "#2a1215", "#7f1d1d"], "fatal": ["#fff1f2", "#be123c", "#be123c"] }
+    },
+    "serviceHues": {
+      "light": ["#3d6fe0", "#c8651a", "#16927a", "#b8458f", "#7c5ce6", "#9a7a12", "#5f7f2c", "#6b7689"],
+      "dark": ["#5b8cf5", "#e8893c", "#2fb394", "#d468ac", "#9a80f2", "#c9a43a", "#86a84a", "#8e98aa"]
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "One page heading per page." },
+      "control": { "displayName": "Control", "purpose": "Buttons, inputs, tabs, segmented controls." },
+      "mono": { "displayName": "Mono", "purpose": "Ids, durations, timestamps, values, code." }
+    },
+    "shadows": [
+      { "name": "elevation-sm", "value": "0 1px 2px rgba(9,9,11,.06)", "purpose": "Hairline lift on outline buttons and inputs." },
+      { "name": "elevation-md", "value": "0 4px 12px -2px rgba(9,9,11,.10), 0 2px 4px -2px rgba(9,9,11,.06)", "purpose": "Popovers, menus, command palette." },
+      { "name": "elevation-lg", "value": "0 16px 40px -8px rgba(9,9,11,.20), 0 4px 8px -4px rgba(9,9,11,.08)", "purpose": "Dialogs and sheets." }
+    ],
+    "motion": [
+      { "name": "pulse-soft", "value": "pulse-soft 1.6s ease-in-out infinite", "purpose": "Live or pending state indicators." },
+      { "name": "reduced-motion", "value": "animation: none; transition: none", "purpose": "Honoured globally under prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action of a view.",
+      "html": "<button class=\"ds-btn-primary\">Declare incident</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: var(--primary, #4f46e5); color: var(--primary-foreground, #fff); font: 600 13px/18px 'Source Sans 3 Variable', system-ui, sans-serif; cursor: pointer; transition: background-color .15s; } .ds-btn-primary:hover { background: var(--primary-hover, #4338ca); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, #4f46e5); outline-offset: 1px; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "The everyday button.",
+      "html": "<button class=\"ds-btn-outline\">Filters</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid var(--input, #d4d4d8); border-radius: 6px; background: var(--background, #fff); color: var(--foreground, #09090b); box-shadow: 0 1px 2px rgba(9,9,11,.06); font: 600 13px/18px 'Source Sans 3 Variable', system-ui, sans-serif; cursor: pointer; transition: background-color .15s; } .ds-btn-outline:hover { background: var(--muted, #f4f4f5); } .ds-btn-outline:focus-visible { outline: 2px solid var(--ring, #4f46e5); outline-offset: 1px; }"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Text field for filters and forms.",
+      "html": "<input class=\"ds-input\" placeholder=\"service.name = checkout\" />",
+      "css": ".ds-input { height: 32px; width: 260px; padding: 0 10px; border: 1px solid var(--input, #d4d4d8); border-radius: 6px; background: var(--background, #fff); color: var(--foreground, #09090b); box-shadow: 0 1px 2px rgba(9,9,11,.06); font: 400 13px/18px 'Source Sans 3 Variable', system-ui, sans-serif; } .ds-input::placeholder { color: var(--faint-foreground, #71717a); } .ds-input:focus-visible { outline: 2px solid var(--ring, #4f46e5); outline-offset: 1px; }"
+    },
+    {
+      "name": "State Badges",
+      "kind": "chip",
+      "refersTo": "badge-destructive",
+      "description": "Subtle fill plus matching border per state.",
+      "html": "<span class=\"ds-badge ds-badge-bad\">CrashLoopBackOff</span> <span class=\"ds-badge ds-badge-ok\">Resolved</span> <span class=\"ds-badge\">Running</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--border, #e4e4e7); border-radius: 4px; background: var(--muted, #f4f4f5); color: var(--muted-foreground, #52525b); font: 600 11.5px/1 'Source Sans 3 Variable', system-ui, sans-serif; } .ds-badge-bad { background: var(--destructive-subtle, #fef2f2); color: var(--destructive-text, #b91c1c); border-color: var(--destructive-border, #fecaca); } .ds-badge-ok { background: var(--success-subtle, #f0fdf4); color: var(--success-text, #15803d); border-color: var(--success-border, #bbf7d0); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat panel with a hairline border and a titled header.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\">p99 latency</div><div class=\"ds-card-body\"><span class=\"ds-mono\">412 ms</span></div></div>",
+      "css": ".ds-card { width: 280px; border: 1px solid var(--border, #e4e4e7); border-radius: 8px; background: var(--card, #fff); color: var(--foreground, #09090b); } .ds-card-head { padding: 12px 16px; border-bottom: 1px solid var(--border, #e4e4e7); font: 700 15px/24px 'Source Sans 3 Variable', system-ui, sans-serif; } .ds-card-body { padding: 16px; } .ds-mono { font: 500 20px/28px 'JetBrains Mono Variable', ui-monospace, monospace; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Navigation Row",
+      "kind": "nav",
+      "description": "Sidebar rail row with active state and counter.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-row is-active\">Overview</a><a class=\"ds-nav-row\">Incidents <span class=\"ds-count\">2</span></a><a class=\"ds-nav-row\">Traces</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 220px; padding: 8px; background: var(--bg-sidebar, #fafafa); } .ds-nav-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; color: var(--foreground, #09090b); font: 600 13px/18px 'Source Sans 3 Variable', system-ui, sans-serif; cursor: pointer; text-decoration: none; } .ds-nav-row:hover, .ds-nav-row.is-active { background: var(--muted, #f4f4f5); } .ds-nav-row:focus-visible { outline: 2px solid var(--ring, #4f46e5); outline-offset: 1px; } .ds-count { margin-left: auto; padding: 0 6px; border-radius: 999px; background: var(--destructive-subtle, #fef2f2); color: var(--destructive-text, #b91c1c); font: 600 11px/16px 'JetBrains Mono Variable', monospace; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Calm Control Room",
+    "overview": "FerrisTrace is the room a team walks into when production misbehaves. Everything is visible at a glance and nothing raises its voice except what is broken. The system is dense but ordered: small strict type, tabular numbers, flat panels separated by hairline borders. Two people use this room with equal weight: the developer paged at night on a phone, and the SRE who lives in it all day on a wide screen.",
+    "keyCharacteristics": [
+      "Quiet neutrals, one accent, colour reserved for state.",
+      "Flat surfaces, hairline borders, shadows only on floating layers.",
+      "Small, strict type scale; tabular numbers; monospace for identifiers and values.",
+      "Light and dark themes, both first-class.",
+      "Problems rank first and carry the only loud colour on the screen."
+    ],
+    "rules": [
+      { "name": "The Only Loud Thing Rule", "body": "Red and amber appear only where something is broken or degrading. If nothing is wrong, the screen has no saturated colour besides the indigo accent.", "section": "colors" },
+      { "name": "The Green Is An Answer Rule", "body": "Green marks health only where the user asked \"is it fine?\" (a status, a check). Rows that are simply running stay neutral.", "section": "colors" },
+      { "name": "The Machine Wrote It Rule", "body": "Anything a system produced (ids, hashes, durations, timestamps, query text) is set in mono with tabular figures; anything a person reads as prose is set in the sans.", "section": "typography" },
+      { "name": "The Flat Room Rule", "body": "A card at rest has a border and no shadow. Depth means \"this floats above the page\", nothing else.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do rank problems first in every list and give them the only saturated colour on screen.",
+      "Do set ids, durations, timestamps and values in JetBrains Mono with tabular figures.",
+      "Do separate surfaces with hairline borders (border) and one-step tonal shifts.",
+      "Do keep touch targets at 44px or more on phones, and inputs at 16px on touch devices.",
+      "Do design both themes; check every state colour against card in light and dark."
+    ],
+    "donts": [
+      "Don't put a shadow on a card at rest; shadows are for floating layers only.",
+      "Don't paint healthy or merely running items green; neutral is the default for \"nothing to see\".",
+      "Don't introduce a second accent hue in the app; the extra accents (teal, orange, rose, slate) belong to the public status page only.",
+      "Don't use primary as a chart fill; use series.",
+      "Don't present mock or missing data as real; say what is unknown."
+    ]
+  }
+}

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Switch } from '@/components/ui/switch'
-import { DESIGN_FACTS, PLACEHOLDERS, previewDesign, STATUSES, type AlertStatus, type Design, type DesignFact, type DiscordMessage } from '@/data/alerts'
+import { DESIGN_FACTS, PLACEHOLDERS, previewDesign, STATUSES, type AlertStatus, type ChatKind, type Design, type DesignFact, type DiscordMessage, type SlackMessage } from '@/data/alerts'
 
 const MAX_FIELDS = 5
 const STATE_LABEL: Record<AlertStatus, string> = { firing: 'Firing', ok: 'Resolved', pending: 'Pending', no_data: 'No data' }
@@ -64,10 +64,48 @@ function Preview({ message }: { message: DiscordMessage }) {
   )
 }
 
-export function DiscordDesigner({ design, onChange }: { design: Design; onChange: (next: Design) => void }) {
+function SlackPreview({ message }: { message: SlackMessage }) {
+  const attachment = message.attachments?.[0]
+  const unescape = (text: string) => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  return (
+    <div className="rounded-md bg-white p-3 font-sans text-[14px] leading-[1.4] text-[#1d1c1d]" aria-label="Slack preview">
+      <div className="flex gap-2.5">
+        <div className="mt-0.5 size-9 shrink-0 rounded bg-[#4a154b]" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="mb-0.5"><span className="font-bold">FerrisTrace</span> <span className="ml-1 rounded bg-[#e8e8e8] px-1 text-[10px] font-semibold uppercase text-[#616061]">App</span></div>
+          {message.text ? <div className="mb-1 break-words">{unescape(message.text)}</div> : null}
+          {attachment ? (
+            <div className="flex max-w-[520px] gap-3 border-l-4 pl-3" style={{ borderColor: attachment.color ?? '#98a2b3' }}>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                {attachment.author_name ? <div className="text-[12px] font-bold">{unescape(attachment.author_name)}</div> : null}
+                {attachment.title ? <div className={`break-words font-bold ${attachment.title_link ? 'text-[#1264a3]' : ''}`}>{unescape(attachment.title)}</div> : null}
+                {attachment.text ? <div className="whitespace-pre-wrap break-words">{unescape(attachment.text)}</div> : null}
+                {attachment.fields?.length ? (
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    {attachment.fields.map((one, index) => (
+                      <div key={`${one.title}-${index}`} className={one.short ? 'min-w-0' : 'col-span-2 min-w-0'}>
+                        <div className="text-[12px] font-bold">{unescape(one.title)}</div>
+                        <div className="break-words text-[13px]">{unescape(one.value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {attachment.footer ? <div className="text-[11px] text-[#616061]">{unescape(attachment.footer)}</div> : null}
+              </div>
+              {attachment.thumb_url ? <img src={attachment.thumb_url} alt="" className="size-16 shrink-0 rounded object-cover" /> : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function ChatDesigner({ kind, design, onChange }: { kind: ChatKind; design: Design; onChange: (next: Design) => void }) {
   const { active } = useOrganisations()
   const [state, setState] = useState<AlertStatus>('firing')
-  const [message, setMessage] = useState<DiscordMessage | null>(null)
+  const [message, setMessage] = useState<(DiscordMessage & SlackMessage) | null>(null)
+  const slack = kind === 'slack'
   const [problem, setProblem] = useState<string | null>(null)
   const focused = useRef<Text | null>(null)
 
@@ -75,13 +113,13 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
     if (!active) return
     let current = true
     const timer = setTimeout(() => {
-      previewDesign(active.org, design, state).then(
+      previewDesign(active.org, kind, design, state).then(
         (shown) => { if (current) { setMessage(shown); setProblem(null) } },
         (error) => { if (current) setProblem(because(error, 'The preview could not be drawn')) },
       )
     }, 300)
     return () => { current = false; clearTimeout(timer) }
-  }, [active, design, state])
+  }, [active, kind, design, state])
 
   const text = (key: Text) => design[key] ?? ''
   const setText = (key: Text, value: string) => onChange({ ...design, [key]: value === '' ? null : value })
@@ -99,7 +137,7 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-3">
         <Section title="Text">
-          <Field label="Message text" htmlFor="dd-content" hint="Shown above the embed. Leave empty for none."><Input id="dd-content" value={text('content')} onFocus={() => { focused.current = 'content' }} onChange={(e) => setText('content', e.target.value)} /></Field>
+          <Field label="Message text" htmlFor="dd-content" hint={slack ? 'Shown above the attachment. Empty keeps the title.' : 'Shown above the embed. Leave empty for none.'}><Input id="dd-content" value={text('content')} onFocus={() => { focused.current = 'content' }} onChange={(e) => setText('content', e.target.value)} /></Field>
           <Field label="Title" htmlFor="dd-title" hint="Empty keeps “{state}: {alert}”."><Input id="dd-title" value={text('title')} onFocus={() => { focused.current = 'title' }} onChange={(e) => setText('title', e.target.value)} placeholder="{state}: {alert}" /></Field>
           <Field label="Description" htmlFor="dd-description"><Textarea id="dd-description" rows={3} value={text('description')} onFocus={() => { focused.current = 'description' }} onChange={(e) => setText('description', e.target.value)} placeholder="{value} errors on {label.service}" /></Field>
           <div className="grid grid-cols-2 gap-3">
@@ -123,11 +161,11 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
               </Field>
             ))}
           </div>
-          <Field label="Thumbnail" htmlFor="dd-thumb" hint="An https image URL as png, jpg, gif or webp. Discord does not draw svg. Empty for none."><Input id="dd-thumb" mono value={design.thumbnail ?? ''} onChange={(e) => onChange({ ...design, thumbnail: e.target.value === '' ? null : e.target.value })} placeholder="https://cdn.example.com/logo.png" /></Field>
+          <Field label="Thumbnail" htmlFor="dd-thumb" hint={`An https image URL as png, jpg, gif or webp. ${slack ? 'Slack' : 'Discord'} does not draw svg. Empty for none.`}><Input id="dd-thumb" mono value={design.thumbnail ?? ''} onChange={(e) => onChange({ ...design, thumbnail: e.target.value === '' ? null : e.target.value })} placeholder="https://cdn.example.com/logo.png" /></Field>
         </Section>
         <Section title="Facts">
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-            {DESIGN_FACTS.map((one) => <Switch key={one.key} label={one.label} checked={design.shown[one.key]} onCheckedChange={(on) => setFact(one.key, on)} />)}
+            {DESIGN_FACTS.filter((one) => !slack || one.key !== 'timestamp').map((one) => <Switch key={one.key} label={one.label} checked={design.shown[one.key]} onCheckedChange={(on) => setFact(one.key, on)} />)}
           </div>
         </Section>
         <Section title="Custom fields">
@@ -142,8 +180,8 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
           {design.fields.length < MAX_FIELDS ? <div><Button type="button" size="sm" onClick={() => onChange({ ...design, fields: [...design.fields, { name: '', value: '', inline: true }] })}><Plus />Add a field</Button></div> : null}
         </Section>
         <Section title="Ping when it fires">
-          <Field label="Role ids" htmlFor="dd-roles" hint="Discord ids, separated by spaces or commas. Pings only on firing, never @everyone."><Input id="dd-roles" mono value={design.ping_roles.join(', ')} onChange={(e) => onChange({ ...design, ping_roles: ids(e.target.value) })} /></Field>
-          <Field label="User ids" htmlFor="dd-users"><Input id="dd-users" mono value={design.ping_users.join(', ')} onChange={(e) => onChange({ ...design, ping_users: ids(e.target.value) })} /></Field>
+          <Field label={slack ? 'User group ids' : 'Role ids'} htmlFor="dd-roles" hint={slack ? 'Slack user group ids (S…), separated by spaces or commas. Pings only on firing, never @channel.' : 'Discord ids, separated by spaces or commas. Pings only on firing, never @everyone.'}><Input id="dd-roles" mono value={design.ping_roles.join(', ')} onChange={(e) => onChange({ ...design, ping_roles: ids(e.target.value) })} /></Field>
+          <Field label="User ids" htmlFor="dd-users" hint={slack ? 'Slack member ids (U… or W…).' : undefined}><Input id="dd-users" mono value={design.ping_users.join(', ')} onChange={(e) => onChange({ ...design, ping_users: ids(e.target.value) })} /></Field>
         </Section>
       </div>
       <div className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-0 lg:self-start">
@@ -151,9 +189,9 @@ export function DiscordDesigner({ design, onChange }: { design: Design; onChange
           <h3 className="m-0 text-control font-semibold">Preview</h3>
           <Segmented label="Preview state" value={state} onChange={setState} options={STATUSES.map((one) => ({ value: one, label: STATE_LABEL[one] }))} />
         </div>
-        {message ? <Preview message={message} /> : <div className="rounded-md bg-muted p-3 text-control text-muted-foreground">Drawing the preview…</div>}
+        {message ? (slack ? <SlackPreview message={message} /> : <Preview message={message} />) : <div className="rounded-md bg-muted p-3 text-control text-muted-foreground">Drawing the preview…</div>}
         {problem ? <span className="text-caption text-destructive-text">{problem}</span> : null}
-        <span className="text-caption text-muted-foreground">Drawn by the server with a sample alert, so it matches what Discord receives. The link to the alert needs a base URL on the server.</span>
+        <span className="text-caption text-muted-foreground">{`Drawn by the server with a sample alert, so it matches what ${slack ? 'Slack' : 'Discord'} receives. The link to the alert needs a base URL on the server.`}</span>
       </div>
     </div>
   )

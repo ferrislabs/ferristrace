@@ -25,13 +25,6 @@ fn verdict(dispatch: &Dispatch) -> &'static str {
     }
 }
 
-fn title(dispatch: &Dispatch) -> String {
-    shortened(
-        &format!("{}: {}", verdict(dispatch), dispatch.name),
-        MAX_TITLE,
-    )
-}
-
 fn slack_color(dispatch: &Dispatch) -> &'static str {
     match dispatch.to {
         AlertStatus::Firing if dispatch.severity == AlertSeverity::Critical => "#d92d20",
@@ -101,30 +94,92 @@ fn slack_text(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-pub fn slack(dispatch: &Dispatch, link: &str) -> Value {
-    let title = title(dispatch);
-    let mut body = json!({
-        "text": slack_text(&title),
-        "attachments": [{
-            "color": slack_color(dispatch),
-            "fallback": slack_text(&title),
-            "title": slack_text(&title),
-            "fields": facts(dispatch, Shown::default())
-                .into_iter()
-                .map(|(name, value)| json!({
-                    "title": slack_text(&name),
-                    "value": slack_text(&value),
-                    "short": true,
-                }))
-                .collect::<Vec<_>>(),
-            "ts": dispatch.at_ms / 1_000,
-        }],
-    });
-    if let (Some(link), Some(attachment)) = (absolute(link), body["attachments"][0].as_object_mut())
-    {
-        attachment.insert("title_link".to_owned(), json!(link));
+fn slack_pings(design: &Design, dispatch: &Dispatch) -> String {
+    if dispatch.to != AlertStatus::Firing {
+        return String::new();
     }
-    body
+    let (roles, users) = pinged_ids(design, dispatch);
+    let groups = roles
+        .iter()
+        .filter(|id| id.starts_with('S'))
+        .map(|id| format!("<!subteam^{id}>"));
+    let people = users
+        .iter()
+        .filter(|id| id.starts_with(['U', 'W']))
+        .map(|id| format!("<@{id}>"));
+    groups.chain(people).collect::<Vec<_>>().join(" ")
+}
+
+fn slack_fields(design: &Design, dispatch: &Dispatch, link: &str) -> Vec<Value> {
+    let mut fields: Vec<Value> = facts(dispatch, design.shown)
+        .into_iter()
+        .map(|(name, value)| {
+            json!({"title": slack_text(&name), "value": slack_text(&value), "short": true})
+        })
+        .collect();
+    for field in &design.fields {
+        let name = slack_text(&rendered(&field.name, dispatch, link, 200));
+        let value = slack_text(&rendered(&field.value, dispatch, link, MAX_FIELD));
+        if !name.is_empty() && !value.is_empty() {
+            fields.push(json!({"title": name, "value": value, "short": field.inline}));
+        }
+    }
+    fields.truncate(MAX_EMBED_FIELDS);
+    fields
+}
+
+pub fn slack(design: &Design, dispatch: &Dispatch, link: &str) -> Value {
+    let title = slack_text(&rendered(
+        design.title.as_ref().unwrap_or(&default_title()),
+        dispatch,
+        link,
+        MAX_TITLE,
+    ));
+    let mut attachment = json!({
+        "color": slack_colour(design, dispatch),
+        "fallback": title,
+        "title": title,
+        "fields": slack_fields(design, dispatch, link),
+        "ts": dispatch.at_ms / 1_000,
+    });
+    let Some(object) = attachment.as_object_mut() else {
+        return Value::Null;
+    };
+    if let (true, Some(link)) = (design.shown.holds(Fact::Link), absolute(link)) {
+        object.insert("title_link".to_owned(), json!(link));
+    }
+    let mut text = |key: &str, template: &Option<Template>, most: usize| {
+        if let Some(template) = template {
+            let shown = slack_text(&rendered(template, dispatch, link, most));
+            if !shown.is_empty() {
+                object.insert(key.to_owned(), json!(shown));
+            }
+        }
+    };
+    text("text", &design.description, 3_000);
+    text("author_name", &design.author, 256);
+    text("footer", &design.footer, 300);
+    if let Some(url) = &design.thumbnail {
+        object.insert("thumb_url".to_owned(), json!(url));
+    }
+    let mut lead = slack_pings(design, dispatch);
+    if let Some(template) = &design.content {
+        let shown = slack_text(&rendered(template, dispatch, link, 1_800));
+        if !shown.is_empty() {
+            if !lead.is_empty() {
+                lead.push(' ');
+            }
+            lead.push_str(&shown);
+        }
+    }
+    if lead.is_empty() {
+        lead = title;
+    }
+    json!({"text": lead, "attachments": [attachment]})
+}
+
+fn slack_colour(design: &Design, dispatch: &Dispatch) -> String {
+    format!("#{:06x}", embed_colour(design, dispatch))
 }
 
 const DEFAULT_TITLE: &str = "{state}: {alert}";
@@ -233,9 +288,22 @@ fn merged(first: &[Box<str>], second: &[Box<str>]) -> Vec<Box<str>> {
     ids
 }
 
+fn pinged_ids(design: &Design, dispatch: &Dispatch) -> (Vec<Box<str>>, Vec<Box<str>>) {
+    (
+        merged(&design.ping_roles, dispatch.mentions.roles()),
+        merged(&design.ping_users, dispatch.mentions.users()),
+    )
+}
+
+fn numeric(ids: Vec<Box<str>>) -> Vec<Box<str>> {
+    ids.into_iter()
+        .filter(|id| id.bytes().all(|byte| byte.is_ascii_digit()))
+        .collect()
+}
+
 fn pinged(design: &Design, dispatch: &Dispatch) -> (String, Value) {
-    let roles = merged(&design.ping_roles, dispatch.mentions.roles());
-    let users = merged(&design.ping_users, dispatch.mentions.users());
+    let (roles, users) = pinged_ids(design, dispatch);
+    let (roles, users) = (numeric(roles), numeric(users));
     if dispatch.to != AlertStatus::Firing || (roles.is_empty() && users.is_empty()) {
         return (String::new(), json!({"parse": []}));
     }
@@ -401,6 +469,7 @@ mod tests {
     #[test]
     fn a_slack_message_is_a_colored_attachment_with_a_link_and_the_facts() {
         let body = slack(
+            &Design::default(),
             &dispatch("Checkout errors", AlertStatus::Firing),
             "https://x/a",
         );
@@ -421,14 +490,113 @@ mod tests {
         );
     }
 
+    fn slack_design() -> Design {
+        Design {
+            content: Some(Template::parse("on call: {label.service}", 200).expect("template")),
+            title: Some(Template::parse("{alert} is {state}", 200).expect("template")),
+            description: Some(Template::parse("{value} errors", 200).expect("template")),
+            author: Some(Template::parse("FerrisTrace", 200).expect("template")),
+            footer: Some(Template::parse("prod", 200).expect("template")),
+            thumbnail: Some("https://cdn.example.com/a.png".into()),
+            colors: ferristrace_domain::Colors {
+                firing: Some(0x0012_3456),
+                ..ferristrace_domain::Colors::default()
+            },
+            fields: vec![ferristrace_domain::CustomField {
+                name: Template::parse("Team", 200).expect("template"),
+                value: Template::parse("{label.service}", 200).expect("template"),
+                inline: false,
+            }],
+            ping_roles: vec!["S0614TZR7".into(), "123456789012345678".into()],
+            ping_users: vec!["U024BE7LH".into(), "223456789012345678".into()],
+            ..Design::default()
+        }
+    }
+
+    #[test]
+    fn a_slack_design_shapes_the_attachment_and_pings_only_slack_ids() {
+        let body = slack(
+            &slack_design(),
+            &dispatch("Checkout errors", AlertStatus::Firing),
+            "https://x/a",
+        );
+
+        let attachment = &body["attachments"][0];
+        assert_eq!(
+            body["text"],
+            "<!subteam^S0614TZR7> <@U024BE7LH> on call: checkout"
+        );
+        assert_eq!(attachment["title"], "Checkout errors is Firing");
+        assert_eq!(attachment["color"], "#123456");
+        assert_eq!(attachment["text"], "7.5 errors");
+        assert_eq!(attachment["author_name"], "FerrisTrace");
+        assert_eq!(attachment["footer"], "prod");
+        assert_eq!(attachment["thumb_url"], "https://cdn.example.com/a.png");
+        let fields = attachment["fields"].as_array().expect("fields");
+        assert!(
+            fields
+                .iter()
+                .any(|f| f["title"] == "Team" && f["value"] == "checkout" && f["short"] == false)
+        );
+    }
+
+    #[test]
+    fn a_slack_design_pings_only_when_the_alert_fires() {
+        let body = slack(
+            &slack_design(),
+            &dispatch("Checkout errors", AlertStatus::Ok),
+            "https://x/a",
+        );
+
+        assert_eq!(body["text"], "on call: checkout");
+    }
+
+    #[test]
+    fn a_discord_message_never_carries_a_slack_id() {
+        let body = discord(
+            &slack_design(),
+            &dispatch("Checkout errors", AlertStatus::Firing),
+            "https://x/a",
+        );
+
+        assert_eq!(
+            body["content"],
+            "<@&123456789012345678> <@223456789012345678> on call: checkout"
+        );
+        assert_eq!(
+            body["allowed_mentions"]["roles"],
+            serde_json::json!(["123456789012345678"])
+        );
+    }
+
+    #[test]
+    fn a_placeholder_cannot_mention_anyone_in_slack() {
+        let design = Design {
+            content: Some(Template::parse("{alert}", 200).expect("template")),
+            ..Design::default()
+        };
+
+        let body = slack(
+            &design,
+            &dispatch("<!channel>", AlertStatus::Firing),
+            "https://x/a",
+        );
+
+        assert!(!body["text"].as_str().expect("text").contains("<!channel>"));
+    }
+
     #[test]
     fn a_name_cannot_ping_a_slack_channel() {
         let body = slack(
+            &Design::default(),
             &dispatch("<!channel> & <@U1>", AlertStatus::Firing),
             "https://x/a",
         );
 
-        assert_eq!(body["text"], "Firing: &lt;!channel&gt; &amp; &lt;@U1&gt;");
+        assert_eq!(
+            body["text"],
+            "Firing: &lt;\u{200b}!channel&gt; &amp; &lt;\u{200b}@\u{200b}U1&gt;"
+        );
     }
 
     #[test]
@@ -450,7 +618,7 @@ mod tests {
         let firing = dispatch("Checkout errors", AlertStatus::Firing);
 
         let embed = discord(&Design::default(), &firing, "/alerts?rule=7");
-        let attachment = slack(&firing, "/alerts?rule=7");
+        let attachment = slack(&Design::default(), &firing, "/alerts?rule=7");
 
         assert!(embed["embeds"][0].get("url").is_none());
         assert!(attachment["attachments"][0].get("title_link").is_none());

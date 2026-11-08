@@ -238,12 +238,12 @@ export function RuleEditor({ rule, open, onClose }: { rule: Rule | null; open: b
           </Field>
 
           <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-control font-semibold">Mention on Discord</legend>
+            <legend className="mb-1 text-control font-semibold">Mention in Slack and Discord</legend>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Role ids" htmlFor="ar-mr" hint="Discord ids, separated by spaces or commas."><Input id="ar-mr" mono value={form.mentionRoles} onChange={(e) => set({ mentionRoles: e.target.value })} /></Field>
+              <Field label="Role ids" htmlFor="ar-mr" hint="Discord role ids or Slack user group ids (S…), separated by spaces or commas."><Input id="ar-mr" mono value={form.mentionRoles} onChange={(e) => set({ mentionRoles: e.target.value })} /></Field>
               <Field label="User ids" htmlFor="ar-mu"><Input id="ar-mu" mono value={form.mentionUsers} onChange={(e) => set({ mentionUsers: e.target.value })} /></Field>
             </div>
-            <span className="text-caption text-muted-foreground">Pinged when the rule starts firing, in every Discord channel it uses, on top of the pings set on the channel itself. Never @everyone.</span>
+            <span className="text-caption text-muted-foreground">Pinged when the rule starts firing, in every Slack and Discord channel it uses (each keeps the ids of its own service), on top of the pings set on the channel itself. Never @everyone.</span>
           </fieldset>
 
           <div className="flex flex-col gap-2 rounded-lg border p-3">
