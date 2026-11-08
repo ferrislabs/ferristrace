@@ -12,6 +12,7 @@ use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use crate::alert_codec::{culprits_of, decode, encode, encode_culprits, encode_labels, labels_of};
+use crate::design_codec;
 use crate::keys::to_nanos;
 use crate::unit_of_work::{Postgres, SharedTx};
 
@@ -359,7 +360,24 @@ fn open_secret(seal: Option<&SecretSeal>, row: &PgRow) -> Option<WebhookSecret> 
 
 fn destination_of(row: &PgRow, kind: &str, target: &str) -> Result<Destination, StoreError> {
     let kind = ChannelKind::parse(row.get::<&str, _>(kind)).ok_or_else(|| refused("kind"))?;
-    Destination::parse(kind, row.get::<&str, _>(target)).map_err(|_| refused("target"))
+    let destination =
+        Destination::parse(kind, row.get::<&str, _>(target)).map_err(|_| refused("target"))?;
+    let kept: Option<String> = row.try_get("design").unwrap_or(None);
+    match kept {
+        None => Ok(destination),
+        Some(text) => {
+            let held: serde_json::Value =
+                serde_json::from_str(&text).map_err(|_| refused("design"))?;
+            let design = design_codec::decode(&held).ok_or_else(|| refused("design"))?;
+            Ok(destination.designed(design))
+        }
+    }
+}
+
+fn design_of(destination: &Destination) -> Option<String> {
+    destination
+        .design()
+        .map(|design| design_codec::encode(design).to_string())
 }
 
 fn channel_name(row: &PgRow, column: &str) -> Result<ChannelName, StoreError> {
@@ -538,7 +556,7 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
     async fn list(&self, org: TenantId) -> Result<Vec<ChannelView>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
-            "SELECT id, name, kind, target, secret_sealed IS NOT NULL AS has_secret \
+            "SELECT id, name, kind, target, design::text AS design, secret_sealed IS NOT NULL AS has_secret \
              FROM alert_channels WHERE org_id = $1 ORDER BY created_at, id",
         )
         .bind(org.as_uuid())
@@ -551,7 +569,7 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
     async fn armed(&self, org: TenantId, id: ChannelId) -> Result<Option<Channel>, StoreError> {
         let mut tx = self.tx.lock().await;
         let row = sqlx::query(
-            "SELECT id, name, kind, target, secret_sealed \
+            "SELECT id, name, kind, target, design::text AS design, secret_sealed \
              FROM alert_channels WHERE org_id = $1 AND id = $2",
         )
         .bind(org.as_uuid())
@@ -595,10 +613,10 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
         let mut tx = self.tx.lock().await;
         let row = sqlx::query(
             "INSERT INTO alert_channels \
-             (id, org_id, name, kind, target, secret_sealed, created_by, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             (id, org_id, name, kind, target, secret_sealed, created_by, created_at, design) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) \
              ON CONFLICT (org_id, name) DO NOTHING \
-             RETURNING id, name, kind, target, secret_sealed IS NOT NULL AS has_secret",
+             RETURNING id, name, kind, target, design::text AS design, secret_sealed IS NOT NULL AS has_secret",
         )
         .bind(Uuid::new_v4())
         .bind(org.as_uuid())
@@ -608,6 +626,7 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
         .bind(sealed)
         .bind(by.as_uuid())
         .bind(to_nanos(self.clock.now()))
+        .bind(design_of(destination))
         .fetch_optional(&mut **tx)
         .await
         .map_err(unreachable("create an alert channel"))?;
@@ -623,7 +642,7 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
     ) -> Result<bool, StoreError> {
         let mut tx = self.tx.lock().await;
         let done = sqlx::query(
-            "UPDATE alert_channels SET name = $3, target = $4 \
+            "UPDATE alert_channels SET name = $3, target = $4, design = $6::jsonb \
              WHERE org_id = $1 AND id = $2 AND kind = $5",
         )
         .bind(org.as_uuid())
@@ -631,6 +650,7 @@ impl<C: Clock + Send + Sync> AlertChannels for PostgresAlertChannels<C> {
         .bind(name.as_str())
         .bind(destination.target())
         .bind(destination.kind().as_str())
+        .bind(design_of(destination))
         .execute(&mut **tx)
         .await
         .map_err(unreachable("update an alert channel"))?;

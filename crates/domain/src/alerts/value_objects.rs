@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use super::design::Design;
 use super::errors::{BadChannel, BadRule};
 use crate::catalogue::ProjectId;
 use crate::explore::{ServiceFilter, Window};
@@ -767,7 +768,7 @@ impl fmt::Debug for WebhookSecret {
 pub enum Destination {
     Email(EmailList),
     Webhook(WebhookUrl),
-    Chat(Chat, WebhookUrl),
+    Chat(Chat, WebhookUrl, Box<Design>),
 }
 
 impl Destination {
@@ -783,9 +784,24 @@ impl Destination {
     fn chat(chat: Chat, target: &str) -> Result<Self, BadChannel> {
         let url = WebhookUrl::try_from(target)?;
         if chat.admits(&url) {
-            Ok(Self::Chat(chat, url))
+            Ok(Self::Chat(chat, url, Box::default()))
         } else {
             Err(BadChannel::ChatHook(chat.name()))
+        }
+    }
+
+    pub fn design(&self) -> Option<&Design> {
+        match self {
+            Self::Chat(_, _, design) => Some(design),
+            Self::Email(_) | Self::Webhook(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn designed(self, design: Design) -> Self {
+        match self {
+            Self::Chat(chat, url, _) => Self::Chat(chat, url, Box::new(design)),
+            other => other,
         }
     }
 
@@ -793,15 +809,15 @@ impl Destination {
         match self {
             Self::Email(_) => ChannelKind::Email,
             Self::Webhook(_) => ChannelKind::Webhook,
-            Self::Chat(Chat::Slack, _) => ChannelKind::Slack,
-            Self::Chat(Chat::Discord, _) => ChannelKind::Discord,
+            Self::Chat(Chat::Slack, ..) => ChannelKind::Slack,
+            Self::Chat(Chat::Discord, ..) => ChannelKind::Discord,
         }
     }
 
     pub fn target(&self) -> String {
         match self {
             Self::Email(list) => list.target(),
-            Self::Webhook(url) | Self::Chat(_, url) => url.as_str().to_owned(),
+            Self::Webhook(url) | Self::Chat(_, url, _) => url.as_str().to_owned(),
         }
     }
 }

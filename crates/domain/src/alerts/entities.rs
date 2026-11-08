@@ -1,4 +1,5 @@
-use super::culprits::Culprits;
+use super::culprits::{CulpritPod, Culprits};
+use super::design::Design;
 use super::errors::DeliveryError;
 use super::value_objects::{
     AlertSeverity, AlertStatus, ChannelId, ChannelKind, ChannelName, Condition, Definition,
@@ -159,6 +160,45 @@ pub struct Dispatch {
     pub labels: Labels,
     pub at_ms: u64,
     pub context: Option<Culprits>,
+}
+
+impl Dispatch {
+    pub fn sample(org: TenantId, to: AlertStatus) -> Self {
+        Self {
+            rule: RuleId::new(uuid::Uuid::nil()),
+            name: "Checkout error rate".into(),
+            severity: AlertSeverity::Critical,
+            org,
+            from: AlertStatus::Ok,
+            to,
+            value: Some(12.4),
+            labels: Labels::new(
+                [("service", "checkout"), ("environment", "production")]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+            ),
+            at_ms: 1_700_000_000_000,
+            context: Some(Culprits::new(
+                vec![CulpritPod {
+                    name: "checkout-7d9f-abcde".into(),
+                    node: Some("node-1".into()),
+                    count: 42,
+                }],
+                3,
+                vec!["node-1".into()],
+                vec!["2.4.1".into()],
+                &Labels::default(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelChange<'a> {
+    pub name: Option<&'a ChannelName>,
+    pub target: Option<&'a str>,
+    pub design: Option<&'a Design>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

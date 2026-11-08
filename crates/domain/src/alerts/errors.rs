@@ -39,8 +39,30 @@ pub enum BadChannel {
     Url,
     #[error("a {0} channel takes the incoming webhook url that {0} gives")]
     ChatHook(&'static str),
+    #[error("only a Slack or Discord channel has a message design")]
+    NoDesign,
     #[error("a channel keeps its kind; create another one instead")]
     KindChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BadDesign {
+    #[error("a template holds at most {max} bytes")]
+    TooLong { max: usize },
+    #[error(
+        "{{{0}}} is not a placeholder; use alert, severity, state, from, to, value, link, pods, versions, nodes or label.<key>"
+    )]
+    Placeholder(Box<str>),
+    #[error("a colour is a number up to 0xFFFFFF")]
+    Colour,
+    #[error("a thumbnail is an https url with no spaces")]
+    Thumbnail,
+    #[error("a design holds at most {max} custom fields")]
+    TooManyFields { max: usize },
+    #[error("a design pings at most {max} roles and {max} users")]
+    TooManyPings { max: usize },
+    #[error("a role or user to ping is a Discord id of 17 to 20 digits")]
+    Snowflake,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

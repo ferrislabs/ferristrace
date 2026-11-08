@@ -2,13 +2,14 @@ use core::future::Future;
 use std::collections::BTreeMap;
 
 use ferristrace_domain::{
-    Aggregation, AlertBook, AlertError, AlertEvent, Buckets, ChannelBook, ChannelId, ChannelName,
-    ChannelView, Clock, Courier, CulpritReader, Culprits, Definition, Delivery, Destination,
-    Drained, Evaluator, Followers, IssuedChannel, Labels, LlmReader, LlmSignal, LogQuery,
-    LogReader, LogSignal, MetricQuery, MetricReader, MetricSignal, ModelPrices, Observation,
-    Paging, Preview, PriceBook, ProbeError, ProjectId, Reader, Readers, RuleDraft, RuleId,
-    RulePatch, ServiceFilter, SessionToken, Signal, SignalProbe, SpanReader, Spend, TenantId, Tick,
-    TraceMeasure, TraceSignal, Watched, Whoami, Window,
+    Aggregation, AlertBook, AlertError, AlertEvent, AlertStatus, Buckets, ChannelBook,
+    ChannelChange, ChannelId, ChannelName, ChannelView, Chat, Clock, Courier, CulpritReader,
+    Culprits, Definition, Delivery, Design, Destination, Drained, Evaluator, Followers,
+    IssuedChannel, Labels, LlmReader, LlmSignal, LogQuery, LogReader, LogSignal, MetricQuery,
+    MetricReader, MetricSignal, ModelPrices, Observation, Paging, Preview, PriceBook, ProbeError,
+    ProjectId, Reader, Readers, RuleDraft, RuleId, RulePatch, ServiceFilter, SessionToken, Signal,
+    SignalProbe, SpanReader, Spend, TenantId, Tick, TraceMeasure, TraceSignal, Watched, Whoami,
+    Window,
 };
 
 use crate::registry::AlertRepos;
@@ -564,15 +565,32 @@ where
         token: &SessionToken,
         org: TenantId,
         id: ChannelId,
-        name: Option<&ChannelName>,
-        target: Option<&str>,
+        change: ChannelChange<'_>,
     ) -> Result<ChannelView, AlertError> {
         ChannelBook::new(
             Readers::new(Whoami::new(sessions, memberships), api_keys),
             alert_channels,
             audit,
         )
-        .update(token, org, id, name, target, &self.webhooks)
+        .update(token, org, id, change, &self.webhooks)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, alert_channels, audit, unavailable = AlertError::StoreUnreachable)]
+    pub async fn preview_channel_design(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        chat: Chat,
+        design: &Design,
+        to: AlertStatus,
+    ) -> Result<String, AlertError> {
+        ChannelBook::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            alert_channels,
+            audit,
+        )
+        .preview(token, org, chat, design, to, &self.webhooks)
         .await
     }
 
