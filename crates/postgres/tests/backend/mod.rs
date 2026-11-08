@@ -166,6 +166,7 @@ forward!(Accounts: AccountDirectory {
 forward!(Orgs: Orgs {
     fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError>;
     fn rename(&self, org: TenantId, name: &OrgName) -> Result<(), StoreError>;
+    fn disband(&self, org: TenantId) -> Result<bool, StoreError>;
     fn set_logo(&self, org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError>;
     fn set_retention(&self, org: TenantId, retention: Option<RetentionDays>) -> Result<(), StoreError>;
     fn set_timezone(&self, org: TenantId, timezone: &OrgTimezone) -> Result<(), StoreError>;

@@ -262,6 +262,11 @@ impl Orgs for FakeOrgs {
         Ok(())
     }
 
+    async fn disband(&self, _org: TenantId) -> Result<bool, StoreError> {
+        self.handle.write();
+        Ok(true)
+    }
+
     async fn set_logo(&self, _org: TenantId, _logo: Option<&Portrait>) -> Result<(), StoreError> {
         Ok(())
     }

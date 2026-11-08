@@ -21,6 +21,8 @@ pub trait Orgs {
         name: &OrgName,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
+    fn disband(&self, org: TenantId) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
     fn set_logo(
         &self,
         org: TenantId,
@@ -54,6 +56,10 @@ impl<T: Orgs + Sync> Orgs for &T {
         name: &OrgName,
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         (*self).rename(org, name)
+    }
+
+    fn disband(&self, org: TenantId) -> impl Future<Output = Result<bool, StoreError>> + Send {
+        (*self).disband(org)
     }
 
     fn set_logo(
@@ -95,6 +101,10 @@ impl<T: Orgs + Send + Sync> Orgs for std::sync::Arc<T> {
         name: &OrgName,
     ) -> impl Future<Output = Result<(), StoreError>> + Send {
         self.as_ref().rename(org, name)
+    }
+
+    fn disband(&self, org: TenantId) -> impl Future<Output = Result<bool, StoreError>> + Send {
+        self.as_ref().disband(org)
     }
 
     fn set_logo(

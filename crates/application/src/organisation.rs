@@ -44,6 +44,22 @@ where
     }
 
     #[transactional(sessions, memberships, orgs, audit, unavailable = SettingError::StoreUnreachable)]
+    pub async fn disband_org(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+    ) -> Result<(), SettingError> {
+        OrgSettings::new(
+            Whoami::new(sessions, memberships),
+            orgs,
+            &self.photos,
+            audit,
+        )
+        .disband(token, org)
+        .await
+    }
+
+    #[transactional(sessions, memberships, orgs, audit, unavailable = SettingError::StoreUnreachable)]
     pub async fn set_org_retention(
         &self,
         token: &SessionToken,

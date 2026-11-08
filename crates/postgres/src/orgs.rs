@@ -66,6 +66,19 @@ impl Orgs for PostgresOrgs {
         Ok(())
     }
 
+    async fn disband(&self, org: TenantId) -> Result<bool, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let done = sqlx::query("DELETE FROM orgs WHERE id = $1")
+            .bind(org.as_uuid())
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "the control plane refused to disband an organisation");
+                StoreError::Unreachable
+            })?;
+        Ok(done.rows_affected() > 0)
+    }
+
     async fn set_retention(
         &self,
         org: TenantId,

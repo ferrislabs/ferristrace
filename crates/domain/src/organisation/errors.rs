@@ -25,6 +25,8 @@ pub enum SettingError {
     NotYoursToChange,
     #[error("retention is an owner's to set")]
     OwnersOnly,
+    #[error("disbanding an organisation is an owner's to do")]
+    OwnersOnlyToDisband,
     #[error("the plan keeps spans at most {} days", cap.get())]
     AboveCap { cap: RetentionDays },
     #[error("no organisation carries that id any more")]
