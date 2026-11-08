@@ -206,3 +206,17 @@ Delivered with 13C
   @spec-l13-14  The insights count the incidents opened in a window and time
                 their acknowledgement and resolution, per severity and per
                 service.
+
+Delivered with 13B1d
+  A Slack channel takes the same design as a Discord one: message text,
+  title, description, author, footer, thumbnail, a colour per state, the
+  standard facts and custom fields, with the same live preview drawn by the
+  server. Roles and users to ping accept Slack ids next to Discord ids: a
+  user group `S…` becomes `<!subteam^S…>`, a member `U…` or `W…` becomes
+  `<@U…>`. Each service keeps only its own ids, so a rule that names both
+  pings each channel once. Pings only on firing, never `@channel`. Slack
+  always carries the alert time, so the timestamp fact is hidden for it.
+  The Reliability sub-navigation marks only the longest matching tab, so
+  Insights no longer lights Incidents too.
+  @spec-l13-15  A Slack design shapes the attachment, pings only Slack ids,
+                and a placeholder cannot mention anyone.

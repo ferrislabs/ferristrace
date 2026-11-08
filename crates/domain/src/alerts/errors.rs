@@ -63,7 +63,9 @@ pub enum BadDesign {
     TooManyFields { max: usize },
     #[error("a design pings at most {max} roles and {max} users")]
     TooManyPings { max: usize },
-    #[error("a role or user to ping is a Discord id of 17 to 20 digits")]
+    #[error(
+        "a role or user to ping is a Discord id (17 to 20 digits) or a Slack id (U, W or S followed by capitals and digits)"
+    )]
     Snowflake,
 }
 

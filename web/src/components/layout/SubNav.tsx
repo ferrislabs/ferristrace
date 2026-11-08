@@ -1,4 +1,4 @@
-import { AXES } from './nav'
+import { AXES, currentTab } from './nav'
 import { useNavCounts } from './useNavCounts'
 import { NavLink, isActivePath, useLocation } from '@/lib/router'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ export function SubNav() {
   const counts = useNavCounts()
   const axis = AXES.find((a) => a.tabs.some((t) => isActivePath(pathname, t.to)))
   if (!axis || axis.tabs.length < 2) return null
+  const current = currentTab(axis.tabs, pathname)
   return (
     <nav aria-label={axis.label} className="scrollbar-none sticky top-12 z-10 flex h-10 shrink-0 gap-1 overflow-x-auto border-b bg-background/95 px-[max(12px,env(safe-area-inset-left))] backdrop-blur md:px-4">
       {axis.tabs.map((t) => {
@@ -17,10 +18,10 @@ export function SubNav() {
             key={t.to}
             to={t.to}
             end={t.to === '/'}
-            className={({ isActive }) =>
+            className={() =>
               cn(
                 'relative flex shrink-0 items-center gap-1.5 px-2.5 text-[13.5px] font-semibold text-muted-foreground no-underline hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-                isActive && 'text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary',
+                current === t && 'text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary',
               )
             }
           >

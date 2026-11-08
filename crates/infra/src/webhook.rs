@@ -276,7 +276,7 @@ impl WebhookSender for HttpWebhooks {
     fn render_chat(&self, chat: Chat, design: &Design, dispatch: &Dispatch) -> String {
         let link = self.link_to(dispatch);
         match chat {
-            Chat::Slack => crate::chat::slack(dispatch, &link),
+            Chat::Slack => crate::chat::slack(design, dispatch, &link),
             Chat::Discord => crate::chat::discord(design, dispatch, &link),
         }
         .to_string()

@@ -56,3 +56,8 @@ export const ALL_NAV = AXES.flatMap((axis) => axis.tabs)
 
 export const axisOf = (matches: (to: string) => boolean): NavAxis | undefined =>
   AXES.find((axis) => axis.tabs.some((tab) => matches(tab.to)))
+
+export const currentTab = (tabs: NavItem[], pathname: string): NavItem | undefined =>
+  tabs
+    .filter((tab) => (tab.to === '/' ? pathname === '/' : pathname === tab.to || pathname.startsWith(`${tab.to}/`)))
+    .sort((one, other) => other.to.length - one.to.length)[0]
