@@ -65,6 +65,22 @@ where
         Ok(card)
     }
 
+    pub async fn disband(&self, token: &SessionToken, org: TenantId) -> Result<(), SettingError> {
+        match self.standing(token, org, OrgRole::Owner).await {
+            Ok(_) => {}
+            Err(SettingError::NotYoursToChange) => return Err(SettingError::OwnersOnlyToDisband),
+            Err(refused) => return Err(refused),
+        }
+        let logo = self.card(org).await?.logo;
+        if !self.orgs.disband(org).await? {
+            return Err(SettingError::Gone);
+        }
+        if let Some(kept) = logo {
+            let _ = self.photos.remove(Pictured::Org(org), &kept).await;
+        }
+        Ok(())
+    }
+
     pub async fn put_logo(
         &self,
         token: &SessionToken,

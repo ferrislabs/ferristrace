@@ -86,7 +86,10 @@ where
     S::Repos: OrgRepos + ReadRepos,
 {
     Router::new()
-        .route("/api/orgs/{org}", get(card::<S>).patch(rename::<S>))
+        .route(
+            "/api/orgs/{org}",
+            get(card::<S>).patch(rename::<S>).delete(disband::<S>),
+        )
         .route("/api/orgs/{org}/retention", patch(retain::<S>))
         .route("/api/orgs/{org}/timezone", patch(zone::<S>))
         .route("/api/orgs/{org}/clock", get(clock::<S>))
@@ -130,6 +133,20 @@ where
         .await?;
     tracing::info!(org = %org, "an organisation was renamed");
     Ok(Json(Card::of(card, state.default_retention_days)))
+}
+
+async fn disband<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<StatusCode, OrgRefused>
+where
+    S::Repos: OrgRepos,
+{
+    let token = carried(&state, &headers).await?;
+    state.app.disband_org(&token, TenantId::new(org)).await?;
+    tracing::info!(org = %org, "an organisation was disbanded");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn retain<S: Stack>(
@@ -260,6 +277,8 @@ pub enum OrgRefused {
     AboveCap(u32),
     #[error("retention is an owner's to set")]
     NotAnOwner,
+    #[error("disbanding an organisation is an owner's to do")]
+    NotAnOwnerToDisband,
     #[error("that organisation keeps no logo")]
     NoLogo,
     #[error(transparent)]
@@ -279,6 +298,7 @@ impl From<SettingError> for OrgRefused {
             SettingError::NotYours | SettingError::Gone => Self::NoSuchOrg,
             SettingError::NotYoursToChange => Self::NotAnAdministrator,
             SettingError::OwnersOnly => Self::NotAnOwner,
+            SettingError::OwnersOnlyToDisband => Self::NotAnOwnerToDisband,
             SettingError::AboveCap { cap } => Self::AboveCap(cap.get()),
             SettingError::NoLogo => Self::NoLogo,
             SettingError::Photos(refusal) => Self::NoStore(refusal),
@@ -308,7 +328,10 @@ impl IntoResponse for OrgRefused {
             | Self::Timezone(_)
             | Self::AboveCap(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoSuchOrg | Self::NoLogo => StatusCode::NOT_FOUND,
-            Self::NotAnAdministrator | Self::NotAnOwner | Self::OutOfScope => StatusCode::FORBIDDEN,
+            Self::NotAnAdministrator
+            | Self::NotAnOwner
+            | Self::NotAnOwnerToDisband
+            | Self::OutOfScope => StatusCode::FORBIDDEN,
             Self::NoStore(_) | Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
         if status.is_server_error() {

@@ -135,6 +135,10 @@ impl Orgs for &Kept {
         Ok(())
     }
 
+    async fn disband(&self, _org: TenantId) -> Result<bool, StoreError> {
+        Ok(self.name.lock().expect("the lock").take().is_some())
+    }
+
     async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
         *self.logo.lock().expect("the lock") = logo.cloned();
         Ok(())
@@ -821,4 +825,92 @@ async fn setting_the_zone_it_already_has_writes_nothing() {
         .expect("a no-op");
 
     assert!(notebook.entries().is_empty());
+}
+
+#[tokio::test]
+async fn an_owner_disbands_it_and_nothing_answers_for_it_afterwards() {
+    let kept = Kept::holding("Acme");
+
+    settings(OrgRole::Owner, &kept)
+        .disband(&token(), an_org(MINE))
+        .await
+        .expect("an owner may disband it");
+
+    assert_eq!(
+        settings(OrgRole::Owner, &kept)
+            .read(&token(), an_org(MINE))
+            .await,
+        Err(SettingError::Gone)
+    );
+}
+
+#[tokio::test]
+async fn an_administrator_and_a_member_may_not_disband_it_and_it_stays() {
+    let kept = Kept::holding("Acme");
+
+    for role in [OrgRole::Admin, OrgRole::Member] {
+        let refused = settings(role, &kept).disband(&token(), an_org(MINE)).await;
+
+        assert_eq!(refused, Err(SettingError::OwnersOnlyToDisband));
+    }
+
+    assert!(
+        kept.name.lock().expect("the lock").is_some(),
+        "the organisation outlived both refusals"
+    );
+}
+
+#[tokio::test]
+async fn disbanding_an_organisation_this_session_is_no_part_of_says_no_such_thing() {
+    let kept = Kept::holding("Acme");
+
+    let refused = settings(OrgRole::Owner, &kept)
+        .disband(&token(), an_org(THEIRS))
+        .await;
+
+    assert_eq!(refused, Err(SettingError::NotYours));
+    assert!(kept.name.lock().expect("the lock").is_some());
+}
+
+#[tokio::test]
+async fn disbanding_one_the_membership_outlived_is_gone_rather_than_silent() {
+    let kept = Kept::gone();
+
+    let refused = settings(OrgRole::Owner, &kept)
+        .disband(&token(), an_org(MINE))
+        .await;
+
+    assert_eq!(refused, Err(SettingError::Gone));
+}
+
+#[tokio::test]
+async fn disbanding_one_that_keeps_a_logo_forgets_the_logo_with_it() {
+    let kept = Kept::holding("Acme");
+    let shelf = Shelf::default();
+    let held = marked(OrgRole::Owner, &kept, &shelf);
+    held.put_logo(&token(), an_org(MINE), &a_png())
+        .await
+        .expect("a logo");
+
+    held.disband(&token(), an_org(MINE))
+        .await
+        .expect("an owner may disband it");
+
+    assert_eq!(shelf.forgotten(), vec!["token1".to_owned()]);
+}
+
+#[tokio::test]
+async fn disbanding_records_nothing_because_the_trail_goes_with_the_organisation() {
+    let kept = Kept::holding("Acme");
+    let notebook = Notebook::default();
+
+    noting(OrgRole::Owner, &kept, &notebook)
+        .disband(&token(), an_org(MINE))
+        .await
+        .expect("an owner may disband it");
+
+    assert!(
+        notebook.entries().is_empty(),
+        "an entry would be cascaded away with the organisation it names"
+    );
 }

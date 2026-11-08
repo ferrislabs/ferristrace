@@ -60,10 +60,14 @@ struct Kept(
     Mutex<Option<RetentionDays>>,
     Option<RetentionDays>,
     Mutex<OrgTimezone>,
+    Mutex<bool>,
 );
 
 impl Orgs for Kept {
     async fn only(&self, org: TenantId) -> Result<Option<Organisation>, StoreError> {
+        if *self.5.lock().expect("the lock") {
+            return Ok(None);
+        }
         Ok(Some(Organisation {
             id: org,
             name: self.0.lock().expect("the lock").clone().into(),
@@ -81,6 +85,13 @@ impl Orgs for Kept {
         held.clear();
         held.push_str(name.as_str());
         Ok(())
+    }
+
+    async fn disband(&self, _org: TenantId) -> Result<bool, StoreError> {
+        let mut gone = self.5.lock().expect("the lock");
+        let held = !*gone;
+        *gone = true;
+        Ok(held)
     }
 
     async fn set_logo(&self, _org: TenantId, logo: Option<&Portrait>) -> Result<(), StoreError> {
@@ -299,6 +310,7 @@ fn holding(name: &str) -> Arc<Kept> {
         Mutex::default(),
         None,
         Mutex::default(),
+        Mutex::default(),
     ))
 }
 
@@ -308,6 +320,7 @@ fn holding_under_cap(name: &str, cap: u32) -> Arc<Kept> {
         Mutex::default(),
         Mutex::default(),
         RetentionDays::try_from(cap).ok(),
+        Mutex::default(),
         Mutex::default(),
     ))
 }
@@ -864,4 +877,60 @@ async fn a_stranger_is_not_told_whether_another_organisation_keeps_a_logo() {
         StatusCode::NOT_FOUND,
         "telling a stranger an organisation exists is itself a leak"
     );
+}
+
+#[tokio::test]
+async fn an_owner_disbands_it_and_is_answered_with_nothing_at_all() {
+    let kept = holding("Acme");
+
+    let (status, body) = served(OrgRole::Owner, &kept, asking(Method::DELETE, MINE, None)).await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(body.is_empty(), "{body}");
+    let (after, _) = served(OrgRole::Owner, &kept, asking(Method::GET, MINE, None)).await;
+    assert_eq!(after, StatusCode::NOT_FOUND, "the card is gone with it");
+}
+
+#[tokio::test]
+async fn an_administrator_and_a_member_are_forbidden_to_disband_it() {
+    for role in [OrgRole::Admin, OrgRole::Member] {
+        let kept = holding("Acme");
+
+        let (status, body) = served(role, &kept, asking(Method::DELETE, MINE, None)).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role:?}");
+        assert!(body.contains("an owner's to do"), "{body}");
+        let (after, _) = served(OrgRole::Owner, &kept, asking(Method::GET, MINE, None)).await;
+        assert_eq!(
+            after,
+            StatusCode::OK,
+            "the organisation outlived the refusal"
+        );
+    }
+}
+
+#[tokio::test]
+async fn disbanding_an_organisation_this_session_does_not_belong_to_is_not_found() {
+    let kept = holding("Acme");
+
+    let (status, _) = served(OrgRole::Owner, &kept, asking(Method::DELETE, THEIRS, None)).await;
+
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "telling a stranger an organisation exists is itself a leak"
+    );
+    let (after, _) = served(OrgRole::Owner, &kept, asking(Method::GET, MINE, None)).await;
+    assert_eq!(after, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn disbanding_the_same_organisation_twice_is_not_found_the_second_time() {
+    let kept = holding("Acme");
+    let first = served(OrgRole::Owner, &kept, asking(Method::DELETE, MINE, None)).await;
+
+    let (status, _) = served(OrgRole::Owner, &kept, asking(Method::DELETE, MINE, None)).await;
+
+    assert_eq!(first.0, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

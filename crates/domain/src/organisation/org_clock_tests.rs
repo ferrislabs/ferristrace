@@ -31,6 +31,10 @@ impl Orgs for InParis {
         Ok(())
     }
 
+    async fn disband(&self, _: TenantId) -> Result<bool, StoreError> {
+        Ok(true)
+    }
+
     async fn set_logo(
         &self,
         _: TenantId,
