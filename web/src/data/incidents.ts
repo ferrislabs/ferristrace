@@ -102,6 +102,42 @@ export function useIncident(id: string | undefined) {
   return { incident: data, pending: isPending, failed: error }
 }
 
+export type IncidentContext = {
+  services: string[]
+  from_ms: number
+  to_ms: number
+  deploys: { service: string; version: string; environment: string; at_ms: number }[]
+  issues: { print: string; title: string; message: string; service: string; first_seen_ms: number; occurrences: number }[]
+  resources: { kind: 'cluster' | 'host' | 'container'; id: string; name: string; silent: boolean; cpu_percent: number | null; memory_bytes: number | null }[]
+  traces: { trace_id: string; service: string; operation: string; duration_ms: number; at_ms: number }[]
+  left_out: { deploys: number; issues: number; resources: number; traces: number }
+}
+
+export function useIncidentContext(id: string) {
+  const { active } = useOrganisations()
+  const { data, isPending, error } = useQuery({
+    queryKey: [...key(active?.org), 'context', id],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    refetchInterval: 60_000,
+    retry: false,
+    queryFn: async () => {
+      const body = await json<Partial<IncidentContext>>(await get(`/api/orgs/${active?.org}/incidents/${id}/context`))
+      return {
+        services: body.services ?? [],
+        from_ms: body.from_ms ?? 0,
+        to_ms: body.to_ms ?? 0,
+        deploys: body.deploys ?? [],
+        issues: body.issues ?? [],
+        resources: body.resources ?? [],
+        traces: body.traces ?? [],
+        left_out: body.left_out ?? { deploys: 0, issues: 0, resources: 0, traces: 0 },
+      } satisfies IncidentContext
+    },
+  })
+  return { context: data, pending: isPending, failed: error }
+}
+
 function useRefreshing<T, R>(send: (org: string, asked: T) => Promise<R>) {
   const { active } = useOrganisations()
   const client = useQueryClient()

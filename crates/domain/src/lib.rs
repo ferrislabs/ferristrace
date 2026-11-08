@@ -89,9 +89,10 @@ pub use identity::{
 pub use incidents::{
     AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,
     Briefed, Change, Chronicle, CommentBody, Dossier, EntryKind, Followers, Incident,
-    IncidentAttachments, IncidentDesk, IncidentDraft, IncidentError, IncidentFilter, IncidentId,
-    IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTimeline,
-    IncidentTitle, Incidents, Person, Reference, TimelineEntry, TimelineId,
+    IncidentAttachments, IncidentContext, IncidentDesk, IncidentDraft, IncidentError,
+    IncidentFilter, IncidentId, IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus,
+    IncidentTimeline, IncidentTitle, Incidents, LeftOut, Person, Reference, Surroundings,
+    TimelineEntry, TimelineId,
 };
 pub use infrastructure::{
     InfraFilter, InfraReader, Inventory, Resource, ResourceKind, ResourceStatus, SILENT_SECS,

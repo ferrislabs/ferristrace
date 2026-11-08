@@ -21,6 +21,7 @@ import { stamp } from '@/lib/format'
 import { Link, useParams } from '@/lib/router'
 import { useOffline } from '@/lib/offline'
 import { labelOf } from '@/components/ft/MetricChart'
+import { IncidentContext } from '@/components/ft/IncidentContext'
 import { PostmortemSection } from './PostmortemSection'
 
 const KIND_ICON: Record<AttachmentKind, typeof Waypoints> = { trace: Waypoints, logs: ScrollText, metric: LineChart }
@@ -114,16 +115,19 @@ function Opened({ incident }: { incident: Dossier }) {
           </ol>
           <CommentBox id={incident.id} shown={incident.public} />
         </section>
-        <section aria-label="Attachments" className="flex flex-col gap-2">
-          <h2 className="text-control font-semibold">Attachments</h2>
-          {incident.attachments.length === 0 ? (
-            <span className="text-control text-muted-foreground">Nothing attached yet. On a trace, a logs search or a metric chart, use “Attach to incident”.</span>
-          ) : (
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-              {incident.attachments.map((one) => <li key={one.id}><AttachmentLink attachment={one} /></li>)}
-            </ul>
-          )}
-        </section>
+        <div className="flex min-w-0 flex-col gap-4">
+          <IncidentContext id={incident.id} />
+          <section aria-label="Attachments" className="flex flex-col gap-2">
+            <h2 className="text-control font-semibold">Attachments</h2>
+            {incident.attachments.length === 0 ? (
+              <span className="text-control text-muted-foreground">Nothing attached yet. On a trace, a logs search or a metric chart, use “Attach to incident”.</span>
+            ) : (
+              <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                {incident.attachments.map((one) => <li key={one.id}><AttachmentLink attachment={one} /></li>)}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
       <PostmortemSection incident={incident} />
     </>

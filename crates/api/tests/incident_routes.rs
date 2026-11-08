@@ -350,10 +350,10 @@ impl Harness {
             webhooks: Inert::default(),
             photos: NoPhotos,
             meter: Inert::default(),
-            span_store: None,
-            issue_store: None,
+            span_store: Some(Inert::default()),
+            issue_store: Some(Inert::default()),
             log_store: None,
-            metric_store: None,
+            metric_store: Some(Inert::default()),
             users: Some(Bearers),
         };
         let app = Ferristrace::<TestStack>::new(
@@ -1484,4 +1484,61 @@ async fn an_incident_tells_its_severity_status_and_the_services_its_alert_concer
     assert_eq!(read["status"], "investigating");
     assert_eq!(read["services"], json!(["checkout"]));
     assert_eq!(manual["services"], json!([]));
+}
+
+#[tokio::test]
+async fn spec_l13_4_an_incident_without_a_service_answers_an_empty_context() {
+    let harness = Harness::new();
+    let incident = harness.declared(json!({"title": "Plain"})).await;
+
+    let (status, body) = harness
+        .member(
+            Method::GET,
+            &format!("{}/context", one(MINE, &incident)),
+            None,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["services"], json!([]));
+    for section in ["deploys", "issues", "resources", "traces"] {
+        assert_eq!(body[section], json!([]), "{section}");
+        assert_eq!(body["left_out"][section], 0, "{section}");
+    }
+    let from = body["from_ms"].as_u64().expect("a start");
+    let to = body["to_ms"].as_u64().expect("an end");
+    assert!(to > from);
+}
+
+#[tokio::test]
+async fn spec_l13_5_a_read_key_bound_elsewhere_and_a_stranger_see_no_context() {
+    let harness = Harness::new();
+    let whole = harness.declared(json!({"title": "Whole"})).await;
+    let path = format!("{}/context", one(MINE, &whole));
+
+    let (bound, _) = harness
+        .served(OrgRole::Member, as_key(BOUND_KEY, Method::GET, &path, None))
+        .await;
+    let (whole_key, _) = harness
+        .served(OrgRole::Member, as_key(WHOLE_KEY, Method::GET, &path, None))
+        .await;
+    let (missing, _) = harness
+        .member(
+            Method::GET,
+            &format!("{}/{}/context", incidents(MINE), id(404)),
+            None,
+        )
+        .await;
+    let (stranger, _) = harness
+        .member(
+            Method::GET,
+            &format!("{}/{}/context", incidents(THEIRS), id(404)),
+            None,
+        )
+        .await;
+
+    assert_eq!(bound, StatusCode::NOT_FOUND);
+    assert_eq!(whole_key, StatusCode::OK);
+    assert_eq!(missing, StatusCode::NOT_FOUND);
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
 }

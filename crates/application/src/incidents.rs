@@ -1,7 +1,7 @@
 use ferristrace_domain::{
-    Attachment, AttachmentLabel, Briefed, Chronicle, Clock, CommentBody, Dossier, IncidentDesk,
-    IncidentDraft, IncidentError, IncidentFilter, IncidentId, IncidentPatch, Paging, Reader,
-    Readers, Reference, TenantId, Whoami,
+    Attachment, AttachmentLabel, Briefed, Chronicle, Clock, CommentBody, Dossier, IncidentContext,
+    IncidentDesk, IncidentDraft, IncidentError, IncidentFilter, IncidentId, IncidentPatch, Paging,
+    Reader, Readers, Reference, Surroundings, TenantId, Whoami,
 };
 
 use crate::registry::IncidentRepos;
@@ -182,5 +182,37 @@ where
         )
         .attach(who, org, id, reference, label, self.clock.now())
         .await
+    }
+}
+
+impl<S: Stack> Ferristrace<S>
+where
+    S::Repos: IncidentRepos,
+{
+    pub async fn incident_context(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        id: IncidentId,
+    ) -> Result<IncidentContext, IncidentError> {
+        let dossier = self.incident(who, org, id).await?;
+        let (Some(issues), Some(spans), Some(infra)) =
+            (&self.issue_store, &self.span_store, &self.metric_store)
+        else {
+            return Err(IncidentError::StoreUnreachable);
+        };
+        let services = dossier
+            .briefed
+            .alert
+            .as_ref()
+            .map(|alert| alert.services.clone())
+            .unwrap_or_default();
+        Ok(Surroundings::new(issues, issues, spans, infra)
+            .around(
+                &dossier.briefed.incident,
+                &services,
+                self.clock.now().get().saturating_mul(1_000),
+            )
+            .await?)
     }
 }
