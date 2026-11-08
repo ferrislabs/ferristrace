@@ -11,6 +11,7 @@ pub mod cluster;
 pub mod explore;
 pub mod export;
 pub mod identity;
+pub mod inbox;
 pub mod incidents;
 pub mod infrastructure;
 pub mod issue;
@@ -85,6 +86,10 @@ pub use identity::{
     AccountDirectory, AccountId, AuthError, Email, InvalidCredential, Issuer, ProvisionPolicy,
     ResolvedIdentity, Session, SessionError, SessionStore, SessionSwitch, Subject, UserRefusal,
     UserTokens,
+};
+pub use inbox::{
+    InboxDesk, InboxError, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore,
+    PAGE_LIMIT as INBOX_PAGE_LIMIT, RETENTION_DAYS as INBOX_RETENTION_DAYS,
 };
 pub use incidents::{
     AlertRef, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, BadIncident,

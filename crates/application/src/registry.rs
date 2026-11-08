@@ -3,10 +3,10 @@ use core::future::Future;
 use ferristrace_domain::{
     AccountDirectory, Accounts, Agents as AgentBook, AlertChannels, AlertDuty, AlertEvents,
     AlertOutbox, AlertRules, AlertStates, ApiKeys, AuditTrail, ControlPlane, DeployMarks,
-    ExplorerViews, ExportSource, IncidentAttachments, IncidentTimeline, Incidents, IssueDecisions,
-    Memberships, ModelPrices as ModelPriceBook, Orgs, Pages, Postmortems, Projects, Roll,
-    Schedules, SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages, StatusSubscribers,
-    UsageHistory,
+    ExplorerViews, ExportSource, InboxStore, IncidentAttachments, IncidentTimeline, Incidents,
+    IssueDecisions, Memberships, ModelPrices as ModelPriceBook, Orgs, Pages, Postmortems, Projects,
+    Roll, Schedules, SessionStore, SessionSwitch, Squads, StatusOutbox, StatusPages,
+    StatusSubscribers, UsageHistory,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +66,8 @@ pub mod domain {
     pub struct DeployMarks;
     #[derive(Debug)]
     pub struct Export;
+    #[derive(Debug)]
+    pub struct Inbox;
     #[derive(Debug)]
     pub struct IncidentAttachments;
     #[derive(Debug)]
@@ -234,6 +236,10 @@ impl<R> ProfileRepos for R where
     R: StandingRepos + RepoFor<domain::Accounts, Repo: Accounts + AccountDirectory>
 {
 }
+
+pub trait InboxRepos: StandingRepos + RepoFor<domain::Inbox, Repo: InboxStore> {}
+
+impl<R> InboxRepos for R where R: StandingRepos + RepoFor<domain::Inbox, Repo: InboxStore> {}
 
 pub trait SwitchRepos: StandingRepos + RepoFor<domain::Sessions, Repo: SessionSwitch> {}
 

@@ -9,8 +9,8 @@ starting with 1 and 2.
 
 | # | Mission | Depends on | Status |
 |---|---------|------------|--------|
-| 1 | Display preferences (timezone, timestamp precision, row density, start page) persisted per account | none | **done** — PR open, see below |
-| 2 | In-app notification center foundation (storage, API, bell/inbox UI), empty, no producers yet | none | pending |
+| 1 | Display preferences (timezone, timestamp precision, row density, start page) persisted per account | none | **done** — merged |
+| 2 | In-app notification center foundation (storage, API, dedicated page), empty, no producers yet | none | **done** — PR open, see below |
 | 3 | Notification preferences storage (the "notify me when X" matrix) + email/digest toggles | 2 | pending |
 | 4 | Wire status-page events and member join/leave into the notification system | 2, 3 | pending |
 | 5 | New detector: a service stops sending spans (no detector exists today) | 2, 3 | pending |
@@ -40,9 +40,9 @@ Full audit of what already existed before this chantier started (2026-11-19):
 
 ## Workstream 1 — done
 
-Branch `feat/account-preferences-display`. Backend: `Preferences`/`AccountTimezone`/
-`TimestampPrecision`/`RowDensity`/`StartPage` in `crates/domain/src/profile/`, two new
-`Accounts` port methods (`preferences_of`/`set_preferences`), migration
+Merged (PR #293). Backend: `Preferences`/`AccountTimezone`/`TimestampPrecision`/
+`RowDensity`/`StartPage` in `crates/domain/src/profile/`, two new `Accounts` port
+methods (`preferences_of`/`set_preferences`), migration
 `20261119000001_account_preferences` (4 nullable columns on `accounts`), new routes
 `GET`/`PUT /auth/me/preferences`. Frontend: `web/src/data/profile.ts`
 (`usePreferences`/`useSetPreferences`), `Preferences.tsx`'s Display card wired for
@@ -54,6 +54,34 @@ values persisted from Postgres.
 `/settings/preferences` stays marked `mock: true` in `web/src/routes.tsx` — the
 Notifications half of the page is still fake. Flip it to `real` only once
 workstream 3/4 land.
+
+## Workstream 2 — done
+
+Branch `feat/notification-center-foundation`. New domain module
+`crates/domain/src/inbox/` (`InboxDesk`, `InboxStore` port, `InboxItem`/
+`InboxItemDraft`, `InboxItemKind` enum with all 6 future producer targets already
+named: `Issue`, `ServiceSilent`, `StatusPage`, `ApiKeyExpiring`, `Usage`,
+`Membership`). A notification belongs to one account in one org — every read/write
+is scoped to both. Postgres: `inbox_items` table (migration
+`20261120000001_inbox_items`), `PostgresInbox`. Application: `notifications`,
+`mark_notification_read`, `mark_all_notifications_read`, and `notify` (the call
+future producers use — nothing calls it yet). API:
+`GET /api/orgs/{org}/notifications`,
+`POST /api/orgs/{org}/notifications/{id}/read`,
+`POST /api/orgs/{org}/notifications/read-all`. Frontend: `web/src/data/notifications.ts`,
+a dedicated `/notifications` page (not a topbar bell — the user chose a page over a
+popover), a "Notifications" entry with an unread-count badge in the Sidebar's
+account menu.
+
+90-day retention is modeled (`InboxStore::prune`, `INBOX_RETENTION_DAYS = 90`) but
+**no job calls it yet** — wiring a prune tick onto the existing `ticking()` pattern
+in `apps/server/src/main.rs` is for whoever adds the first real producer, since
+there is nothing to prune until one exists.
+
+Verified: 8 domain tests, 5 postgres (live), 6 api, all passing. Migration
+confirmed live on the local stack (`\d inbox_items`); two test rows seeded directly
+in Postgres for manual UI verification since the Chrome extension was unavailable
+this session — nobody has visually confirmed the `/notifications` page renders yet.
 
 ## Decisions
 

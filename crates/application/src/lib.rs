@@ -10,6 +10,7 @@ mod catalogue;
 mod explore;
 mod export;
 mod identity;
+mod inbox;
 mod incidents;
 mod ingestion;
 mod issues;
