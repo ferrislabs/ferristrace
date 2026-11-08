@@ -13,11 +13,11 @@ use ferristrace_application::testing::{
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, AlertEvent, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned, Created,
-    EventId, IssuedKey, KeyId, KeyName, KeyScopes, Labels, Membership, Memberships, NoPhotos,
-    OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, RuleId, ServiceFilter,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
-    SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TargetKind, TeamId, TenantId,
-    TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
+    EventId, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl, Labels, Membership, Memberships,
+    NoPhotos, OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, RuleId,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
+    SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TargetKind,
+    TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -83,6 +83,7 @@ impl ApiKeys for TwoKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

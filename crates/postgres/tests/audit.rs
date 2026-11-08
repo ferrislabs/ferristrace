@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
     AccountId, Action, Actor, ApiKeys, AuditEntry, AuditFilter, AuditTrail, Detail, KeyName,
-    KeyScopes, NoPhotos, OrgName, OrgRole, OrgSettings, Organisation, Orgs, PageSize, SessionToken,
-    SettingError, Target, TenantId, Whoami,
+    KeyScopes, KeyTtl, NoPhotos, OrgName, OrgRole, OrgSettings, Organisation, Orgs, PageSize,
+    SessionToken, SettingError, Target, TenantId, Whoami,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -343,6 +343,7 @@ async fn a_key_actor_is_labelled_with_the_key_name() {
             &KeyName::try_from("collector").expect("a name"),
             &KeyScopes::ingest(),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("a key");

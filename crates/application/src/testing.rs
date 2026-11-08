@@ -9,8 +9,8 @@ use ferristrace_domain::{
     ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, Buckets, CallPage, CallQuery, Clock,
     ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
     Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, InfraFilter,
-    InfraReader, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
-    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
+    InfraReader, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl,
+    Letter, LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
     MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
     PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
     ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
@@ -399,6 +399,7 @@ impl ApiKeys for Inert {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

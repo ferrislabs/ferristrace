@@ -16,7 +16,7 @@ use ferristrace_domain::{
     AccountId, Action, Actor, AgentId, AgentScope, AgentScopes, AgentToken, AgentTokens,
     AlertRules, AlertSeverity, AlertStates, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned,
     AuditEntry, AuditTrail, Comparison, Condition, Created, Definition, DefinitionParts,
-    Delegation, IssuedKey, KeyId, KeyName, KeyScopes, Labels, Membership, Memberships,
+    Delegation, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl, Labels, Membership, Memberships,
     NoDataPolicy, NoPhotos, OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant,
     RegisteredAgent, Renamed, RuleDraft, RuleId, RuleName, RuleState, SeriesState, Session,
     SessionError, SessionStore, SessionToken, Signal, StoreError, TargetKind, TeamId, TenantId,
@@ -101,6 +101,7 @@ impl ApiKeys for TwoKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

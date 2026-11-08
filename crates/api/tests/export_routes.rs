@@ -11,11 +11,12 @@ use ferristrace_application::testing::{Bearers, Inert, Notebook, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, Actor, ApiKey, ApiKeys, ApiSecret, Assigned, Created, ExportSource,
-    ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships, NoPhotos, OrgRole,
-    Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, ServiceFilter,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Snapshot,
-    Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
-    StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
+    ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl, Membership, Memberships, NoPhotos,
+    OrgRole, Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
+    SessionToken, Snapshot, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages,
+    SpanReader, SpanStatus, StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary,
+    UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -85,6 +86,7 @@ impl ApiKeys for Vault {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         let mut held = self.held.lock().expect("the lock");
         let seed = u128::try_from(held.len()).expect("a count") + 100;
@@ -99,6 +101,7 @@ impl ApiKeys for Vault {
             created_at_unix_nanos: 1,
             created_by: Some(by),
             last_used_at_unix_nanos: None,
+            expires_at_unix_nanos: None,
         };
         held.push((org, key.clone(), plaintext.clone(), false));
         Ok(IssuedKey {

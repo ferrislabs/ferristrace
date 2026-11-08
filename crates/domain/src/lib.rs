@@ -34,7 +34,7 @@ pub mod testing;
 
 pub use access::{
     ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
-    KeyRing, KeyScope, KeyScopes, ReadGrant, ReadRefusal, Reader, Readers,
+    KeyRing, KeyScope, KeyScopes, KeyTtl, ReadGrant, ReadRefusal, Reader, Readers,
 };
 pub use agents::{
     Agent as RegisteredAgent, AgentCall, AgentEnrolment, AgentError, AgentGrant, AgentId,

@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ferristrace_domain::{
     Action, Actor, Bootstrapped, ExportError, Fingerprint, IssueError, KeyError, KeyName,
-    KeyScopes, ProjectId, ProvisionError, SessionToken, SettingError, Status, SwitchError, Target,
-    UserRefusal,
+    KeyScopes, KeyTtl, ProjectId, ProvisionError, SessionToken, SettingError, Status, SwitchError,
+    Target, UserRefusal,
 };
 
 use crate::IssueRuling;
@@ -168,6 +168,7 @@ async fn issuing_a_key_builds_every_repository_from_one_transaction_and_commits_
             None,
             &KeyName::try_from("ci").expect("a name"),
             &KeyScopes::ingest(),
+            KeyTtl::Never,
         )
         .await
         .expect("an owner issues a key");

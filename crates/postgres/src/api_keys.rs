@@ -1,7 +1,7 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, AgentId, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditTrail, Clock, IssuedKey,
-    KeyId, KeyName, KeyScope, KeyScopes, ProjectId, ReadGrant, RegisteredAgent, StoreError,
+    KeyId, KeyName, KeyScope, KeyScopes, KeyTtl, ProjectId, ReadGrant, RegisteredAgent, StoreError,
     TenantId,
 };
 use sqlx::Row;
@@ -42,6 +42,13 @@ fn nanos(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
+/// The requested duration in nanoseconds - `KeyTtl::expires_at` with a zero
+/// base, since all we want here is the span, not an absolute instant.
+fn ttl_nanos(ttl: KeyTtl) -> Option<i64> {
+    ttl.expires_at(0)
+        .map(|duration| i64::try_from(duration).unwrap_or(i64::MAX))
+}
+
 fn read_key(row: &PgRow) -> Result<ApiKey, StoreError> {
     let spelled: Vec<String> = row.get("scopes");
     let scopes = KeyScopes::parse(&spelled).map_err(|error| {
@@ -57,6 +64,7 @@ fn read_key(row: &PgRow) -> Result<ApiKey, StoreError> {
         created_at_unix_nanos: nanos(row.get("created_at")),
         created_by: row.get::<Option<Uuid>, _>("created_by").map(AccountId::new),
         last_used_at_unix_nanos: row.get::<Option<i64>, _>("last_used_at").map(nanos),
+        expires_at_unix_nanos: row.get::<Option<i64>, _>("expires_at").map(nanos),
     })
 }
 
@@ -66,7 +74,7 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
         let rows = sqlx::query(
             "SELECT id AS id, project_id AS project_id, name AS name, prefix AS prefix, \
              scopes AS scopes, created_at AS created_at, created_by AS created_by, \
-             last_used_at AS last_used_at \
+             last_used_at AS last_used_at, expires_at AS expires_at \
              FROM api_keys WHERE org_id = $1 AND revoked_at IS NULL \
              ORDER BY created_at DESC, prefix",
         )
@@ -84,6 +92,7 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         let mut tx = self.tx.lock().await;
         let spelled: Vec<&str> = scopes
@@ -99,6 +108,7 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
                 name: name.as_str(),
                 scopes: &spelled,
                 by: Some(by.as_uuid()),
+                ttl_nanos: ttl_nanos(ttl),
             },
         )
         .await
@@ -113,6 +123,7 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
                 created_at_unix_nanos: nanos(minted.created_at),
                 created_by: Some(by),
                 last_used_at_unix_nanos: None,
+                expires_at_unix_nanos: minted.expires_at.map(nanos),
             },
             secret: ApiSecret::from_plaintext(&minted.plaintext),
         })

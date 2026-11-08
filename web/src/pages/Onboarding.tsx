@@ -80,7 +80,7 @@ function KeyStep({ issued, onIssued }: { issued: IssuedKey | null; onIssued: (ke
       onSubmit={(e) => {
         e.preventDefault()
         if (keyNameProblem(name) !== null || issue.isPending) return
-        issue.mutate({ name: name.trim(), scopes: ['ingest'], project: project.id }, { onSuccess: onIssued, onError: (error) => toast.error(because(error, 'The key was not created')) })
+        issue.mutate({ name: name.trim(), scopes: ['ingest'], project: project.id, ttl: 'never' }, { onSuccess: onIssued, onError: (error) => toast.error(because(error, 'The key was not created')) })
       }}
     >
       <Field label="Key name" htmlFor="ob-key" hint={<>Where the key will live, so you know what breaks when you revoke it. It sends to <span className="font-semibold text-foreground">{project.name}</span>.</>} className="min-w-[240px] flex-1">

@@ -7,9 +7,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
-import { Field, Input } from '@/components/ui/input'
+import { Field, Input, NativeSelect } from '@/components/ui/input'
 import { Alert, Table, Td, Th, Tr } from '@/components/ui/misc'
-import { KEY_SCOPES, keyNameProblem, useIssueKey, useKeys, useRevokeKey, type ApiKey, type IssuedKey, type KeyScope } from '@/data/keys'
+import { KEY_SCOPES, KEY_TTLS, keyNameProblem, useIssueKey, useKeys, useRevokeKey, type ApiKey, type IssuedKey, type KeyScope, type KeyTtl } from '@/data/keys'
 import { useCatalogue } from '@/data/projects'
 import { stamp } from '@/lib/format'
 import { Link } from '@/lib/router'
@@ -31,6 +31,7 @@ export function ProjectApiKeys() {
   const [asking, setAsking] = useState(false)
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<KeyScope[]>(['ingest'])
+  const [ttl, setTtl] = useState<KeyTtl>('never')
   const [issued, setIssued] = useState<IssuedKey | null>(null)
   const [revoking, setRevoking] = useState<ApiKey | null>(null)
 
@@ -56,6 +57,7 @@ export function ProjectApiKeys() {
     setIssued(null)
     setName('')
     setScopes(['ingest'])
+    setTtl('never')
   }
   const toggle = (scope: KeyScope) => setScopes((now) => (now.includes(scope) ? now.filter((one) => one !== scope) : KEY_SCOPES.filter((one) => one === scope || now.includes(one))))
 
@@ -68,9 +70,9 @@ export function ProjectApiKeys() {
       <Card className="overflow-x-auto">
         {keys ? (
           <Table>
-            <thead><tr><Th>Name</Th><Th className="w-[200px]">Key</Th><Th className="w-[140px]">Scopes</Th><Th className="w-[170px]">Created</Th><Th className="w-[170px]">Last used</Th>{mayChange ? <Th className="w-[100px]"><span className="sr-only">Actions</span></Th> : null}</tr></thead>
+            <thead><tr><Th>Name</Th><Th className="w-[200px]">Key</Th><Th className="w-[140px]">Scopes</Th><Th className="w-[170px]">Created</Th><Th className="w-[170px]">Last used</Th><Th className="w-[170px]">Expires</Th>{mayChange ? <Th className="w-[100px]"><span className="sr-only">Actions</span></Th> : null}</tr></thead>
             <tbody>
-              {held.length === 0 ? <Tr><Td colSpan={mayChange ? 6 : 5} className="text-muted-foreground">No key authenticates for this project yet.</Td></Tr> : null}
+              {held.length === 0 ? <Tr><Td colSpan={mayChange ? 7 : 6} className="text-muted-foreground">No key authenticates for this project yet.</Td></Tr> : null}
               {held.map((k) => (
                 <Tr key={k.id}>
                   <Td><span className="flex flex-wrap items-center gap-2"><span className={k.name ? 'font-semibold' : 'text-muted-foreground'}>{k.name || 'unnamed'}</span>{k.project === null ? <Badge variant="accent">All projects</Badge> : null}</span></Td>
@@ -78,6 +80,7 @@ export function ProjectApiKeys() {
                   <Td><span className="flex gap-1">{k.scopes.map((s) => <Badge key={s} variant="outline">{s}</Badge>)}</span></Td>
                   <Td className="font-mono">{stamp(k.created_at_ms)}</Td>
                   <Td className={k.last_used_at_ms === null ? 'font-mono text-muted-foreground' : 'font-mono'}>{k.last_used_at_ms === null ? 'never' : stamp(k.last_used_at_ms)}</Td>
+                  <Td className={k.expires_at_ms === null ? 'font-mono text-muted-foreground' : 'font-mono'}>{k.expires_at_ms === null ? 'never' : stamp(k.expires_at_ms)}</Td>
                   {mayChange ? <Td numeric><Button variant="ghost" size="sm" className="text-destructive-text" onClick={() => setRevoking(k)}>Revoke</Button></Td> : null}
                 </Tr>
               ))}
@@ -100,7 +103,7 @@ export function ProjectApiKeys() {
               onSubmit={(e) => {
                 e.preventDefault()
                 issue.mutate(
-                  { name, scopes, project: project.id },
+                  { name, scopes, project: project.id, ttl },
                   { onSuccess: setIssued, onError: (error) => toast.error(because(error, 'The key was not created')) },
                 )
               }}
@@ -116,6 +119,7 @@ export function ProjectApiKeys() {
                   </label>
                 ))}
               </fieldset>
+              <Field label="Expires" htmlFor="ak-ttl" hint="The key stops working on its own once this passes."><NativeSelect id="ak-ttl" value={ttl} onChange={(e) => setTtl(e.target.value as KeyTtl)}>{KEY_TTLS.map((one) => <option key={one.value} value={one.value}>{one.label}</option>)}</NativeSelect></Field>
               <DialogFooter><Button type="button" onClick={close}>Cancel</Button><Button variant="primary" type="submit" disabled={issue.isPending || scopes.length === 0 || keyNameProblem(name) !== null}>Create key</Button></DialogFooter>
             </form>
           )}

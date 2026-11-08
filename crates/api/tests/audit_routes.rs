@@ -10,7 +10,7 @@ use ferristrace_application::testing::{Bearers, Inert, Notebook, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Actor, ApiKey, ApiKeys, ApiSecret, Assigned, Created, IssuedKey, KeyId, KeyName,
-    KeyScopes, Membership, Memberships, NoPhotos, OrgRole, Project, ProjectId, ProjectName,
+    KeyScopes, KeyTtl, Membership, Memberships, NoPhotos, OrgRole, Project, ProjectId, ProjectName,
     Projects, ReadGrant, Renamed, Session, SessionError, SessionStore, SessionToken, StoreError,
     TeamId, TenantId, UnixSeconds, WhoamiError,
 };
@@ -82,6 +82,7 @@ impl ApiKeys for Vault {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         let mut held = self.held.lock().expect("the lock");
         let seed = u128::try_from(held.len()).expect("a count") + 100;
@@ -96,6 +97,7 @@ impl ApiKeys for Vault {
             created_at_unix_nanos: 1,
             created_by: Some(by),
             last_used_at_unix_nanos: None,
+            expires_at_unix_nanos: None,
         };
         held.push((org, key.clone(), plaintext.clone(), false));
         Ok(IssuedKey {

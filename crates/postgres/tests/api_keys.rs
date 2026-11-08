@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    AccountId, ApiKeys, ApiSecret, IngestKey, KeyName, KeyScope, KeyScopes, ProjectId, ProjectName,
-    Projects, ReadGrant, TenantDirectory, TenantId, UnknownKey,
+    AccountId, ApiKeys, ApiSecret, IngestKey, KeyName, KeyScope, KeyScopes, KeyTtl, ProjectId,
+    ProjectName, Projects, ReadGrant, TenantDirectory, TenantId, UnknownKey,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres, PostgresDirectory};
@@ -119,6 +119,7 @@ async fn an_issued_key_is_listed_with_its_name_scopes_and_creator_but_no_secret(
             &a_name("edge collector"),
             &scopes(&[KeyScope::Read, KeyScope::Ingest]),
             owner,
+            KeyTtl::Days30,
         )
         .await
         .expect("the issue");
@@ -138,6 +139,10 @@ async fn an_issued_key_is_listed_with_its_name_scopes_and_creator_but_no_secret(
     assert_eq!(listed[0].created_by, Some(owner));
     assert_eq!(listed[0].last_used_at_unix_nanos, None);
     assert!(listed[0].created_at_unix_nanos > 1_600_000_000_000_000_000);
+    assert_eq!(
+        listed[0].expires_at_unix_nanos,
+        KeyTtl::Days30.expires_at(listed[0].created_at_unix_nanos)
+    );
     let stored: Vec<u8> = sqlx::query("SELECT secret_digest FROM api_keys WHERE prefix = $1")
         .bind(prefix)
         .fetch_one(&pool)
@@ -145,6 +150,30 @@ async fn an_issued_key_is_listed_with_its_name_scopes_and_creator_but_no_secret(
         .expect("the row")
         .get("secret_digest");
     assert_ne!(stored, secret.as_bytes(), "only a digest is kept");
+}
+
+#[tokio::test]
+async fn a_key_issued_without_a_ttl_carries_no_expiry() {
+    let Some(pool) = control_plane("api_keys_never_expires").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let keys = backend::api_keys(&pg);
+
+    let issued = keys
+        .issue(
+            org,
+            None,
+            &a_name("collector"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
+        .await
+        .expect("the issue");
+
+    assert_eq!(issued.key.expires_at_unix_nanos, None);
 }
 
 #[tokio::test]
@@ -163,6 +192,7 @@ async fn a_read_key_grants_its_organisation_and_project_and_notes_its_use() {
             &a_name("dashboards"),
             &scopes(&[KeyScope::Read]),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");
@@ -189,7 +219,14 @@ async fn an_ingest_key_a_wrong_secret_and_a_malformed_one_grant_nothing() {
     let (org, owner) = an_org(&pool, "owner@example.com").await;
     let keys = backend::api_keys(&pg);
     let ingest = keys
-        .issue(org, None, &a_name("collector"), &KeyScopes::ingest(), owner)
+        .issue(
+            org,
+            None,
+            &a_name("collector"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
         .await
         .expect("the issue");
     let read = keys
@@ -199,6 +236,7 @@ async fn an_ingest_key_a_wrong_secret_and_a_malformed_one_grant_nothing() {
             &a_name("dashboards"),
             &scopes(&[KeyScope::Read]),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");
@@ -229,6 +267,7 @@ async fn a_read_only_key_does_not_resolve_through_the_ingest_directory() {
             &a_name("dashboards"),
             &scopes(&[KeyScope::Read]),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");
@@ -239,6 +278,7 @@ async fn a_read_only_key_does_not_resolve_through_the_ingest_directory() {
             &a_name("everything"),
             &scopes(&[KeyScope::Ingest, KeyScope::Read]),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");
@@ -293,6 +333,7 @@ async fn a_revoked_key_neither_grants_nor_ingests_nor_is_listed() {
             &a_name("everything"),
             &scopes(&[KeyScope::Ingest, KeyScope::Read]),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");
@@ -331,6 +372,7 @@ async fn one_organisation_neither_lists_nor_revokes_the_keys_of_another() {
             &a_name("collector"),
             &KeyScopes::ingest(),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("the issue");

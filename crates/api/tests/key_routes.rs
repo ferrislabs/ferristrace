@@ -11,11 +11,11 @@ use ferristrace_application::{Adapters, Ferristrace, Ingestion, Stack};
 use ferristrace_domain::{
     AccountId, ApiKey, ApiKeys, ApiSecret, Assigned, Counted, Created, Fingerprint, IngestKey,
     IssueDecisions, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScope, KeyScopes,
-    Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId, ProjectName,
-    Projects, ReadGrant, Recorded, Renamed, Scope, ServiceFilter, ServiceSeries, ServiceSummary,
-    Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
+    KeyTtl, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
+    ProjectName, Projects, ReadGrant, Recorded, Renamed, Scope, ServiceFilter, ServiceSeries,
+    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage,
+    SpanPages, SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter,
+    TraceId, TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -112,20 +112,23 @@ impl ApiKeys for Vault {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         let mut held = self.held.lock().expect("the lock");
         let seed = u128::try_from(held.len()).expect("a count") + 100;
         let prefix = format!("ft_live_{seed:012x}");
         let plaintext = format!("{prefix}.{seed:064x}");
+        let created_at_unix_nanos = 1_700_000_000_123_456_789;
         let key = ApiKey {
             id: KeyId::new(Uuid::from_u128(seed)),
             project,
             name: name.as_str().into(),
             prefix: prefix.into(),
             scopes: scopes.clone(),
-            created_at_unix_nanos: 1_700_000_000_123_456_789,
+            created_at_unix_nanos,
             created_by: Some(by),
             last_used_at_unix_nanos: None,
+            expires_at_unix_nanos: ttl.expires_at(created_at_unix_nanos),
         };
         held.push(Held {
             org,
@@ -917,6 +920,46 @@ async fn the_keys_of_an_organisation_this_session_does_not_belong_to_are_not_fou
         .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_key_carries_the_expiry_its_ttl_asked_for_and_none_without_one() {
+    let harness = Harness::new();
+
+    let with_ttl = harness
+        .issued(r#"{"name":"temp","scopes":["read"],"ttl":"30d"}"#)
+        .await;
+    let without_ttl = harness
+        .issued(r#"{"name":"forever","scopes":["read"]}"#)
+        .await;
+
+    assert_ne!(with_ttl["key"]["expires_at_ms"], serde_json::Value::Null);
+    assert_eq!(without_ttl["key"]["expires_at_ms"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn a_ttl_nobody_offers_is_refused_before_anything_is_issued() {
+    let harness = Harness::new();
+
+    let (status, _) = harness
+        .served(
+            OrgRole::Admin,
+            as_session(
+                Method::POST,
+                &keys_of(MINE),
+                Some(r#"{"name":"ci","scopes":["read"],"ttl":"30 days"}"#),
+            ),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        harness
+            .vault
+            .list(TenantId::new(Uuid::from_u128(MINE)))
+            .await,
+        Ok(Vec::new())
+    );
 }
 
 #[tokio::test]

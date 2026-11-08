@@ -1,6 +1,6 @@
 use ferristrace_domain::{
-    ApiKey, IssuedKey, KeyError, KeyId, KeyName, KeyRing, KeyScopes, ProjectId, SessionToken,
-    TenantId, Whoami,
+    ApiKey, IssuedKey, KeyError, KeyId, KeyName, KeyRing, KeyScopes, KeyTtl, ProjectId,
+    SessionToken, TenantId, Whoami,
 };
 
 use crate::registry::AccessRepos;
@@ -34,6 +34,7 @@ where
         project: Option<ProjectId>,
         name: &KeyName,
         scopes: &KeyScopes,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, KeyError> {
         KeyRing::new(
             Whoami::new(sessions, memberships),
@@ -41,7 +42,7 @@ where
             projects,
             audit,
         )
-        .issue(token, org, project, name, scopes)
+        .issue(token, org, project, name, scopes, ttl)
         .await
     }
 

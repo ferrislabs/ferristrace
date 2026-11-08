@@ -9,10 +9,10 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
-    ClusterSnapshot, InfraFilter, InfraReader, IssuedKey, KeyId, KeyName, KeyScopes, Membership,
-    Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, OrgRole,
-    ProjectId, ReadGrant, Resource, ResourceKind, SeriesSet, Session, SessionError, SessionStore,
-    SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError, Window,
+    ClusterSnapshot, InfraFilter, InfraReader, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl,
+    Membership, Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos,
+    OrgRole, ProjectId, ReadGrant, Resource, ResourceKind, SeriesSet, Session, SessionError,
+    SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError, Window,
 };
 use ferristrace_infra::FixedClock;
 use tower::ServiceExt;
@@ -74,6 +74,7 @@ impl ApiKeys for TwoReadKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

@@ -184,7 +184,7 @@ forward!(Projects: Projects {
 
 forward!(ApiKeys: ApiKeys {
     fn list(&self, org: TenantId) -> Result<Vec<ApiKey>, StoreError>;
-    fn issue(&self, org: TenantId, project: Option<ProjectId>, name: &KeyName, scopes: &KeyScopes, by: AccountId) -> Result<IssuedKey, StoreError>;
+    fn issue(&self, org: TenantId, project: Option<ProjectId>, name: &KeyName, scopes: &KeyScopes, by: AccountId, ttl: KeyTtl) -> Result<IssuedKey, StoreError>;
     fn revoke(&self, org: TenantId, id: KeyId) -> Result<bool, StoreError>;
     fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError>;
     fn agent_standing(&self, org: TenantId, client_id: &str) -> Result<Option<RegisteredAgent>, StoreError>;

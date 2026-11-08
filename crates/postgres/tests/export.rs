@@ -1,6 +1,6 @@
 use ferristrace_domain::{
     AccountId, Action, Actor, ApiKeys, AuditEntry, AuditTrail, Detail, ExportSource, Fingerprint,
-    IssueDecisions, IssuedKey, KeyName, KeyScopes, OrgRole, ProjectId, ProjectName, Roll,
+    IssueDecisions, IssuedKey, KeyName, KeyScopes, KeyTtl, OrgRole, ProjectId, ProjectName, Roll,
     SecretHash, Snapshot, Squads, Status, Target, TeamName, TenantId,
 };
 use ferristrace_infra::FixedClock;
@@ -121,6 +121,7 @@ async fn furnished(pool: &PgPool, name: &str, tag: &str) -> Furnished {
             &KeyName::try_from(format!("key-{tag}").as_str()).expect("a key name"),
             &KeyScopes::ingest(),
             owner,
+            KeyTtl::Never,
         )
         .await
         .expect("a key");

@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use super::errors::{BadKeyName, BadScopes, ReadRefusal};
 use super::value_objects::{
-    ApiSecret, KeyName, KeyScope, KeyScopes, MAX_KEY_NAME_BYTES, ReadGrant,
+    ApiSecret, KeyName, KeyScope, KeyScopes, KeyTtl, MAX_KEY_NAME_BYTES, ReadGrant,
 };
 use crate::catalogue::ProjectId;
 use crate::telemetry::TenantId;
@@ -144,4 +144,47 @@ fn a_project_bound_grant_refuses_another_project_like_a_stranger() {
     };
 
     assert_eq!(grant.narrow(Some(a_project(8))), Err(ReadRefusal::NotYours));
+}
+
+#[test]
+fn a_ttl_reads_back_from_its_spelling() {
+    for ttl in [
+        KeyTtl::Days30,
+        KeyTtl::Days90,
+        KeyTtl::Days365,
+        KeyTtl::Never,
+    ] {
+        assert_eq!(KeyTtl::parse(ttl.as_str()), Some(ttl));
+    }
+    assert_eq!(KeyTtl::parse("30 days"), None);
+}
+
+#[test]
+fn never_expires_whatever_it_was_issued_at() {
+    assert_eq!(KeyTtl::Never.expires_at(0), None);
+    assert_eq!(KeyTtl::Never.expires_at(u64::MAX), None);
+}
+
+#[test]
+fn a_ttl_lands_exactly_that_many_days_after_issue() {
+    const NANOS_PER_DAY: u64 = 86_400 * 1_000_000_000;
+    let issued_at = 1_000;
+
+    assert_eq!(
+        KeyTtl::Days30.expires_at(issued_at),
+        Some(issued_at + 30 * NANOS_PER_DAY)
+    );
+    assert_eq!(
+        KeyTtl::Days90.expires_at(issued_at),
+        Some(issued_at + 90 * NANOS_PER_DAY)
+    );
+    assert_eq!(
+        KeyTtl::Days365.expires_at(issued_at),
+        Some(issued_at + 365 * NANOS_PER_DAY)
+    );
+}
+
+#[test]
+fn a_ttl_saturates_rather_than_overflows_at_the_edge_of_time() {
+    assert_eq!(KeyTtl::Days365.expires_at(u64::MAX), Some(u64::MAX));
 }

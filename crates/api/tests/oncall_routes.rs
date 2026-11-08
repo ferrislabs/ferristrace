@@ -14,11 +14,12 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, AckClaim, AckKey, Action, Actor, AgentId, AgentScope, AgentScopes, AgentToken,
     AgentTokens, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Created, Day,
-    Delegation, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships,
-    NoPhotos, OrgRole, PageSource, Paging, Project, ProjectId, ProjectName, Projects, ReadGrant,
-    RegisteredAgent, Renamed, Rotation, RotationLength, Schedule, ScheduleId, ScheduleName,
-    Session, SessionError, SessionStore, SessionToken, StoreError, TargetKind, TeamId, TenantId,
-    TimeOfDay, Timezone, TokenRefusal, UnixSeconds, VerifiedToken, Weekday, WhoamiError,
+    Delegation, Handoff, IncidentId, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl, Membership,
+    Memberships, NoPhotos, OrgRole, PageSource, Paging, Project, ProjectId, ProjectName, Projects,
+    ReadGrant, RegisteredAgent, Renamed, Rotation, RotationLength, Schedule, ScheduleId,
+    ScheduleName, Session, SessionError, SessionStore, SessionToken, StoreError, TargetKind,
+    TeamId, TenantId, TimeOfDay, Timezone, TokenRefusal, UnixSeconds, VerifiedToken, Weekday,
+    WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};
@@ -164,6 +165,7 @@ impl ApiKeys for OneKey {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

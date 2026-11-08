@@ -8,10 +8,11 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, ApiKey, ApiKeys, ApiSecret, IssuedKey, KeyId, KeyName, KeyScopes, Membership,
-    Memberships, NoPhotos, OrgName, OrgRole, OrgTimezone, Organisation, Orgs, Photo, PhotoError,
-    PhotoKind, Photos, Pictured, Portrait, ProjectId, ReadGrant, RetentionDays, Session,
-    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, ApiKey, ApiKeys, ApiSecret, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl,
+    Membership, Memberships, NoPhotos, OrgName, OrgRole, OrgTimezone, Organisation, Orgs, Photo,
+    PhotoError, PhotoKind, Photos, Pictured, Portrait, ProjectId, ReadGrant, RetentionDays,
+    Session, SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
+    WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -128,6 +129,7 @@ impl ApiKeys for Doors {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

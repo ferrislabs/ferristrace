@@ -16,4 +16,6 @@ pub use errors::{BadKeyName, BadScopes, KeyError, ReadRefusal};
 pub use key_ring::KeyRing;
 pub use ports::ApiKeys;
 pub use readers::Readers;
-pub use value_objects::{ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, ReadGrant, Reader};
+pub use value_objects::{
+    ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, KeyTtl, ReadGrant, Reader,
+};

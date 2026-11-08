@@ -12,7 +12,7 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, ApiKey, ApiKeys, ApiSecret, BucketTotals, Call, CallCursor, CallPage,
     CallQuery, Counted, Deploy, DeployFeed, Deployed, Fingerprint, GroupBy, GroupLatency,
-    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, LlmReader, Membership,
+    IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl, LlmReader, Membership,
     Memberships, NoPhotos, Occurrence, OrgRole, PricedCall, ProjectId, PromptMarker, ReadGrant,
     Release, ReleaseDetail, ReleaseFilter, ReleaseReader, SeenModel, Session, SessionError,
     SessionStore, SessionToken, SpanId, SpendQuery, SpendRead, StoreError, TargetKind, TenantId,
@@ -78,6 +78,7 @@ impl ApiKeys for TwoReadKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

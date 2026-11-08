@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use ferristrace_domain::{
     AccountId, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditFilter, AuditPage,
     AuditTrail, ControlPlane, Created, Email, ExportSource, Fingerprint, IssueDecisions, IssuedKey,
-    KeyId, KeyName, KeyScopes, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
+    KeyId, KeyName, KeyScopes, KeyTtl, Membership, Memberships, Minted, NoPhotos, OrgName, OrgRole,
     Organisation, Orgs, PageSize, Portrait, Project, ProjectId, ProjectName, Projects,
     ProvisionError, ReadGrant, Recorded, Renamed, RetentionDays, Revoked, Session, SessionError,
     SessionStore, SessionSwitch, SessionToken, Snapshot, Status, StoreError, TeamId, TenantId,
@@ -397,6 +397,7 @@ impl ApiKeys for FakeApiKeys {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         self.handle.write();
         Ok(IssuedKey {
@@ -409,6 +410,7 @@ impl ApiKeys for FakeApiKeys {
                 created_at_unix_nanos: 0,
                 created_by: Some(by),
                 last_used_at_unix_nanos: None,
+                expires_at_unix_nanos: ttl.expires_at(0),
             },
             secret: ApiSecret::from_plaintext("ft_live_000000000004.secret"),
         })

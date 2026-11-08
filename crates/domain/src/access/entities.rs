@@ -12,6 +12,7 @@ pub struct ApiKey {
     pub created_at_unix_nanos: u64,
     pub created_by: Option<AccountId>,
     pub last_used_at_unix_nanos: Option<u64>,
+    pub expires_at_unix_nanos: Option<u64>,
 }
 
 #[derive(Debug)]

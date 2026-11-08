@@ -134,6 +134,7 @@ impl ApiKeys for &Book {
         _name: &crate::access::KeyName,
         _scopes: &crate::access::KeyScopes,
         _by: AccountId,
+        _ttl: crate::access::KeyTtl,
     ) -> Result<crate::access::IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

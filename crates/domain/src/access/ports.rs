@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use super::entities::{ApiKey, IssuedKey};
-use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScopes, ReadGrant};
+use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScopes, KeyTtl, ReadGrant};
 use crate::agents::{Agent, AgentId};
 use crate::audit::AuditEntry;
 use crate::catalogue::ProjectId;
@@ -19,6 +19,7 @@ pub trait ApiKeys {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> impl Future<Output = Result<IssuedKey, StoreError>> + Send;
 
     fn revoke(
@@ -62,8 +63,9 @@ impl<T: ApiKeys + Sync> ApiKeys for &T {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> impl Future<Output = Result<IssuedKey, StoreError>> + Send {
-        (*self).issue(org, project, name, scopes, by)
+        (*self).issue(org, project, name, scopes, by, ttl)
     }
 
     fn revoke(
@@ -111,8 +113,9 @@ impl<T: ApiKeys + Send + Sync> ApiKeys for std::sync::Arc<T> {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> impl Future<Output = Result<IssuedKey, StoreError>> + Send {
-        self.as_ref().issue(org, project, name, scopes, by)
+        self.as_ref().issue(org, project, name, scopes, by, ttl)
     }
 
     fn revoke(

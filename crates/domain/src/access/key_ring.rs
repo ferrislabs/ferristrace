@@ -1,7 +1,7 @@
 use super::entities::{ApiKey, IssuedKey};
 use super::errors::KeyError;
 use super::ports::ApiKeys;
-use super::value_objects::{KeyId, KeyName, KeyScopes};
+use super::value_objects::{KeyId, KeyName, KeyScopes, KeyTtl};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target};
 use crate::catalogue::{ProjectId, Projects};
 use crate::identity::{AccountId, SessionStore};
@@ -46,6 +46,7 @@ where
         project: Option<ProjectId>,
         name: &KeyName,
         scopes: &KeyScopes,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, KeyError> {
         let by = self.standing(token, org, OrgRole::Admin).await?;
         if let Some(project) = project {
@@ -54,7 +55,7 @@ where
                 return Err(KeyError::NoSuchProject);
             }
         }
-        let issued = self.keys.issue(org, project, name, scopes, by).await?;
+        let issued = self.keys.issue(org, project, name, scopes, by, ttl).await?;
         self.note(
             org,
             by,
@@ -63,7 +64,8 @@ where
             Detail::default()
                 .with("name", name.as_str())
                 .with_all("scopes", scopes.as_slice())
-                .with_maybe("project", project),
+                .with_maybe("project", project)
+                .with("ttl", ttl.as_str()),
         )
         .await?;
         Ok(issued)

@@ -5,7 +5,7 @@ use super::entities::{ApiKey, IssuedKey};
 use super::errors::KeyError;
 use super::key_ring::KeyRing;
 use super::ports::ApiKeys;
-use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, ReadGrant};
+use super::value_objects::{ApiSecret, KeyId, KeyName, KeyScope, KeyScopes, KeyTtl, ReadGrant};
 use crate::agents::registry_tests::Book;
 use crate::audit::{Action, Actor, Target};
 use crate::catalogue::{Assigned, Created, Project, ProjectId, ProjectName, Projects, Renamed};
@@ -115,6 +115,7 @@ impl Ring {
                 created_at_unix_nanos: 1,
                 created_by: None,
                 last_used_at_unix_nanos: None,
+                expires_at_unix_nanos: None,
             },
             secret: secret.clone(),
             revoked: false,
@@ -142,12 +143,14 @@ impl ApiKeys for &Ring {
         name: &KeyName,
         scopes: &KeyScopes,
         by: AccountId,
+        ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         let secret = self.holding(org, project, scopes.clone());
         let mut held = self.held.lock().expect("the lock");
         let last = held.last_mut().expect("just held");
         last.key.name = name.as_str().into();
         last.key.created_by = Some(by);
+        last.key.expires_at_unix_nanos = ttl.expires_at(last.key.created_at_unix_nanos);
         Ok(IssuedKey {
             key: last.key.clone(),
             secret,
@@ -286,6 +289,7 @@ async fn a_stranger_is_told_there_is_no_such_organisation() {
             None,
             &a_name("ci"),
             &KeyScopes::ingest(),
+            KeyTtl::Never,
         )
         .await;
 
@@ -316,6 +320,7 @@ async fn an_administrator_issues_a_key_whose_secret_comes_back_once() {
             Some(a_project(OURS)),
             &a_name(" edge collector "),
             &scopes(&[KeyScope::Read]),
+            KeyTtl::Days30,
         )
         .await
         .expect("an administrator may issue");
@@ -331,6 +336,10 @@ async fn an_administrator_issues_a_key_whose_secret_comes_back_once() {
     assert_eq!(
         issued.key.created_by,
         Some(AccountId::new(Uuid::from_u128(ACCOUNT)))
+    );
+    assert_eq!(
+        issued.key.expires_at_unix_nanos,
+        KeyTtl::Days30.expires_at(issued.key.created_at_unix_nanos)
     );
     assert_eq!(listed, vec![issued.key]);
 }
@@ -352,6 +361,7 @@ async fn a_member_may_neither_issue_nor_revoke_and_nothing_is_written() {
             None,
             &a_name("ci"),
             &KeyScopes::ingest(),
+            KeyTtl::Never,
         )
         .await;
     let revoked = ring(OrgRole::Member, &keys)
@@ -420,6 +430,7 @@ async fn a_key_is_only_bound_to_a_project_of_its_own_organisation() {
             Some(a_project(OTHER)),
             &a_name("ci"),
             &KeyScopes::ingest(),
+            KeyTtl::Never,
         )
         .await;
 
@@ -443,6 +454,7 @@ async fn issuing_and_revoking_a_key_records_each_once_and_never_its_secret() {
             None,
             &KeyName::try_from("ci").expect("a name"),
             &KeyScopes::new(&[KeyScope::Ingest, KeyScope::Read]).expect("scopes"),
+            KeyTtl::Never,
         )
         .await
         .expect("an administrator issues a key");
@@ -490,6 +502,7 @@ async fn a_refused_key_change_records_nothing() {
             None,
             &KeyName::try_from("ci").expect("a name"),
             &KeyScopes::ingest(),
+            KeyTtl::Never,
         )
         .await;
 

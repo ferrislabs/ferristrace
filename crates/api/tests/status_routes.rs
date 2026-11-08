@@ -13,7 +13,7 @@ use ferristrace_application::testing::{
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, ApiKey, ApiKeys, ApiSecret, Assigned, Created, IssuedKey, KeyId, KeyName,
-    KeyScopes, Membership, Memberships, NoPhotos, OrgRole, Project, ProjectId, ProjectName,
+    KeyScopes, KeyTtl, Membership, Memberships, NoPhotos, OrgRole, Project, ProjectId, ProjectName,
     Projects, ReadGrant, Renamed, Session, SessionError, SessionStore, SessionToken, StoreError,
     TargetKind, TeamId, TenantId, UnixSeconds, WhoamiError,
 };
@@ -100,6 +100,7 @@ impl ApiKeys for TwoKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

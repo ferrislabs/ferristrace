@@ -78,6 +78,54 @@ impl KeyScopes {
     }
 }
 
+const NANOS_PER_DAY: u64 = 86_400 * 1_000_000_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyTtl {
+    Days30,
+    Days90,
+    Days365,
+    Never,
+}
+
+impl KeyTtl {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Days30 => "30d",
+            Self::Days90 => "90d",
+            Self::Days365 => "365d",
+            Self::Never => "never",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "30d" => Some(Self::Days30),
+            "90d" => Some(Self::Days90),
+            "365d" => Some(Self::Days365),
+            "never" => Some(Self::Never),
+            _ => None,
+        }
+    }
+
+    /// `None` for `Never` - a key with no deadline to check against.
+    pub fn expires_at(self, issued_at_unix_nanos: u64) -> Option<u64> {
+        let days = match self {
+            Self::Never => return None,
+            Self::Days30 => 30,
+            Self::Days90 => 90,
+            Self::Days365 => 365,
+        };
+        Some(issued_at_unix_nanos.saturating_add(days * NANOS_PER_DAY))
+    }
+}
+
+impl fmt::Display for KeyTtl {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyName(Box<str>);
 

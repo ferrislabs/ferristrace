@@ -84,6 +84,7 @@ pub(crate) struct Minted {
     pub(crate) prefix: String,
     pub(crate) plaintext: String,
     pub(crate) created_at: i64,
+    pub(crate) expires_at: Option<i64>,
 }
 
 pub(crate) struct Minting<'a> {
@@ -92,6 +93,9 @@ pub(crate) struct Minting<'a> {
     pub(crate) name: &'a str,
     pub(crate) scopes: &'a [&'a str],
     pub(crate) by: Option<Uuid>,
+    /// How many nanoseconds after this same insert's `created_at` the key
+    /// expires - `None` for a key that never does.
+    pub(crate) ttl_nanos: Option<i64>,
 }
 
 pub(crate) async fn mint_on(
@@ -104,10 +108,17 @@ pub(crate) async fn mint_on(
     let secret = hex::encode(secret_bytes);
 
     let row = sqlx::query(
-        "INSERT INTO api_keys \
-         (id, org_id, project_id, prefix, hash, secret_digest, name, scopes, created_by) \
-         VALUES (gen_random_uuid(), $1, $2, $3, '', $4, $5, $6, $7) \
-         RETURNING id AS id, created_at AS created_at",
+        "WITH stamp AS (SELECT clock_timestamp() AS now) \
+         INSERT INTO api_keys \
+         (id, org_id, project_id, prefix, hash, secret_digest, name, scopes, created_by, \
+          created_at, expires_at) \
+         SELECT gen_random_uuid(), $1, $2, $3, '', $4, $5, $6, $7, \
+                (extract(epoch FROM stamp.now) * 1000000000)::bigint, \
+                CASE WHEN $8::bigint IS NULL THEN NULL \
+                     ELSE (extract(epoch FROM stamp.now) * 1000000000)::bigint + $8::bigint \
+                END \
+         FROM stamp \
+         RETURNING id AS id, created_at AS created_at, expires_at AS expires_at",
     )
     .bind(minting.org.as_uuid())
     .bind(minting.project)
@@ -116,6 +127,7 @@ pub(crate) async fn mint_on(
     .bind(minting.name)
     .bind(minting.scopes)
     .bind(minting.by)
+    .bind(minting.ttl_nanos)
     .fetch_one(connection)
     .await?;
 
@@ -125,6 +137,7 @@ pub(crate) async fn mint_on(
         prefix,
         plaintext,
         created_at: row.get("created_at"),
+        expires_at: row.get("expires_at"),
     })
 }
 
@@ -150,6 +163,7 @@ pub(crate) async fn ingest_on(
             name: "",
             scopes: &[KeyScope::Ingest.as_str()],
             by: None,
+            ttl_nanos: None,
         },
     )
     .await?)

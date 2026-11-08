@@ -16,7 +16,7 @@ use ferristrace_domain::{
     AccountId, Action, Actor, AgentEnrolment, AgentId, AgentScope, AgentScopes, AgentToken,
     AgentTokens, Agents, ApiKey, ApiKeys, ApiSecret, Assigned, AuditEntry, AuditTrail, Counted,
     Created, Delegation, Fingerprint, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
-    KeyScopes, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
+    KeyScopes, KeyTtl, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
     ProjectName, Projects, ReadGrant, RegisteredAgent, Renamed, ServiceFilter, ServiceSeries,
     ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage,
     SpanPages, SpanReader, StoreError, TeamId, TenantId, TokenRefusal, TraceFilter, TraceId,
@@ -413,6 +413,7 @@ impl ApiKeys for Book {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }

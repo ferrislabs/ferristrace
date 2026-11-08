@@ -8,7 +8,7 @@ use ferristrace_application::Stack;
 use ferristrace_application::registry::AccessRepos;
 use ferristrace_domain::{
     AccountId, ApiKey, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName, KeyScopes,
-    ProjectId, TenantId,
+    KeyTtl, ProjectId, TenantId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -33,6 +33,7 @@ struct Held {
     created_at_ms: u64,
     created_by: Option<Uuid>,
     last_used_at_ms: Option<u64>,
+    expires_at_ms: Option<u64>,
 }
 
 impl From<ApiKey> for Held {
@@ -52,6 +53,9 @@ impl From<ApiKey> for Held {
             created_by: key.created_by.map(AccountId::as_uuid),
             last_used_at_ms: key
                 .last_used_at_unix_nanos
+                .map(|nanos| nanos / NANOS_PER_MILLI),
+            expires_at_ms: key
+                .expires_at_unix_nanos
                 .map(|nanos| nanos / NANOS_PER_MILLI),
         }
     }
@@ -78,6 +82,8 @@ pub struct Asked {
     scopes: Vec<String>,
     #[serde(default)]
     project: Option<Uuid>,
+    #[serde(default)]
+    ttl: Option<String>,
 }
 
 pub fn key_router<S: Stack>(state: AppState<S>) -> Router
@@ -117,6 +123,10 @@ where
     let token = carried(&state, &headers).await?;
     let name = KeyName::try_from(asked.name.as_str())?;
     let scopes = KeyScopes::parse(&asked.scopes)?;
+    let ttl = match &asked.ttl {
+        None => KeyTtl::Never,
+        Some(spelling) => KeyTtl::parse(spelling).ok_or(KeyRefused::Ttl)?,
+    };
     let issued = state
         .app
         .issue_key(
@@ -125,6 +135,7 @@ where
             asked.project.map(ProjectId::new),
             &name,
             &scopes,
+            ttl,
         )
         .await?;
     tracing::info!(org = %org, key = %issued.key.id, "a key was issued");
@@ -162,6 +173,8 @@ pub enum KeyRefused {
     NoSuchProject,
     #[error("no such key")]
     NoSuchKey,
+    #[error("that is not a ttl this organisation offers")]
+    Ttl,
     #[error("keys are an administrator's to issue and revoke")]
     NotAnAdministrator,
     #[error("the keys could not be read")]
@@ -185,7 +198,7 @@ impl IntoResponse for KeyRefused {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Reaching(refused) => return refused.into_response(),
-            Self::Name(_) | Self::Scopes(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Name(_) | Self::Scopes(_) | Self::Ttl => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NoSuchOrg | Self::NoSuchProject | Self::NoSuchKey => StatusCode::NOT_FOUND,
             Self::NotAnAdministrator => StatusCode::FORBIDDEN,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,

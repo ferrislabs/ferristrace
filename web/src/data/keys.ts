@@ -7,6 +7,15 @@ export type KeyScope = 'ingest' | 'read'
 
 export const KEY_SCOPES: KeyScope[] = ['ingest', 'read']
 
+export type KeyTtl = '30d' | '90d' | '365d' | 'never'
+
+export const KEY_TTLS: { value: KeyTtl; label: string }[] = [
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days' },
+  { value: '365d', label: '1 year' },
+  { value: 'never', label: 'Never' },
+]
+
 export type ApiKey = {
   id: string
   name: string
@@ -16,6 +25,7 @@ export type ApiKey = {
   created_at_ms: number
   created_by: string | null
   last_used_at_ms: number | null
+  expires_at_ms: number | null
 }
 
 export type IssuedKey = { key: ApiKey; secret: string }
@@ -47,7 +57,7 @@ function useRefreshing<T, R>(send: (org: string, asked: T) => Promise<R>) {
 }
 
 export const useIssueKey = () =>
-  useRefreshing<{ name: string; scopes: KeyScope[]; project: string | null }, IssuedKey>(async (org, asked) =>
+  useRefreshing<{ name: string; scopes: KeyScope[]; project: string | null; ttl: KeyTtl }, IssuedKey>(async (org, asked) =>
     json(await post(`/api/orgs/${org}/keys`, asked)),
   )
 

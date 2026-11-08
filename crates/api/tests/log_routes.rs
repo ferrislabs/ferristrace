@@ -9,7 +9,7 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, ApiKey, ApiKeys, ApiSecret, Buckets, IssuedKey, KeyId, KeyName, KeyScopes,
+    AccountId, ApiKey, ApiKeys, ApiSecret, Buckets, IssuedKey, KeyId, KeyName, KeyScopes, KeyTtl,
     LogBucket, LogCursor, LogPage, LogQuery, LogReader, LogRecord, Membership, Memberships,
     NoPhotos, OrgRole, ProjectId, ReadGrant, Session, SessionError, SessionStore, SessionToken,
     Severity, SpanId, StoreError, TenantId, TraceId, UnixSeconds, WhoamiError,
@@ -75,6 +75,7 @@ impl ApiKeys for TwoReadKeys {
         _name: &KeyName,
         _scopes: &KeyScopes,
         _by: AccountId,
+        _ttl: KeyTtl,
     ) -> Result<IssuedKey, StoreError> {
         Err(StoreError::Unreachable)
     }
