@@ -12,6 +12,7 @@ mod export_routes;
 mod grpc;
 mod health;
 mod http;
+mod inbox_routes;
 mod incident_routes;
 mod infra_routes;
 mod issue_routes;
@@ -55,6 +56,7 @@ pub use grpc::{
 };
 pub use health::health_router;
 pub use http::{MAX_DECOMPRESSED_BYTES, router};
+pub use inbox_routes::{InboxRefused, inbox_router};
 pub use incident_routes::{IncidentRefused, incident_router};
 pub use infra_routes::{InfraRefused, infra_router};
 pub use issue_routes::{IssueRefused, issue_router};

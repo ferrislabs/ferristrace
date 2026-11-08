@@ -1,4 +1,4 @@
-import { Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
+import { Bell, Keyboard, LogOut, Moon, Settings2, UserRound } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Segmented } from '@/components/ui/segmented'
 import { Kbd, Avatar } from '@/components/ui/misc'
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { AXES } from './nav'
 import { useNavCounts } from './useNavCounts'
 import { initialsOf, nameOf } from '@/data/profile'
+import { useUnreadCount } from '@/data/notifications'
 import { useAccount, useOrganisations, useSignOut } from '@/auth/session'
 import { useTheme, type ThemePref } from '@/lib/theme'
 import { Link, isActivePath, useLocation, useNavigate } from '@/lib/router'
@@ -22,6 +23,7 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const signingOut = useSignOut()
   const { pref, setPref } = useTheme()
   const navigate = useNavigate()
+  const unread = useUnreadCount()
   const who = account ? nameOf(account) : null
   const initials = who ? initialsOf(who) : '??'
   const onSettings = isActivePath(pathname, '/settings')
@@ -64,6 +66,7 @@ export function Sidebar({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
               </div>
               {active ? <Badge variant="accent">{active.role}</Badge> : null}
             </div>
+            <MenuItem icon={<Bell />} onClick={() => navigate('/notifications')} hint={unread > 0 ? <Badge variant="accent">{unread}</Badge> : undefined}>Notifications</MenuItem>
             <MenuItem icon={<UserRound />} onClick={() => navigate('/settings/profile')}>Profile</MenuItem>
             <div className="flex h-[30px] items-center gap-2 px-2 text-control">
               <Moon className="size-3.5" aria-hidden />Theme

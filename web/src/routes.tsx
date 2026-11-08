@@ -21,6 +21,7 @@ import { Issues } from '@/pages/Issues'
 import { Logs } from '@/pages/Logs'
 import { Metrics } from '@/pages/Metrics'
 import { NotFound } from '@/pages/NotFound'
+import { Notifications } from '@/pages/Notifications'
 import { Onboarding } from '@/pages/Onboarding'
 import { Overview } from '@/pages/Overview'
 import { PublicPostmortem, PublicStatus } from '@/pages/PublicStatus'
@@ -153,6 +154,7 @@ const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     inShell('/', Overview, timed),
     inShell('/onboarding', Onboarding, real),
+    inShell('/notifications', Notifications, real),
     inShell('/services', Services, timed),
     inShell('/services/$name', ServiceDetail, timed),
     inShell('/issues', Issues, real),
