@@ -11,8 +11,9 @@ starting with 1 and 2.
 |---|---------|------------|--------|
 | 1 | Display preferences (timezone, timestamp precision, row density, start page) persisted per account | none | **done** — merged |
 | 2 | In-app notification center foundation (storage, API, dedicated page), empty, no producers yet | none | **done** — merged |
-| 3 | Notification preferences storage (the "notify me when X" matrix) + email/digest toggles | 2 | **done** — PR #299 open |
-| 4 | Wire status-page events and member join/leave into the notification system | 2, 3 | pending |
+| 3 | Notification preferences storage (the "notify me when X" matrix) + email/digest toggles | 2 | **done** — merged (#299) |
+| 4a | Wire member join/leave into the notification system | 2, 3 | **done** — PR #307 open |
+| 4b | Wire status-page events into the notification system | 2, 3 | owned by Nathael, not this chantier's branch |
 | 5 | New detector: a service stops sending spans (no detector exists today) | 2, 3 | pending |
 | 6 | New detector: a new exception/issue type is seen | 2, 3 | pending |
 | 7 | API key expiry: add the concept to the domain, then a detector | 2, 3 | pending |
@@ -107,6 +108,33 @@ mirrors the already-tested `PreferencesBody` pattern and the business logic is
 covered at the domain layer; see the PR body. Not visually confirmed in a browser
 this session (Chrome extension unavailable throughout).
 
+## Workstream 4a — done, 4b out of scope here
+
+Branch `feat/notify-admins-on-membership-change` (PR #307). Status-page events
+(the other half of the original workstream 4) are owned by Nathael separately
+and were dropped from this chantier's scope — not touched here.
+
+Domain: `Roster::invite`/`remove` now also return `Vec<AccountId>` — the other
+admins/owners to notify, computed from the same `Roll::of(org)` read they
+already needed, excluding the acting admin and the member the action was
+about (never both, that's the whole point). A private `admins_to_notify`
+helper does the filtering; no new type, no new generics on `Roster` itself.
+Application: `invite_member`/`remove_member` call the existing
+`Ferristrace::notify` (built by workstream 3 "for a future producer", first
+one to use it) once per recipient via a small `tell_admins` helper - best
+effort, a failed notify never undoes the member change, since the postgres
+adapter already logs the cause downstream. Both app functions now require
+`InboxRepos` alongside `RosterRepos`, which rippled into `roster_router`'s
+bound and into `crates/api/tests/roster_routes.rs`'s own `Fakes` (needed a
+new `Notices` fake implementing `InboxStore`/`NotificationSettings`, same
+"NoInbox"-style pattern workstream 3 used elsewhere).
+
+Verified: 32 domain roster tests (including the new recipient-filtering
+ones), 17 api roster-route tests (including two asserting an admin's inbox
+actually receives the item), full domain/app/api suite green, clippy/fmt
+clean. Route existence checked live (401/415 without auth, not 404/405).
+No new migration, no postgres changes.
+
 ## Decisions
 
 - Theme is **not** moved to the backend. It's a per-browser cosmetic setting today
@@ -128,24 +156,33 @@ this session (Chrome extension unavailable throughout).
   same pattern as `ResourceKind::parse`/`AlertStatus::parse` elsewhere), 422 on
   `None`, mirroring the existing `Malformed`/`Misplaced` convention.
 
-## Frozen contracts (for workstreams 4+)
+## Frozen contracts (for workstreams 5+)
 
-- `InboxDesk::notify(draft, now_ms) -> Result<Option<InboxItem>, InboxError>` —
-  a producer calls this and gets `None` back when the account suppressed that
-  kind in-app. Every future detector (5, 6, 7, 8) goes through this, never
-  `InboxStore::create` directly, or preferences are bypassed.
+- `InboxDesk::notify(draft, now_ms) -> Result<Option<InboxItem>, InboxError>`
+  at the domain layer, or `Ferristrace::notify(account, org, kind, title, body,
+  link)` at the application layer (what workstream 4a actually called) — a
+  producer calls one of these and gets `None`/best-effort-skipped back when
+  the account suppressed that kind in-app. Every future detector (5, 6, 7, 8)
+  goes through one of these, never `InboxStore::create` directly, or
+  preferences are bypassed.
+- A producer that needs "who else to tell" as a business rule (workstream 4a's
+  "the other admins, not the actor, not the subject") computes that list in
+  the domain layer next to the data it already reads, and hands plain
+  `Vec<AccountId>` up to the application layer to loop over with `notify` -
+  not the other way around.
 - `InboxItemKind::{Issue, ServiceSilent, StatusPage, ApiKeyExpiring, Usage,
-  Membership}` and their spellings (`as_str`/`parse`) are fixed — workstream 4's
-  wiring and 5-8's new detectors raise exactly these kinds, no new variants
-  without updating the preferences matrix and the frontend's `LABELS` map in
-  `Preferences.tsx`.
+  Membership}` and their spellings (`as_str`/`parse`) are fixed — 5-8's new
+  detectors raise exactly these kinds, no new variants without updating the
+  preferences matrix and the frontend's `LABELS` map in `Preferences.tsx`.
+- `StatusPage` is Nathael's to wire, not part of this chantier's remaining
+  branches.
 - Workstream 7 still needs an API key expiry field on the domain before it can
   raise `ApiKeyExpiring` — nothing added here.
 - Workstream 8 still needs usage/billing threshold math — nothing added here.
 
-Whoever picks up 4+ should still write its own mini-spec per `spec-driven`
+Whoever picks up 5+ should still write its own mini-spec per `spec-driven`
 where it introduces something new (a detector, a job) — this section only
-freezes what workstream 3 already decided.
+freezes what workstreams 3 and 4a already decided.
 
 ## Verify (workstream 1)
 
