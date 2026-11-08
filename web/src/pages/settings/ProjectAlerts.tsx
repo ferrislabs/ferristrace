@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
 import { Field, Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
+import { Switch } from '@/components/ui/switch'
 import { Alert, Table, Td, Th, Tr } from '@/components/ui/misc'
 import { isForbidden, isNotConfigured, useChannels, useCreateChannel, useDeleteChannel, useUpdateChannel, type Channel, type ChannelKind, type Design, type IssuedChannel, emptyDesign } from '@/data/alerts'
 import { DiscordDesigner } from './DiscordDesigner'
@@ -74,10 +75,10 @@ export function ProjectAlerts() {
   const submit = () => {
     if (problem) return
     if (editingExisting) {
-      update.mutate({ id: editingExisting.id, name: name.trim(), target: normal, design: shape === 'discord' ? design : undefined }, { onSuccess: () => { toast.success('Channel saved'); close() }, onError: (error) => toast.error(because(error, 'The channel was not saved')) })
+      update.mutate({ id: editingExisting.id, name: name.trim(), target: normal, design: shape === 'discord' || shape === 'slack' ? design : undefined }, { onSuccess: () => { toast.success('Channel saved'); close() }, onError: (error) => toast.error(because(error, 'The channel was not saved')) })
       return
     }
-    create.mutate({ name: name.trim(), kind, target: normal, design: kind === 'discord' ? design : undefined }, {
+    create.mutate({ name: name.trim(), kind, target: normal, design: kind === 'discord' || kind === 'slack' ? design : undefined }, {
       onSuccess: (made) => {
         if (made.secret) setIssued(made)
         else { toast.success('Channel created'); close() }
@@ -133,6 +134,7 @@ export function ProjectAlerts() {
               <Field label={shape === 'email' ? 'Addresses' : 'URL'} htmlFor="ch-t" hint={shape === 'email' ? 'Comma separated.' : shape === 'slack' ? 'Create an incoming webhook in your Slack workspace and paste its URL.' : shape === 'discord' ? 'In the channel settings, open Integrations, create a webhook and copy its URL.' : 'Private, loopback and link-local addresses are refused unless the deployment allows them.'}>
                 <Input id="ch-t" mono value={target} placeholder={shape === 'email' ? 'oncall@example.com, team@example.com' : shape === 'slack' ? 'https://hooks.slack.com/services/T000/B000/XXXX' : shape === 'discord' ? 'https://discord.com/api/webhooks/123/abc' : 'https://hooks.example.com/ferristrace'} onChange={(e) => setTarget(e.target.value)} />
               </Field>
+              {shape === 'discord' || shape === 'slack' ? <Switch label="Also post incident updates here" checked={design.incident_updates} onCheckedChange={(on) => setDesign({ ...design, incident_updates: on })} /> : null}
               {shape === 'discord' ? <DiscordDesigner design={design} onChange={setDesign} /> : null}
               {problem && (name || target) ? <span className="text-caption text-destructive-text">{problem}</span> : null}
               <DialogFooter><Button type="button" onClick={close}>Cancel</Button><Button variant="primary" type="submit" disabled={problem !== null || create.isPending || update.isPending}>{editingExisting ? 'Save channel' : 'Create channel'}</Button></DialogFooter>

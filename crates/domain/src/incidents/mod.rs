@@ -7,6 +7,9 @@ mod desk_tests;
 mod entities;
 mod errors;
 mod followers;
+mod narration;
+#[cfg(test)]
+mod narration_tests;
 mod ports;
 mod value_objects;
 #[cfg(test)]
@@ -23,6 +26,7 @@ pub use entities::{
 };
 pub use errors::{BadIncident, IncidentError};
 pub use followers::Followers;
+pub use narration::{ANNOUNCED, ClaimedIncidentNotice, IncidentNotice, IncidentOutbox, Narrator};
 pub use ports::{IncidentAttachments, IncidentTimeline, Incidents};
 pub use value_objects::{
     AttachmentId, AttachmentKind, AttachmentLabel, CommentBody, EntryKind, IncidentId,

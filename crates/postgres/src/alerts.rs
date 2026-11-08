@@ -2,9 +2,10 @@ use ferristrace_application::repository;
 use ferristrace_domain::{
     AccountId, AlertChannels, AlertDuty, AlertEvent, AlertEvents, AlertOutbox, AlertRules,
     AlertSeverity, AlertStates, AlertStatus, Channel, ChannelId, ChannelKind, ChannelName,
-    ChannelView, Claimed, Clock, DeliveryStatus, Destination, Dispatch, Duty, EventId,
-    Notification, NotificationId, ProjectId, Rule, RuleDraft, RuleId, RuleName, RuleState,
-    SeriesState, Settlement, StoreError, TenantId, WebhookSecret,
+    ChannelView, Claimed, ClaimedIncidentNotice, Clock, DeliveryStatus, Destination, Dispatch,
+    Duty, EventId, IncidentId, IncidentNotice, IncidentOutbox, Notification, NotificationId,
+    ProjectId, Rule, RuleDraft, RuleId, RuleName, RuleState, SeriesState, Settlement, StoreError,
+    TenantId, WebhookSecret,
 };
 use ferristrace_infra::SecretSeal;
 use sqlx::Row;
@@ -15,6 +16,7 @@ use crate::alert_codec::{
     culprits_of, decode, encode, encode_culprits, encode_labels, labels_of, mentions_of,
 };
 use crate::design_codec;
+use crate::incidents::{read_entry, read_incident};
 use crate::keys::to_nanos;
 use crate::unit_of_work::{Postgres, SharedTx};
 
@@ -24,6 +26,7 @@ pub const DELIVER_LOCK: i64 = 0x6674_616c_6572_7402;
 pub const ESCALATE_LOCK: i64 = 0x6674_616c_6572_7403;
 pub const ANNOUNCE_LOCK: i64 = 0x6674_616c_6572_7404;
 pub const DEPLOYS_LOCK: i64 = 0x6674_616c_6572_7405;
+pub const NARRATE_LOCK: i64 = 0x6674_616c_6572_7406;
 
 fn unreachable(doing: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
     move |error| {
@@ -360,7 +363,11 @@ fn open_secret(seal: Option<&SecretSeal>, row: &PgRow) -> Option<WebhookSecret> 
         .map(WebhookSecret::from_plaintext)
 }
 
-fn destination_of(row: &PgRow, kind: &str, target: &str) -> Result<Destination, StoreError> {
+pub(crate) fn destination_of(
+    row: &PgRow,
+    kind: &str,
+    target: &str,
+) -> Result<Destination, StoreError> {
     let kind = ChannelKind::parse(row.get::<&str, _>(kind)).ok_or_else(|| refused("kind"))?;
     let destination =
         Destination::parse(kind, row.get::<&str, _>(target)).map_err(|_| refused("target"))?;
@@ -382,7 +389,7 @@ fn design_of(destination: &Destination) -> Option<String> {
         .map(|design| design_codec::encode(design).to_string())
 }
 
-fn channel_name(row: &PgRow, column: &str) -> Result<ChannelName, StoreError> {
+pub(crate) fn channel_name(row: &PgRow, column: &str) -> Result<ChannelName, StoreError> {
     ChannelName::try_from(row.get::<&str, _>(column)).map_err(|_| refused("channel name"))
 }
 
@@ -710,6 +717,7 @@ fn lock_of(duty: Duty) -> i64 {
         Duty::Escalate => ESCALATE_LOCK,
         Duty::Announce => ANNOUNCE_LOCK,
         Duty::Deploys => DEPLOYS_LOCK,
+        Duty::Narrate => NARRATE_LOCK,
     }
 }
 
@@ -736,4 +744,124 @@ impl AlertDuty for PostgresAlertDuty {
         .map_err(unreachable("claim an alert slot"))?;
         Ok(done.rows_affected() == 1)
     }
+}
+
+#[repository(domain = IncidentOutbox, backend = Postgres<C>, generics = <C: Send + Sync + 'static>)]
+#[derive(Debug)]
+pub struct PostgresIncidentOutbox {
+    tx: SharedTx,
+    seal: Option<SecretSeal>,
+}
+
+impl PostgresIncidentOutbox {
+    pub fn new<C>(backend: &Postgres<C>, tx: &SharedTx) -> Self {
+        Self {
+            tx: tx.clone(),
+            seal: backend.seal.clone(),
+        }
+    }
+}
+
+impl IncidentOutbox for PostgresIncidentOutbox {
+    async fn claim(
+        &self,
+        now_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<ClaimedIncidentNotice>, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query(
+            "SELECT o.id AS id, o.org_id AS org_id, o.incident_id AS incident_id, \
+             o.event_id AS event_id, o.channel_id AS channel_id, o.attempt AS attempt, \
+             c.name AS channel_name, c.kind AS kind, c.target AS target, \
+             c.design::text AS design, c.secret_sealed AS secret_sealed \
+             FROM incident_outbox o \
+             JOIN alert_channels c ON c.id = o.channel_id \
+             WHERE o.status = 'pending' AND o.next_at_ms <= $1 \
+             ORDER BY o.next_at_ms, o.id \
+             LIMIT $2 \
+             FOR UPDATE OF o SKIP LOCKED",
+        )
+        .bind(signed(now_ms))
+        .bind(i64::from(limit))
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(unreachable("claim the due incident updates"))?;
+        let mut claimed = Vec::new();
+        for row in &rows {
+            let org = TenantId::new(row.get("org_id"));
+            let incident_id = IncidentId::new(row.get("incident_id"));
+            let incident_row = sqlx::query(
+                "SELECT id, org_id, project_id, title, severity, status, owner_id, public, \
+                 opened_ms, resolved_ms, opened_from_alert, paged_schedule \
+                 FROM incidents WHERE id = $1 AND org_id = $2",
+            )
+            .bind(incident_id.as_uuid())
+            .bind(org.as_uuid())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(unreachable("read an incident to announce"))?;
+            let entry_row = sqlx::query(
+                "SELECT id, kind, author_kind, author_id, author_label, body, \
+                 detail::text AS detail, at_ms FROM incident_events WHERE id = $1",
+            )
+            .bind(row.get::<Uuid, _>("event_id"))
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(unreachable("read an incident event to announce"))?;
+            let (Some(incident_row), Some(entry_row)) = (incident_row, entry_row) else {
+                continue;
+            };
+            let incident = read_incident(&incident_row)?;
+            let entry = read_entry(&entry_row, org, incident_id)?;
+            let Some(notice) = IncidentNotice::of(&incident, &entry) else {
+                continue;
+            };
+            let channel = ChannelId::new(row.get("channel_id"));
+            claimed.push(ClaimedIncidentNotice {
+                id: row.get("id"),
+                attempt: u32::try_from(row.get::<i32, _>("attempt")).unwrap_or_default(),
+                notice,
+                channel: Channel {
+                    id: channel,
+                    name: channel_name(row, "channel_name")?,
+                    destination: destination_of_design(row)?,
+                    secret: open_secret(self.seal.as_ref(), row),
+                },
+            });
+        }
+        Ok(claimed)
+    }
+
+    async fn settle(
+        &self,
+        id: Uuid,
+        attempts: u32,
+        settlement: &Settlement,
+    ) -> Result<(), StoreError> {
+        let (status, next_at_ms, error) = match settlement {
+            Settlement::Sent => (DeliveryStatus::Sent, None, None),
+            Settlement::Retry { next_at_ms, error } => {
+                (DeliveryStatus::Pending, Some(*next_at_ms), Some(&**error))
+            }
+            Settlement::Abandoned { error } => (DeliveryStatus::Abandoned, None, Some(&**error)),
+        };
+        let mut tx = self.tx.lock().await;
+        sqlx::query(
+            "UPDATE incident_outbox SET attempt = $2, status = $3, \
+             next_at_ms = COALESCE($4, next_at_ms), last_error = $5 WHERE id = $1",
+        )
+        .bind(id)
+        .bind(i32::try_from(attempts).unwrap_or(i32::MAX))
+        .bind(status.as_str())
+        .bind(next_at_ms.map(signed))
+        .bind(error)
+        .execute(&mut **tx)
+        .await
+        .map_err(unreachable("settle an incident update"))?;
+        Ok(())
+    }
+}
+
+fn destination_of_design(row: &PgRow) -> Result<Destination, StoreError> {
+    destination_of(row, "kind", "target")
 }

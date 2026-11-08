@@ -587,6 +587,7 @@ fn watch_alerts(
     vec![
         tokio::spawn(evaluate_alerts(Arc::clone(&state.app), stopped.clone())),
         tokio::spawn(deliver_alerts(Arc::clone(&state.app), stopped.clone())),
+        tokio::spawn(narrate_incidents(Arc::clone(&state.app), stopped.clone())),
     ]
 }
 
@@ -764,6 +765,35 @@ async fn deliver_alerts(app: Arc<Ferristrace<Production>>, mut stopped: watch::R
                 "alert notifications were delivered"
             ),
             Err(error) => tracing::error!(%error, "the alert notifications could not be delivered"),
+        }
+    }
+}
+
+async fn narrate_incidents(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(DELIVER_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.narrate_incidents().await {
+            Ok(Drained::Skipped) => tracing::debug!("another replica is narrating"),
+            Ok(Drained::Delivered {
+                sent: 0,
+                retried: 0,
+                abandoned: 0,
+            }) => {}
+            Ok(Drained::Delivered {
+                sent,
+                retried,
+                abandoned,
+            }) => tracing::info!(
+                sent,
+                retried,
+                abandoned,
+                "incident updates were posted to chat"
+            ),
+            Err(error) => tracing::error!(%error, "the incident updates could not be posted"),
         }
     }
 }

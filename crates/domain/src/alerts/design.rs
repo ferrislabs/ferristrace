@@ -172,6 +172,7 @@ pub struct Design {
     pub fields: Vec<CustomField>,
     pub ping_roles: Vec<Box<str>>,
     pub ping_users: Vec<Box<str>>,
+    pub incident_updates: bool,
 }
 
 pub fn snowflake(given: &str) -> Result<Box<str>, BadDesign> {

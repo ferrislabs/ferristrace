@@ -15,7 +15,7 @@ Context
 
   One pull request per part, in this order:
     13A  Incident context, read when the incident page opens
-    13B  Slack and Discord                    13B1 delivered, 13B2 and 13B3 next
+    13B  Slack and Discord                    13B1 and 13B2 delivered, 13B3 next
     13C  Insights: MTTA, MTTR, frequency per service
 
 Glossary
@@ -91,9 +91,23 @@ Design
           message. The channel editor gets a design panel with a live
           preview rendered by the server, so the preview and the delivery
           cannot drift. Slack keeps its fixed look for now.
-    13B2  Incident events to a chat channel. A project names one chat
-          channel; opening, status, severity and owner changes and public
-          comments post there as the incident timeline grows.
+    13B2  Incident updates in chat. A Slack or Discord channel can opt in
+          ("Also post incident updates here"). From then on, every entry
+          appended to an incident of the organisation that a person would
+          want to read is queued for it: opened, status, severity, owner,
+          title, public flag, comments, paging and acknowledgement. Alert
+          state changes, deploys and attachments are left out: alerts
+          already notify their own channels and deploys are noise. The
+          queue is an outbox filled in the transaction that writes the
+          entry, drained by a loop that takes its own lead, with the same
+          retries as alerts. The message is a coloured attachment or
+          embed with the incident title, severity, status, a link, and the
+          comment text; nothing in it can mention anyone. Decided against
+          the first draft: a channel opts in instead of a project naming
+          one, so incidents with no project are heard too, and several
+          channels may listen. Every comment is posted, since the channel
+          is the team's own; per-comment public flags still arrive with
+          the status page.
     13B3  Commands. A Slack app (slash command, buttons) and a Discord
           application (interactions endpoint) to declare, acknowledge,
           resolve and comment. Inbound calls are verified (Slack signing
@@ -168,3 +182,10 @@ Delivered with 13B1c
   `@everyone`. Slack ids differ, so a Slack channel does not use them yet.
   @spec-l13-12  A rule keeps its mentions, refuses a bad id, and a firing
                 notification pings the rule's and the channel's ids once.
+
+Delivered with 13B2
+  Migration `20261122000002` adds `incident_outbox`. The opt-in lives in the
+  channel design (`incident_updates`), so no column was added to channels.
+  @spec-l13-13  An announced entry reaches each subscribed chat channel once
+                and no other channel; alerts, deploys and attachments are
+                not announced.

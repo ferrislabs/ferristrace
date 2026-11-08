@@ -1,6 +1,6 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Incident,
+    ANNOUNCED, AccountId, Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Incident,
     IncidentAttachments, IncidentFilter, IncidentId, IncidentScope, IncidentSeverity,
     IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, ProjectId, Reference, RuleId,
     ScheduleId, StoreError, TenantId, TimelineEntry, TimelineId,
@@ -35,7 +35,7 @@ fn unsigned(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
 }
 
-fn read_incident(row: &PgRow) -> Result<Incident, StoreError> {
+pub(crate) fn read_incident(row: &PgRow) -> Result<Incident, StoreError> {
     Ok(Incident {
         id: IncidentId::new(row.get("id")),
         org: TenantId::new(row.get("org_id")),
@@ -204,7 +204,7 @@ impl PostgresIncidentTimeline {
     }
 }
 
-fn read_entry(
+pub(crate) fn read_entry(
     row: &PgRow,
     org: TenantId,
     incident: IncidentId,
@@ -233,6 +233,29 @@ fn read_entry(
     })
 }
 
+async fn announce(tx: &mut sqlx::PgConnection, entry: &TimelineEntry) -> Result<(), StoreError> {
+    let kind = entry.change.kind();
+    if !ANNOUNCED.contains(&kind) {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO incident_outbox (id, org_id, incident_id, event_id, channel_id, next_at_ms) \
+         SELECT gen_random_uuid(), $1, $2, $3, c.id, $4 \
+         FROM alert_channels c \
+         WHERE c.org_id = $1 AND c.kind IN ('slack', 'discord') \
+           AND c.design->>'incident_updates' = 'true' \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(entry.org.as_uuid())
+    .bind(entry.incident.as_uuid())
+    .bind(entry.id.as_uuid())
+    .bind(signed(entry.at_ms))
+    .execute(tx)
+    .await
+    .map_err(unreachable("queue an incident update"))?;
+    Ok(())
+}
+
 impl IncidentTimeline for PostgresIncidentTimeline {
     async fn append(&self, entry: &TimelineEntry) -> Result<(), StoreError> {
         let (author_kind, author_id, author_label) = author_parts(&entry.author);
@@ -257,6 +280,7 @@ impl IncidentTimeline for PostgresIncidentTimeline {
         .execute(&mut **tx)
         .await
         .map_err(unreachable("append to an incident timeline"))?;
+        announce(&mut tx, entry).await?;
         Ok(())
     }
 
@@ -284,6 +308,9 @@ impl IncidentTimeline for PostgresIncidentTimeline {
         .execute(&mut **tx)
         .await
         .map_err(unreachable("append once to an incident timeline"))?;
+        if done.rows_affected() == 1 {
+            announce(&mut tx, entry).await?;
+        }
         Ok(done.rows_affected() == 1)
     }
 

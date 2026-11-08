@@ -1,10 +1,11 @@
 use ferristrace_domain::{
-    Attachment, AttachmentLabel, Briefed, Chronicle, Clock, CommentBody, Dossier, IncidentContext,
-    IncidentDesk, IncidentDraft, IncidentError, IncidentFilter, IncidentId, IncidentPatch, Paging,
-    Reader, Readers, Reference, Surroundings, TenantId, Whoami,
+    AlertError, Attachment, AttachmentLabel, Briefed, Chronicle, Clock, CommentBody, Dossier,
+    Drained, IncidentContext, IncidentDesk, IncidentDraft, IncidentError, IncidentFilter,
+    IncidentId, IncidentPatch, Narrator, Paging, Reader, Readers, Reference, Surroundings,
+    TenantId, Whoami,
 };
 
-use crate::registry::IncidentRepos;
+use crate::registry::{IncidentRepos, NarrateRepos};
 use crate::{Ferristrace, Stack, transactional};
 
 impl<S: Stack> Ferristrace<S>
@@ -214,5 +215,24 @@ where
                 self.clock.now().get().saturating_mul(1_000),
             )
             .await?)
+    }
+}
+
+impl<S: Stack> Ferristrace<S>
+where
+    S::Repos: NarrateRepos,
+{
+    #[allow(clippy::manual_async_fn)]
+    pub fn narrate_incidents(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Drained, AlertError>> + Send {
+        async move { self.narrate_once().await }
+    }
+
+    #[transactional(incident_outbox, alert_duty, unavailable = AlertError::StoreUnreachable)]
+    async fn narrate_once(&self) -> Result<Drained, AlertError> {
+        Narrator::new(incident_outbox, alert_duty, &self.webhooks)
+            .tick(self.clock.now())
+            .await
     }
 }

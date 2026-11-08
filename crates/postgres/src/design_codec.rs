@@ -33,6 +33,7 @@ pub(crate) fn encode(design: &Design) -> Value {
         })).collect::<Vec<_>>(),
         "ping_roles": design.ping_roles,
         "ping_users": design.ping_users,
+        "incident_updates": design.incident_updates,
     })
 }
 
@@ -105,6 +106,7 @@ pub(crate) fn decode(held: &Value) -> Option<Design> {
         fields,
         ping_roles: ids(held, "ping_roles")?,
         ping_users: ids(held, "ping_users")?,
+        incident_updates: flag(held, "incident_updates", false),
     }
     .checked()
     .ok()

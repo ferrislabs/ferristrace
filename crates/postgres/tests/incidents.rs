@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 
 use ferristrace_application::registry::{RepoFor, Settle, UnitOfWork, domain};
 use ferristrace_domain::{
-    AccountId, AgentId, AlertError, AlertRules, AlertSeverity, AlertStatus, Attachment,
-    AttachmentId, AttachmentKind, AttachmentLabel, Author, Change, CommentBody, Comparison,
-    Condition, CulpritPod, Culprits, Definition, DefinitionParts, Evaluator, Followers, Incident,
-    IncidentAttachments, IncidentFilter, IncidentId, IncidentScope, IncidentSeverity,
-    IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, KeyId, Labels, NoDataPolicy,
-    Observation, Paging, ProbeError, ProjectId, ProjectName, Reference, RuleDraft, RuleId,
-    RuleName, Signal, SignalProbe, TenantId, Tick, TimelineEntry, TimelineId, TraceMeasure,
+    AccountId, AgentId, AlertChannels, AlertError, AlertRules, AlertSeverity, AlertStatus,
+    Attachment, AttachmentId, AttachmentKind, AttachmentLabel, Author, Change, CommentBody,
+    Comparison, Condition, CulpritPod, Culprits, Definition, DefinitionParts, Evaluator, Followers,
+    Incident, IncidentAttachments, IncidentFilter, IncidentId, IncidentOutbox, IncidentScope,
+    IncidentSeverity, IncidentStatus, IncidentTimeline, IncidentTitle, Incidents, KeyId, Labels,
+    NoDataPolicy, Observation, Paging, ProbeError, ProjectId, ProjectName, Reference, RuleDraft,
+    RuleId, RuleName, Signal, SignalProbe, TenantId, Tick, TimelineEntry, TimelineId, TraceMeasure,
     TraceSignal, UnixSeconds, Window,
 };
 use ferristrace_infra::FixedClock;
@@ -635,4 +635,93 @@ fn no_statement_in_the_application_rewrites_an_incident_timeline_entry() {
         .collect();
 
     assert!(offending.is_empty(), "{offending:?}");
+}
+
+#[tokio::test]
+async fn spec_l13_13_an_announced_entry_queues_for_each_subscribed_chat_channel_only() {
+    let Some(pool) = control_plane("incidents_narration").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+    let incident = an_incident(org, None, None, 1_000);
+    let hook = |target: &str| {
+        ferristrace_domain::Destination::parse(ferristrace_domain::ChannelKind::Discord, target)
+            .expect("a hook")
+    };
+    let subscribed =
+        hook("https://discord.com/api/webhooks/1/abc").designed(ferristrace_domain::Design {
+            incident_updates: true,
+            ..ferristrace_domain::Design::default()
+        });
+    let quiet = hook("https://discord.com/api/webhooks/2/def");
+
+    let (claimed, again) =
+        committed!(pg, |incidents: Incidents,
+                        timeline: IncidentTimeline,
+                        channels: AlertChannels,
+                        outbox: IncidentOutbox| {
+            incidents.open(&incident).await.expect("opened");
+            for (name, destination) in [("team", &subscribed), ("other", &quiet)] {
+                channels
+                    .create(
+                        org,
+                        &ferristrace_domain::ChannelName::try_from(name).expect("a name"),
+                        destination,
+                        None,
+                        owner,
+                    )
+                    .await
+                    .expect("kept")
+                    .expect("fresh");
+            }
+            let me = Author::Account(owner);
+            for change in [
+                Change::Opened {
+                    title: incident.title.clone(),
+                    severity: IncidentSeverity::Sev2,
+                    alert: None,
+                },
+                Change::Deploy {
+                    service: "checkout".into(),
+                    version: "1.2".into(),
+                    environment: "prod".into(),
+                },
+                Change::Comment {
+                    body: CommentBody::try_from("rolled back").expect("a body"),
+                    public: false,
+                },
+            ] {
+                timeline
+                    .append(&entry(&incident, me.clone(), change, 1_100))
+                    .await
+                    .expect("appended");
+            }
+            let claimed = outbox.claim(2_000, 50).await.expect("claimed");
+            outbox
+                .settle(claimed[0].id, 1, &ferristrace_domain::Settlement::Sent)
+                .await
+                .expect("settled");
+            let again = outbox.claim(2_000, 50).await.expect("claimed");
+            (claimed, again)
+        });
+
+    assert_eq!(
+        claimed.len(),
+        2,
+        "the deploy and the quiet channel are left out"
+    );
+    assert!(
+        claimed
+            .iter()
+            .all(|one| one.channel.name.as_str() == "team")
+    );
+    let headlines: Vec<&str> = claimed.iter().map(|one| &*one.notice.headline).collect();
+    assert!(
+        headlines.contains(&"Incident opened (sev2)"),
+        "{headlines:?}"
+    );
+    assert!(headlines.contains(&"New comment"), "{headlines:?}");
+    assert_eq!(&*claimed[0].notice.title, "Checkout down");
+    assert_eq!(again.len(), 1, "a sent update is not claimed twice");
 }
