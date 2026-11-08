@@ -1,10 +1,10 @@
 use axum::Router;
 use ferristrace_api::{
     AppState, SignInMethods, agent_router, alert_router, audit_router, catalogue_router,
-    cluster_router, explore_router, export_router, incident_router, issue_router, key_router,
-    llm_router, log_router, mark_routes, mcp_router, me_router, methods_router, metric_router,
-    oncall_router, org_router, postmortem_router, release_router, roster_router, site_router,
-    status_router, team_router, usage_router, view_router, workspace_router,
+    cluster_router, explore_router, export_router, incident_router, infra_router, issue_router,
+    key_router, llm_router, log_router, mark_routes, mcp_router, me_router, methods_router,
+    metric_router, oncall_router, org_router, postmortem_router, release_router, roster_router,
+    site_router, status_router, team_router, usage_router, view_router, workspace_router,
 };
 
 use crate::adapters::Production;
@@ -74,6 +74,7 @@ fn explore_routes(state: Option<&State>, held: bool) -> Router {
         .merge(log_router(state.clone()))
         .merge(metric_router(state.clone()))
         .merge(cluster_router(state.clone()))
+        .merge(infra_router(state.clone()))
         .merge(site_router(state.clone()))
 }
 

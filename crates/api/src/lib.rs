@@ -13,6 +13,7 @@ mod grpc;
 mod health;
 mod http;
 mod incident_routes;
+mod infra_routes;
 mod issue_routes;
 mod job_routes;
 mod key_routes;
@@ -55,6 +56,7 @@ pub use grpc::{
 pub use health::health_router;
 pub use http::{MAX_DECOMPRESSED_BYTES, router};
 pub use incident_routes::{IncidentRefused, incident_router};
+pub use infra_routes::{InfraRefused, infra_router};
 pub use issue_routes::{IssueRefused, issue_router};
 pub use key_routes::{KeyRefused, key_router};
 pub use llm_routes::{LlmRefused, llm_router};

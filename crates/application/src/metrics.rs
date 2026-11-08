@@ -1,7 +1,7 @@
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, Clock, ClusterFilter, ClusterSnapshot, ClusterView,
-    ExploreError, MetricDescriptor, MetricError, MetricQuery, MetricSearch, ProjectId, Reader,
-    Readers, SeenAttribute, SeenValue, SeriesSet, TenantId, Whoami,
+    ExploreError, InfraFilter, Inventory, MetricDescriptor, MetricError, MetricQuery, MetricSearch,
+    ProjectId, Reader, Readers, Resource, SeenAttribute, SeenValue, SeriesSet, TenantId, Whoami,
 };
 
 use crate::registry::ReadRepos;
@@ -102,6 +102,24 @@ where
             reader,
         )
         .snapshot(who, org, self.clock.now(), filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn infrastructure(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &InfraFilter,
+    ) -> Result<Vec<Resource>, ExploreError> {
+        let Some(reader) = &self.metric_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Inventory::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .list(who, org, self.clock.now(), filter)
         .await
     }
 }

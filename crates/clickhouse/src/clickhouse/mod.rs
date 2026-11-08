@@ -1,6 +1,7 @@
 mod cluster_read;
 mod culprits;
 mod export;
+mod infra_read;
 mod issues;
 mod job_read;
 mod llm_read;

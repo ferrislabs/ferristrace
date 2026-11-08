@@ -9,9 +9,9 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Aggregation, ApiKey, ApiKeys, ApiSecret, ClusterFilter, ClusterReader,
-    ClusterSnapshot, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships,
-    MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, Node, OrgRole,
-    PlacementName, Pod, PodPhase, ProjectId, ReadGrant, SeriesSet, Session, SessionError,
+    ClusterSnapshot, InfraFilter, InfraReader, IssuedKey, KeyId, KeyName, KeyScopes, Membership,
+    Memberships, MetricDescriptor, MetricKind, MetricQuery, MetricReader, NoPhotos, Node, OrgRole,
+    PlacementName, Pod, PodPhase, ProjectId, ReadGrant, Resource, SeriesSet, Session, SessionError,
     SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError, Window,
     WorkloadKind, WorkloadSummary,
 };
@@ -216,6 +216,17 @@ impl ClusterReader for Store {
             return Ok(ClusterSnapshot::default());
         }
         Ok(reported())
+    }
+}
+
+impl InfraReader for Store {
+    async fn resources(
+        &self,
+        _org: TenantId,
+        _figures: Window,
+        _filter: &InfraFilter,
+    ) -> Result<Vec<Resource>, StoreError> {
+        Ok(Vec::new())
     }
 }
 

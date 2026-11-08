@@ -1,8 +1,9 @@
 use ferristrace_domain::{
     AckKey, AgentTokens, AlertMailer, Clock, ClusterReader, CulpritReader, DeployFeed,
-    ESCALATE_AFTER_SECS, IssueReader, LinkKey, LlmReader, LogReader, LogSink, MetricReader,
-    MetricSink, Photos, PlacementReader, QuotaPolicy, ReleaseReader, SpanPages, SpanReader,
-    SpanSink, StatusMailer, TenantDirectory, UsageMeter, UsageReader, UserTokens, WebhookSender,
+    ESCALATE_AFTER_SECS, InfraReader, IssueReader, LinkKey, LlmReader, LogReader, LogSink,
+    MetricReader, MetricSink, Photos, PlacementReader, QuotaPolicy, ReleaseReader, SpanPages,
+    SpanReader, SpanSink, StatusMailer, TenantDirectory, UsageMeter, UsageReader, UserTokens,
+    WebhookSender,
 };
 
 use crate::registry::UnitOfWork;
@@ -15,7 +16,7 @@ pub trait Stack: Send + Sync + 'static {
     type SpanStore: SpanReader + SpanPages + PlacementReader + CulpritReader + Send + Sync + 'static;
     type IssueStore: IssueReader + ReleaseReader + LlmReader + DeployFeed + Send + Sync + 'static;
     type LogStore: LogReader + CulpritReader + Send + Sync + 'static;
-    type MetricStore: MetricReader + ClusterReader + Send + Sync + 'static;
+    type MetricStore: MetricReader + ClusterReader + InfraReader + Send + Sync + 'static;
     type Meter: UsageMeter + UsageReader + Send + Sync + 'static;
     type Users: UserTokens + Send + Sync + 'static;
     type Agents: AgentTokens + Send + Sync + 'static;
