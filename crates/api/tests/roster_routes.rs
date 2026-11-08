@@ -10,8 +10,10 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::organisation::{Holder, Joined};
 use ferristrace_domain::{
-    AccountId, Email, Member, Membership, Memberships, NoPhotos, OrgRole, Roll, Session,
-    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, WhoamiError,
+    AccountId, Email, InboxItem, InboxItemDraft, InboxItemId, InboxItemKind, InboxStore, Member,
+    Membership, Memberships, NoPhotos, NotificationPreferences, NotificationSettings, OrgRole,
+    Roll, Session, SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
+    WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -180,6 +182,84 @@ impl Roll for Kept {
     }
 }
 
+#[derive(Debug, Default)]
+struct Notices {
+    raised: Mutex<Vec<InboxItemDraft>>,
+}
+
+impl Notices {
+    fn fresh() -> Arc<Self> {
+        Arc::default()
+    }
+
+    fn raised(&self) -> Vec<InboxItemDraft> {
+        self.raised.lock().expect("the lock").clone()
+    }
+}
+
+impl InboxStore for Notices {
+    async fn list(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _limit: u32,
+    ) -> Result<Vec<InboxItem>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn create(&self, draft: &InboxItemDraft, at_ms: u64) -> Result<InboxItem, StoreError> {
+        self.raised.lock().expect("the lock").push(draft.clone());
+        Ok(InboxItem {
+            id: InboxItemId::fresh(),
+            account: draft.account,
+            org: draft.org,
+            kind: draft.kind,
+            title: draft.title.clone(),
+            body: draft.body.clone(),
+            link: draft.link.clone(),
+            created_ms: at_ms,
+            read_ms: None,
+        })
+    }
+
+    async fn mark_read(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _id: InboxItemId,
+        _at_ms: u64,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn mark_all_read(
+        &self,
+        _account: AccountId,
+        _org: TenantId,
+        _at_ms: u64,
+    ) -> Result<u64, StoreError> {
+        Ok(0)
+    }
+
+    async fn prune(&self, _older_than_ms: u64) -> Result<u64, StoreError> {
+        Ok(0)
+    }
+}
+
+impl NotificationSettings for Notices {
+    async fn of(&self, _account: AccountId) -> Result<Option<NotificationPreferences>, StoreError> {
+        Ok(None)
+    }
+
+    async fn set(
+        &self,
+        _account: AccountId,
+        _preferences: &NotificationPreferences,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
 fn org(seed: u128) -> String {
     Uuid::from_u128(seed).to_string()
 }
@@ -200,6 +280,7 @@ fn asking(method: Method, uri: &str, body: Option<&str>) -> Request<Body> {
 struct Fakes {
     role: OrgRole,
     kept: Arc<Kept>,
+    notices: Arc<Notices>,
 }
 
 impl Untransacted for Fakes {}
@@ -236,6 +317,14 @@ impl RepoFor<domain::Roster> for Fakes {
     }
 }
 
+impl RepoFor<domain::Inbox> for Fakes {
+    type Repo = Arc<Notices>;
+
+    fn build(&self, (): &()) -> Self::Repo {
+        Arc::clone(&self.notices)
+    }
+}
+
 struct TestStack;
 
 impl Stack for TestStack {
@@ -256,10 +345,11 @@ impl Stack for TestStack {
     type Webhooks = Inert;
 }
 
-fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
+fn state(role: OrgRole, kept: &Arc<Kept>, notices: &Arc<Notices>) -> AppState<TestStack> {
     let fakes = Fakes {
         role,
         kept: Arc::clone(kept),
+        notices: Arc::clone(notices),
     };
     let adapters = Adapters {
         clock: Inert::default(),
@@ -276,8 +366,13 @@ fn state(role: OrgRole, kept: &Arc<Kept>) -> AppState<TestStack> {
     AppState::new(Arc::new(Ferristrace::new(fakes, adapters)))
 }
 
-async fn served(role: OrgRole, kept: &Arc<Kept>, request: Request<Body>) -> (StatusCode, String) {
-    let response = roster_router(state(role, kept))
+async fn served(
+    role: OrgRole,
+    kept: &Arc<Kept>,
+    notices: &Arc<Notices>,
+    request: Request<Body>,
+) -> (StatusCode, String) {
+    let response = roster_router(state(role, kept, notices))
         .oneshot(request)
         .await
         .expect("a response");
@@ -302,6 +397,7 @@ async fn a_member_reads_the_whole_roll_of_its_own_organisation() {
     let (status, body) = served(
         OrgRole::Member,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::GET,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -332,6 +428,7 @@ async fn the_members_of_an_organisation_this_session_does_not_belong_to_are_not_
     let (status, _) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::GET,
             &format!("/api/orgs/{}/members", org(THEIRS)),
@@ -354,6 +451,7 @@ async fn an_administrator_changes_a_role_and_is_answered_with_the_member() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
@@ -374,6 +472,7 @@ async fn a_member_is_told_plainly_that_changing_a_role_is_not_its_to_do() {
     let (status, body) = served(
         OrgRole::Member,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
@@ -394,6 +493,7 @@ async fn an_administrator_is_refused_the_owner_role_in_either_direction() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
@@ -414,6 +514,7 @@ async fn the_last_owner_stays_an_owner_however_it_asks() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
@@ -437,6 +538,7 @@ async fn an_owner_steps_down_from_its_own_row_once_another_owner_stays() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::PATCH,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
@@ -459,6 +561,7 @@ async fn an_administrator_walks_out_of_an_organisation_it_does_not_own() {
     let (status, _) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(ME)),
@@ -479,6 +582,7 @@ async fn an_administrator_shows_a_member_the_door_and_the_answer_carries_no_body
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
@@ -499,6 +603,7 @@ async fn an_account_this_organisation_never_held_is_no_member_to_remove() {
     let (status, _) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::DELETE,
             &format!("/api/orgs/{}/members/{}", org(MINE), org(404)),
@@ -518,6 +623,7 @@ async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
     let (status, body) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -541,6 +647,7 @@ async fn an_address_that_already_has_an_account_joins_the_account_it_holds() {
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -563,6 +670,7 @@ async fn an_address_already_on_the_roll_is_a_conflict_rather_than_a_second_invit
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -582,6 +690,7 @@ async fn an_administrator_cannot_invite_an_owner_and_no_account_is_made_for_one(
     let (status, _) = served(
         OrgRole::Admin,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -601,6 +710,7 @@ async fn something_that_is_not_an_address_is_refused_before_anybody_is_admitted(
     let (status, body) = served(
         OrgRole::Owner,
         &kept,
+        &Notices::fresh(),
         asking(
             Method::POST,
             &format!("/api/orgs/{}/members", org(MINE)),
@@ -612,4 +722,60 @@ async fn something_that_is_not_an_address_is_refused_before_anybody_is_admitted(
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body.contains("address"), "{body}");
     assert_eq!(kept.created(), 0);
+}
+
+#[tokio::test]
+async fn inviting_a_member_notifies_the_other_admins_but_not_the_actor() {
+    let kept = Kept::of(vec![
+        a_member(ME, OrgRole::Admin),
+        a_member(THEIRS, OrgRole::Owner),
+    ]);
+    let notices = Notices::fresh();
+
+    let (status, _) = served(
+        OrgRole::Admin,
+        &kept,
+        &notices,
+        asking(
+            Method::POST,
+            &format!("/api/orgs/{}/members", org(MINE)),
+            Some(r#"{"email":"new@example.com","role":"member"}"#),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    let raised = notices.raised();
+    assert_eq!(raised.len(), 1);
+    assert_eq!(raised[0].account, an_account(THEIRS));
+    assert_eq!(raised[0].org, TenantId::new(Uuid::from_u128(MINE)));
+    assert_eq!(raised[0].kind, InboxItemKind::Membership);
+}
+
+#[tokio::test]
+async fn removing_a_member_notifies_the_other_admins_but_not_the_actor() {
+    let kept = Kept::of(vec![
+        a_member(ME, OrgRole::Admin),
+        a_member(SOMEBODY, OrgRole::Member),
+        a_member(THEIRS, OrgRole::Owner),
+    ]);
+    let notices = Notices::fresh();
+
+    let (status, _) = served(
+        OrgRole::Admin,
+        &kept,
+        &notices,
+        asking(
+            Method::DELETE,
+            &format!("/api/orgs/{}/members/{}", org(MINE), org(SOMEBODY)),
+            None,
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let raised = notices.raised();
+    assert_eq!(raised.len(), 1);
+    assert_eq!(raised[0].account, an_account(THEIRS));
+    assert_eq!(raised[0].kind, InboxItemKind::Membership);
 }

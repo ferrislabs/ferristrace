@@ -454,7 +454,7 @@ async fn the_last_owner_cannot_leave_either() {
 async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
     let held = Held::awaiting();
 
-    let Invitation { member, created } = roster(OrgRole::Admin, &held)
+    let (Invitation { member, created }, _notify) = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
         .await
         .expect("an administrator may invite");
@@ -471,7 +471,7 @@ async fn an_unknown_address_is_admitted_with_an_account_of_its_own() {
 async fn an_address_that_already_has_an_account_joins_without_a_new_account() {
     let held = Held::standing(an_account(SOMEBODY));
 
-    let Invitation { member, created } = roster(OrgRole::Owner, &held)
+    let (Invitation { member, created }, _notify) = roster(OrgRole::Owner, &held)
         .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
         .await
         .expect("an owner may invite");
@@ -532,7 +532,7 @@ async fn inviting_into_an_organisation_this_session_is_no_part_of_says_no_such_t
 async fn inviting_an_address_with_an_account_adds_a_membership_and_creates_nothing() {
     let held = Held::standing(an_account(SOMEBODY));
 
-    let Invitation { member, created } = roster(OrgRole::Owner, &held)
+    let (Invitation { member, created }, _notify) = roster(OrgRole::Owner, &held)
         .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
         .await
         .expect("an owner may invite");
@@ -554,7 +554,7 @@ async fn inviting_an_address_with_an_account_adds_a_membership_and_creates_nothi
 async fn inviting_a_new_address_creates_one_account() {
     let held = Held::awaiting();
 
-    let Invitation { member, created } = roster(OrgRole::Admin, &held)
+    let (Invitation { member, created }, _notify) = roster(OrgRole::Admin, &held)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
         .await
         .expect("an administrator may invite");
@@ -638,11 +638,86 @@ async fn removing_a_member_records_the_role_it_held() {
 }
 
 #[tokio::test]
+async fn removing_a_member_notifies_the_other_admins_but_not_the_actor_or_the_member_removed() {
+    let held = Held::of(vec![
+        a_member(ME, OrgRole::Admin),
+        a_member(SOMEBODY, OrgRole::Member),
+        a_member(THEIRS, OrgRole::Owner),
+    ]);
+
+    let notify = roster(OrgRole::Admin, &held)
+        .remove(&token(), an_org(MINE), an_account(SOMEBODY))
+        .await
+        .expect("an administrator may remove a member");
+
+    assert_eq!(notify, vec![an_account(THEIRS)]);
+}
+
+#[tokio::test]
+async fn removing_an_admin_does_not_notify_the_plain_members_left_behind() {
+    let held = Held::of(vec![
+        a_member(ME, OrgRole::Owner),
+        a_member(SOMEBODY, OrgRole::Admin),
+        a_member(THEIRS, OrgRole::Member),
+    ]);
+
+    let notify = roster(OrgRole::Owner, &held)
+        .remove(&token(), an_org(MINE), an_account(SOMEBODY))
+        .await
+        .expect("an owner may remove an admin");
+
+    assert!(notify.is_empty(), "no other admin is left to tell");
+}
+
+#[tokio::test]
+async fn inviting_a_member_notifies_the_other_admins_but_not_the_actor_or_the_new_member() {
+    let held = Held::of(vec![
+        a_member(ME, OrgRole::Admin),
+        a_member(THEIRS, OrgRole::Owner),
+    ]);
+
+    let (_invitation, notify) = roster(OrgRole::Admin, &held)
+        .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
+        .await
+        .expect("an administrator may invite");
+
+    assert_eq!(notify, vec![an_account(THEIRS)]);
+}
+
+#[tokio::test]
+async fn inviting_an_account_already_among_the_admins_does_not_notify_it_about_its_own_invitation()
+{
+    let held = Held {
+        holder: Some(Holder {
+            account: an_account(SOMEBODY),
+            name: None,
+            photo: None,
+        }),
+        ..Held::of(vec![
+            a_member(ME, OrgRole::Owner),
+            a_member(SOMEBODY, OrgRole::Admin),
+            a_member(THEIRS, OrgRole::Admin),
+        ])
+    };
+
+    let (_invitation, notify) = roster(OrgRole::Owner, &held)
+        .invite(&token(), an_org(MINE), &an_address("known"), OrgRole::Admin)
+        .await
+        .expect("an owner may invite");
+
+    assert_eq!(
+        notify,
+        vec![an_account(THEIRS)],
+        "not the acting owner, not the admin being invited"
+    );
+}
+
+#[tokio::test]
 async fn inviting_records_the_address_and_the_role() {
     let held = Held::awaiting();
     let notebook = Notebook::default();
 
-    let invitation = noting(OrgRole::Admin, &held, &notebook)
+    let (invitation, _notify) = noting(OrgRole::Admin, &held, &notebook)
         .invite(&token(), an_org(MINE), &an_address("new"), OrgRole::Member)
         .await
         .expect("an administrator may invite");
