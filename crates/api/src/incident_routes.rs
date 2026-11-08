@@ -10,9 +10,10 @@ use ferristrace_application::Stack;
 use ferristrace_application::registry::IncidentRepos;
 use ferristrace_domain::{
     AccountId, AgentId, AlertRef, Attachment, AttachmentKind, AttachmentLabel, Author, BadIncident,
-    Briefed, Change, Chronicle, CommentBody, Dossier, IncidentDraft, IncidentError, IncidentFilter,
-    IncidentId, IncidentPatch, IncidentScope, IncidentSeverity, IncidentStatus, IncidentTitle,
-    Person, ProjectId, Reference, RuleId, ScheduleId, TenantId, TimelineEntry,
+    Briefed, Change, Chronicle, CommentBody, Dossier, IncidentContext, IncidentDraft,
+    IncidentError, IncidentFilter, IncidentId, IncidentPatch, IncidentScope, IncidentSeverity,
+    IncidentStatus, IncidentTitle, Person, ProjectId, Reference, RuleId, ScheduleId, TenantId,
+    TimelineEntry,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -31,6 +32,10 @@ where
         .route(
             "/api/orgs/{org}/incidents/{id}",
             get(one::<S>).patch(amend::<S>),
+        )
+        .route(
+            "/api/orgs/{org}/incidents/{id}/context",
+            get(surroundings::<S>),
         )
         .route(
             "/api/orgs/{org}/incidents/{id}/timeline",
@@ -640,4 +645,104 @@ impl IntoResponse for IncidentRefused {
         }
         (status, message).into_response()
     }
+}
+
+const NANOS_PER_MILLI: u64 = 1_000_000;
+
+#[derive(Debug, Serialize)]
+struct SurroundingsBody {
+    services: Vec<String>,
+    from_ms: u64,
+    to_ms: u64,
+    deploys: Vec<Value>,
+    issues: Vec<Value>,
+    resources: Vec<Value>,
+    traces: Vec<Value>,
+    left_out: Value,
+}
+
+impl From<&IncidentContext> for SurroundingsBody {
+    fn from(context: &IncidentContext) -> Self {
+        Self {
+            services: context.services.iter().map(ToString::to_string).collect(),
+            from_ms: context.from_ms,
+            to_ms: context.to_ms,
+            deploys: context
+                .deploys
+                .iter()
+                .map(|deploy| {
+                    json!({
+                        "service": deploy.service,
+                        "version": deploy.version,
+                        "environment": deploy.environment,
+                        "at_ms": deploy.at_ms(),
+                    })
+                })
+                .collect(),
+            issues: context
+                .issues
+                .iter()
+                .map(|issue| {
+                    json!({
+                        "project": issue.project.as_uuid(),
+                        "print": issue.print.to_string(),
+                        "title": issue.exception_type,
+                        "message": issue.message,
+                        "service": issue.service,
+                        "first_seen_ms": issue.first_seen_unix_nanos / NANOS_PER_MILLI,
+                        "occurrences": issue.count,
+                    })
+                })
+                .collect(),
+            resources: context
+                .resources
+                .iter()
+                .map(|resource| {
+                    json!({
+                        "kind": resource.kind.name(),
+                        "id": resource.id,
+                        "name": resource.name,
+                        "silent": resource.silent,
+                        "cpu_percent": resource.cpu_percent.filter(|value| value.is_finite()),
+                        "memory_bytes": resource.memory_bytes,
+                    })
+                })
+                .collect(),
+            traces: context
+                .traces
+                .iter()
+                .map(|trace| {
+                    json!({
+                        "trace_id": hex::encode(trace.trace_id.as_bytes()),
+                        "service": trace.root_service,
+                        "operation": trace.root_name,
+                        "duration_ms": trace.duration_nanos / NANOS_PER_MILLI,
+                        "at_ms": trace.started_unix_nanos / NANOS_PER_MILLI,
+                    })
+                })
+                .collect(),
+            left_out: json!({
+                "deploys": context.left_out.deploys,
+                "issues": context.left_out.issues,
+                "resources": context.left_out.resources,
+                "traces": context.left_out.traces,
+            }),
+        }
+    }
+}
+
+async fn surroundings<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> Result<Json<SurroundingsBody>, IncidentRefused>
+where
+    S::Repos: IncidentRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let found = state
+        .app
+        .incident_context(&who, TenantId::new(org), IncidentId::new(id))
+        .await?;
+    Ok(Json(SurroundingsBody::from(&found)))
 }

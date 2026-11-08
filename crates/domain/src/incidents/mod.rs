@@ -1,3 +1,6 @@
+mod context;
+#[cfg(test)]
+mod context_tests;
 mod desk;
 #[cfg(test)]
 mod desk_tests;
@@ -9,6 +12,10 @@ mod value_objects;
 #[cfg(test)]
 mod value_objects_tests;
 
+pub use context::{
+    FIGURES_MS, IncidentContext, LOOKBACK_MS, LeftOut, MAX_DEPLOYS, MAX_ISSUES, MAX_RESOURCES,
+    MAX_TRACES, Surroundings, context_span_ms,
+};
 pub use desk::{DEFAULT_SEVERITY, IncidentDesk};
 pub use entities::{
     AlertRef, Attachment, Author, Briefed, Change, Chronicle, Dossier, FORMER_MEMBER, Incident,
