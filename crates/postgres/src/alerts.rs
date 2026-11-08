@@ -56,6 +56,7 @@ fn read_rule(row: &PgRow) -> Result<Rule, StoreError> {
         enabled: row.get("enabled"),
         definition: decode(&definition).ok_or_else(|| refused("definition"))?,
         created_ms: unsigned(row.get::<i64, _>("created_at") / NANOS_PER_MILLI),
+        silenced_until_ms: row.get::<Option<i64>, _>("silenced_until_ms").map(unsigned),
     })
 }
 
@@ -79,7 +80,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
     async fn list(&self, org: TenantId) -> Result<Vec<Rule>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
-            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at FROM alerts WHERE org_id = $1 ORDER BY created_at, id"
+            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at, silenced_until_ms FROM alerts WHERE org_id = $1 ORDER BY created_at, id"
         )
         .bind(org.as_uuid())
         .fetch_all(&mut **tx)
@@ -91,7 +92,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
     async fn get(&self, org: TenantId, id: RuleId) -> Result<Option<Rule>, StoreError> {
         let mut tx = self.tx.lock().await;
         let row = sqlx::query(
-            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at FROM alerts WHERE org_id = $1 AND id = $2"
+            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at, silenced_until_ms FROM alerts WHERE org_id = $1 AND id = $2"
         )
         .bind(org.as_uuid())
         .bind(id.as_uuid())
@@ -113,7 +114,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
              (id, org_id, name, project_id, enabled, definition, created_by, created_at, updated_at) \
              VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $8) \
              ON CONFLICT (org_id, name) DO NOTHING \
-             RETURNING id, org_id, name, project_id, enabled, definition::text AS definition, created_at"
+             RETURNING id, org_id, name, project_id, enabled, definition::text AS definition, created_at, silenced_until_ms"
         )
         .bind(Uuid::new_v4())
         .bind(org.as_uuid())
@@ -133,7 +134,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
         let mut tx = self.tx.lock().await;
         let done = sqlx::query(
             "UPDATE alerts SET name = $3, project_id = $4, enabled = $5, \
-             definition = $6::jsonb, updated_at = $7 \
+             definition = $6::jsonb, updated_at = $7, silenced_until_ms = $8 \
              WHERE org_id = $1 AND id = $2",
         )
         .bind(rule.org.as_uuid())
@@ -143,6 +144,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
         .bind(rule.enabled)
         .bind(encode(&rule.definition))
         .bind(to_nanos(self.clock.now()))
+        .bind(rule.silenced_until_ms.map(signed))
         .execute(&mut **tx)
         .await
         .map_err(unreachable("update an alert rule"))?;
@@ -163,7 +165,7 @@ impl<C: Clock + Send + Sync> AlertRules for PostgresAlertRules<C> {
     async fn enabled(&self) -> Result<Vec<Rule>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
-            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at FROM alerts WHERE enabled ORDER BY org_id, created_at, id"
+            "SELECT id, org_id, name, project_id, enabled, definition::text AS definition, created_at, silenced_until_ms FROM alerts WHERE enabled ORDER BY org_id, created_at, id"
         )
         .fetch_all(&mut **tx)
         .await

@@ -54,7 +54,7 @@ export type RuleDefinition = {
   page: { schedule: string } | null
 }
 
-export type Rule = RuleDefinition & { id: string; state: RuleState }
+export type Rule = RuleDefinition & { id: string; state: RuleState; silenced_until_ms: number | null }
 
 export type AlertContext = {
   pods: { name: string; node: string | null; count: number }[]
@@ -198,6 +198,16 @@ export const useToggleRule = () =>
   useRefreshing<{ id: string; enabled: boolean }, Rule>(key, async (org, asked) =>
     json(await patch(`/api/orgs/${org}/alerts/${asked.id}`, { enabled: asked.enabled })),
   )
+
+export const SILENCE_MAX_DAYS = 30
+
+export const useSilenceRule = () =>
+  useRefreshing<{ id: string; until_ms: number }, Rule>(key, async (org, asked) =>
+    json(await post(`/api/orgs/${org}/alerts/${asked.id}/silence`, { until_ms: asked.until_ms })),
+  )
+
+export const useUnsilenceRule = () =>
+  useRefreshing<string, Rule>(key, async (org, id) => json(await del(`/api/orgs/${org}/alerts/${id}/silence`)))
 
 export const useDeleteRule = () =>
   useRefreshing<string, void>(key, async (org, id) => {

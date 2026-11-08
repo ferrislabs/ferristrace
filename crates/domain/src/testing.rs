@@ -240,6 +240,7 @@ impl crate::alerts::AlertRules for AlertLedger {
                 enabled: draft.enabled,
                 definition: draft.definition.clone(),
                 created_ms: 0,
+                silenced_until_ms: None,
             };
             held.rules.push(rule.clone());
             Some(rule)

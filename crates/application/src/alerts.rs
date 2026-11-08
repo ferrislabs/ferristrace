@@ -426,6 +426,49 @@ where
         .await
     }
 
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
+    pub async fn silence_alert(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        id: RuleId,
+        until_ms: u64,
+    ) -> Result<Watched, AlertError> {
+        AlertBook::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            projects,
+            alert_rules,
+            alert_states,
+            alert_events,
+            alert_channels,
+            schedules,
+            audit,
+        )
+        .silence(token, org, id, until_ms, self.clock.now())
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, unavailable = AlertError::StoreUnreachable)]
+    pub async fn unsilence_alert(
+        &self,
+        token: &SessionToken,
+        org: TenantId,
+        id: RuleId,
+    ) -> Result<Watched, AlertError> {
+        AlertBook::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            projects,
+            alert_rules,
+            alert_states,
+            alert_events,
+            alert_channels,
+            schedules,
+            audit,
+        )
+        .unsilence(token, org, id)
+        .await
+    }
+
     #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, alert_events, alert_channels, schedules, audit, model_prices, unavailable = AlertError::StoreUnreachable)]
     pub async fn preview_alert(
         &self,

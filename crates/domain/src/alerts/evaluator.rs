@@ -116,6 +116,52 @@ where
             .filter(|culprits| !culprits.is_empty())
     }
 
+    async fn dispatch(
+        &self,
+        rule: &Rule,
+        transition: &Transition,
+        event: &AlertEvent,
+        silenced: bool,
+        now_ms: u64,
+    ) -> Result<(), AlertError> {
+        let definition = &rule.definition;
+        if !silenced
+            && let (AlertStatus::Firing, Some(schedule)) = (transition.to, definition.page())
+        {
+            self.paging
+                .raise(
+                    rule.org,
+                    schedule,
+                    PageSource::Alert {
+                        rule: rule.id,
+                        event: event.id,
+                    },
+                    rule.name.as_str(),
+                    now_ms,
+                )
+                .await?;
+        }
+        if !transition.notifies() || silenced {
+            return Ok(());
+        }
+        for channel in definition.channels() {
+            self.outbox
+                .enqueue(&Notification {
+                    id: NotificationId::fresh(),
+                    org: rule.org,
+                    rule: rule.id,
+                    event: event.id,
+                    channel: *channel,
+                    attempt: 0,
+                    next_at_ms: now_ms,
+                    status: DeliveryStatus::Pending,
+                    last_error: None,
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn evaluate(&self, rule: &Rule, now_ms: u64) -> Result<Option<usize>, AlertError> {
         let definition = &rule.definition;
         let window = window_ending(now_ms, definition.window_secs())?;
@@ -127,6 +173,7 @@ where
             return Ok(None);
         };
         let previous = self.states.of(rule.id).await?;
+        let silenced = rule.silenced(now_ms);
         let mut moved = 0;
         let (mut firing, mut left_firing) = (false, false);
         for observation in alongside(observed, &previous) {
@@ -173,38 +220,8 @@ where
             };
             self.events.record(&event).await?;
             self.followers.tell(&event).await?;
-            if let (AlertStatus::Firing, Some(schedule)) = (transition.to, definition.page()) {
-                self.paging
-                    .raise(
-                        rule.org,
-                        schedule,
-                        PageSource::Alert {
-                            rule: rule.id,
-                            event: event.id,
-                        },
-                        rule.name.as_str(),
-                        now_ms,
-                    )
-                    .await?;
-            }
-            if !transition.notifies() {
-                continue;
-            }
-            for channel in definition.channels() {
-                self.outbox
-                    .enqueue(&Notification {
-                        id: NotificationId::fresh(),
-                        org: rule.org,
-                        rule: rule.id,
-                        event: event.id,
-                        channel: *channel,
-                        attempt: 0,
-                        next_at_ms: now_ms,
-                        status: DeliveryStatus::Pending,
-                        last_error: None,
-                    })
-                    .await?;
-            }
+            self.dispatch(rule, &transition, &event, silenced, now_ms)
+                .await?;
         }
         if left_firing && !firing {
             self.paging

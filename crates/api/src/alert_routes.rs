@@ -35,6 +35,10 @@ where
             get(one::<S>).patch(update::<S>).delete(delete::<S>),
         )
         .route("/api/orgs/{org}/alerts/{id}/test", post(test::<S>))
+        .route(
+            "/api/orgs/{org}/alerts/{id}/silence",
+            post(silence::<S>).delete(unsilence::<S>),
+        )
         .route("/api/orgs/{org}/alerts/{id}/history", get(history::<S>))
         .route(
             "/api/orgs/{org}/channels",
@@ -459,6 +463,7 @@ pub struct RuleView {
     name: String,
     project: Option<Uuid>,
     enabled: bool,
+    silenced_until_ms: Option<u64>,
     signal: SignalBody,
     condition: ConditionBody,
     window_s: u64,
@@ -490,6 +495,7 @@ impl From<Watched> for RuleView {
             name: rule.name.as_str().to_owned(),
             project: rule.project.map(ProjectId::as_uuid),
             enabled: rule.enabled,
+            silenced_until_ms: rule.silenced_until_ms,
             signal: SignalBody::of(definition.signal()),
             condition: ConditionBody {
                 op: definition.condition().op().as_str().to_owned(),
@@ -808,6 +814,44 @@ where
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SilenceAsked {
+    until_ms: u64,
+}
+
+async fn silence<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    Json(asked): Json<SilenceAsked>,
+) -> Result<Json<RuleView>, AlertRefused>
+where
+    S::Repos: AlertRepos,
+{
+    let token = carried(&state, &headers).await?;
+    let watched = state
+        .app
+        .silence_alert(&token, TenantId::new(org), RuleId::new(id), asked.until_ms)
+        .await?;
+    Ok(Json(watched.into()))
+}
+
+async fn unsilence<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path((org, id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> Result<Json<RuleView>, AlertRefused>
+where
+    S::Repos: AlertRepos,
+{
+    let token = carried(&state, &headers).await?;
+    let watched = state
+        .app
+        .unsilence_alert(&token, TenantId::new(org), RuleId::new(id))
+        .await?;
+    Ok(Json(watched.into()))
+}
+
 async fn channels<S: Stack>(
     State(state): State<AppState<S>>,
     Path(org): Path<Uuid>,
@@ -927,6 +971,7 @@ fn status_of(error: AlertError) -> StatusCode {
         | AlertError::PrivateTarget
         | AlertError::Rule(_)
         | AlertError::Channel(_)
+        | AlertError::Silence(_)
         | AlertError::Query(_) => StatusCode::UNPROCESSABLE_ENTITY,
         AlertError::SignalUnavailable | AlertError::StoreUnreachable => {
             StatusCode::SERVICE_UNAVAILABLE

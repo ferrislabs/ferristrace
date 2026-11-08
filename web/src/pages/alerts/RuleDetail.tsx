@@ -1,11 +1,14 @@
-import { Pencil, Siren, Trash2 } from 'lucide-react'
+import { BellOff, Pencil, Siren, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { because } from '@/auth/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
-import { conditionOf, duration, scopeOf, signalLink, unitOf, useAlertHistory, useChannels, useDeleteRule, withUnit, type AlertStatus, type Rule } from '@/data/alerts'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Segmented } from '@/components/ui/segmented'
+import { conditionOf, duration, scopeOf, signalLink, unitOf, useAlertHistory, useChannels, useDeleteRule, useSilenceRule, useUnsilenceRule, withUnit, SILENCE_MAX_DAYS, type AlertStatus, type Rule } from '@/data/alerts'
 import { useMetricCatalogue } from '@/data/metrics'
 import { useDeclareIncident } from '@/data/incidents'
 import { useState } from 'react'
@@ -15,6 +18,74 @@ import { labelOf } from '@/components/ft/MetricChart'
 import { AlertContext, StateBadge } from './bits'
 
 const SHOWN = 100
+
+const PRESETS = [
+  { value: '1h', label: '1 h', ms: 3_600_000 },
+  { value: '4h', label: '4 h', ms: 4 * 3_600_000 },
+  { value: '24h', label: '24 h', ms: 24 * 3_600_000 },
+  { value: 'custom', label: 'Custom', ms: 0 },
+] as const
+
+function SilenceControl({ rule }: { rule: Rule }) {
+  const silence = useSilenceRule()
+  const unsilence = useUnsilenceRule()
+  const [open, setOpen] = useState(false)
+  const [preset, setPreset] = useState<(typeof PRESETS)[number]['value']>('1h')
+  const [custom, setCustom] = useState('')
+  const active = rule.silenced_until_ms !== null && rule.silenced_until_ms > Date.now()
+
+  if (active) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-caption text-warning-text">
+        <BellOff className="size-3.5 shrink-0" aria-hidden />
+        Silenced until {stamp(rule.silenced_until_ms as number)}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 px-1.5 text-inherit"
+          disabled={unsilence.isPending}
+          onClick={() =>
+            unsilence.mutate(rule.id, {
+              onSuccess: () => toast.success('Silence lifted'),
+              onError: (error) => toast.error(because(error, 'The silence was not lifted')),
+            })
+          }
+        >
+          Lift
+        </Button>
+      </span>
+    )
+  }
+
+  const untilMs = preset === 'custom' ? Date.parse(custom) : Date.now() + PRESETS.find((p) => p.value === preset)!.ms
+  const ready = Number.isFinite(untilMs) && untilMs > Date.now()
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="ghost"><BellOff />Silence</Button>
+      </PopoverTrigger>
+      <PopoverContent className="flex w-[260px] flex-col gap-2.5 p-3">
+        <Segmented label="Duration" value={preset} onChange={setPreset} options={PRESETS.map((p) => ({ value: p.value, label: p.label }))} />
+        {preset === 'custom' ? <Input type="datetime-local" value={custom} onChange={(e) => setCustom(e.target.value)} aria-label="Silenced until" /> : null}
+        <span className="text-caption text-muted-foreground">Up to {SILENCE_MAX_DAYS} days. No notification or page fires until then.</span>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!ready || silence.isPending}
+          onClick={() =>
+            silence.mutate({ id: rule.id, until_ms: untilMs }, {
+              onSuccess: () => { setOpen(false); toast.success('Rule silenced') },
+              onError: (error) => toast.error(because(error, 'The rule was not silenced')),
+            })
+          }
+        >
+          Silence
+        </Button>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export function RuleDetail({ rule, project, mayChange, onEdit, onClose }: { rule: Rule | null; project: string; mayChange: boolean; onEdit: () => void; onClose: () => void }) {
   const history = useAlertHistory(rule?.id ?? null)
@@ -43,6 +114,7 @@ export function RuleDetail({ rule, project, mayChange, onEdit, onClose }: { rule
               <Badge variant="outline">{rule.signal.kind}</Badge>
               <Badge variant={rule.severity === 'critical' ? 'destructive' : rule.severity === 'warning' ? 'warning' : 'neutral'}>{rule.severity}</Badge>
               {rule.enabled ? null : <Badge variant="outline">Disabled</Badge>}
+              {mayChange ? <SilenceControl rule={rule} /> : null}
               <Button asChild variant="ghost" size="sm" className="ml-auto"><Link to={link.to} search={link.search}>{link.label}</Link></Button>
             </div>
             {state.status === 'firing' ? (

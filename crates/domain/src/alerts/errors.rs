@@ -42,6 +42,14 @@ pub enum BadChannel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BadSilence {
+    #[error("a silence lifts at a moment still to come")]
+    InThePast,
+    #[error("a silence lasts at most {max_days} days")]
+    TooLong { max_days: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProbeError {
     #[error("a store could not be reached")]
     Unreachable,
@@ -101,6 +109,8 @@ pub enum AlertError {
     Rule(#[from] BadRule),
     #[error(transparent)]
     Channel(#[from] BadChannel),
+    #[error(transparent)]
+    Silence(#[from] BadSilence),
     #[error(transparent)]
     Query(#[from] BadMetricQuery),
     #[error("no reader holds that signal on this deployment")]
