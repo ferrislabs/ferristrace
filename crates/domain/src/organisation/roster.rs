@@ -66,16 +66,23 @@ where
         Ok(granted)
     }
 
+    /// Removes a member and returns which other admins/owners to notify of
+    /// it - never the acting admin, never the member just removed.
     pub async fn remove(
         &self,
         token: &SessionToken,
         org: TenantId,
         account: AccountId,
-    ) -> Result<(), RosterError> {
+    ) -> Result<Vec<AccountId>, RosterError> {
         let who = self.standing(token, org, OrgRole::Admin).await?;
-        let (held, owners) = self.standing_in(org, account).await?;
+        let roll = self.roll.of(org).await?;
+        let held = roll
+            .iter()
+            .find(|member| member.account == account)
+            .map(|member| member.role)
+            .ok_or(RosterError::NoSuchMember)?;
         owners_only(&who, org, [held])?;
-        keeps_an_owner(held, None, owners)?;
+        keeps_an_owner(held, None, owners_among(&roll))?;
         if !self.roll.remove(org, account).await? {
             return Err(RosterError::NoSuchMember);
         }
@@ -86,16 +93,19 @@ where
             account,
             Detail::default().with("role", held),
         )
-        .await
+        .await?;
+        Ok(admins_to_notify(&roll, [who.account, account]))
     }
 
+    /// Invites a member and returns which other admins/owners to notify of
+    /// it - never the inviting admin, never the member just invited.
     pub async fn invite(
         &self,
         token: &SessionToken,
         org: TenantId,
         email: &Email,
         role: OrgRole,
-    ) -> Result<Invitation, RosterError> {
+    ) -> Result<(Invitation, Vec<AccountId>), RosterError> {
         let who = self.standing(token, org, OrgRole::Admin).await?;
         owners_only(&who, org, [role])?;
         let (holder, created) = if let Some(holder) = self.roll.standing_of(email).await? {
@@ -124,17 +134,22 @@ where
                 .with("role", joined.role),
         )
         .await?;
-        Ok(Invitation {
-            member: Member {
-                account: holder.account,
-                email: email.clone(),
-                name: holder.name,
-                photo: holder.photo,
-                role: joined.role,
-                joined_at_unix_nanos: joined.joined_at_unix_nanos,
+        let after = self.roll.of(org).await?;
+        let notify = admins_to_notify(&after, [who.account, holder.account]);
+        Ok((
+            Invitation {
+                member: Member {
+                    account: holder.account,
+                    email: email.clone(),
+                    name: holder.name,
+                    photo: holder.photo,
+                    role: joined.role,
+                    joined_at_unix_nanos: joined.joined_at_unix_nanos,
+                },
+                created,
             },
-            created,
-        })
+            notify,
+        ))
     }
 
     async fn standing(
@@ -190,6 +205,18 @@ fn owners_among(roll: &[Member]) -> usize {
     roll.iter()
         .filter(|member| member.role == OrgRole::Owner)
         .count()
+}
+
+/// Every admin or owner on the roll, except the two accounts named - the
+/// accounts the caller already knows don't need telling: the one who acted,
+/// and the one the action was about.
+fn admins_to_notify(roll: &[Member], excluding: [AccountId; 2]) -> Vec<AccountId> {
+    roll.iter()
+        .filter(|member| {
+            member.role.at_least(OrgRole::Admin) && !excluding.contains(&member.account)
+        })
+        .map(|member| member.account)
+        .collect()
 }
 
 fn keeps_an_owner(

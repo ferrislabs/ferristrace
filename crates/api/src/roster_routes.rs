@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
 use ferristrace_application::Stack;
-use ferristrace_application::registry::RosterRepos;
+use ferristrace_application::registry::{InboxRepos, RosterRepos};
 use ferristrace_domain::{
     AccountId, Email, InvalidCredential, Member, OrgRole, RosterError, TenantId,
 };
@@ -86,7 +86,7 @@ pub struct Granting {
 
 pub fn roster_router<S: Stack>(state: AppState<S>) -> Router
 where
-    S::Repos: RosterRepos,
+    S::Repos: RosterRepos + InboxRepos,
 {
     Router::new()
         .route(
@@ -106,7 +106,7 @@ async fn members<S: Stack>(
     headers: HeaderMap,
 ) -> Result<Json<Members>, MemberRefused>
 where
-    S::Repos: RosterRepos,
+    S::Repos: RosterRepos + InboxRepos,
 {
     let token = carried(&state, &headers).await?;
     let roll = state.app.list_members(&token, TenantId::new(org)).await?;
@@ -122,7 +122,7 @@ async fn invite<S: Stack>(
     Json(asked): Json<Inviting>,
 ) -> Result<(StatusCode, Json<Welcomed>), MemberRefused>
 where
-    S::Repos: RosterRepos,
+    S::Repos: RosterRepos + InboxRepos,
 {
     let token = carried(&state, &headers).await?;
     let email = Email::try_from(asked.email.as_str())?;
@@ -153,7 +153,7 @@ async fn grant<S: Stack>(
     Json(asked): Json<Granting>,
 ) -> Result<Json<Listed>, MemberRefused>
 where
-    S::Repos: RosterRepos,
+    S::Repos: RosterRepos + InboxRepos,
 {
     let token = carried(&state, &headers).await?;
     let changed = state
@@ -175,7 +175,7 @@ async fn remove<S: Stack>(
     headers: HeaderMap,
 ) -> Result<StatusCode, MemberRefused>
 where
-    S::Repos: RosterRepos,
+    S::Repos: RosterRepos + InboxRepos,
 {
     let token = carried(&state, &headers).await?;
     state
