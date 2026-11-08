@@ -630,7 +630,7 @@ async fn spec_l2_1_an_error_rate_rule_goes_pending_then_firing_then_back_to_ok()
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
                 page: None,
-                mentions: Default::default(),
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },
@@ -748,7 +748,7 @@ async fn spec_l2_4_an_incident_declared_from_a_firing_alert_hears_of_its_recover
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
                 page: None,
-                mentions: Default::default(),
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },
@@ -1248,7 +1248,7 @@ async fn spec_l3_5_a_firing_rule_stores_the_culprits_on_its_event() {
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
                 page: None,
-                mentions: Default::default(),
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },
@@ -1479,7 +1479,7 @@ async fn spec_l4_4_a_cost_rule_fires_when_the_priced_calls_cross_ten_dollars_and
                 no_data: NoDataPolicy::Ok,
                 channels: Vec::new(),
                 page: None,
-                mentions: Default::default(),
+                mentions: ferristrace_domain::Mentions::default(),
             })
             .expect("a definition"),
         },

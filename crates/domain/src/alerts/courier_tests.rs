@@ -62,7 +62,7 @@ async fn a_firing(ledger: &AlertLedger, channels: &[ChannelId]) {
                 no_data: NoDataPolicy::Ok,
                 channels: channels.to_vec(),
                 page: None,
-                mentions: Default::default(),
+                mentions: crate::Mentions::default(),
             })
             .expect("a definition"),
         },

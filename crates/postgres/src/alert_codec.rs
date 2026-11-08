@@ -350,8 +350,8 @@ mod tests {
 
     use ferristrace_domain::{
         Aggregation, AlertSeverity, ChannelId, Comparison, Condition, Definition, DefinitionParts,
-        Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, MetricSignal, NoDataPolicy, ProjectId,
-        ScheduleId, Severity, Signal, TraceMeasure, TraceSignal,
+        Labels, LlmGroup, LlmMeasure, LlmSignal, LogSignal, Mentions, MetricSignal, NoDataPolicy,
+        ProjectId, ScheduleId, Severity, Signal, TraceMeasure, TraceSignal,
     };
     use uuid::Uuid;
 

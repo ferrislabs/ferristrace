@@ -356,7 +356,7 @@ mod tests {
             labels: Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
             at_ms: 1_700_000_000_000,
             context: None,
-            mentions: Default::default(),
+            mentions: ferristrace_domain::Mentions::default(),
         };
         let to = EmailList::try_from("ops@example.com, oncall@example.com").expect("addresses");
 
@@ -411,7 +411,7 @@ mod tests {
                 vec!["1.4.2".into()],
                 &Labels::none(),
             )),
-            mentions: Default::default(),
+            mentions: ferristrace_domain::Mentions::default(),
         };
 
         let text = alert_text(&dispatch, "https://app.example.com/alerts");

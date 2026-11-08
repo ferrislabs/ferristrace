@@ -421,7 +421,7 @@ impl crate::alerts::AlertOutbox for AlertLedger {
                         labels: event.labels.clone(),
                         at_ms: event.at_ms,
                         context: event.context.clone(),
-                        mentions: Default::default(),
+                        mentions: crate::Mentions::default(),
                     },
                     channel: channel.clone(),
                 });

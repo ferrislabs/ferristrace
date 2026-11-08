@@ -302,7 +302,7 @@ mod tests {
                 vec!["2.0.1".into()],
                 &Labels::new(BTreeMap::from([("queue".into(), "mail".into())])),
             )),
-            mentions: Default::default(),
+            mentions: ferristrace_domain::Mentions::default(),
         };
         let hooks = HttpWebhooks::new(WebhookSettings::default());
 
