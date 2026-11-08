@@ -179,7 +179,7 @@ export function useInfrastructure() {
       const params = new URLSearchParams()
       if (project) params.set('project', project)
       const body = await json<{ resources: InfraResource[] }>(await get(`/api/orgs/${active?.org}/infrastructure?${params.toString()}`))
-      return body.resources
+      return body.resources.map((resource) => ({ ...resource, services: resource.services ?? [] }))
     },
   })
   return { resources: found.data ?? [], pending: found.isPending, failed: found.error }
