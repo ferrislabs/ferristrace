@@ -14,6 +14,8 @@ pub enum BadIncident {
     TraceId,
     #[error("a logs or metric attachment carries a query of at most {max} bytes")]
     Reference { max: usize },
+    #[error("the insights window runs forward and spans at most {max} days")]
+    Window { max: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

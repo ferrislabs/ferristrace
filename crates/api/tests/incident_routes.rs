@@ -1543,3 +1543,91 @@ async fn spec_l13_5_a_read_key_bound_elsewhere_and_a_stranger_see_no_context() {
     assert_eq!(missing, StatusCode::NOT_FOUND);
     assert_eq!(stranger, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn spec_l13_14_the_insights_count_incidents_and_time_their_acknowledgement_and_resolution() {
+    let harness = Harness::new();
+    let one_incident = harness
+        .declared(json!({"title": "A", "severity": "sev1"}))
+        .await;
+    let other = harness
+        .declared(json!({"title": "B", "severity": "sev3"}))
+        .await;
+    harness
+        .member(
+            Method::PATCH,
+            &one(MINE, &one_incident),
+            Some(json!({"status": "identified"})),
+        )
+        .await;
+    harness
+        .member(
+            Method::PATCH,
+            &one(MINE, &one_incident),
+            Some(json!({"status": "resolved"})),
+        )
+        .await;
+    let window = format!(
+        "{}/insights?from_ms={}&to_ms={}",
+        incidents(MINE),
+        (NOW - 86_400) * 1_000,
+        (NOW + 60) * 1_000
+    );
+
+    let (status, body) = harness.member(Method::GET, &window, None).await;
+    let (backwards, _) = harness
+        .member(
+            Method::GET,
+            &format!("{}/insights?from_ms=5&to_ms=4", incidents(MINE)),
+            None,
+        )
+        .await;
+    let (too_long, _) = harness
+        .member(
+            Method::GET,
+            &format!(
+                "{}/insights?from_ms=0&to_ms=99999999999999",
+                incidents(MINE)
+            ),
+            None,
+        )
+        .await;
+    let (stranger, _) = harness
+        .member(
+            Method::GET,
+            &format!("{}/insights", incidents(THEIRS)),
+            None,
+        )
+        .await;
+    let (bound, bound_body) = harness
+        .served(
+            OrgRole::Member,
+            as_key(BOUND_KEY, Method::GET, &window, None),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["overall"]["incidents"], 2);
+    assert_eq!(body["overall"]["resolved"], 1);
+    assert_eq!(body["overall"]["open"], 1);
+    assert_eq!(body["overall"]["acknowledge"]["samples"], 1);
+    assert_eq!(body["overall"]["resolve"]["samples"], 1);
+    let severities: Vec<&str> = body["by_severity"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|group| group["severity"].as_str())
+        .collect();
+    assert_eq!(severities, vec!["sev1", "sev3"]);
+    assert_eq!(body["by_service"][0]["service"], Value::Null);
+    assert_eq!(body["per_day"].as_array().expect("days").len(), 2);
+    assert_eq!(backwards, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(too_long, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(stranger, StatusCode::NOT_FOUND);
+    assert_eq!(bound, StatusCode::OK);
+    assert_eq!(
+        bound_body["overall"]["incidents"], 0,
+        "a bound key sees its project only"
+    );
+    let _ = other;
+}

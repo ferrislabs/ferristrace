@@ -873,6 +873,33 @@ impl crate::incidents::IncidentTimeline for IncidentLedger {
                 .collect()
         }))
     }
+
+    async fn first_responses(
+        &self,
+        org: TenantId,
+        incidents: &[crate::incidents::IncidentId],
+    ) -> Result<std::collections::HashMap<crate::incidents::IncidentId, u64>, StoreError> {
+        use crate::incidents::Change;
+        Ok(self.with(|kept| {
+            let mut first = std::collections::HashMap::new();
+            for entry in kept.timeline.iter().filter(|entry| {
+                entry.org == org
+                    && incidents.contains(&entry.incident)
+                    && matches!(
+                        entry.change,
+                        Change::Acknowledged { .. }
+                            | Change::Status { .. }
+                            | Change::Owner { to: Some(_), .. }
+                    )
+            }) {
+                first
+                    .entry(entry.incident)
+                    .and_modify(|at: &mut u64| *at = (*at).min(entry.at_ms))
+                    .or_insert(entry.at_ms);
+            }
+            first
+        }))
+    }
 }
 
 impl crate::incidents::IncidentAttachments for IncidentLedger {

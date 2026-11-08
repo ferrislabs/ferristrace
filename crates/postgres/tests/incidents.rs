@@ -725,3 +725,84 @@ async fn spec_l13_13_an_announced_entry_queues_for_each_subscribed_chat_channel_
     assert_eq!(&*claimed[0].notice.title, "Checkout down");
     assert_eq!(again.len(), 1, "a sent update is not claimed twice");
 }
+
+#[tokio::test]
+async fn spec_l13_14_the_first_response_is_the_earliest_status_owner_taken_or_acknowledgement() {
+    let Some(pool) = control_plane("incidents_first_response").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "Acme", "owner@example.com").await;
+    let answered = an_incident(org, None, None, 1_000);
+    let silent = an_incident(org, None, None, 1_000);
+    let me = Author::Account(owner);
+
+    let found = committed!(pg, |incidents: Incidents, timeline: IncidentTimeline| {
+        incidents.open(&answered).await.expect("opened");
+        incidents.open(&silent).await.expect("opened");
+        for (incident, change, at_ms) in [
+            (
+                &answered,
+                Change::Opened {
+                    title: answered.title.clone(),
+                    severity: IncidentSeverity::Sev2,
+                    alert: None,
+                },
+                1_000,
+            ),
+            (
+                &answered,
+                Change::Comment {
+                    body: CommentBody::try_from("looking").expect("a body"),
+                    public: false,
+                },
+                1_020,
+            ),
+            (
+                &answered,
+                Change::Owner {
+                    from: Some(owner),
+                    to: None,
+                },
+                1_050,
+            ),
+            (
+                &answered,
+                Change::Owner {
+                    from: None,
+                    to: Some(owner),
+                },
+                1_200,
+            ),
+            (
+                &answered,
+                Change::Status {
+                    from: IncidentStatus::Investigating,
+                    to: IncidentStatus::Identified,
+                },
+                1_100,
+            ),
+            (
+                &silent,
+                Change::Opened {
+                    title: silent.title.clone(),
+                    severity: IncidentSeverity::Sev2,
+                    alert: None,
+                },
+                1_000,
+            ),
+        ] {
+            timeline
+                .append(&entry(incident, me.clone(), change, at_ms))
+                .await
+                .expect("appended");
+        }
+        timeline
+            .first_responses(org, &[answered.id, silent.id])
+            .await
+            .expect("read")
+    });
+
+    assert_eq!(found.get(&answered.id), Some(&1_100));
+    assert_eq!(found.get(&silent.id), None);
+}

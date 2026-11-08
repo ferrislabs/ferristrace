@@ -12,6 +12,7 @@ import { QueriesPage } from '@/pages/backend/QueriesPage'
 import { RequestsPage } from '@/pages/backend/RequestsPage'
 import { SystemPage } from '@/pages/backend/SystemPage'
 import { IncidentDetail } from '@/pages/IncidentDetail'
+import { IncidentInsights } from '@/pages/IncidentInsights'
 import { Incidents } from '@/pages/Incidents'
 import { Kubernetes } from '@/pages/Infra'
 import { InfraOverview } from '@/pages/InfraOverview'
@@ -164,6 +165,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/ai', Ai, real),
     inShell('/alerts', Alerts, real),
     inShell('/incidents', Incidents, real),
+    inShell('/incidents/insights', IncidentInsights, real),
     inShell('/incidents/$id', IncidentDetail, real),
     inShell('/infra', InfraOverview, real),
     inShell('/infra/kubernetes', Kubernetes, real),

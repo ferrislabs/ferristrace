@@ -1,8 +1,8 @@
 use ferristrace_domain::{
-    AlertError, Attachment, AttachmentLabel, Briefed, Chronicle, Clock, CommentBody, Dossier,
-    Drained, IncidentContext, IncidentDesk, IncidentDraft, IncidentError, IncidentFilter,
-    IncidentId, IncidentPatch, Narrator, Paging, Reader, Readers, Reference, Surroundings,
-    TenantId, Whoami,
+    AlertError, Attachment, AttachmentLabel, BadIncident, Briefed, Chronicle, Clock, CommentBody,
+    DEFAULT_WINDOW_DAYS, Dossier, Drained, IncidentContext, IncidentDesk, IncidentDraft,
+    IncidentError, IncidentFilter, IncidentId, IncidentInsights, IncidentPatch, MAX_WINDOW_DAYS,
+    Narrator, Paging, ProjectId, Reader, Readers, Reference, Surroundings, TenantId, Whoami,
 };
 
 use crate::registry::{IncidentRepos, NarrateRepos};
@@ -33,6 +33,41 @@ where
             status_outbox,
         )
         .list(who, org, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, projects, alert_rules, alert_states, incidents, incident_timeline, incident_attachments, roster, audit, schedules, pages, status_outbox, unavailable = IncidentError::StoreUnreachable)]
+    pub async fn incident_insights(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        from_ms: Option<u64>,
+        to_ms: Option<u64>,
+        project: Option<ProjectId>,
+    ) -> Result<IncidentInsights, IncidentError> {
+        const DAY_MS: u64 = 86_400_000;
+        let to_ms = to_ms.unwrap_or_else(|| self.clock.now().get().saturating_mul(1_000));
+        let from_ms = from_ms.unwrap_or_else(|| to_ms.saturating_sub(DEFAULT_WINDOW_DAYS * DAY_MS));
+        if from_ms >= to_ms || to_ms - from_ms > MAX_WINDOW_DAYS * DAY_MS {
+            return Err(BadIncident::Window {
+                max: MAX_WINDOW_DAYS,
+            }
+            .into());
+        }
+        IncidentDesk::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            projects,
+            alert_rules,
+            alert_states,
+            incidents,
+            incident_timeline,
+            incident_attachments,
+            roster,
+            audit,
+            Paging::new(schedules, pages).escalating_after(self.escalate_after_secs),
+            status_outbox,
+        )
+        .insights(who, org, from_ms, to_ms, project)
         .await
     }
 

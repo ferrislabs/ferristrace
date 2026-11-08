@@ -1,16 +1,19 @@
+use std::collections::HashMap;
+
 use super::entities::{
     AlertRef, Attachment, Author, Briefed, Change, Chronicle, Dossier, Incident, IncidentDraft,
     IncidentFilter, IncidentPatch, Person, TimelineEntry,
 };
 use super::errors::{BadIncident, IncidentError};
+use super::insights::Insights;
 use super::ports::{IncidentAttachments, IncidentTimeline, Incidents};
 use super::value_objects::{
-    AttachmentId, AttachmentLabel, CommentBody, IncidentId, IncidentSeverity, IncidentStatus,
-    IncidentTitle, Reference, TimelineId,
+    AttachmentId, AttachmentLabel, CommentBody, IncidentId, IncidentScope, IncidentSeverity,
+    IncidentStatus, IncidentTitle, Reference, TimelineId,
 };
 use crate::access::{ApiKeys, ReadGrant, Reader, Readers};
 use crate::agents::{AgentGrant, AgentScope};
-use crate::alerts::{AlertRules, AlertStates, AlertStatus, Rule};
+use crate::alerts::{AlertRules, AlertStates, AlertStatus, Rule, RuleId};
 use crate::audit::{Action, Actor, AuditEntry, AuditTrail, Detail, Target, TargetKind};
 use crate::catalogue::{ProjectId, Projects};
 use crate::clock::UnixSeconds;
@@ -110,6 +113,43 @@ where
             .filter(|incident| visible(&grant, incident))
             .map(|incident| brief(incident, &people, &alerts))
             .collect())
+    }
+
+    pub async fn insights(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        from_ms: u64,
+        to_ms: u64,
+        project: Option<ProjectId>,
+    ) -> Result<Insights, IncidentError> {
+        let grant = self.readers.grant(who, org).await?;
+        let project = grant.narrow(project)?;
+        let held: Vec<Incident> = self
+            .incidents
+            .list(
+                org,
+                &IncidentFilter {
+                    scope: IncidentScope::All,
+                    project,
+                },
+            )
+            .await?
+            .into_iter()
+            .filter(|incident| visible(&grant, incident))
+            .filter(|incident| incident.opened_ms >= from_ms && incident.opened_ms < to_ms)
+            .collect();
+        let ids: Vec<IncidentId> = held.iter().map(|incident| incident.id).collect();
+        let responses = self.timeline.first_responses(org, &ids).await?;
+        let services: HashMap<RuleId, Vec<Box<str>>> = self
+            .alerts(org)
+            .await?
+            .into_iter()
+            .map(|alert| (alert.id, alert.services))
+            .collect();
+        Ok(Insights::compute(
+            &held, &responses, &services, from_ms, to_ms,
+        ))
     }
 
     pub async fn get(
