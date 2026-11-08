@@ -47,6 +47,23 @@ export function useRenameOrg() {
   })
 }
 
+export function useDisbandOrg() {
+  const { active } = useOrganisations()
+  const client = useQueryClient()
+  const navigate = useNavigate()
+  const { chooseProject } = useScope()
+  return useMutation({
+    mutationFn: async () => {
+      await del(`/api/orgs/${active?.org}`)
+    },
+    onSuccess: async () => {
+      chooseProject(undefined)
+      await client.resetQueries()
+      navigate('/')
+    },
+  })
+}
+
 export type FoundedOrg = { id: string; name: string; project: string }
 
 function useEnterOrg() {

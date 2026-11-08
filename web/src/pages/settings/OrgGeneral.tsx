@@ -8,7 +8,7 @@ import { Avatar } from '@/components/ui/misc'
 import { download } from '@/auth/blob'
 import { because } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
-import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, timeZoneNames, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, useSetOrgTimezone, type OrgCard } from '@/data/orgs'
+import { effectiveRetention, logoProblem, orgNameProblem, retentionProblem, timeZoneNames, useDisbandOrg, useOrgCard, usePutOrgLogo, useRemoveOrgLogo, useRenameOrg, useSetOrgRetention, useSetOrgTimezone, type OrgCard } from '@/data/orgs'
 import { initialsOf } from '@/data/profile'
 import { stamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -168,6 +168,7 @@ export function OrgGeneral() {
   const { active } = useOrganisations()
   const { card, nothing } = useOrgCard()
   const rename = useRenameOrg()
+  const disband = useDisbandOrg()
   const [typed, setTyped] = useState<string | null>(null)
   const [del, setDel] = useState(false)
   const name = typed ?? card?.name ?? ''
@@ -203,8 +204,33 @@ export function OrgGeneral() {
           <TimeZone card={card} mayChange={mayChange} />
           <Retention card={card} isOwner={active?.role === 'owner'} />
           <Export card={card} isOwner={active?.role === 'owner'} />
-          <Danger title={`Delete ${card.name}`} text="Deletes every project, signal, member and key of the organisation. Export first if you need anything." action="Delete organisation" onClick={() => setDel(true)} />
-          <ConfirmDelete open={del} onOpenChange={setDel} name={card.name} what="organisation" body="Every project, signal, member, team, key and alert is deleted. This cannot be undone." />
+          {active?.role === 'owner' ? (
+            <>
+              <Danger
+                title={`Delete ${card.name}`}
+                text="Every project, team, member and key goes with it. Spans, logs and metrics already written are not touched — they wait out their own retention, same as today. Export first if you need anything."
+                action="Delete organisation"
+                onClick={() => setDel(true)}
+              />
+              <ConfirmDelete
+                open={del}
+                onOpenChange={setDel}
+                name={card.name}
+                what="organisation"
+                body="Every project, team, member, key, alert and incident is deleted with the organisation. Spans, logs and metrics already written stay in the signal store until their own retention expires, unreachable from here. This cannot be undone."
+                busy={disband.isPending}
+                onConfirm={() =>
+                  disband.mutate(undefined, {
+                    onSuccess: () => {
+                      setDel(false)
+                      toast(`Organisation ${card.name} disbanded`)
+                    },
+                    onError: (error) => toast.error(because(error, 'The organisation was not disbanded')),
+                  })
+                }
+              />
+            </>
+          ) : null}
         </>
       ) : (
         <Card className="px-4 py-3 text-control text-muted-foreground">{nothing}</Card>
