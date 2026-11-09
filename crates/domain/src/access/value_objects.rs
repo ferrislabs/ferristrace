@@ -10,6 +10,30 @@ use crate::telemetry::TenantId;
 
 pub(super) const MAX_KEY_NAME_BYTES: usize = 64;
 
+/// How often the background sweep for expiring and expired keys runs.
+pub const KEY_EXPIRY_TICK_SECS: u64 = 3_600;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExpiryThreshold {
+    Days7,
+    Day1,
+}
+
+impl ExpiryThreshold {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Days7 => "7d",
+            Self::Day1 => "1d",
+        }
+    }
+}
+
+impl fmt::Display for ExpiryThreshold {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KeyScope {
     Ingest,

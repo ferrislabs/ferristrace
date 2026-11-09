@@ -23,8 +23,9 @@ use ferristrace_clickhouse::{
 };
 use ferristrace_domain::telemetry::{Allowance, StaticQuota};
 use ferristrace_domain::{
-    ANNOUNCE_TICK_SECS, AckKey, Clock, DEPLOY_WATCH_TICK_SECS, Drained, Followed, Heralded,
-    LinkKey, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId, Tick,
+    ANNOUNCE_TICK_SECS, AckKey, Clock, DEPLOY_WATCH_TICK_SECS, Drained, Expired, Followed,
+    Heralded, KEY_EXPIRY_TICK_SECS, LinkKey, PAGE_TICK_SECS, Paged, ProvisionPolicy, TenantId,
+    Tick,
 };
 use ferristrace_infra::{
     HttpWebhooks, JwksSettings, JwksVerifier, MailSettings, MemoryMeter, MemorySink,
@@ -55,6 +56,7 @@ const DELIVER_EVERY: Duration = Duration::from_secs(10);
 const ESCALATE_EVERY: Duration = Duration::from_secs(PAGE_TICK_SECS);
 const ANNOUNCE_EVERY: Duration = Duration::from_secs(ANNOUNCE_TICK_SECS);
 const FOLLOW_DEPLOYS_EVERY: Duration = Duration::from_secs(DEPLOY_WATCH_TICK_SECS);
+const EXPIRE_KEYS_EVERY: Duration = Duration::from_secs(KEY_EXPIRY_TICK_SECS);
 
 #[derive(Default)]
 struct Optional {
@@ -131,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     watching.extend(watch_pages(state.as_ref(), &stopped));
     watching.extend(watch_status(state.as_ref(), &stopped));
     watching.extend(watch_deploys(state.as_ref(), held.issues, &stopped));
+    watching.extend(watch_key_expiry(state.as_ref(), &stopped));
     let gateway = Arc::new(gateway_of(
         directory_of(pool.as_ref(), default_retention_days(config.spans.as_ref())),
         allowances,
@@ -626,6 +629,39 @@ fn watch_deploys(
         Arc::clone(&state.app),
         stopped.clone(),
     )))
+}
+
+fn watch_key_expiry(
+    state: Option<&State>,
+    stopped: &watch::Receiver<bool>,
+) -> Option<JoinHandle<()>> {
+    let state = state?;
+    tracing::info!("api keys are checked for expiry every hour");
+    Some(tokio::spawn(expire_keys(
+        Arc::clone(&state.app),
+        stopped.clone(),
+    )))
+}
+
+async fn expire_keys(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {
+    let mut ticks = ticking(EXPIRE_KEYS_EVERY);
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = ticks.tick() => {}
+        }
+        match app.expire_keys().await {
+            Ok(Expired::Skipped) => tracing::debug!("another replica is checking key expiry"),
+            Ok(Expired::Worked { revoked, noticed })
+                if revoked.is_empty() && noticed.is_empty() => {}
+            Ok(Expired::Worked { revoked, noticed }) => tracing::info!(
+                revoked = revoked.len(),
+                noticed = noticed.len(),
+                "expiring api keys were revoked and their owners notified"
+            ),
+            Err(error) => tracing::error!(%error, "api key expiry could not be checked"),
+        }
+    }
 }
 
 async fn follow_deploys(app: Arc<Ferristrace<Production>>, mut stopped: watch::Receiver<bool>) {

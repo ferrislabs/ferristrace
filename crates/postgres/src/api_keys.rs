@@ -1,8 +1,8 @@
 use ferristrace_application::repository;
 use ferristrace_domain::{
-    AccountId, AgentId, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditTrail, Clock, IssuedKey,
-    KeyId, KeyName, KeyScope, KeyScopes, KeyTtl, ProjectId, ReadGrant, RegisteredAgent, StoreError,
-    TenantId,
+    AccountId, AgentId, ApiKey, ApiKeys, ApiSecret, AuditEntry, AuditTrail, Clock, ExpiringKey,
+    ExpiryThreshold, IssuedKey, KeyId, KeyName, KeyScope, KeyScopes, KeyTtl, ProjectId, ReadGrant,
+    RegisteredAgent, StoreError, TenantId,
 };
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -40,6 +40,22 @@ fn unreachable(doing: &'static str) -> impl FnOnce(sqlx::Error) -> StoreError {
 
 fn nanos(value: i64) -> u64 {
     u64::try_from(value).unwrap_or_default()
+}
+
+fn signed(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+const SEVEN_DAYS_NANOS: i64 = 7 * 86_400 * 1_000_000_000;
+const ONE_DAY_NANOS: i64 = 86_400 * 1_000_000_000;
+
+fn read_expiring(row: &PgRow) -> ExpiringKey {
+    ExpiringKey {
+        id: KeyId::new(row.get("id")),
+        org: TenantId::new(row.get("org_id")),
+        name: row.get::<String, _>("name").into(),
+        created_by: row.get::<Option<Uuid>, _>("created_by").map(AccountId::new),
+    }
 }
 
 /// The requested duration in nanoseconds - `KeyTtl::expires_at` with a zero
@@ -179,6 +195,77 @@ impl<C: Clock + Clone + Send + Sync> ApiKeys for PostgresApiKeys<C> {
             org: TenantId::new(row.get("org_id")),
             project: row.get::<Option<Uuid>, _>("project_id").map(ProjectId::new),
         }))
+    }
+
+    async fn due_for_expiry_notice(
+        &self,
+        now_unix_nanos: u64,
+    ) -> Result<Vec<(ExpiringKey, ExpiryThreshold)>, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let now = signed(now_unix_nanos);
+        let seven = sqlx::query(
+            "SELECT id AS id, org_id AS org_id, name AS name, created_by AS created_by \
+             FROM api_keys WHERE revoked_at IS NULL AND expires_at IS NOT NULL \
+             AND NOT notified_7d AND expires_at > $1 AND expires_at - $1 <= $2",
+        )
+        .bind(now)
+        .bind(SEVEN_DAYS_NANOS)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(unreachable("find keys entering their seven day notice"))?;
+        let one = sqlx::query(
+            "SELECT id AS id, org_id AS org_id, name AS name, created_by AS created_by \
+             FROM api_keys WHERE revoked_at IS NULL AND expires_at IS NOT NULL \
+             AND NOT notified_1d AND expires_at > $1 AND expires_at - $1 <= $2",
+        )
+        .bind(now)
+        .bind(ONE_DAY_NANOS)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(unreachable("find keys entering their one day notice"))?;
+        Ok(seven
+            .iter()
+            .map(|row| (read_expiring(row), ExpiryThreshold::Days7))
+            .chain(
+                one.iter()
+                    .map(|row| (read_expiring(row), ExpiryThreshold::Day1)),
+            )
+            .collect())
+    }
+
+    async fn mark_expiry_notice_sent(
+        &self,
+        id: KeyId,
+        threshold: ExpiryThreshold,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.tx.lock().await;
+        let query = match threshold {
+            ExpiryThreshold::Days7 => "UPDATE api_keys SET notified_7d = true WHERE id = $1",
+            ExpiryThreshold::Day1 => "UPDATE api_keys SET notified_1d = true WHERE id = $1",
+        };
+        sqlx::query(query)
+            .bind(id.as_uuid())
+            .execute(&mut **tx)
+            .await
+            .map_err(unreachable("mark a key's expiry notice sent"))?;
+        Ok(())
+    }
+
+    async fn due_for_auto_revoke(
+        &self,
+        now_unix_nanos: u64,
+    ) -> Result<Vec<ExpiringKey>, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let rows = sqlx::query(
+            "SELECT id AS id, org_id AS org_id, name AS name, created_by AS created_by \
+             FROM api_keys WHERE revoked_at IS NULL AND expires_at IS NOT NULL \
+             AND expires_at <= $1",
+        )
+        .bind(signed(now_unix_nanos))
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(unreachable("find keys past their deadline"))?;
+        Ok(rows.iter().map(read_expiring).collect())
     }
 
     async fn agent_standing(

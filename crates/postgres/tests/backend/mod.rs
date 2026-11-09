@@ -189,6 +189,9 @@ forward!(ApiKeys: ApiKeys {
     fn grant_for(&self, secret: &ApiSecret) -> Result<Option<ReadGrant>, StoreError>;
     fn agent_standing(&self, org: TenantId, client_id: &str) -> Result<Option<RegisteredAgent>, StoreError>;
     fn agent_used(&self, org: TenantId, agent: AgentId, entry: &AuditEntry) -> Result<(), StoreError>;
+    fn due_for_expiry_notice(&self, now_unix_nanos: u64) -> Result<Vec<(ExpiringKey, ExpiryThreshold)>, StoreError>;
+    fn mark_expiry_notice_sent(&self, id: KeyId, threshold: ExpiryThreshold) -> Result<(), StoreError>;
+    fn due_for_auto_revoke(&self, now_unix_nanos: u64) -> Result<Vec<ExpiringKey>, StoreError>;
 });
 
 forward!(Agents: Agents {

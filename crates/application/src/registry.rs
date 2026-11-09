@@ -164,6 +164,16 @@ impl<R> AccessRepos for R where
 {
 }
 
+pub trait KeyExpiryRepos:
+    AccessRepos + RosterRepos + InboxRepos + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+{
+}
+
+impl<R> KeyExpiryRepos for R where
+    R: AccessRepos + RosterRepos + InboxRepos + RepoFor<domain::AlertDuty, Repo: AlertDuty>
+{
+}
+
 pub trait AgentRepos:
     StandingRepos
     + RecordingRepos

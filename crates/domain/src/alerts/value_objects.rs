@@ -254,6 +254,7 @@ pub enum Duty {
     Announce,
     Deploys,
     Narrate,
+    ExpireKeys,
 }
 
 spelled!(Duty {
@@ -263,6 +264,7 @@ spelled!(Duty {
     Announce => "announce",
     Deploys => "deploys",
     Narrate => "narrate",
+    ExpireKeys => "expire_keys",
 });
 
 #[derive(Debug, Clone, Copy, PartialEq)]

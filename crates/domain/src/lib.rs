@@ -33,8 +33,9 @@ pub mod views;
 pub mod testing;
 
 pub use access::{
-    ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, IssuedKey, KeyError, KeyId, KeyName,
-    KeyRing, KeyScope, KeyScopes, KeyTtl, ReadGrant, ReadRefusal, Reader, Readers,
+    ApiKey, ApiKeys, ApiSecret, BadKeyName, BadScopes, Expired, ExpiringKey, Expiry, ExpiryNotice,
+    ExpiryThreshold, IssuedKey, KEY_EXPIRY_TICK_SECS, KeyError, KeyId, KeyName, KeyRing, KeyScope,
+    KeyScopes, KeyTtl, ReadGrant, ReadRefusal, Reader, Readers, Revocation,
 };
 pub use agents::{
     Agent as RegisteredAgent, AgentCall, AgentEnrolment, AgentError, AgentGrant, AgentId,

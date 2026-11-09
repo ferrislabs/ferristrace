@@ -1,6 +1,7 @@
 use ferristrace_domain::{
-    AccountId, ApiKeys, ApiSecret, IngestKey, KeyName, KeyScope, KeyScopes, KeyTtl, ProjectId,
-    ProjectName, Projects, ReadGrant, TenantDirectory, TenantId, UnknownKey,
+    AccountId, ApiKeys, ApiSecret, ExpiringKey, ExpiryThreshold, IngestKey, KeyName, KeyScope,
+    KeyScopes, KeyTtl, ProjectId, ProjectName, Projects, ReadGrant, TenantDirectory, TenantId,
+    UnknownKey,
 };
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres, PostgresDirectory};
@@ -12,6 +13,26 @@ use uuid::Uuid;
 mod backend;
 
 const NOW: u64 = 1_700_000_000;
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
+const NANOS_PER_DAY: u64 = 86_400 * NANOS_PER_SECOND;
+
+fn now_nanos() -> u64 {
+    NOW * NANOS_PER_SECOND
+}
+
+async fn set_expiry(pool: &PgPool, id: Uuid, expires_at_unix_nanos: Option<i64>) {
+    let done = sqlx::query("UPDATE api_keys SET expires_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(expires_at_unix_nanos)
+        .execute(pool)
+        .await
+        .expect("setting the expiry directly");
+    assert_eq!(
+        done.rows_affected(),
+        1,
+        "the key row was not found to update"
+    );
+}
 
 async fn control_plane(schema: &str) -> Option<PgPool> {
     let url = backend::url()?;
@@ -380,4 +401,184 @@ async fn one_organisation_neither_lists_nor_revokes_the_keys_of_another() {
     assert_eq!(keys.list(theirs).await, Ok(Vec::new()));
     assert_eq!(keys.revoke(theirs, issued.key.id).await, Ok(false));
     assert_eq!(keys.list(mine).await.map(|listed| listed.len()), Ok(1));
+}
+
+#[tokio::test]
+async fn a_key_entering_its_seven_day_window_is_returned_once_then_not_again() {
+    let Some(pool) = control_plane("api_keys_notice_7d").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let keys = backend::api_keys(&pg);
+    let issued = keys
+        .issue(
+            org,
+            None,
+            &a_name("ci"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
+        .await
+        .expect("the issue");
+    let expires_at = now_nanos() + 5 * NANOS_PER_DAY;
+    set_expiry(
+        &pool,
+        issued.key.id.as_uuid(),
+        Some(i64::try_from(expires_at).expect("fits")),
+    )
+    .await;
+
+    let due = keys
+        .due_for_expiry_notice(now_nanos())
+        .await
+        .expect("the read");
+    assert_eq!(
+        due,
+        vec![(
+            ExpiringKey {
+                id: issued.key.id,
+                org,
+                name: "ci".into(),
+                created_by: Some(owner),
+            },
+            ExpiryThreshold::Days7
+        )]
+    );
+
+    keys.mark_expiry_notice_sent(issued.key.id, ExpiryThreshold::Days7)
+        .await
+        .expect("marking it sent");
+    let again = keys
+        .due_for_expiry_notice(now_nanos())
+        .await
+        .expect("the read");
+    assert!(again.is_empty(), "the seven day notice was already sent");
+}
+
+#[tokio::test]
+async fn a_key_closer_than_a_day_out_is_due_for_both_notices_at_once() {
+    let Some(pool) = control_plane("api_keys_notice_both").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let keys = backend::api_keys(&pg);
+    let issued = keys
+        .issue(
+            org,
+            None,
+            &a_name("ci"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
+        .await
+        .expect("the issue");
+    let expires_at = now_nanos() + NANOS_PER_DAY / 2;
+    set_expiry(
+        &pool,
+        issued.key.id.as_uuid(),
+        Some(i64::try_from(expires_at).expect("fits")),
+    )
+    .await;
+
+    let mut due = keys
+        .due_for_expiry_notice(now_nanos())
+        .await
+        .expect("the read");
+    due.sort_by_key(|(_, threshold)| *threshold);
+
+    assert_eq!(
+        due.into_iter()
+            .map(|(_, threshold)| threshold)
+            .collect::<Vec<_>>(),
+        vec![ExpiryThreshold::Days7, ExpiryThreshold::Day1]
+    );
+}
+
+#[tokio::test]
+async fn a_revoked_key_is_never_due_for_a_notice() {
+    let Some(pool) = control_plane("api_keys_notice_revoked").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let keys = backend::api_keys(&pg);
+    let issued = keys
+        .issue(
+            org,
+            None,
+            &a_name("ci"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
+        .await
+        .expect("the issue");
+    let expires_at = now_nanos() + NANOS_PER_DAY / 2;
+    set_expiry(
+        &pool,
+        issued.key.id.as_uuid(),
+        Some(i64::try_from(expires_at).expect("fits")),
+    )
+    .await;
+    keys.revoke(org, issued.key.id).await.expect("the revoke");
+
+    assert!(
+        keys.due_for_expiry_notice(now_nanos())
+            .await
+            .expect("the read")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_key_past_its_deadline_is_due_for_auto_revoke_until_it_is_revoked() {
+    let Some(pool) = control_plane("api_keys_auto_revoke").await else {
+        return;
+    };
+    let pg = backend_of(&pool);
+    let (org, owner) = an_org(&pool, "owner@example.com").await;
+    let keys = backend::api_keys(&pg);
+    let issued = keys
+        .issue(
+            org,
+            None,
+            &a_name("ci"),
+            &KeyScopes::ingest(),
+            owner,
+            KeyTtl::Never,
+        )
+        .await
+        .expect("the issue");
+    let expires_at = now_nanos() - NANOS_PER_SECOND;
+    set_expiry(
+        &pool,
+        issued.key.id.as_uuid(),
+        Some(i64::try_from(expires_at).expect("fits")),
+    )
+    .await;
+
+    let due = keys
+        .due_for_auto_revoke(now_nanos())
+        .await
+        .expect("the read");
+    assert_eq!(
+        due,
+        vec![ExpiringKey {
+            id: issued.key.id,
+            org,
+            name: "ci".into(),
+            created_by: Some(owner),
+        }]
+    );
+
+    keys.revoke(org, issued.key.id).await.expect("the revoke");
+    let again = keys
+        .due_for_auto_revoke(now_nanos())
+        .await
+        .expect("the read");
+    assert!(again.is_empty(), "a revoked key is no longer due");
 }
