@@ -18,7 +18,8 @@ use crate::alerts::{
 use crate::catalogue::ProjectId;
 use crate::clock::UnixSeconds;
 use crate::explore::{
-    ServiceFilter, ServiceSeries, ServiceSummary, SpanReader, TraceFilter, TraceSummary,
+    ServiceEdge, ServiceFilter, ServiceSeries, ServiceSummary, SpanReader, TraceFilter,
+    TraceSummary,
 };
 use crate::identity::AccountId;
 use crate::incidents::{
@@ -79,6 +80,14 @@ impl SpanReader for Loads {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 

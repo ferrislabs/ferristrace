@@ -9,8 +9,8 @@ use super::statements::{Fanout, StatementGrouping, StatementSeries, StatementSum
 use super::value_objects::Window;
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
-    ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceEdge, ServiceFilter,
+    ServiceSeries, ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
 };
 use crate::access::{ApiKeys, Reader, Readers};
 use crate::catalogue::ProjectId;
@@ -55,6 +55,16 @@ where
     ) -> Result<Vec<ServiceSummary>, ExploreError> {
         let filter = self.narrowed(who, org, filter).await?;
         Ok(self.reader.operations(org, service, &filter).await?)
+    }
+
+    pub async fn dependencies(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, ExploreError> {
+        let filter = self.narrowed(who, org, filter).await?;
+        Ok(self.reader.dependencies(org, &filter).await?)
     }
 
     pub async fn series(

@@ -6,7 +6,8 @@ use ferristrace_domain::{
     DurationRange, FACET_VALUES, FacetFilter, FacetValues, Facets, Fanout, JobGrouping, JobSeries,
     JobSummary, ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, RequestGrouping,
     RequestSeries, RequestSummary, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
-    ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent, SpanFilter,
+    ServiceEdge, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent,
+    SpanFilter,
     SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StatementGrouping,
     StatementSeries, StatementSummary, StoreError, TableFilter, TableRow, TenantId, TraceFilter,
     TraceId, TraceOrder, TraceSummary,
@@ -37,6 +38,24 @@ const MEASURED: &str = "count() AS requests, \
 
 const SERVICES: &str = "SELECT service_name AS name, {measured} {served} \
    GROUP BY service_name ORDER BY requests DESC, name LIMIT 500";
+
+const DEPENDENCIES: &str = "SELECT parent.service_name AS caller, child.service_name AS callee, \
+     count() AS calls, countIf(child.status = 'error') AS errors \
+   FROM spans AS child FINAL \
+   INNER JOIN spans AS parent FINAL \
+     ON parent.tenant_id = child.tenant_id AND parent.trace_id = child.trace_id \
+       AND parent.span_id = child.parent_span_id \
+   WHERE child.tenant_id = ? \
+     AND child.start_time >= fromUnixTimestamp64Nano(?) \
+     AND child.start_time < fromUnixTimestamp64Nano(?) \
+     AND child.kind IN ('server', 'consumer') \
+     AND (? = 0 OR child.project_id = ?) \
+     AND (? = '' OR child.attributes['deployment.environment'] = ? \
+       OR child.attributes['deployment.environment.name'] = ?) \
+     AND parent.service_name != child.service_name \
+   GROUP BY caller, callee \
+   ORDER BY calls DESC, caller, callee \
+   LIMIT 500";
 
 const OPERATIONS: &str = "SELECT name AS name, {measured} {served} \
    GROUP BY name ORDER BY requests DESC, name LIMIT 500";
@@ -248,6 +267,14 @@ struct ServiceRow {
 }
 
 #[derive(Debug, Row, Deserialize)]
+struct EdgeRow {
+    caller: String,
+    callee: String,
+    calls: u64,
+    errors: u64,
+}
+
+#[derive(Debug, Row, Deserialize)]
 struct CacheRow {
     operation: String,
     store: String,
@@ -423,6 +450,29 @@ impl SpanReader for ClickhouseReader {
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.summaries(OPERATIONS, tenant, Some(service), filter)
             .await
+    }
+
+    async fn dependencies(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
+        let environment = filter.environment.as_deref().unwrap_or_default();
+        let rows: Vec<EdgeRow> = self
+            .client()
+            .query(DEPENDENCIES)
+            .bind(tenant.as_uuid())
+            .bind(nanos(filter.window.from_unix_nanos()))
+            .bind(nanos(filter.window.to_unix_nanos()))
+            .bind(u8::from(filter.project.is_some()))
+            .bind(uuid_of(filter.project))
+            .bind(environment)
+            .bind(environment)
+            .bind(environment)
+            .fetch_all()
+            .await
+            .map_err(|error| refused(&error))?;
+        Ok(rows.into_iter().map(read_edge).collect())
     }
 
     async fn series(
@@ -921,6 +971,15 @@ impl SpanReader for ClickhouseReader {
                 read_span(id, row, events)
             })
             .collect()
+    }
+}
+
+fn read_edge(row: EdgeRow) -> ServiceEdge {
+    ServiceEdge {
+        caller: row.caller.into(),
+        callee: row.callee.into(),
+        calls: row.calls,
+        errors: row.errors,
     }
 }
 

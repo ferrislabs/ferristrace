@@ -75,8 +75,8 @@ pub use explore::{
     FacetValues, Facets, Fanout, Field, JobGrouping, JobPoint, JobSeries, JobSummary, LEAST_FANOUT,
     ListedSpan, MAX_ATTRIBUTES, MAX_FACETS, MAX_GROUPS, MAX_VALUES, Measure, Number, Op, Query,
     RequestGrouping, RequestPoint, RequestSeries, RequestSummary, Scalar, SeenAttribute, SeenValue,
-    SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries,
-    ServiceSummary, SpanFilter, SpanOrder, SpanReader, SparseLine, StatementGrouping,
+    SeriesFilter, SeriesLine, SeriesResult, ServiceEdge, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, SpanFilter, SpanOrder, SpanReader, SparseLine, StatementGrouping,
     StatementPoint, StatementSeries, StatementSummary, Stream, TableFilter, TableRow, Test,
     TraceFilter, TraceOrder, TraceSummary, Value, Window,
 };

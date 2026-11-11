@@ -32,6 +32,8 @@ export type Operation = {
   seen: string
 }
 
+export type Edge = { caller: string; callee: string; calls: number; errors: number; err: number | null }
+
 export type Point = { atMs: number; requests: number; errors: number; p95Ms: number | null }
 
 export type Stepped = { stepMs: number; requests: number; errors: number; p95Ms: number | null; points: Point[] }
@@ -46,6 +48,14 @@ type Serving = {
   p95_us: number
   p99_us: number
   last_seen_ms: number
+}
+
+type Edged = {
+  caller: string
+  callee: string
+  calls: number
+  errors: number
+  error_rate: number
 }
 
 type Operated = {
@@ -93,6 +103,14 @@ export const serving = (service: Serving): Service => ({
   p95: dur(service.p95_us / 1000),
   p99: dur(service.p99_us / 1000),
   seen: since(service.last_seen_ms),
+})
+
+const edged = (edge: Edged): Edge => ({
+  caller: edge.caller,
+  callee: edge.callee,
+  calls: edge.calls,
+  errors: edge.errors,
+  err: edge.calls === 0 ? null : edge.error_rate * 100,
 })
 
 const operated = (operation: Operated, windowMs: number): Operation => {
@@ -152,6 +170,24 @@ export function useServiceTable(environment = '', windowMs = WINDOW_MS, placemen
     },
   })
   return { services: data ?? [], pending: isPending, failed: error }
+}
+
+export function useServiceDependencies(environment = '', windowMs = WINDOW_MS, placement: Placement = NOWHERE) {
+  const { active } = useOrganisations()
+  const { project } = useScope()
+  const { data, isPending, error } = useQuery({
+    queryKey: ['services', active?.org, project, 'dependencies', environment.trim(), windowMs, placement],
+    enabled: Boolean(active),
+    staleTime: FRESH_MS,
+    queryFn: async () => {
+      const params = spanning(windowMs, project, environment, placement)
+      const found = await json<{ edges: Edged[] }>(
+        await get(`/api/orgs/${active?.org}/services/dependencies?${params.toString()}`),
+      )
+      return found.edges.map(edged)
+    },
+  })
+  return { edges: data ?? [], pending: isPending, failed: error }
 }
 
 export function useOperations(service: string, environment = '', windowMs = WINDOW_MS, placement: Placement = NOWHERE) {

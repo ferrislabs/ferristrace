@@ -8,7 +8,8 @@ use super::entities::Incident;
 use super::value_objects::{IncidentId, IncidentSeverity, IncidentStatus, IncidentTitle};
 use crate::catalogue::ProjectId;
 use crate::explore::{
-    ServiceFilter, ServiceSeries, ServiceSummary, SpanReader, TraceFilter, TraceSummary, Window,
+    ServiceEdge, ServiceFilter, ServiceSeries, ServiceSummary, SpanReader, TraceFilter,
+    TraceSummary, Window,
 };
 use crate::infrastructure::{InfraFilter, InfraReader, Resource, ResourceKind};
 use crate::issue::{Counted, Fingerprint, IssueFilter, IssueReader, Occurrence};
@@ -137,6 +138,14 @@ impl SpanReader for Spans {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Err(StoreError::Unreachable)
     }
 

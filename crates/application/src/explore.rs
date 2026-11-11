@@ -2,8 +2,9 @@ use ferristrace_domain::{
     AttributeFilter, AttributeKey, CacheGrouping, CacheSeries, CacheSummary, Clock, Explore,
     ExploreError, FacetFilter, Facets, Fanout, JobGrouping, JobSeries, JobSummary, ListedSpan,
     Placements, ProjectId, Reader, Readers, RequestGrouping, RequestSeries, RequestSummary,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
-    ServiceSite, ServiceSummary, Span, SpanFilter, StatementGrouping, StatementSeries,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceEdge, ServiceFilter,
+    ServiceSeries, ServiceSite, ServiceSummary, Span, SpanFilter, StatementGrouping,
+    StatementSeries,
     StatementSummary, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
     Window,
 };
@@ -52,6 +53,24 @@ where
             reader,
         )
         .operations(who, org, service, filter)
+        .await
+    }
+
+    #[transactional(sessions, memberships, api_keys, unavailable = ExploreError::StoreUnreachable)]
+    pub async fn dependencies(
+        &self,
+        who: &Reader,
+        org: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, ExploreError> {
+        let Some(reader) = &self.span_store else {
+            return Err(ExploreError::StoreUnreachable);
+        };
+        Explore::new(
+            Readers::new(Whoami::new(sessions, memberships), api_keys),
+            reader,
+        )
+        .dependencies(who, org, filter)
         .await
     }
 

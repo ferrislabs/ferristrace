@@ -28,6 +28,7 @@ import { Overview } from '@/pages/Overview'
 import { PublicPostmortem, PublicStatus } from '@/pages/PublicStatus'
 import { ReleaseDetail, Releases } from '@/pages/Releases'
 import { ServiceDetail } from '@/pages/ServiceDetail'
+import { ServiceMap } from '@/pages/ServiceMap'
 import { Services } from '@/pages/Services'
 import { StatusPageEditor } from '@/pages/StatusPageEditor'
 import { TraceDetail } from '@/pages/TraceDetail'
@@ -157,6 +158,7 @@ const routeTree = rootRoute.addChildren([
     inShell('/onboarding', Onboarding, real),
     inShell('/notifications', Notifications, real),
     inShell('/services', Services, timed),
+    inShell('/service-map', ServiceMap, timed),
     inShell('/services/$name', ServiceDetail, timed),
     inShell('/issues', Issues, real),
     inShell('/issues/$id', IssueDetail, real),

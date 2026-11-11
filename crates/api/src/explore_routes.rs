@@ -11,9 +11,9 @@ use ferristrace_application::registry::ReadRepos;
 use ferristrace_domain::{
     AttributeFilter, AttributeKey, BadQuery, CacheGrouping, CacheSeries, CacheSummary,
     ExploreError, FacetFilter, Facets, ListedSpan, Measure, ProjectId, Query as TraceQuery,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
-    ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder, SpanStatus, Stream, TableFilter,
-    TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceEdge, ServiceFilter,
+    ServiceSeries, ServiceSummary, Span, SpanFilter, SpanKind, SpanOrder, SpanStatus, Stream,
+    TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceOrder, TraceSummary, Window,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -210,6 +210,10 @@ where
 {
     Router::new()
         .route("/api/orgs/{org}/services", get(services::<S>))
+        .route(
+            "/api/orgs/{org}/services/dependencies",
+            get(dependencies::<S>),
+        )
         .route(
             "/api/orgs/{org}/services/{service}/operations",
             get(operations::<S>),
@@ -977,6 +981,30 @@ struct Serving {
     last_seen_ms: u64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct Dependencies {
+    edges: Vec<Edging>,
+}
+
+#[derive(Debug, Serialize)]
+struct Edging {
+    caller: String,
+    callee: String,
+    calls: u64,
+    errors: u64,
+    error_rate: f64,
+}
+
+fn edging(edge: ServiceEdge) -> Edging {
+    Edging {
+        error_rate: ratio(edge.errors, edge.calls),
+        caller: edge.caller.into_string(),
+        callee: edge.callee.into_string(),
+        calls: edge.calls,
+        errors: edge.errors,
+    }
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn ratio(part: u64, whole: u64) -> f64 {
     if whole == 0 {
@@ -1291,6 +1319,28 @@ where
         .map(|summary| serving(summary, seconds))
         .collect();
     Ok(Json(Running { services: found }))
+}
+
+async fn dependencies<S: Stack>(
+    State(state): State<AppState<S>>,
+    Path(org): Path<Uuid>,
+    Query(over): Query<Spanning>,
+    headers: HeaderMap,
+) -> Result<Json<Dependencies>, LookRefused>
+where
+    S::Repos: ReadRepos,
+{
+    let who = reading(&state, &headers).await?;
+    let filter = over.filter()?;
+
+    let found = state
+        .app
+        .dependencies(&who, TenantId::new(org), &filter)
+        .await?
+        .into_iter()
+        .map(edging)
+        .collect();
+    Ok(Json(Dependencies { edges: found }))
 }
 
 async fn operations<S: Stack>(

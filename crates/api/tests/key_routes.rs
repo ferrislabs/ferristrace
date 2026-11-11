@@ -12,7 +12,8 @@ use ferristrace_domain::{
     AccountId, ApiKey, ApiKeys, ApiSecret, Assigned, Counted, Created, Fingerprint, IngestKey,
     IssueDecisions, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScope, KeyScopes,
     Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId, ProjectName,
-    Projects, ReadGrant, Recorded, Renamed, Scope, ServiceFilter, ServiceSeries, ServiceSummary,
+    Projects, ReadGrant, Recorded, Renamed, Scope, ServiceEdge, ServiceFilter, ServiceSeries,
+    ServiceSummary,
     Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages,
     SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter, TraceId,
     TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
@@ -339,6 +340,14 @@ impl SpanReader for Looked {
         filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         self.note(filter.project);
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 

@@ -6,8 +6,8 @@ use super::requests::{RequestGrouping, RequestSeries, RequestSummary};
 use super::statements::{Fanout, StatementGrouping, StatementSeries, StatementSummary};
 use super::value_objects::{
     AttributeFilter, CacheGrouping, CacheSeries, CacheSummary, FacetFilter, Facets, ListedSpan,
-    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceFilter, ServiceSeries,
-    ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
+    SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceEdge, ServiceFilter,
+    ServiceSeries, ServiceSummary, SpanFilter, TableFilter, TableRow, TraceFilter, TraceSummary,
 };
 use crate::catalogue::ProjectId;
 use crate::store::StoreError;
@@ -26,6 +26,12 @@ pub trait SpanReader {
         service: &str,
         filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send;
+
+    fn dependencies(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceEdge>, StoreError>> + Send;
 
     fn series(
         &self,
@@ -189,6 +195,14 @@ impl<T: SpanReader + Sync> SpanReader for &T {
         filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
         (*self).operations(tenant, service, filter)
+    }
+
+    fn dependencies(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceEdge>, StoreError>> + Send {
+        (*self).dependencies(tenant, filter)
     }
 
     fn series(
@@ -359,6 +373,14 @@ impl<T: SpanReader + Send + Sync> SpanReader for std::sync::Arc<T> {
         filter: &ServiceFilter,
     ) -> impl Future<Output = Result<Vec<ServiceSummary>, StoreError>> + Send {
         self.as_ref().operations(tenant, service, filter)
+    }
+
+    fn dependencies(
+        &self,
+        tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> impl Future<Output = Result<Vec<ServiceEdge>, StoreError>> + Send {
+        self.as_ref().dependencies(tenant, filter)
     }
 
     fn series(
