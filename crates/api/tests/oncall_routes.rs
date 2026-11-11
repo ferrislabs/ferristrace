@@ -964,6 +964,14 @@ impl ferristrace_domain::SpanReader for Failing {
         Ok(Vec::new())
     }
 
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ferristrace_domain::ServiceFilter,
+    ) -> Result<Vec<ferristrace_domain::ServiceEdge>, StoreError> {
+        Ok(Vec::new())
+    }
+
     async fn series(
         &self,
         _tenant: TenantId,

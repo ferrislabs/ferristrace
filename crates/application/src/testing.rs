@@ -13,8 +13,9 @@ use ferristrace_domain::{
     LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
     MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
     PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
-    ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceFilter, ServiceSeries,
-    ServiceSummary, SessionToken, SinkError, Span, SpanCursor, SpanPage, SpanPages, SpanReader,
+    ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceEdge, ServiceFilter,
+    ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor, SpanPage, SpanPages,
+    SpanReader,
     SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory, TenantId,
     TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter,
     UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl,
@@ -150,6 +151,14 @@ impl SpanReader for Inert {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 

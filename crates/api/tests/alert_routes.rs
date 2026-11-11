@@ -14,8 +14,9 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, AlertEvent, AlertStatus, ApiKey, ApiKeys, ApiSecret, Assigned, Created,
     EventId, IssuedKey, KeyId, KeyName, KeyScopes, Labels, Membership, Memberships, NoPhotos,
-    OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, RuleId, ServiceFilter,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
+    OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, RuleId, ServiceEdge,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
+    SessionToken, Span,
     SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TargetKind, TeamId, TenantId,
     TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
@@ -185,6 +186,14 @@ impl SpanReader for Steady {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 

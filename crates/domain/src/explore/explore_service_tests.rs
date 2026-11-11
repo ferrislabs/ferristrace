@@ -6,8 +6,8 @@ use super::errors::{BadWindow, ExploreError};
 use super::explore_service::Explore;
 use super::ports::SpanReader;
 use super::value_objects::{
-    CacheGrouping, CacheSeries, CacheSummary, ServiceFilter, ServicePoint, ServiceSeries,
-    ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window,
+    CacheGrouping, CacheSeries, CacheSummary, ServiceEdge, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, TraceFilter, TraceOrder, TraceSummary, Window,
 };
 use crate::access::key_ring_tests::Ring;
 use crate::access::{KeyScope, KeyScopes, Reader, Readers};
@@ -158,6 +158,14 @@ impl SpanReader for &Asked {
         }])
     }
 
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
+        Ok(Vec::new())
+    }
+
     async fn series(
         &self,
         tenant: TenantId,
@@ -271,6 +279,14 @@ impl SpanReader for Unreachable {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Err(StoreError::Unreachable)
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Err(StoreError::Unreachable)
     }
 

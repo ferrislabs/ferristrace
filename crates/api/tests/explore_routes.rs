@@ -14,8 +14,9 @@ use ferristrace_domain::{
     JobSeries, JobSummary, LEAST_FANOUT, ListedSpan, Measure, Membership, Memberships, NoPhotos,
     OrgRole, Placement, PlacementName, PlacementReader, Placements, ProjectId, RequestGrouping,
     RequestPoint, RequestSeries, RequestSummary, SeenAttribute, SeenPod, SeenValue, SeenWorkload,
-    SeriesFilter, SeriesLine, SeriesResult, ServiceFilter, ServicePoint, ServiceSeries,
-    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanEvent,
+    SeriesFilter, SeriesLine, SeriesResult, ServiceEdge, ServiceFilter, ServicePoint,
+    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
+    SpanCursor, SpanEvent,
     SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus,
     StatementGrouping, StatementPoint, StatementSeries, StatementSummary, StoreError, TableFilter,
     TableRow, TenantId, Test, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
@@ -148,6 +149,14 @@ impl SpanReader for TwoSpans {
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
         Ok(vec![a_summary(&format!("{service} POST /pay"))])
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
+        Ok(Vec::new())
     }
 
     async fn series(
@@ -428,6 +437,14 @@ impl SpanReader for NoSpans {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -854,6 +871,15 @@ impl SpanReader for Remembering {
         Ok(Vec::new())
     }
 
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
+        self.note(None, filter);
+        Ok(Vec::new())
+    }
+
     async fn series(
         &self,
         _tenant: TenantId,
@@ -1247,6 +1273,7 @@ async fn the_organisation_series_is_the_same_shape_over_every_service() {
 #[tokio::test]
 async fn the_service_routes_refuse_strangers_bad_windows_and_missing_sessions() {
     for route in [
+        "services/dependencies",
         "services/checkout/operations",
         "services/checkout/series",
         "series",
@@ -1271,6 +1298,7 @@ async fn the_service_routes_pass_the_project_environment_and_service_to_the_stor
     let project = org(7);
     for route in [
         "services",
+        "services/dependencies",
         "services/check%20out/operations",
         "services/check%20out/series",
         "series",
@@ -1293,6 +1321,7 @@ async fn the_service_routes_pass_the_project_environment_and_service_to_the_stor
     assert_eq!(
         services,
         vec![
+            None,
             None,
             Some("check out".to_owned()),
             Some("check out".to_owned()),

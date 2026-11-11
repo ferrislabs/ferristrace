@@ -421,6 +421,14 @@ pub struct ServiceSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceEdge {
+    pub caller: Box<str>,
+    pub callee: Box<str>,
+    pub calls: u64,
+    pub errors: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceFilter {
     pub window: Window,
     pub project: Option<ProjectId>,

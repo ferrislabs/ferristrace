@@ -12,8 +12,9 @@ use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Action, Actor, ApiKey, ApiKeys, ApiSecret, Assigned, Created, ExportSource,
     ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships, NoPhotos, OrgRole,
-    Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, ServiceFilter,
-    ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Snapshot,
+    Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, ServiceEdge,
+    ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
+    SessionToken, Snapshot,
     Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
     StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
@@ -281,6 +282,14 @@ impl SpanReader for Shelf {
         _service: &str,
         _filter: &ServiceFilter,
     ) -> Result<Vec<ServiceSummary>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn dependencies(
+        &self,
+        _tenant: TenantId,
+        _filter: &ServiceFilter,
+    ) -> Result<Vec<ServiceEdge>, StoreError> {
         Ok(Vec::new())
     }
 
