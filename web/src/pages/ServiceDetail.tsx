@@ -4,10 +4,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
-import { EmptyState, Kpi, svcBg } from '@/components/ft/bits'
+import { EmptyState, Kpi, ServiceDot, svcBg } from '@/components/ft/bits'
 import { LineChart } from '@/components/ft/charts'
 import { ceiling, timeLabels, useDeployMarkers } from '@/data/series'
-import { ERROR_THRESHOLD, charted, perSecond, useOperations, useServiceSeries, useServiceTable } from '@/data/services'
+import { ERROR_THRESHOLD, type Edge, charted, perSecond, useOperations, useServiceDependencies, useServiceSeries, useServiceTable } from '@/data/services'
 import { useWindow } from '@/lib/window'
 import { ANY as ANY_ISSUE, useIssues } from '@/data/issues'
 import { placementSearch, usePlacement } from '@/data/placement'
@@ -28,6 +28,7 @@ export function ServiceDetail() {
   const { operations, failed: opsFailed } = useOperations(name, environment, windowMs, placement)
   const { series } = useServiceSeries(name, environment, windowMs, placement)
   const { issues } = useIssues({ ...ANY_ISSUE, rangeMs: windowMs, service: name, limit: 50 })
+  const { edges, pending: depsPending, failed: depsFailed } = useServiceDependencies(environment, windowMs, placement)
   const markers = useDeployMarkers(series, name)
   const s = services.find((x) => x.name === name)
   const bad = (s?.err ?? 0) >= ERROR_THRESHOLD
@@ -40,6 +41,8 @@ export function ServiceDetail() {
   const open = issues.filter((issue) => issue.status === 'unresolved').slice(0, 5)
   const where = placementSearch(placement)
   const kept = { ...(environment ? { env: environment } : {}), ...where }
+  const upstream = edges.filter((edge) => edge.callee === name).sort((a, b) => b.calls - a.calls)
+  const downstream = edges.filter((edge) => edge.caller === name).sort((a, b) => b.calls - a.calls)
   return (
     <>
       <nav aria-label="Breadcrumb" className="text-control"><Link to="/services" search={kept}>Services</Link><span className="text-faint-foreground"> / </span><span className="font-mono">{name}</span></nav>
@@ -89,6 +92,25 @@ export function ServiceDetail() {
         </div>
       </Card>
       <Card className="overflow-hidden">
+        <CardHeader><CardTitle>Dependencies</CardTitle><span className="text-caption text-muted-foreground">direct callers and callees in the last {label}</span></CardHeader>
+        {depsFailed ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">{because(depsFailed, 'The dependency graph could not be read.')}</p> : null}
+        {!depsFailed && !depsPending && upstream.length === 0 && downstream.length === 0 ? (
+          <p className="m-0 px-4 py-3 text-control text-muted-foreground">No cross-service calls involving {name} in the last {label}.</p>
+        ) : null}
+        {!depsFailed && (upstream.length > 0 || downstream.length > 0) ? (
+          <div className="grid gap-px bg-border-subtle sm:grid-cols-2">
+            <div className="bg-card">
+              <p className="m-0 px-4 pt-3 pb-1 text-caption text-muted-foreground">Called by <span className="text-faint-foreground">if {name} breaks, these feel it</span></p>
+              {upstream.length === 0 ? <p className="m-0 px-4 py-2 text-control text-muted-foreground">Nothing calls {name}.</p> : upstream.map((edge) => <DependencyRow key={edge.caller} other={edge.caller} edge={edge} kept={kept} />)}
+            </div>
+            <div className="bg-card">
+              <p className="m-0 px-4 pt-3 pb-1 text-caption text-muted-foreground">Depends on <span className="text-faint-foreground">if these break, {name} feels it</span></p>
+              {downstream.length === 0 ? <p className="m-0 px-4 py-2 text-control text-muted-foreground">{name} calls nothing else.</p> : downstream.map((edge) => <DependencyRow key={edge.callee} other={edge.callee} edge={edge} kept={kept} />)}
+            </div>
+          </div>
+        ) : null}
+      </Card>
+      <Card className="overflow-hidden">
         <CardHeader><CardTitle className="flex-1">Open issues</CardTitle><span className="text-caption text-muted-foreground">seen in the last {label}</span></CardHeader>
         {open.length === 0 ? <p className="m-0 px-4 py-3 text-control text-muted-foreground">No unresolved issue was seen on this service in the last {label}.</p> : null}
         {open.map((issue) => (
@@ -101,5 +123,18 @@ export function ServiceDetail() {
       <RunsOn service={name} />
       {!pending && !s ? <EmptyState title="Nothing measured yet">This service served no span in the last {label}{environment ? ` in ${environment}` : ''}.</EmptyState> : null}
     </>
+  )
+}
+
+function DependencyRow({ other, edge, kept }: { other: string; edge: Edge; kept: Record<string, string> }) {
+  const bad = (edge.err ?? 0) >= ERROR_THRESHOLD
+  return (
+    <Link to={`/services/${other}`} search={kept} className="flex items-center justify-between gap-2 border-t border-border-subtle px-4 py-2 text-foreground no-underline first:border-0">
+      <span className="inline-flex min-w-0 items-center gap-2 truncate font-mono"><ServiceDot name={other} />{other}</span>
+      <span className="flex shrink-0 items-center gap-1.5 text-control text-muted-foreground">
+        <span>{edge.calls} calls</span>
+        {bad ? <span className="inline-flex items-center gap-1 font-semibold text-warning-text"><TriangleAlert className="size-3.5" aria-hidden />{edge.err?.toFixed(1)} %</span> : null}
+      </span>
+    </Link>
   )
 }
