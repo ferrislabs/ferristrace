@@ -4,7 +4,7 @@
 # The three binaries come out of one Rust build, so building every target
 # compiles the workspace once.
 
-FROM rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137 AS chef
+FROM rust:1.99.1-trixie@sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07 AS chef
 
 WORKDIR /usr/local/src/ferristrace
 
@@ -32,7 +32,7 @@ COPY apps apps
 RUN cargo build --release --locked \
     --bin ferristrace --bin ferristrace-mcp --bin ferristrace-mcp-gateway
 
-FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web-build
+FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web-build
 
 WORKDIR /usr/local/src/ferristrace/web
 
@@ -46,7 +46,7 @@ COPY web/ ./
 
 RUN pnpm build
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:08476c244888bfb425bae1ae4dd7c17f093e972aab8426883d97f3c6f280f7c1 AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab AS runtime
 
 ENV RUST_LOG=info
 
