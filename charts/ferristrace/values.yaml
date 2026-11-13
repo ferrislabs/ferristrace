@@ -94,6 +94,9 @@ config:
     database: ferristrace
     user: ferristrace
     retentionDays: 30
+    # -- Days before parts move to the `cold` volume of ClickHouse's `tiered`
+    # storage policy (ADR 0036). Empty keeps everything local.
+    coldAfterDays: null
   oidc:
     enabled: false
     issuer: ""

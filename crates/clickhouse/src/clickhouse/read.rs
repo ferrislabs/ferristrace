@@ -7,8 +7,7 @@ use ferristrace_domain::{
     JobSummary, ListedSpan, MAX_ATTRIBUTES, MAX_GROUPS, MAX_VALUES, ProjectId, RequestGrouping,
     RequestSeries, RequestSummary, SeenAttribute, SeenValue, SeriesFilter, SeriesResult,
     ServiceEdge, ServiceFilter, ServicePoint, ServiceSeries, ServiceSummary, Span, SpanEvent,
-    SpanFilter,
-    SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StatementGrouping,
+    SpanFilter, SpanId, SpanKind, SpanOrder, SpanReader, SpanStatus, SparseLine, StatementGrouping,
     StatementSeries, StatementSummary, StoreError, TableFilter, TableRow, TenantId, TraceFilter,
     TraceId, TraceOrder, TraceSummary,
 };

@@ -17,8 +17,10 @@ Decisions
   D1  Seven days hot by default in production. The value is
       `spans.cold_after_days`, unset by default, so self-host is unchanged.
   D2  One RustFS for FerrisTrace, not shared with other stacks.
-  D3  The operator owns disks and the `tiered` policy (volumes `hot`,
+  D3  The operator owns disks and the `tiered` policy (volumes `default`,
       `cold`). The server owns the TTL and asks for the policy by name.
+      The local volume keeps the name `default`: ClickHouse refuses a new
+      policy that drops a volume of the old one.
   D4  Moved tables: spans, span_events, logs, metric_points,
       metric_histograms, metric_exemplars, llm_calls. Catalogues stay hot.
   D5  Not a numbered migration: tiering depends on the deployment, and a
@@ -66,7 +68,7 @@ Acceptance (14a)
                `tiered` and a TTL that moves to `cold` after 7 days and
                deletes at `expire_at`; catalogues are untouched.
   @spec-l14-3  A row 8 days old ends on the `cold` volume after
-               `MATERIALIZE TTL`, a row 1 day old stays on `hot`, and one
+               `MATERIALIZE TTL`, a row 1 day old stays local, and one
                query returns both.
   @spec-l14-4  With the key set and no `tiered` policy, the start fails
                with an error naming the policy.

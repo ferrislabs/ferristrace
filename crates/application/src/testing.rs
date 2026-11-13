@@ -15,11 +15,10 @@ use ferristrace_domain::{
     PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
     ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceEdge, ServiceFilter,
     ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader,
-    SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory, TenantId,
-    TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey, UsageMeter,
-    UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret, WebhookSender, WebhookUrl,
-    Window,
+    SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory,
+    TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
+    UsageMeter, UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret, WebhookSender,
+    WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};

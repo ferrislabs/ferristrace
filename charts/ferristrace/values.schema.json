@@ -214,6 +214,10 @@
             "retentionDays": {
               "type": "integer",
               "minimum": 1
+            },
+            "coldAfterDays": {
+              "type": ["integer", "null"],
+              "minimum": 1
             }
           }
         },

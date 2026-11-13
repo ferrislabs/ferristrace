@@ -180,6 +180,18 @@ jobs:
         with:
           shared-key: rust-test
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: give ClickHouse a tiered storage policy
+        env:
+          CLICKHOUSE_CONTAINER: ${{ job.services.clickhouse.id }}
+        run: |
+          docker cp .github/clickhouse/tiered.xml "$CLICKHOUSE_CONTAINER":/etc/clickhouse-server/config.d/tiered.xml
+          docker restart "$CLICKHOUSE_CONTAINER"
+          for _ in $(seq 60); do
+            curl -sf http://localhost:8123/ping && exit 0
+            sleep 1
+          done
+          echo "ClickHouse did not come back after the restart" >&2
+          exit 1
       - name: unit, integration and adapter tests
         run: cargo test --workspace --locked
       - name: doc tests

@@ -19,9 +19,8 @@ use ferristrace_domain::{
     KeyScopes, Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId,
     ProjectName, Projects, ReadGrant, RegisteredAgent, Renamed, ServiceEdge, ServiceFilter,
     ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
-    SpanCursor, SpanPage,
-    SpanPages, SpanReader, StoreError, TeamId, TenantId, TokenRefusal, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, VerifiedToken, WhoamiError, Window,
+    SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TeamId, TenantId, TokenRefusal,
+    TraceFilter, TraceId, TraceSummary, UnixSeconds, VerifiedToken, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;

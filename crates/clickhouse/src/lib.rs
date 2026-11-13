@@ -2,8 +2,9 @@ mod clickhouse;
 mod spans;
 
 pub use clickhouse::{
-    BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
-    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, MIGRATIONS,
-    MigrateError, Migration,
+    BatchLimits, COLD_VOLUME, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink,
+    ClickhouseMetricReader, ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader,
+    ClickhouseSink, ClickhouseTiering, MIGRATIONS, MOVED_TABLES, MigrateError, Migration,
+    MovedTable, TIERED_POLICY, TieringError,
 };
-pub use spans::{SpanStore, SpanStoreSettings, open as open_span_store};
+pub use spans::{OpenError, SpanStore, SpanStoreSettings, open as open_span_store};
