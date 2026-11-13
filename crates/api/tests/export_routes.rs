@@ -14,9 +14,9 @@ use ferristrace_domain::{
     ExportedSpan, IssuedKey, KeyId, KeyName, KeyScopes, Membership, Memberships, NoPhotos, OrgRole,
     Organisation, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, ServiceEdge,
     ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
-    SessionToken, Snapshot,
-    Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages, SpanReader, SpanStatus,
-    StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
+    SessionToken, Snapshot, Span, SpanCursor, SpanEvent, SpanId, SpanKind, SpanPage, SpanPages,
+    SpanReader, SpanStatus, StoreError, TeamId, TenantId, TraceFilter, TraceId, TraceSummary,
+    UnixSeconds, WhoamiError,
 };
 use tower::ServiceExt;
 use uuid::Uuid;

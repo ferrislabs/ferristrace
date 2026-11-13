@@ -16,11 +16,10 @@ use ferristrace_domain::{
     RequestPoint, RequestSeries, RequestSummary, SeenAttribute, SeenPod, SeenValue, SeenWorkload,
     SeriesFilter, SeriesLine, SeriesResult, ServiceEdge, ServiceFilter, ServicePoint,
     ServiceSeries, ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span,
-    SpanCursor, SpanEvent,
-    SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages, SpanReader, SpanStatus,
-    StatementGrouping, StatementPoint, StatementSeries, StatementSummary, StoreError, TableFilter,
-    TableRow, TenantId, Test, TraceFilter, TraceId, TraceOrder, TraceSummary, UnixSeconds,
-    WhoamiError, Window, Workload, WorkloadKind,
+    SpanCursor, SpanEvent, SpanFilter, SpanId, SpanKind, SpanOrder, SpanPage, SpanPages,
+    SpanReader, SpanStatus, StatementGrouping, StatementPoint, StatementSeries, StatementSummary,
+    StoreError, TableFilter, TableRow, TenantId, Test, TraceFilter, TraceId, TraceOrder,
+    TraceSummary, UnixSeconds, WhoamiError, Window, Workload, WorkloadKind,
 };
 use tower::ServiceExt;
 use uuid::Uuid;

@@ -4,9 +4,8 @@ use ferristrace_domain::{
     Placements, ProjectId, Reader, Readers, RequestGrouping, RequestSeries, RequestSummary,
     SeenAttribute, SeenValue, SeriesFilter, SeriesResult, ServiceEdge, ServiceFilter,
     ServiceSeries, ServiceSite, ServiceSummary, Span, SpanFilter, StatementGrouping,
-    StatementSeries,
-    StatementSummary, TableFilter, TableRow, TenantId, TraceFilter, TraceId, TraceSummary, Whoami,
-    Window,
+    StatementSeries, StatementSummary, TableFilter, TableRow, TenantId, TraceFilter, TraceId,
+    TraceSummary, Whoami, Window,
 };
 
 use crate::registry::{ReadRepos, SiteRepos};

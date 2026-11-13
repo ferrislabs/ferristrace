@@ -13,10 +13,9 @@ use ferristrace_domain::{
     IssueDecisions, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScope, KeyScopes,
     Membership, Memberships, NoPhotos, Occurrence, OrgRole, Project, ProjectId, ProjectName,
     Projects, ReadGrant, Recorded, Renamed, Scope, ServiceEdge, ServiceFilter, ServiceSeries,
-    ServiceSummary,
-    Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter, TraceId,
-    TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
+    ServiceSummary, Session, SessionError, SessionStore, SessionToken, Span, SpanCursor, SpanPage,
+    SpanPages, SpanReader, Status, StoreError, TeamId, TenantDirectory, TenantId, TraceFilter,
+    TraceId, TraceSummary, UnixSeconds, UnknownKey, WhoamiError, Window,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;

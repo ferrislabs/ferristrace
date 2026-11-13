@@ -16,9 +16,8 @@ use ferristrace_domain::{
     EventId, IssuedKey, KeyId, KeyName, KeyScopes, Labels, Membership, Memberships, NoPhotos,
     OrgRole, Project, ProjectId, ProjectName, Projects, ReadGrant, Renamed, RuleId, ServiceEdge,
     ServiceFilter, ServiceSeries, ServiceSummary, Session, SessionError, SessionStore,
-    SessionToken, Span,
-    SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TargetKind, TeamId, TenantId,
-    TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
+    SessionToken, Span, SpanCursor, SpanPage, SpanPages, SpanReader, StoreError, TargetKind,
+    TeamId, TenantId, TraceFilter, TraceId, TraceSummary, UnixSeconds, WhoamiError,
 };
 use ferristrace_infra::FixedClock;
 use serde_json::{Value, json};

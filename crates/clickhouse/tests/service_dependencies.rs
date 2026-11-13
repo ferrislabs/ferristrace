@@ -117,7 +117,15 @@ async fn a_server_span_whose_parent_lives_in_another_service_is_an_edge() {
         &client,
         Scope::of(org(MINE)),
         vec![
-            span(1, 1, None, "checkout", SpanKind::Internal, SpanStatus::Ok, 0),
+            span(
+                1,
+                1,
+                None,
+                "checkout",
+                SpanKind::Internal,
+                SpanStatus::Ok,
+                0,
+            ),
             span(
                 1,
                 2,
@@ -160,7 +168,15 @@ async fn a_call_within_the_same_service_is_not_an_edge() {
         &client,
         Scope::of(org(MINE)),
         vec![
-            span(2, 1, None, "checkout", SpanKind::Internal, SpanStatus::Ok, 0),
+            span(
+                2,
+                1,
+                None,
+                "checkout",
+                SpanKind::Internal,
+                SpanStatus::Ok,
+                0,
+            ),
             span(
                 2,
                 2,
@@ -179,7 +195,10 @@ async fn a_call_within_the_same_service_is_not_an_edge() {
         .await
         .expect("the dependencies read");
 
-    assert!(edges.is_empty(), "a span calling its own service is no edge");
+    assert!(
+        edges.is_empty(),
+        "a span calling its own service is no edge"
+    );
 }
 
 #[tokio::test]
@@ -191,7 +210,15 @@ async fn the_dependency_graph_is_scoped_to_the_tenant_and_project() {
         &client,
         Scope::of(org(MINE)),
         vec![
-            span(3, 1, None, "checkout", SpanKind::Internal, SpanStatus::Ok, 0),
+            span(
+                3,
+                1,
+                None,
+                "checkout",
+                SpanKind::Internal,
+                SpanStatus::Ok,
+                0,
+            ),
             span(
                 3,
                 2,
@@ -210,7 +237,15 @@ async fn the_dependency_graph_is_scoped_to_the_tenant_and_project() {
         &client,
         other_project,
         vec![
-            span(4, 1, None, "checkout", SpanKind::Internal, SpanStatus::Ok, 0),
+            span(
+                4,
+                1,
+                None,
+                "checkout",
+                SpanKind::Internal,
+                SpanStatus::Ok,
+                0,
+            ),
             span(
                 4,
                 2,
@@ -227,16 +262,16 @@ async fn the_dependency_graph_is_scoped_to_the_tenant_and_project() {
         &client,
         Scope::of(org(THEIRS)),
         vec![
-            span(5, 1, None, "checkout", SpanKind::Internal, SpanStatus::Ok, 0),
             span(
                 5,
-                2,
-                Some(1),
-                "fraud",
-                SpanKind::Server,
-                SpanStatus::Ok,
                 1,
+                None,
+                "checkout",
+                SpanKind::Internal,
+                SpanStatus::Ok,
+                0,
             ),
+            span(5, 2, Some(1), "fraud", SpanKind::Server, SpanStatus::Ok, 1),
         ],
     )
     .await;
@@ -247,7 +282,10 @@ async fn the_dependency_graph_is_scoped_to_the_tenant_and_project() {
         .await
         .expect("the dependencies read");
     assert_eq!(
-        everyone.iter().map(|edge| &*edge.callee).collect::<Vec<_>>(),
+        everyone
+            .iter()
+            .map(|edge| &*edge.callee)
+            .collect::<Vec<_>>(),
         vec!["billing", "shipping"],
         "both projects of the tenant, neither of the other tenant"
     );
@@ -259,7 +297,10 @@ async fn the_dependency_graph_is_scoped_to_the_tenant_and_project() {
         .await
         .expect("the dependencies read");
     assert_eq!(
-        one_project.iter().map(|edge| &*edge.callee).collect::<Vec<_>>(),
+        one_project
+            .iter()
+            .map(|edge| &*edge.callee)
+            .collect::<Vec<_>>(),
         vec!["shipping"]
     );
 }
