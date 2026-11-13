@@ -5,6 +5,7 @@ mod routes;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -361,6 +362,7 @@ async fn spans_of(config: &Config) -> anyhow::Result<Opened> {
     tracing::info!(
         url = %settings.url,
         retention_days = settings.retention_days,
+        cold_after_days = settings.cold_after_days.map(NonZeroU16::get),
         "spans, logs and metrics are written to the span store"
     );
     Ok(Opened {

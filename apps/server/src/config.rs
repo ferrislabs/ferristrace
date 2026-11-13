@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::num::NonZeroU16;
 
 use ferristrace_clickhouse::SpanStoreSettings;
 use ferristrace_domain::DecompressedBytes;
@@ -62,6 +63,8 @@ pub struct SpansConfig {
     pub password: Option<String>,
     #[serde(default = "a_month")]
     pub retention_days: u64,
+    #[serde(default)]
+    pub cold_after_days: Option<NonZeroU16>,
 }
 
 impl From<SpansConfig> for SpanStoreSettings {
@@ -72,6 +75,7 @@ impl From<SpansConfig> for SpanStoreSettings {
             user: spans.user,
             password: spans.password,
             retention_days: spans.retention_days,
+            cold_after_days: spans.cold_after_days,
         }
     }
 }
@@ -259,6 +263,8 @@ pub fn load() -> anyhow::Result<Config> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
+    use std::num::NonZeroU16;
+
     use super::{AgentSetup, Config, FILE, McpConfig, OidcConfig, TenantAllowance, figment};
 
     #[test]
@@ -360,6 +366,7 @@ mod tests {
             assert_eq!(spans.url, "http://clickhouse:8123");
             assert_eq!(spans.retention_days, 30);
             assert_eq!(spans.database, None);
+            assert_eq!(spans.cold_after_days, None);
             Ok(())
         });
     }
@@ -382,6 +389,43 @@ mod tests {
 
             assert_eq!(spans.retention_days, 7);
             assert_eq!(spans.database.as_deref(), Some("ferristrace"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn a_span_store_moves_parts_to_the_cold_volume_after_the_days_given() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                [spans]
+                url = "http://clickhouse:8123"
+                cold_after_days = 7
+                "#,
+            )?;
+
+            let config: Config = figment().extract()?;
+            let spans = config.spans.expect("a span store");
+
+            assert_eq!(spans.cold_after_days.map(NonZeroU16::get), Some(7));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn zero_days_before_the_cold_volume_is_refused() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                FILE,
+                r#"
+                [spans]
+                url = "http://clickhouse:8123"
+                cold_after_days = 0
+                "#,
+            )?;
+
+            assert!(figment().extract::<Config>().is_err());
             Ok(())
         });
     }

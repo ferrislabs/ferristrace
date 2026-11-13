@@ -33,7 +33,9 @@ the MergeTree format, so every query reads hot and cold parts the same way
 and nothing in the read path changes.
 
 The operator declares a storage policy named `tiered` with two volumes:
-`hot` (the local disk) and `cold` (the S3 disk, behind a local cache). The
+`default` (the local disk) and `cold` (the S3 disk, behind a local cache).
+The local volume keeps the name `default` because ClickHouse refuses a new
+policy that drops a volume of the table's current one. The
 server does not create disks or policies. It only asks for the policy.
 
 The server owns the TTL. With `spans.cold_after_days` set, it sets on each

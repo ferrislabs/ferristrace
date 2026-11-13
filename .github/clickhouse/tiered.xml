@@ -1,0 +1,24 @@
+<!-- The tests' stand-in for ADR 0036: the cold volume is a second local
+     path instead of an S3 disk, so the TTL and the moves are exercised
+     without object storage. -->
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <cold>
+                <path>/var/lib/clickhouse/cold/</path>
+            </cold>
+        </disks>
+        <policies>
+            <tiered>
+                <volumes>
+                    <default>
+                        <disk>default</disk>
+                    </default>
+                    <cold>
+                        <disk>cold</disk>
+                    </cold>
+                </volumes>
+            </tiered>
+        </policies>
+    </storage_configuration>
+</clickhouse>

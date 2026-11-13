@@ -1,3 +1,4 @@
+use std::num::NonZeroU16;
 use std::time::Duration;
 
 use clickhouse::Client;
@@ -5,7 +6,8 @@ use ferristrace_domain::Clock;
 
 use crate::clickhouse::{
     BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
-    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, MigrateError,
+    ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, ClickhouseTiering,
+    MigrateError, TieringError,
 };
 
 const DEFAULT_RETENTION_DAYS: u64 = 30;
@@ -18,6 +20,7 @@ pub struct SpanStoreSettings {
     pub user: Option<String>,
     pub password: Option<String>,
     pub retention_days: u64,
+    pub cold_after_days: Option<NonZeroU16>,
 }
 
 impl SpanStoreSettings {
@@ -28,6 +31,7 @@ impl SpanStoreSettings {
             user: None,
             password: None,
             retention_days: DEFAULT_RETENTION_DAYS,
+            cold_after_days: None,
         }
     }
 
@@ -61,16 +65,33 @@ pub struct SpanStore<C> {
     pub metric_reader: ClickhouseMetricReader,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum OpenError {
+    #[error(transparent)]
+    Migrate(#[from] MigrateError),
+    #[error(transparent)]
+    Tiering(#[from] TieringError),
+}
+
 pub async fn open<C: Clock + Clone>(
     settings: &SpanStoreSettings,
     clock: C,
-) -> Result<SpanStore<C>, MigrateError> {
+) -> Result<SpanStore<C>, OpenError> {
     let client = settings.client();
     let ran = ClickhouseMigrator::new(client.clone()).up().await?;
     if ran.is_empty() {
         tracing::info!("the span schema was already up to date");
     } else {
         tracing::info!(?ran, "the span schema was migrated");
+    }
+    ClickhouseTiering::new(client.clone())
+        .apply(settings.cold_after_days)
+        .await?;
+    if let Some(days) = settings.cold_after_days {
+        tracing::info!(
+            cold_after_days = days.get(),
+            "signal parts older than this move to the cold volume"
+        );
     }
     Ok(SpanStore {
         metrics: ClickhouseMetricSink::new(

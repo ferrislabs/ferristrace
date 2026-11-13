@@ -738,6 +738,68 @@ one project: an owner sets it in Settings, Organisation, General, and
 `spans.retention_days` is the value for an organisation that sets none.
 ClickHouse applies it on its own schedule.
 
+## Cold storage
+
+ClickHouse can keep the recent days on its own volume and move older
+parts to S3-compatible object storage, such as RustFS, MinIO or Garage
+([ADR 0036](../docs/adr/0036-clickhouse-keeps-a-week-local-and-the-rest-in-object-storage.md)).
+Queries do not change: old parts are read from the bucket through a local
+cache. It is off by default.
+
+1. Give ClickHouse a storage policy named `tiered`. The local volume must
+   keep the name `default`, and the volume for old parts must be named
+   `cold`. Mount this file in `/etc/clickhouse-server/config.d/`, with the
+   bucket already created and the keys in the ClickHouse environment:
+
+   ```xml
+   <clickhouse>
+       <storage_configuration>
+           <disks>
+               <cold_s3>
+                   <type>s3</type>
+                   <endpoint>http://rustfs:9000/ferristrace-cold/clickhouse/</endpoint>
+                   <access_key_id from_env="COLD_ACCESS_KEY"/>
+                   <secret_access_key from_env="COLD_SECRET_KEY"/>
+               </cold_s3>
+               <cold>
+                   <type>cache</type>
+                   <disk>cold_s3</disk>
+                   <path>/var/lib/clickhouse/cold_cache/</path>
+                   <max_size>10737418240</max_size>
+               </cold>
+           </disks>
+           <policies>
+               <tiered>
+                   <volumes>
+                       <default>
+                           <disk>default</disk>
+                       </default>
+                       <cold>
+                           <disk>cold</disk>
+                       </cold>
+                   </volumes>
+               </tiered>
+           </policies>
+       </storage_configuration>
+   </clickhouse>
+   ```
+
+2. Set `spans.cold_after_days` (`FERRISTRACE_SPANS__COLD_AFTER_DAYS`), for
+   example to `7`. At start the server moves spans, span events, logs,
+   metric points, histograms and exemplars, and LLM calls older than that
+   to `cold`, and refuses to start if the `tiered` policy has no `cold`
+   volume. Catalogues stay local.
+
+Things to know before turning it on:
+
+- The ClickHouse volume and the bucket are one backup. The volume holds
+  the map of what is in the bucket, so losing either loses the old data.
+- If the object store is down, queries that reach past the local days
+  fail. Ingest and recent queries keep working.
+- A table that uses `tiered` cannot go back to `default`. Removing
+  `cold_after_days` stops new moves; parts already in the bucket stay
+  there until their retention ends.
+
 ## Export
 
 An owner downloads everything the organisation holds from Settings,

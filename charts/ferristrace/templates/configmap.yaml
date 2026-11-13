@@ -23,6 +23,9 @@ data:
   {{- with $c.spans.user }}
   FERRISTRACE_SPANS__USER: {{ . | quote }}
   {{- end }}
+  {{- with $c.spans.coldAfterDays }}
+  FERRISTRACE_SPANS__COLD_AFTER_DAYS: {{ . | quote }}
+  {{- end }}
   {{- if $c.oidc.enabled }}
   FERRISTRACE_OIDC__ISSUER: {{ required "config.oidc.issuer is required when config.oidc.enabled" $c.oidc.issuer | quote }}
   FERRISTRACE_OIDC__CLIENT_ID: {{ required "config.oidc.clientId is required when config.oidc.enabled" $c.oidc.clientId | quote }}
