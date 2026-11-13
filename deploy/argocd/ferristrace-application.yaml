@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: ghcr.io/ferrislabs/charts
     chart: ferristrace
-    targetRevision: 0.0.4
+    targetRevision: 0.0.5
     helm:
       valuesObject:
         replicaCount: 2
