@@ -760,6 +760,7 @@ cache. It is off by default.
                    <endpoint>http://rustfs:9000/ferristrace-cold/clickhouse/</endpoint>
                    <access_key_id from_env="COLD_ACCESS_KEY"/>
                    <secret_access_key from_env="COLD_SECRET_KEY"/>
+                   <skip_access_check>true</skip_access_check>
                </cold_s3>
                <cold>
                    <type>cache</type>
@@ -795,7 +796,9 @@ Things to know before turning it on:
 - The ClickHouse volume and the bucket are one backup. The volume holds
   the map of what is in the bucket, so losing either loses the old data.
 - If the object store is down, queries that reach past the local days
-  fail. Ingest and recent queries keep working.
+  fail. Ingest and recent queries keep working. Keep
+  `skip_access_check`: without it ClickHouse 24.8 does not start at all
+  while the object store is unreachable.
 - A table that uses `tiered` cannot go back to `default`. Removing
   `cold_after_days` stops new moves; parts already in the bucket stay
   there until their retention ends.
