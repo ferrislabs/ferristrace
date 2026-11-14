@@ -1,5 +1,5 @@
 use ferristrace_application::repository;
-use ferristrace_domain::telemetry::{BillingMonth, HourTotal, MonthTotal, UsageLedger};
+use ferristrace_domain::telemetry::{BillingMonth, HourTotal, MonthTotal, Split, UsageLedger};
 use ferristrace_domain::{Consumed, DecompressedBytes, StoreError, TenantId, UsageHistory, Window};
 use sqlx::Row;
 use uuid::Uuid;
@@ -23,7 +23,9 @@ impl UsageHistory for PostgresUsage {
     async fn hours(&self, org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError> {
         let mut tx = self.tx.lock().await;
         let rows = sqlx::query(
-            "SELECT hour_start AS hour_start, ingested_bytes AS ingested_bytes \
+            "SELECT hour_start AS hour_start, ingested_bytes AS ingested_bytes, \
+             spans_bytes AS spans_bytes, logs_bytes AS logs_bytes, \
+             metrics_points AS metrics_points \
              FROM usage_hourly WHERE org_id = $1 AND hour_start >= $2 AND hour_start < $3 \
              ORDER BY hour_start",
         )
@@ -41,6 +43,7 @@ impl UsageHistory for PostgresUsage {
                     .unwrap_or_default(),
                 ingested_bytes: u64::try_from(row.get::<i64, _>("ingested_bytes"))
                     .unwrap_or_default(),
+                split: split_of(&row),
             })
             .collect())
     }
@@ -64,28 +67,33 @@ impl UsageHistory for PostgresUsage {
 
 impl UsageLedger for PostgresUsage {
     async fn record_hours(&self, hours: &[HourTotal]) -> Result<usize, StoreError> {
-        let rows: Vec<(Uuid, i64, i64)> = hours
+        let rows: Vec<(Uuid, i64, i64, Option<Split>)> = hours
             .iter()
             .map(|total| {
                 (
                     total.tenant.as_uuid(),
                     total.hour.start_nanos(),
                     i64::try_from(total.ingested.get()).unwrap_or(i64::MAX),
+                    total.split,
                 )
             })
             .collect();
 
         let mut tx = self.tx.lock().await;
         let mut written = 0;
-        for (org, hour_start, ingested) in rows {
+        for (org, hour_start, ingested, split) in rows {
             let inserted = sqlx::query(
-                "INSERT INTO usage_hourly (org_id, hour_start, ingested_bytes) \
-                 SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM orgs WHERE id = $1) \
+                "INSERT INTO usage_hourly \
+                 (org_id, hour_start, ingested_bytes, spans_bytes, logs_bytes, metrics_points) \
+                 SELECT $1, $2, $3, $4, $5, $6 WHERE EXISTS (SELECT 1 FROM orgs WHERE id = $1) \
                  ON CONFLICT (org_id, hour_start) DO NOTHING",
             )
             .bind(org)
             .bind(hour_start)
             .bind(ingested)
+            .bind(split.map(|found| as_nanos(found.spans_bytes)))
+            .bind(split.map(|found| as_nanos(found.logs_bytes)))
+            .bind(split.map(|found| as_nanos(found.metrics_points)))
             .execute(&mut **tx)
             .await
             .map_err(|error| unreachable(&error, "roll an hour up"))?;
@@ -117,6 +125,18 @@ impl UsageLedger for PostgresUsage {
             })
             .collect())
     }
+}
+
+fn split_of(row: &sqlx::postgres::PgRow) -> Option<Split> {
+    let count = |column: &str| {
+        row.get::<Option<i64>, _>(column)
+            .map(|value| u64::try_from(value).unwrap_or_default())
+    };
+    Some(Split {
+        spans_bytes: count("spans_bytes")?,
+        logs_bytes: count("logs_bytes")?,
+        metrics_points: count("metrics_points")?,
+    })
 }
 
 fn as_nanos(unsigned: u64) -> i64 {

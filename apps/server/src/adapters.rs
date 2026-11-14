@@ -10,10 +10,10 @@ use ferristrace_domain::telemetry::{
     BillingHour, CounterUnreachable, HourTotal, HourlyCounters, StaticQuota,
 };
 use ferristrace_domain::{
-    AlertMailer, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey, Letter,
-    LogRecord, LogSink, Metric, MetricSink, NoPhotos, PageDispatch, Photo, PhotoError, Photos,
-    Pictured, Portrait, Scope, SinkError, Span, SpanSink, StatusMailer, TenantDirectory, TenantId,
-    UnknownKey, UsageMeter, UsageReader,
+    AlertMailer, Carried, DecompressedBytes, DeliveryError, Dispatch, Email, EmailList, IngestKey,
+    Letter, LogRecord, LogSink, Metric, MetricSink, NoPhotos, PageDispatch, Photo, PhotoError,
+    Photos, Pictured, Portrait, Scope, SinkError, Span, SpanSink, StatusMailer, TenantDirectory,
+    TenantId, UnknownKey, UsageMeter, UsageReader,
 };
 use ferristrace_infra::{
     HttpWebhooks, JwksVerifier, MemoryMeter, MemorySink, S3Photos, SmtpMailer, StaticDirectory,
@@ -173,10 +173,15 @@ pub(crate) enum Meter {
 }
 
 impl UsageMeter for Meter {
-    async fn record_ingest(&self, tenant: TenantId, decompressed: DecompressedBytes) {
+    async fn record_ingest(
+        &self,
+        tenant: TenantId,
+        decompressed: DecompressedBytes,
+        carried: Carried,
+    ) {
         match self {
-            Self::Memory(meter) => meter.record_ingest(tenant, decompressed).await,
-            Self::Redis(meter) => meter.record_ingest(tenant, decompressed).await,
+            Self::Memory(meter) => meter.record_ingest(tenant, decompressed, carried).await,
+            Self::Redis(meter) => meter.record_ingest(tenant, decompressed, carried).await,
         }
     }
 }

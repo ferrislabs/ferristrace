@@ -181,13 +181,13 @@ pub use status::{
 };
 pub use store::StoreError;
 pub use telemetry::{
-    Admission, Allowance, BadRetention, BadSeverity, BillingHour, BillingMonth, Consumed,
+    Admission, Allowance, BadRetention, BadSeverity, BillingHour, BillingMonth, Carried, Consumed,
     Consumption, CounterUnreachable, DecompressedBytes, HourTotal, HourlyCounters, Ingest,
     IngestError, IngestKey, InvalidId, LogPayload, LogRecord, LogSink, MAX_RETENTION_DAYS,
     MIN_RETENTION_DAYS, Metering, MonthTotal, Payload, QuotaPolicy, RetentionDays, Scope, Severity,
-    SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, StaticQuota,
-    TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered, UsageHistory, UsageLedger,
-    UsageMeter, UsageReader, UsageSyncError,
+    SignalKind, SinkError, Span, SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, Split,
+    StaticQuota, TenantDirectory, TenantId, TraceId, UnknownKey, Unmetered, UsageHistory,
+    UsageLedger, UsageMeter, UsageReader, UsageSyncError,
 };
 pub use views::{
     BadViewDefinition, BadViewName, Creation, ExplorerViews, NewView, Saving, View, ViewChange,

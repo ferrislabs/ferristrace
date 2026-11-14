@@ -154,6 +154,15 @@ pub struct MetricPayload {
     pub decompressed: DecompressedBytes,
 }
 
+impl MetricPayload {
+    pub fn datapoints(&self) -> u64 {
+        self.metrics
+            .iter()
+            .map(|metric| metric.data.datapoints() as u64)
+            .sum()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricQuery {
     pub window: Window,

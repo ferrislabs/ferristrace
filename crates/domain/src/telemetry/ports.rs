@@ -4,7 +4,8 @@ use super::billing::{BillingHour, BillingMonth};
 use super::entities::{LogRecord, Span};
 use super::errors::{CounterUnreachable, SinkError, UnknownKey};
 use super::value_objects::{
-    Admission, Consumed, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Scope, TenantId,
+    Admission, Carried, Consumed, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Scope,
+    TenantId,
 };
 use crate::explore::Window;
 use crate::store::StoreError;
@@ -123,6 +124,7 @@ pub trait UsageMeter {
         &self,
         tenant: TenantId,
         decompressed: DecompressedBytes,
+        carried: Carried,
     ) -> impl Future<Output = ()> + Send;
 }
 
@@ -131,8 +133,9 @@ impl<T: UsageMeter + Sync> UsageMeter for &T {
         &self,
         tenant: TenantId,
         decompressed: DecompressedBytes,
+        carried: Carried,
     ) -> impl Future<Output = ()> + Send {
-        (*self).record_ingest(tenant, decompressed)
+        (*self).record_ingest(tenant, decompressed, carried)
     }
 }
 
@@ -141,8 +144,9 @@ impl<T: UsageMeter + Send + Sync> UsageMeter for std::sync::Arc<T> {
         &self,
         tenant: TenantId,
         decompressed: DecompressedBytes,
+        carried: Carried,
     ) -> impl Future<Output = ()> + Send {
-        self.as_ref().record_ingest(tenant, decompressed)
+        self.as_ref().record_ingest(tenant, decompressed, carried)
     }
 }
 

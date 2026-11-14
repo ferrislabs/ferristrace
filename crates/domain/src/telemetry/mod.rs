@@ -33,7 +33,7 @@ pub use ports::{
 };
 pub use quota::{Allowance, StaticQuota};
 pub use value_objects::{
-    Admission, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, LogPayload,
+    Admission, Carried, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, LogPayload,
     MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope, Severity,
-    SpanEvent, SpanId, SpanKind, SpanStatus, TenantId, TraceId,
+    SignalKind, SpanEvent, SpanId, SpanKind, SpanStatus, Split, TenantId, TraceId,
 };

@@ -100,6 +100,13 @@ impl MetricData {
         }
     }
 
+    pub fn datapoints(&self) -> usize {
+        match self {
+            Self::Gauge(points) | Self::Sum { points, .. } => points.len(),
+            Self::Histogram { points, .. } => points.len(),
+        }
+    }
+
     pub fn last_seen_unix_nanos(&self) -> Option<u64> {
         match self {
             Self::Gauge(points) | Self::Sum { points, .. } => {

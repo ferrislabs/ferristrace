@@ -6,19 +6,19 @@ pub use ferristrace_domain::testing::{
 };
 use ferristrace_domain::{
     AccountId, Admission, AgentToken, AgentTokens, Aggregation, AlertMailer, ApiKey, ApiKeys,
-    ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, Buckets, CallPage, CallQuery, Clock,
-    ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes, DeliveryError,
-    Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint, InfraFilter,
-    InfraReader, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName, KeyScopes, Letter,
-    LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink, Metric,
-    MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence, PageDispatch,
-    PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail, ReleaseFilter,
-    ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceEdge, ServiceFilter,
-    ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor, SpanPage, SpanPages,
-    SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError, TenantDirectory,
-    TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds, UnknownKey,
-    UsageMeter, UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret, WebhookSender,
-    WebhookUrl, Window,
+    ApiSecret, AuditEntry, AuditFilter, AuditPage, AuditTrail, Buckets, CallPage, CallQuery,
+    Carried, Clock, ClusterFilter, ClusterReader, ClusterSnapshot, Counted, DecompressedBytes,
+    DeliveryError, Deploy, DeployFeed, Deployed, Dispatch, Email, EmailList, Fingerprint,
+    InfraFilter, InfraReader, IngestKey, IssueFilter, IssueReader, IssuedKey, KeyId, KeyName,
+    KeyScopes, Letter, LlmReader, LogBucket, LogPage, LogQuery, LogReader, LogRecord, LogSink,
+    Metric, MetricDescriptor, MetricKind, MetricQuery, MetricReader, MetricSink, Occurrence,
+    PageDispatch, PageSize, ProjectId, QuotaPolicy, ReadGrant, Release, ReleaseDetail,
+    ReleaseFilter, ReleaseReader, Resource, Scope, SeenModel, SeriesSet, ServiceEdge,
+    ServiceFilter, ServiceSeries, ServiceSummary, SessionToken, SinkError, Span, SpanCursor,
+    SpanPage, SpanPages, SpanReader, SpanSink, SpendQuery, SpendRead, StatusMailer, StoreError,
+    TenantDirectory, TenantId, TokenRefusal, TraceFilter, TraceId, TraceSummary, UnixSeconds,
+    UnknownKey, UsageMeter, UsageReader, UserRefusal, UserTokens, VerifiedToken, WebhookSecret,
+    WebhookSender, WebhookUrl, Window,
 };
 
 use crate::registry::{Settle, UnitOfWork};
@@ -221,7 +221,13 @@ impl IssueReader for Inert {
 }
 
 impl UsageMeter for Inert {
-    async fn record_ingest(&self, _tenant: TenantId, _decompressed: DecompressedBytes) {}
+    async fn record_ingest(
+        &self,
+        _tenant: TenantId,
+        _decompressed: DecompressedBytes,
+        _carried: Carried,
+    ) {
+    }
 }
 
 impl UsageReader for Inert {
