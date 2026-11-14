@@ -59,19 +59,21 @@ export function byDay(hours: Metered['hours'], from: number, to: number): Day[] 
   return days
 }
 
-export function dailyOf(hours: Hour[], read: (hour: Hour) => number | null, from: number, to: number): Day[] {
+export const HOUR = 3_600_000
+
+export function dailyOf(hours: Hour[], read: (hour: Hour) => number | null, from: number, to: number, step: number = DAY): Day[] {
   const totals = new Map<number, number>()
   for (const hour of hours) {
     const value = read(hour)
     if (value === null) continue
-    const day = Math.floor(hour.started_at_ms / DAY) * DAY
-    totals.set(day, (totals.get(day) ?? 0) + value)
+    const bucket = Math.floor(hour.started_at_ms / step) * step
+    totals.set(bucket, (totals.get(bucket) ?? 0) + value)
   }
-  const days: Day[] = []
-  for (let at = Math.floor(from / DAY) * DAY; at < to; at += DAY) {
-    days.push({ at, bytes: totals.get(at) ?? 0 })
+  const buckets: Day[] = []
+  for (let at = Math.floor(from / step) * step; at < to; at += step) {
+    buckets.push({ at, bytes: totals.get(at) ?? 0 })
   }
-  return days
+  return buckets
 }
 
 export function projected(used: number, at: number): number {
