@@ -1,75 +1,17 @@
 import { useMemo, useState } from 'react'
+import { DailyBars } from '@/components/ft/DailyBars'
+import { Meter } from '@/components/ft/Meter'
 import { Card } from '@/components/ui/card'
 import { Segmented } from '@/components/ui/segmented'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
 import { byDay, bytes, projected, startOfMonth, startOfNextMonth, useMetered, type Day } from '@/data/usage'
 import { Link } from '@/lib/router'
-import { cn } from '@/lib/utils'
 import { H, Sub } from './parts'
 
 const DAY = 86_400_000
 
 const month = (at: number) => new Date(at).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 const dayLabel = (at: number) => new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-
-function Meter({ label, used, of, share, note }: { label: string; used: string; of?: string; share: number | null; note: string }) {
-  return (
-    <Card className="flex flex-col gap-2 p-3.5">
-      <div className="flex items-baseline gap-2">
-        <span className="flex-1 text-control font-semibold">{label}</span>
-        <span className="font-mono text-control">{used}</span>
-        {of ? <span className="text-caption text-muted-foreground">{of}</span> : null}
-      </div>
-      {share === null ? null : (
-        <div className="relative h-2 rounded bg-muted" role="img" aria-label={`${share.toFixed(0)} percent`}>
-          <div className="absolute inset-y-0 left-0 rounded bg-series" style={{ width: `${Math.min(100, share)}%` }} />
-        </div>
-      )}
-      <span className="text-caption text-muted-foreground">{note}</span>
-    </Card>
-  )
-}
-
-function Daily({ days }: { days: Day[] }) {
-  const hi = Math.max(1, ...days.map((d) => d.bytes))
-  const [hovered, setHovered] = useState<Day | null>(null)
-  return (
-    <Card className="flex flex-col gap-2.5 p-3.5">
-      <div className="flex items-baseline gap-2">
-        <span className="flex-1 text-control font-semibold">Ingested per day</span>
-        {hovered ? (
-          <span className="text-control"><span className="font-semibold">{dayLabel(hovered.at)}</span> <span className="font-mono">{bytes(hovered.bytes)}</span></span>
-        ) : (
-          <span className="text-caption text-muted-foreground">peak {bytes(hi)}</span>
-        )}
-      </div>
-      <div
-        className="flex h-[120px] items-end gap-[2px]"
-        role="img"
-        aria-label={`Bytes ingested per day, ${days.length} days, peak ${bytes(hi)}`}
-        onMouseLeave={() => setHovered(null)}
-      >
-        {days.map((d) => (
-          <div
-            key={d.at}
-            className="flex h-full flex-1 items-end"
-            title={`${dayLabel(d.at)} · ${bytes(d.bytes)}`}
-            onMouseEnter={() => setHovered(d)}
-          >
-            <div
-              className={cn('w-full rounded-t-[4px] bg-series', d.bytes === 0 && 'bg-border')}
-              style={{ height: `${Math.max(d.bytes === 0 ? 1 : 2, (d.bytes / hi) * 100)}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="flex justify-between font-mono text-caption text-faint-foreground">
-        <span>{days.length > 0 ? dayLabel(days[0].at) : ''}</span>
-        <span>{days.length > 0 ? dayLabel(days[days.length - 1].at) : ''}</span>
-      </div>
-    </Card>
-  )
-}
 
 export function Usage() {
   const [period, setPeriod] = useState('this')
@@ -149,7 +91,7 @@ export function Usage() {
               note={days.length > 0 ? `Across the ${days.length} days read.` : 'No day has been rolled up yet.'}
             />
           </div>
-          <Daily days={days} />
+          <DailyBars title="Ingested per day" what="Bytes ingested" days={days} format={bytes} />
           <Sub>By day</Sub>
           <Card className="max-h-[320px] overflow-auto">
             <Table aria-label="Ingested per day">
@@ -169,7 +111,7 @@ export function Usage() {
         <Card className="px-4 py-3 text-control text-muted-foreground">{nothing}</Card>
       )}
       <p className="m-0 text-caption text-muted-foreground">
-        What is metered is the decompressed size of each payload accepted, counted per organisation — not per project, because the counter is keyed by the organisation. Nothing counts spans, log records or metric points, and nothing measures what the span store holds. The ceiling is the <Link to="/settings/billing">plan</Link> the control plane carries, and it is the same number a payload is refused against.
+        What is metered is the decompressed size of each payload accepted, counted per organisation — not per project, because the counter is keyed by the organisation. The <Link to="/cost">Cost meter</Link> splits it by signal, and nothing measures what the span store holds. The ceiling is the <Link to="/settings/billing">plan</Link> the control plane carries, and it is the same number a payload is refused against.
       </p>
     </>
   )
