@@ -3,11 +3,28 @@ import { get, json } from '@/auth/client'
 import { useOrganisations } from '@/auth/session'
 import { nothingYet } from './orgs'
 
+export type Signal = 'spans' | 'logs' | 'metrics'
+
+export type Hour = {
+  started_at_ms: number
+  ingested_bytes: number
+  spans_bytes: number | null
+  logs_bytes: number | null
+  metrics_points: number | null
+}
+
 export type Metered = {
   ingested_bytes: number
   included_bytes: number | null
-  hours: { started_at_ms: number; ingested_bytes: number }[]
+  by_signal: { spans_bytes: number; logs_bytes: number; metrics_points: number; unsplit_hours: number }
+  hours: Hour[]
 }
+
+export const SIGNALS: { key: Signal; label: string; unit: 'bytes' | 'points'; read: (hour: Hour) => number | null }[] = [
+  { key: 'logs', label: 'Log records', unit: 'bytes', read: (hour) => hour.logs_bytes },
+  { key: 'spans', label: 'Spans', unit: 'bytes', read: (hour) => hour.spans_bytes },
+  { key: 'metrics', label: 'Metric datapoints', unit: 'points', read: (hour) => hour.metrics_points },
+]
 
 export type Day = { at: number; bytes: number }
 
@@ -42,6 +59,21 @@ export function byDay(hours: Metered['hours'], from: number, to: number): Day[] 
   return days
 }
 
+export function dailyOf(hours: Hour[], read: (hour: Hour) => number | null, from: number, to: number): Day[] {
+  const totals = new Map<number, number>()
+  for (const hour of hours) {
+    const value = read(hour)
+    if (value === null) continue
+    const day = Math.floor(hour.started_at_ms / DAY) * DAY
+    totals.set(day, (totals.get(day) ?? 0) + value)
+  }
+  const days: Day[] = []
+  for (let at = Math.floor(from / DAY) * DAY; at < to; at += DAY) {
+    days.push({ at, bytes: totals.get(at) ?? 0 })
+  }
+  return days
+}
+
 export function projected(used: number, at: number): number {
   const start = startOfMonth(at)
   const elapsed = at - start
@@ -61,4 +93,17 @@ export function bytes(count: number): string {
     unit += 1
   }
   return `${scaled.toFixed(scaled < 10 ? 2 : scaled < 100 ? 1 : 0)} ${UNITS[unit]}`
+}
+
+const COUNT_UNITS = ['', 'k', 'M', 'B', 'T']
+
+export function count(value: number): string {
+  if (value < 1000) return `${value}`
+  let scaled = value
+  let unit = 0
+  while (scaled >= 1000 && unit < COUNT_UNITS.length - 1) {
+    scaled /= 1000
+    unit += 1
+  }
+  return `${scaled.toFixed(scaled < 10 ? 2 : scaled < 100 ? 1 : 0)} ${COUNT_UNITS[unit]}`.trim()
 }

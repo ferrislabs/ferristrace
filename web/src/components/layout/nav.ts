@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowLeftRight, BellRing, Boxes, CircleAlert, Gauge, Network, Sparkles, Rocket, Cpu, Database, House, Layers, LayoutGrid, LineChart, ScrollText, Server, ShieldAlert, Siren, Telescope, Waypoints, Zap, type LucideIcon,
+  Activity, ArrowLeftRight, Coins, BellRing, Boxes, CircleAlert, Gauge, Network, Sparkles, Rocket, Cpu, Database, House, Layers, LayoutGrid, LineChart, ScrollText, Server, ShieldAlert, Siren, Telescope, Waypoints, Zap, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = { label: string; to: string; icon: LucideIcon; keys?: string; badge?: boolean }
@@ -15,6 +15,7 @@ export const AXES: NavAxis[] = [
       { label: 'Issues', to: '/issues', icon: CircleAlert, keys: 'I', badge: true },
       { label: 'Releases', to: '/releases', icon: Rocket, keys: 'R' },
       { label: 'AI', to: '/ai', icon: Sparkles, keys: 'C' },
+      { label: 'Cost', to: '/cost', icon: Coins },
     ],
   },
   {
