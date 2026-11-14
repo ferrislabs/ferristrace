@@ -4,7 +4,8 @@ import { Meter } from '@/components/ft/Meter'
 import { Card } from '@/components/ui/card'
 import { Segmented } from '@/components/ui/segmented'
 import { Table, Td, Th, Tr } from '@/components/ui/misc'
-import { SIGNALS, bytes, count, dailyOf, projected, startOfMonth, startOfNextMonth, useMetered, type Signal } from '@/data/usage'
+import { Button } from '@/components/ui/button'
+import { HOUR, SIGNALS, bytes, count, dailyOf, projected, startOfMonth, startOfNextMonth, useMetered, type Signal } from '@/data/usage'
 import { Link } from '@/lib/router'
 import { H, Sub } from './settings/parts'
 
@@ -12,6 +13,8 @@ const DAY = 86_400_000
 
 const month = (at: number) => new Date(at).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 const dayLabel = (at: number) => new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+const hourLabel = (at: number) => `${dayLabel(at)}, ${new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}`
+const HOURLY_UP_TO = 7 * DAY
 
 const TOTALS: Record<Signal, 'spans_bytes' | 'logs_bytes' | 'metrics_points'> = {
   spans: 'spans_bytes',
@@ -23,28 +26,38 @@ export function Cost() {
   const [period, setPeriod] = useState('this')
   const now = Date.now()
 
+  const [zoom, setZoom] = useState<[number, number] | null>(null)
+
   const [from, to] = useMemo(() => {
+    if (zoom) return zoom
     const start = startOfMonth(now)
     return period === 'this' ? [start, startOfNextMonth(now)] : [startOfMonth(start - DAY), start]
-  }, [period, now])
+  }, [period, now, zoom])
 
   const { metered, nothing } = useMetered(from, to)
-  const until = Math.min(to, now + DAY)
+  const step = to - from <= HOURLY_UP_TO ? HOUR : DAY
+  const until = Math.min(to, now + step)
   const series = useMemo(
-    () => SIGNALS.map((signal) => ({ signal, days: metered ? dailyOf(metered.hours, signal.read, from, until) : [] })),
-    [metered, from, until],
+    () => SIGNALS.map((signal) => ({ signal, days: metered ? dailyOf(metered.hours, signal.read, from, until, step) : [] })),
+    [metered, from, until, step],
   )
+  const stampOf = step === HOUR ? hourLabel : dayLabel
+  const choose = (from: number, to: number) => setZoom([from, to])
   const split = metered ? metered.hours.length - metered.by_signal.unsplit_hours : 0
   const show = (unit: 'bytes' | 'points', value: number) => (unit === 'bytes' ? bytes(value) : count(value))
   const rows = useMemo(() => series[0].days.map((_, at) => ({ at: series[0].days[at].at, cells: series.map((one) => one.days[at].bytes) })), [series])
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <H title="Cost meter" sub={`${month(from)} · what was ingested, by signal, for the whole organisation.`}>
+      <H title="Cost meter" sub={`${zoom ? `${hourLabel(from)} to ${hourLabel(to)} UTC` : month(from)} · what was ingested, by signal, for the whole organisation.`}>
+        {zoom ? <Button size="sm" onClick={() => setZoom(null)}>Reset zoom</Button> : null}
         <Segmented
           label="Period"
-          value={period}
-          onChange={setPeriod}
+          value={zoom ? '' : period}
+          onChange={(value) => {
+            setZoom(null)
+            setPeriod(value)
+          }}
           options={[{ value: 'this', label: 'This month' }, { value: 'last', label: 'Last month' }]}
         />
       </H>
@@ -68,9 +81,9 @@ export function Cost() {
                     of={signal.unit === 'bytes' ? 'decompressed' : 'datapoints'}
                     share={ofAll}
                     note={
-                      period === 'this'
+                      period === 'this' && !zoom
                         ? `About ${show(signal.unit, ahead)} at month end, at this rate.`
-                        : ofAll === null ? 'Every finished hour of that month.' : `${ofAll.toFixed(0)} % of what that month ingested.`
+                        : zoom ? 'Every finished hour of the range selected.' : ofAll === null ? 'Every finished hour of that month.' : `${ofAll.toFixed(0)} % of what that month ingested.`
                     }
                   />
                 )
@@ -85,27 +98,29 @@ export function Cost() {
               {series.map(({ signal, days }) => (
                 <DailyBars
                   key={signal.key}
-                  title={`${signal.label} per day`}
+                  title={`${signal.label} per ${step === HOUR ? 'hour' : 'day'}`}
                   what={signal.label}
                   label={signal.unit === 'bytes' ? 'size' : 'datapoints'}
                   days={days}
+                  step={step}
+                  onSelect={choose}
                   format={(value) => show(signal.unit, value)}
                 />
               ))}
             </div>
-            <Sub>By day</Sub>
+            <Sub>{step === HOUR ? 'By hour' : 'By day'}</Sub>
             <Card className="max-h-[320px] overflow-auto">
-              <Table aria-label="Ingested per day and signal">
+              <Table aria-label="Ingested per period and signal">
                 <thead>
                   <tr>
-                    <Th>Day</Th>
+                    <Th>{step === HOUR ? 'Hour' : 'Day'}</Th>
                     {SIGNALS.map((signal) => <Th key={signal.key} numeric className="w-[160px]">{signal.label}</Th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {[...rows].reverse().map((row) => (
                     <Tr key={row.at}>
-                      <Td className="font-mono">{dayLabel(row.at)}</Td>
+                      <Td className="font-mono">{stampOf(row.at)}</Td>
                       {row.cells.map((cell, index) => <Td key={SIGNALS[index].key} numeric className="font-mono">{show(SIGNALS[index].unit, cell)}</Td>)}
                     </Tr>
                   ))}
