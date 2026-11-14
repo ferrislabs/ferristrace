@@ -1,4 +1,6 @@
-use ferristrace_domain::telemetry::{BillingHour, BillingMonth, HourTotal, Split, UsageLedger};
+use ferristrace_domain::telemetry::{
+    BillingHour, BillingMonth, HourSplit, HourTotal, Split, UsageLedger,
+};
 use ferristrace_domain::{DecompressedBytes, TenantId, UnixSeconds, UsageHistory, Window};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -372,4 +374,69 @@ async fn a_split_hour_reads_back_with_its_split_and_an_old_one_without() {
             metrics_points: 12,
         })
     );
+}
+
+#[tokio::test]
+async fn a_split_is_filled_once_into_an_hour_that_has_none_and_never_overwritten() {
+    let Some(pool) = control_plane("usage_fill").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let org = an_org(&pool, "owner@example.com").await;
+    let mut counted = an_hour_total(org, 1_699_999_200, 800);
+    counted.split = Some(Split {
+        spans_bytes: 500,
+        logs_bytes: 300,
+        metrics_points: 12,
+    });
+    let old = an_hour_total(org, 1_699_995_600, 90);
+    committed!(pg, |usage: UsageHistory| usage
+        .record_hours(&[counted, old])
+        .await
+        .expect("rolling the hours"));
+    let rebuilt = Split {
+        spans_bytes: 70,
+        logs_bytes: 20,
+        metrics_points: 4,
+    };
+    let splits = [
+        HourSplit {
+            tenant: org,
+            hour: old.hour,
+            split: rebuilt,
+        },
+        HourSplit {
+            tenant: org,
+            hour: counted.hour,
+            split: rebuilt,
+        },
+        HourSplit {
+            tenant: org,
+            hour: BillingHour::containing(UnixSeconds::new(1_600_000_000)),
+            split: rebuilt,
+        },
+    ];
+
+    let first = committed!(pg, |usage: UsageHistory| usage
+        .fill_splits(&splits)
+        .await
+        .expect("filling"));
+    let second = committed!(pg, |usage: UsageHistory| usage
+        .fill_splits(&splits)
+        .await
+        .expect("filling again"));
+
+    assert_eq!(
+        (first, second),
+        (1, 0),
+        "only the hour with no split, and only once"
+    );
+    let hours = committed!(pg, |usage: UsageHistory| usage
+        .hours(org, Window::new(0, u64::MAX / 2).expect("a window"))
+        .await
+        .expect("reading the hours"));
+    assert_eq!(hours.len(), 2, "an hour with no row is not created");
+    assert_eq!(hours[0].split, Some(rebuilt));
+    assert_eq!(hours[0].ingested_bytes, 90, "the billed total is untouched");
+    assert_eq!(hours[1].split, counted.split, "a counted hour is kept");
 }

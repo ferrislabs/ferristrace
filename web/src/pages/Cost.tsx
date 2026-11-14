@@ -117,7 +117,7 @@ export function Cost() {
         <Card className="px-4 py-3 text-control text-muted-foreground">{nothing}</Card>
       )}
       <p className="m-0 text-caption text-muted-foreground">
-        Logs and spans are counted in decompressed payload bytes, metrics in datapoints, when a payload is accepted. A payload refused at the ceiling counts in none of them. The total the <Link to="/settings/billing">plan</Link> is measured against stays on <Link to="/settings/usage">Usage</Link>.
+        Logs and spans are counted in decompressed payload bytes, metrics in datapoints, when a payload is accepted. Hours from before that can be rebuilt from what the span store holds with <code>ferristrace backfill-usage</code>; those figures are measured on stored rows and sit a few percent under the payload bytes. A payload refused at the ceiling counts in none of them. The total the <Link to="/settings/billing">plan</Link> is measured against stays on <Link to="/settings/usage">Usage</Link>.
       </p>
     </div>
   )
