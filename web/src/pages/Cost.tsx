@@ -87,6 +87,7 @@ export function Cost() {
                   key={signal.key}
                   title={`${signal.label} per day`}
                   what={signal.label}
+                  label={signal.unit === 'bytes' ? 'size' : 'datapoints'}
                   days={days}
                   format={(value) => show(signal.unit, value)}
                 />
