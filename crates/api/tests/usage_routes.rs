@@ -9,7 +9,7 @@ use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
     AccountId, Carried, Consumed, DecompressedBytes, Membership, Memberships, NoPhotos, OrgRole,
-    Session, SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
+    Session, SessionError, SessionStore, SessionToken, Split, StoreError, TenantId, UnixSeconds,
     UsageHistory, UsageMeter, UsageReader, WhoamiError, Window,
 };
 use tower::ServiceExt;
@@ -19,6 +19,7 @@ const TOKEN: &str = "ft.person.0123456789";
 const MINE: u128 = 1;
 const THEIRS: u128 = 2;
 const AN_HOUR_MS: u64 = 3_600_000;
+const AN_HOUR_NANOS: u64 = AN_HOUR_MS * 1_000_000;
 
 fn id(seed: u128) -> String {
     Uuid::from_u128(seed).to_string()
@@ -80,11 +81,31 @@ struct Rolled {
 
 impl UsageHistory for Rolled {
     async fn hours(&self, _org: TenantId, window: Window) -> Result<Vec<Consumed>, StoreError> {
-        Ok(vec![Consumed {
-            started_at_unix_nanos: window.from_unix_nanos(),
-            ingested_bytes: 4_096,
-            split: None,
-        }])
+        Ok(vec![
+            Consumed {
+                started_at_unix_nanos: window.from_unix_nanos(),
+                ingested_bytes: 4_096,
+                split: None,
+            },
+            Consumed {
+                started_at_unix_nanos: window.from_unix_nanos() + AN_HOUR_NANOS,
+                ingested_bytes: 1_000,
+                split: Some(Split {
+                    spans_bytes: 600,
+                    logs_bytes: 400,
+                    metrics_points: 25,
+                }),
+            },
+            Consumed {
+                started_at_unix_nanos: window.from_unix_nanos() + 2 * AN_HOUR_NANOS,
+                ingested_bytes: 500,
+                split: Some(Split {
+                    spans_bytes: 100,
+                    logs_bytes: 0,
+                    metrics_points: 5,
+                }),
+            },
+        ])
     }
 
     async fn included(&self, _org: TenantId) -> Result<Option<DecompressedBytes>, StoreError> {
@@ -245,4 +266,32 @@ async fn a_request_carrying_no_session_is_told_to_sign_in() {
     let (status, _) = served(0, None, asking(MINE, &a_month(), None)).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn each_signal_is_totalled_over_the_hours_that_carry_a_split() {
+    let (status, body) = served(9_999, None, asking(MINE, &a_month(), Some(TOKEN))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let metered = read(&body);
+    assert_eq!(metered["by_signal"]["spans_bytes"], 700);
+    assert_eq!(metered["by_signal"]["logs_bytes"], 400);
+    assert_eq!(metered["by_signal"]["metrics_points"], 30);
+    assert_eq!(
+        metered["by_signal"]["unsplit_hours"], 1,
+        "an hour rolled up before the split is counted apart, not added as zero"
+    );
+}
+
+#[tokio::test]
+async fn an_hour_without_a_split_answers_null_rather_than_zero() {
+    let (_, body) = served(0, None, asking(MINE, &a_month(), Some(TOKEN))).await;
+
+    let hours = read(&body)["hours"].clone();
+    assert!(hours[0]["spans_bytes"].is_null());
+    assert!(hours[0]["logs_bytes"].is_null());
+    assert!(hours[0]["metrics_points"].is_null());
+    assert_eq!(hours[1]["spans_bytes"], 600);
+    assert_eq!(hours[1]["logs_bytes"], 400);
+    assert_eq!(hours[1]["metrics_points"], 25);
 }
