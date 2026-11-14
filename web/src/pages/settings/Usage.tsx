@@ -91,7 +91,7 @@ export function Usage() {
               note={days.length > 0 ? `Across the ${days.length} days read.` : 'No day has been rolled up yet.'}
             />
           </div>
-          <DailyBars title="Ingested per day" what="Bytes ingested" days={days} format={bytes} />
+          <DailyBars title="Ingested per day" what="Bytes ingested" label="size" days={days} format={bytes} />
           <Sub>By day</Sub>
           <Card className="max-h-[320px] overflow-auto">
             <Table aria-label="Ingested per day">
