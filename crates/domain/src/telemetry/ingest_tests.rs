@@ -8,8 +8,8 @@ use super::errors::{IngestError, SinkError, UnknownKey};
 use super::ingest::Ingest;
 use super::ports::{LogSink, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageMeter};
 use super::value_objects::{
-    Admission, DecompressedBytes, IngestKey, LogPayload, Payload, RetentionDays, Scope, Severity,
-    SpanId, SpanKind, SpanStatus, TenantId, TraceId,
+    Admission, Carried, DecompressedBytes, IngestKey, LogPayload, Payload, RetentionDays, Scope,
+    Severity, SpanId, SpanKind, SpanStatus, TenantId, TraceId,
 };
 use crate::metrics::{Metric, MetricData, MetricPayload, MetricPoint, MetricSink};
 use crate::testing;
@@ -65,11 +65,25 @@ impl SpanSink for UnavailableSink {
 }
 
 #[derive(Debug, Default)]
-struct RecordingMeter(Mutex<Vec<(TenantId, DecompressedBytes)>>);
+struct RecordingMeter(Mutex<Vec<(TenantId, DecompressedBytes, Carried)>>);
 
 impl RecordingMeter {
     fn readings(&self) -> Vec<(TenantId, DecompressedBytes)> {
-        self.0.lock().expect("meter lock").clone()
+        self.0
+            .lock()
+            .expect("meter lock")
+            .iter()
+            .map(|(tenant, decompressed, _)| (*tenant, *decompressed))
+            .collect()
+    }
+
+    fn carried(&self) -> Vec<Carried> {
+        self.0
+            .lock()
+            .expect("meter lock")
+            .iter()
+            .map(|(_, _, carried)| *carried)
+            .collect()
     }
 }
 
@@ -78,11 +92,12 @@ impl UsageMeter for RecordingMeter {
         &self,
         tenant: TenantId,
         decompressed: DecompressedBytes,
+        carried: Carried,
     ) -> impl Future<Output = ()> + Send {
         self.0
             .lock()
             .expect("meter lock")
-            .push((tenant, decompressed));
+            .push((tenant, decompressed, carried));
         async {}
     }
 }
@@ -650,4 +665,84 @@ async fn an_export_whose_metrics_were_all_skipped_is_still_metered() {
         meter.readings(),
         vec![(tenant, DecompressedBytes::new(300))]
     );
+}
+
+#[tokio::test]
+async fn spans_are_carried_as_the_decompressed_bytes_of_the_payload() {
+    let tenant = TenantId::new(Uuid::from_u128(50));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        RecordingSink::default(),
+        &meter,
+    );
+
+    ingest
+        .accept(&IngestKey::from_plaintext("live"), a_payload(512))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(meter.carried(), vec![Carried::spans(512)]);
+}
+
+#[tokio::test]
+async fn logs_are_carried_as_the_decompressed_bytes_of_the_payload() {
+    let tenant = TenantId::new(Uuid::from_u128(51));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        RecordingLogs::default(),
+        &meter,
+    );
+
+    ingest
+        .accept_logs(&IngestKey::from_plaintext("live"), some_logs(2048))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(meter.carried(), vec![Carried::logs(2048)]);
+}
+
+#[tokio::test]
+async fn metrics_are_carried_as_the_datapoints_of_the_payload() {
+    let tenant = TenantId::new(Uuid::from_u128(52));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        Unmetered,
+        RecordingMetrics::default(),
+        &meter,
+    );
+
+    ingest
+        .accept_metrics(&IngestKey::from_plaintext("live"), some_metrics(4096))
+        .await
+        .expect("the key resolves");
+
+    assert_eq!(
+        meter.readings(),
+        vec![(tenant, DecompressedBytes::new(4096))]
+    );
+    assert_eq!(meter.carried(), vec![Carried::metrics(2)]);
+}
+
+#[tokio::test]
+async fn a_capped_payload_carries_nothing() {
+    let tenant = TenantId::new(Uuid::from_u128(53));
+    let meter = RecordingMeter::default();
+    let ingest = Ingest::new(
+        FakeDirectory::holding("live", tenant),
+        HardCap(1024),
+        RecordingMetrics::default(),
+        &meter,
+    );
+
+    let outcome = ingest
+        .accept_metrics(&IngestKey::from_plaintext("live"), some_metrics(4096))
+        .await;
+
+    assert!(outcome.is_err());
+    assert!(meter.carried().is_empty());
 }

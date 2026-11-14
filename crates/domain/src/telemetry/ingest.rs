@@ -1,7 +1,7 @@
 use super::errors::IngestError;
 use super::ports::{LogSink, QuotaPolicy, SpanSink, TenantDirectory, UsageMeter};
 use super::value_objects::{
-    Admission, DecompressedBytes, IngestKey, LogPayload, Payload, Scope, TenantId,
+    Admission, Carried, DecompressedBytes, IngestKey, LogPayload, Payload, Scope, TenantId,
 };
 use crate::metrics::{MetricPayload, MetricSink};
 
@@ -41,8 +41,15 @@ where
         Ok(scope)
     }
 
-    async fn metered(&self, scope: Scope, decompressed: DecompressedBytes) -> TenantId {
-        self.meter.record_ingest(scope.tenant, decompressed).await;
+    async fn metered(
+        &self,
+        scope: Scope,
+        decompressed: DecompressedBytes,
+        carried: Carried,
+    ) -> TenantId {
+        self.meter
+            .record_ingest(scope.tenant, decompressed, carried)
+            .await;
         scope.tenant
     }
 }
@@ -57,7 +64,8 @@ where
     pub async fn accept(&self, key: &IngestKey, payload: Payload) -> Result<TenantId, IngestError> {
         let scope = self.admit(key, payload.decompressed).await?;
         self.sink.accept(scope, payload.spans).await?;
-        Ok(self.metered(scope, payload.decompressed).await)
+        let carried = Carried::spans(payload.decompressed.get());
+        Ok(self.metered(scope, payload.decompressed, carried).await)
     }
 }
 
@@ -75,7 +83,8 @@ where
     ) -> Result<TenantId, IngestError> {
         let scope = self.admit(key, payload.decompressed).await?;
         self.sink.accept_logs(scope, payload.records).await?;
-        Ok(self.metered(scope, payload.decompressed).await)
+        let carried = Carried::logs(payload.decompressed.get());
+        Ok(self.metered(scope, payload.decompressed, carried).await)
     }
 }
 
@@ -92,7 +101,8 @@ where
         payload: MetricPayload,
     ) -> Result<TenantId, IngestError> {
         let scope = self.admit(key, payload.decompressed).await?;
+        let carried = Carried::metrics(payload.datapoints());
         self.sink.accept_metrics(scope, payload.metrics).await?;
-        Ok(self.metered(scope, payload.decompressed).await)
+        Ok(self.metered(scope, payload.decompressed, carried).await)
     }
 }

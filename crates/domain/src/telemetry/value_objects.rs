@@ -276,9 +276,61 @@ impl DecompressedBytes {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalKind {
+    Spans,
+    Logs,
+    Metrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Carried {
+    signal: SignalKind,
+    volume: u64,
+}
+
+impl Carried {
+    pub fn spans(bytes: u64) -> Self {
+        Self {
+            signal: SignalKind::Spans,
+            volume: bytes,
+        }
+    }
+
+    pub fn logs(bytes: u64) -> Self {
+        Self {
+            signal: SignalKind::Logs,
+            volume: bytes,
+        }
+    }
+
+    pub fn metrics(datapoints: u64) -> Self {
+        Self {
+            signal: SignalKind::Metrics,
+            volume: datapoints,
+        }
+    }
+
+    pub fn signal(self) -> SignalKind {
+        self.signal
+    }
+
+    pub fn volume(self) -> u64 {
+        self.volume
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Split {
+    pub spans_bytes: u64,
+    pub logs_bytes: u64,
+    pub metrics_points: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Consumed {
     pub started_at_unix_nanos: u64,
     pub ingested_bytes: u64,
+    pub split: Option<Split>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +345,7 @@ pub struct HourTotal {
     pub tenant: TenantId,
     pub hour: BillingHour,
     pub ingested: DecompressedBytes,
+    pub split: Option<Split>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 use ferristrace_application::testing::{Bearers, Inert};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
-use ferristrace_domain::{DecompressedBytes, NoPhotos, TenantId, UsageMeter, UsageReader};
+use ferristrace_domain::{Carried, DecompressedBytes, NoPhotos, TenantId, UsageMeter, UsageReader};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres, SELF_HOSTED_PLAN};
 use ferristrace_redis::RedisMeter;
@@ -116,10 +116,10 @@ async fn a_recorded_payload_shows_up_in_the_monthly_counter() {
     let tenant = TenantId::new(Uuid::new_v4());
 
     meter
-        .record_ingest(tenant, DecompressedBytes::new(400))
+        .record_ingest(tenant, DecompressedBytes::new(400), Carried::spans(400))
         .await;
     meter
-        .record_ingest(tenant, DecompressedBytes::new(600))
+        .record_ingest(tenant, DecompressedBytes::new(600), Carried::spans(600))
         .await;
 
     assert_eq!(meter.used(tenant).await, DecompressedBytes::new(1000));
@@ -146,7 +146,7 @@ async fn two_tenants_do_not_share_a_counter() {
     let second = TenantId::new(Uuid::new_v4());
 
     meter
-        .record_ingest(first, DecompressedBytes::new(100))
+        .record_ingest(first, DecompressedBytes::new(100), Carried::spans(100))
         .await;
 
     assert_eq!(meter.used(first).await, DecompressedBytes::new(100));
@@ -162,7 +162,7 @@ async fn a_new_month_starts_the_counter_again() {
     let tenant = TenantId::new(Uuid::new_v4());
 
     november
-        .record_ingest(tenant, DecompressedBytes::new(900))
+        .record_ingest(tenant, DecompressedBytes::new(900), Carried::spans(900))
         .await;
 
     assert_eq!(november.used(tenant).await, DecompressedBytes::new(900));
@@ -203,7 +203,7 @@ async fn rehydration_leaves_a_live_counter_alone() {
     let tenant = seeded_org(&pool).await;
     billed(&pool, tenant, 1_698_800_000_000_000_000, 700).await;
     meter
-        .record_ingest(tenant, DecompressedBytes::new(50))
+        .record_ingest(tenant, DecompressedBytes::new(50), Carried::spans(50))
         .await;
 
     let seeded = driven(&pool, NOVEMBER, "live")
@@ -295,7 +295,7 @@ async fn a_finished_hour_moves_into_the_billing_table() {
     let tenant = seeded_org(&pool).await;
 
     earlier
-        .record_ingest(tenant, DecompressedBytes::new(1500))
+        .record_ingest(tenant, DecompressedBytes::new(1500), Carried::spans(1500))
         .await;
     let rolled = later.roll_up_usage().await.expect("the rollup runs");
 
@@ -320,7 +320,7 @@ async fn rolling_the_same_hour_twice_does_not_double_the_bill() {
     let tenant = seeded_org(&pool).await;
 
     earlier
-        .record_ingest(tenant, DecompressedBytes::new(800))
+        .record_ingest(tenant, DecompressedBytes::new(800), Carried::spans(800))
         .await;
     let first = later.roll_up_usage().await.expect("the first rollup");
     let second = later.roll_up_usage().await.expect("the second rollup");
@@ -342,7 +342,7 @@ async fn the_hour_in_progress_is_left_to_finish() {
     let tenant = seeded_org(&pool).await;
 
     meter
-        .record_ingest(tenant, DecompressedBytes::new(400))
+        .record_ingest(tenant, DecompressedBytes::new(400), Carried::spans(400))
         .await;
     let rolled = driven(&pool, NOVEMBER, "current")
         .await
@@ -369,9 +369,50 @@ async fn a_rollup_leaves_the_monthly_counter_standing() {
     let tenant = seeded_org(&pool).await;
 
     earlier
-        .record_ingest(tenant, DecompressedBytes::new(1200))
+        .record_ingest(tenant, DecompressedBytes::new(1200), Carried::spans(1200))
         .await;
     later.roll_up_usage().await.expect("the rollup runs");
 
     assert_eq!(earlier.used(tenant).await, DecompressedBytes::new(1200));
+}
+
+#[tokio::test]
+async fn a_rolled_hour_carries_what_each_signal_added() {
+    let Some(pool) = control_plane("counter_split").await else {
+        return;
+    };
+    let Some(earlier) = namespaced_meter_at(NOVEMBER, "split").await else {
+        return;
+    };
+    let later = driven(&pool, NOVEMBER + 3600, "split")
+        .await
+        .expect("the same store");
+    let tenant = seeded_org(&pool).await;
+
+    earlier
+        .record_ingest(tenant, DecompressedBytes::new(100), Carried::spans(100))
+        .await;
+    earlier
+        .record_ingest(tenant, DecompressedBytes::new(40), Carried::logs(40))
+        .await;
+    earlier
+        .record_ingest(tenant, DecompressedBytes::new(60), Carried::metrics(7))
+        .await;
+    earlier
+        .record_ingest(tenant, DecompressedBytes::new(10), Carried::spans(10))
+        .await;
+    later.roll_up_usage().await.expect("the rollup runs");
+
+    let row = sqlx::query(
+        "SELECT ingested_bytes AS total, spans_bytes AS spans, logs_bytes AS logs, \
+         metrics_points AS points FROM usage_hourly WHERE org_id = $1",
+    )
+    .bind(tenant.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .expect("reading the rolled hour");
+    assert_eq!(row.get::<i64, _>("total"), 210);
+    assert_eq!(row.get::<Option<i64>, _>("spans"), Some(110));
+    assert_eq!(row.get::<Option<i64>, _>("logs"), Some(40));
+    assert_eq!(row.get::<Option<i64>, _>("points"), Some(7));
 }

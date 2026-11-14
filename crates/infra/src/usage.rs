@@ -2,7 +2,7 @@ use core::future::Future;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter, UsageReader};
+use ferristrace_domain::{Carried, DecompressedBytes, TenantId, UsageMeter, UsageReader};
 
 #[derive(Debug, Default)]
 pub struct MemoryMeter {
@@ -34,6 +34,7 @@ impl UsageMeter for MemoryMeter {
         &self,
         tenant: TenantId,
         decompressed: DecompressedBytes,
+        _carried: Carried,
     ) -> impl Future<Output = ()> + Send {
         *self
             .totals
@@ -54,7 +55,7 @@ impl UsageReader for MemoryMeter {
 
 #[cfg(test)]
 mod tests {
-    use ferristrace_domain::{DecompressedBytes, TenantId, UsageMeter};
+    use ferristrace_domain::{Carried, DecompressedBytes, TenantId, UsageMeter};
     use uuid::Uuid;
 
     use super::MemoryMeter;
@@ -66,10 +67,14 @@ mod tests {
         let meter = MemoryMeter::default();
 
         meter
-            .record_ingest(first, DecompressedBytes::new(100))
+            .record_ingest(first, DecompressedBytes::new(100), Carried::spans(100))
             .await;
-        meter.record_ingest(first, DecompressedBytes::new(40)).await;
-        meter.record_ingest(second, DecompressedBytes::new(7)).await;
+        meter
+            .record_ingest(first, DecompressedBytes::new(40), Carried::spans(40))
+            .await;
+        meter
+            .record_ingest(second, DecompressedBytes::new(7), Carried::spans(7))
+            .await;
 
         assert_eq!(meter.total_for(first), 140);
         assert_eq!(meter.total_for(second), 7);

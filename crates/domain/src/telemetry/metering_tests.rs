@@ -76,10 +76,12 @@ impl UsageHistory for &Rolled {
             Consumed {
                 started_at_unix_nanos: AN_HOUR,
                 ingested_bytes: 10,
+                split: None,
             },
             Consumed {
                 started_at_unix_nanos: AN_HOUR * 2,
                 ingested_bytes: 20,
+                split: None,
             },
         ])
     }

@@ -1,4 +1,4 @@
-use ferristrace_domain::telemetry::{BillingHour, BillingMonth, HourTotal, UsageLedger};
+use ferristrace_domain::telemetry::{BillingHour, BillingMonth, HourTotal, Split, UsageLedger};
 use ferristrace_domain::{DecompressedBytes, TenantId, UnixSeconds, UsageHistory, Window};
 use ferristrace_infra::FixedClock;
 use ferristrace_postgres::{CONTROL_PLANE, Postgres};
@@ -268,6 +268,7 @@ fn an_hour_total(tenant: TenantId, at: u64, bytes: u64) -> HourTotal {
         tenant,
         hour: BillingHour::containing(UnixSeconds::new(at)),
         ingested: DecompressedBytes::new(bytes),
+        split: None,
     }
 }
 
@@ -335,4 +336,40 @@ async fn the_billed_hours_of_the_month_are_summed_per_organisation() {
     assert_eq!(billed.len(), 1);
     assert_eq!(billed[0].tenant, org);
     assert_eq!(billed[0].ingested, DecompressedBytes::new(1000));
+}
+
+#[tokio::test]
+async fn a_split_hour_reads_back_with_its_split_and_an_old_one_without() {
+    let Some(pool) = control_plane("usage_split").await else {
+        return;
+    };
+    let pg = Postgres::new(pool.clone(), FixedClock::at(1_700_000_000));
+    let org = an_org(&pool, "owner@example.com").await;
+    let mut split = an_hour_total(org, 1_699_999_200, 800);
+    split.split = Some(Split {
+        spans_bytes: 500,
+        logs_bytes: 300,
+        metrics_points: 12,
+    });
+    let unsplit = an_hour_total(org, 1_699_995_600, 90);
+    committed!(pg, |usage: UsageHistory| usage
+        .record_hours(&[split, unsplit])
+        .await
+        .expect("rolling the hours"));
+
+    let hours = committed!(pg, |usage: UsageHistory| usage
+        .hours(org, Window::new(0, u64::MAX / 2).expect("a window"))
+        .await
+        .expect("reading the hours"));
+
+    assert_eq!(hours.len(), 2);
+    assert_eq!(hours[0].split, None);
+    assert_eq!(
+        hours[1].split,
+        Some(Split {
+            spans_bytes: 500,
+            logs_bytes: 300,
+            metrics_points: 12,
+        })
+    );
 }

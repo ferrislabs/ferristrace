@@ -8,9 +8,9 @@ use ferristrace_application::registry::{RepoFor, domain};
 use ferristrace_application::testing::{Bearers, Inert, Untransacted};
 use ferristrace_application::{Adapters, Ferristrace, Stack};
 use ferristrace_domain::{
-    AccountId, Consumed, DecompressedBytes, Membership, Memberships, NoPhotos, OrgRole, Session,
-    SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds, UsageHistory,
-    UsageMeter, UsageReader, WhoamiError, Window,
+    AccountId, Carried, Consumed, DecompressedBytes, Membership, Memberships, NoPhotos, OrgRole,
+    Session, SessionError, SessionStore, SessionToken, StoreError, TenantId, UnixSeconds,
+    UsageHistory, UsageMeter, UsageReader, WhoamiError, Window,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -58,7 +58,13 @@ impl Memberships for MemberOfMine {
 struct Live(u64);
 
 impl UsageMeter for Live {
-    async fn record_ingest(&self, _tenant: TenantId, _decompressed: DecompressedBytes) {}
+    async fn record_ingest(
+        &self,
+        _tenant: TenantId,
+        _decompressed: DecompressedBytes,
+        _carried: Carried,
+    ) {
+    }
 }
 
 impl UsageReader for Live {
@@ -77,6 +83,7 @@ impl UsageHistory for Rolled {
         Ok(vec![Consumed {
             started_at_unix_nanos: window.from_unix_nanos(),
             ingested_bytes: 4_096,
+            split: None,
         }])
     }
 
