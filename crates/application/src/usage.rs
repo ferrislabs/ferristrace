@@ -1,7 +1,8 @@
 use core::future::Future;
 
 use ferristrace_domain::telemetry::{
-    BillingHour, BillingMonth, HourTotal, HourlyCounters, MonthTotal, UsageLedger, UsageSyncError,
+    BillingHour, BillingMonth, HourSplit, HourTotal, HourlyCounters, MonthTotal, StoredVolumes,
+    UsageLedger, UsageSyncError,
 };
 use ferristrace_domain::{
     Clock, Consumption, ExploreError, Metering, SessionToken, StoreError, TenantId, Whoami, Window,
@@ -28,6 +29,24 @@ where
         )
         .consumption(token, org, window)
         .await
+    }
+}
+
+impl<S: Stack> Ferristrace<S>
+where
+    S::Repos: RepoFor<domain::UsageHistory, Repo: UsageLedger>,
+{
+    pub async fn backfill_usage_split<V: StoredVolumes + Sync>(
+        &self,
+        volumes: &V,
+    ) -> Result<usize, UsageSyncError> {
+        let found = volumes.hourly().await?;
+        self.fill_splits(&found).await
+    }
+
+    #[transactional(usage_history, unavailable = UsageSyncError::Store(StoreError::Unreachable))]
+    async fn fill_splits(&self, splits: &[HourSplit]) -> Result<usize, UsageSyncError> {
+        Ok(usage_history.fill_splits(splits).await?)
     }
 }
 

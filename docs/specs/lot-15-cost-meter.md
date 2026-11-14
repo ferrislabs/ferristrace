@@ -28,6 +28,12 @@ Decisions
       ADR 0005 applies unchanged to the new counters.
   D6  No backfill. Hours rolled up before this lot have a total and no
       split; the page shows them as "not split", never as zero.
+  D8  History before this lot is rebuilt on demand by `ferristrace
+      backfill-usage`. It measures the rows the span store holds (bytes of
+      each row for spans and logs, rows for metric points and histograms),
+      per tenant and hour, and fills only hours that have a rolled-up row
+      and no split. It never writes `ingested_bytes`, never creates an
+      hour, never overwrites a counted split.
   D7  A new page, `/cost`, in the navigation. Settings > Usage is
       unchanged and keeps its note, corrected to point at the new page.
 
@@ -85,6 +91,11 @@ Acceptance
   @spec-l15-8  `/cost` shows the three meters, the three daily charts and
                the table for the chosen month, and an empty state when
                nothing has been rolled up.
+  @spec-l15-10 `backfill-usage` fills the split of an hour that has a row
+               and none, leaves a counted split and the billed total as
+               they are, and creates no hour.
+  @spec-l15-11 The span store port sums bytes of spans and logs and counts
+               metric points and histograms per tenant and hour.
   @spec-l15-9  With the counter store down, ingestion still admits the
                payload (ADR 0005).
 
@@ -92,6 +103,8 @@ Slices
   15a  domain + redis + postgres: `Signal`, counters, ledger, migration.
   15b  api: usage endpoint carries the split.
   15c  web: `/cost` page and navigation entry.
+  15d  `backfill-usage`: `StoredVolumes` port, ClickHouse adapter,
+       `UsageLedger::fill_splits`, CLI command.
 
 Verify (exit)
   cargo fmt --check, cargo clippy --workspace -- -D warnings

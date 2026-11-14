@@ -28,12 +28,12 @@ pub use errors::{
 pub use ingest::Ingest;
 pub use metering::Metering;
 pub use ports::{
-    HourlyCounters, LogSink, QuotaPolicy, SpanSink, TenantDirectory, Unmetered, UsageHistory,
-    UsageLedger, UsageMeter, UsageReader,
+    HourlyCounters, LogSink, QuotaPolicy, SpanSink, StoredVolumes, TenantDirectory, Unmetered,
+    UsageHistory, UsageLedger, UsageMeter, UsageReader,
 };
 pub use quota::{Allowance, StaticQuota};
 pub use value_objects::{
-    Admission, Carried, Consumed, Consumption, DecompressedBytes, HourTotal, IngestKey, LogPayload,
-    MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope, Severity,
-    SignalKind, SpanEvent, SpanId, SpanKind, SpanStatus, Split, TenantId, TraceId,
+    Admission, Carried, Consumed, Consumption, DecompressedBytes, HourSplit, HourTotal, IngestKey,
+    LogPayload, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS, MonthTotal, Payload, RetentionDays, Scope,
+    Severity, SignalKind, SpanEvent, SpanId, SpanKind, SpanStatus, Split, TenantId, TraceId,
 };

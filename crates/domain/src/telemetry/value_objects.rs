@@ -349,6 +349,13 @@ pub struct HourTotal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HourSplit {
+    pub tenant: TenantId,
+    pub hour: BillingHour,
+    pub split: Split,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MonthTotal {
     pub tenant: TenantId,
     pub ingested: DecompressedBytes,

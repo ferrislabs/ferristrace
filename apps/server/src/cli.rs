@@ -2,8 +2,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
-use ferristrace_application::registry::ProvisioningRepos;
+use ferristrace_application::registry::{ProvisioningRepos, RepoFor, domain};
 use ferristrace_application::{Ferristrace, Stack};
+use ferristrace_clickhouse::SpanStoreSettings;
+use ferristrace_domain::telemetry::UsageLedger;
 use ferristrace_domain::{Bootstrapped, Email, OrgName, OrgRole, ProjectId, ProjectName, TenantId};
 use uuid::Uuid;
 
@@ -29,6 +31,7 @@ pub(crate) enum Command {
         prefix: String,
     },
     Health,
+    BackfillUsage,
     Bootstrap {
         #[arg(long)]
         email: String,
@@ -102,16 +105,34 @@ pub(crate) async fn health(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn backfill_usage<S: Stack>(config: &Config, app: &Ferristrace<S>) -> anyhow::Result<()>
+where
+    S::Repos: RepoFor<domain::UsageHistory, Repo: UsageLedger>,
+{
+    let spans = config
+        .spans
+        .clone()
+        .context("this command reads the span store, so set spans.url")?;
+    let volumes = SpanStoreSettings::from(spans).volumes();
+    let filled = app
+        .backfill_usage_split(&volumes)
+        .await
+        .context("filling the split of the rolled hours")?;
+    eprintln!("{filled} rolled hours now carry what the span store holds, by signal.");
+    Ok(())
+}
+
 pub(crate) async fn run_command<S: Stack>(
     command: Command,
     config: &Config,
     app: &Ferristrace<S>,
 ) -> anyhow::Result<()>
 where
-    S::Repos: ProvisioningRepos,
+    S::Repos: ProvisioningRepos + RepoFor<domain::UsageHistory, Repo: UsageLedger>,
 {
     match command {
         Command::Health => health(config).await,
+        Command::BackfillUsage => backfill_usage(config, app).await,
         Command::IssueKey { org, project } => issue_key(app, org, project).await,
         Command::RevokeKey { prefix } => revoke_key(app, &prefix).await,
         Command::Bootstrap { email, org } => bootstrap(app, &email, &org).await,

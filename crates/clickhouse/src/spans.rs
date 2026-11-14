@@ -7,7 +7,7 @@ use ferristrace_domain::Clock;
 use crate::clickhouse::{
     BatchLimits, ClickhouseIssues, ClickhouseLogReader, ClickhouseLogSink, ClickhouseMetricReader,
     ClickhouseMetricSink, ClickhouseMigrator, ClickhouseReader, ClickhouseSink, ClickhouseTiering,
-    MigrateError, TieringError,
+    ClickhouseVolumes, MigrateError, TieringError,
 };
 
 const DEFAULT_RETENTION_DAYS: u64 = 30;
@@ -37,6 +37,10 @@ impl SpanStoreSettings {
 
     fn retention(&self) -> Duration {
         Duration::from_secs(self.retention_days.saturating_mul(SECONDS_PER_DAY))
+    }
+
+    pub fn volumes(&self) -> ClickhouseVolumes {
+        ClickhouseVolumes::new(self.client())
     }
 
     fn client(&self) -> Client {

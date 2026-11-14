@@ -20,6 +20,7 @@ mod rows;
 mod sink;
 mod statement_read;
 mod tiering;
+mod volumes;
 
 pub use issues::ClickhouseIssues;
 pub use log_read::ClickhouseLogReader;
@@ -32,3 +33,4 @@ pub use sink::{BatchLimits, ClickhouseSink};
 pub use tiering::{
     COLD_VOLUME, ClickhouseTiering, MOVED_TABLES, MovedTable, TIERED_POLICY, TieringError,
 };
+pub use volumes::ClickhouseVolumes;

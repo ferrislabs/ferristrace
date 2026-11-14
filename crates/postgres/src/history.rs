@@ -1,5 +1,7 @@
 use ferristrace_application::repository;
-use ferristrace_domain::telemetry::{BillingMonth, HourTotal, MonthTotal, Split, UsageLedger};
+use ferristrace_domain::telemetry::{
+    BillingMonth, HourSplit, HourTotal, MonthTotal, Split, UsageLedger,
+};
 use ferristrace_domain::{Consumed, DecompressedBytes, StoreError, TenantId, UsageHistory, Window};
 use sqlx::Row;
 use uuid::Uuid;
@@ -102,6 +104,27 @@ impl UsageLedger for PostgresUsage {
             }
         }
         Ok(written)
+    }
+
+    async fn fill_splits(&self, splits: &[HourSplit]) -> Result<usize, StoreError> {
+        let mut tx = self.tx.lock().await;
+        let mut filled = 0;
+        for found in splits {
+            let updated = sqlx::query(
+                "UPDATE usage_hourly SET spans_bytes = $3, logs_bytes = $4, metrics_points = $5 \
+                 WHERE org_id = $1 AND hour_start = $2 AND spans_bytes IS NULL",
+            )
+            .bind(found.tenant.as_uuid())
+            .bind(found.hour.start_nanos())
+            .bind(as_nanos(found.split.spans_bytes))
+            .bind(as_nanos(found.split.logs_bytes))
+            .bind(as_nanos(found.split.metrics_points))
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| unreachable(&error, "fill an hour's split"))?;
+            filled += usize::try_from(updated.rows_affected()).unwrap_or_default();
+        }
+        Ok(filled)
     }
 
     async fn billed_since(&self, month: BillingMonth) -> Result<Vec<MonthTotal>, StoreError> {

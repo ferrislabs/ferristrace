@@ -4,8 +4,8 @@ use super::billing::{BillingHour, BillingMonth};
 use super::entities::{LogRecord, Span};
 use super::errors::{CounterUnreachable, SinkError, UnknownKey};
 use super::value_objects::{
-    Admission, Carried, Consumed, DecompressedBytes, HourTotal, IngestKey, MonthTotal, Scope,
-    TenantId,
+    Admission, Carried, Consumed, DecompressedBytes, HourSplit, HourTotal, IngestKey, MonthTotal,
+    Scope, TenantId,
 };
 use crate::explore::Window;
 use crate::store::StoreError;
@@ -289,6 +289,15 @@ pub trait UsageLedger {
         &self,
         month: BillingMonth,
     ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send;
+
+    fn fill_splits(
+        &self,
+        splits: &[HourSplit],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send;
+}
+
+pub trait StoredVolumes {
+    fn hourly(&self) -> impl Future<Output = Result<Vec<HourSplit>, StoreError>> + Send;
 }
 
 impl<T: UsageLedger + Sync> UsageLedger for &T {
@@ -305,6 +314,13 @@ impl<T: UsageLedger + Sync> UsageLedger for &T {
     ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send {
         (*self).billed_since(month)
     }
+
+    fn fill_splits(
+        &self,
+        splits: &[HourSplit],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send {
+        (*self).fill_splits(splits)
+    }
 }
 
 impl<T: UsageLedger + Send + Sync> UsageLedger for std::sync::Arc<T> {
@@ -320,5 +336,12 @@ impl<T: UsageLedger + Send + Sync> UsageLedger for std::sync::Arc<T> {
         month: BillingMonth,
     ) -> impl Future<Output = Result<Vec<MonthTotal>, StoreError>> + Send {
         self.as_ref().billed_since(month)
+    }
+
+    fn fill_splits(
+        &self,
+        splits: &[HourSplit],
+    ) -> impl Future<Output = Result<usize, StoreError>> + Send {
+        self.as_ref().fill_splits(splits)
     }
 }
