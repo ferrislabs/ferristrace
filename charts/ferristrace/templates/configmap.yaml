@@ -49,3 +49,13 @@ data:
   FERRISTRACE_OBJECTS__REGION: {{ . | quote }}
   {{- end }}
   {{- end }}
+  {{- with $c.plans }}
+  FERRISTRACE_PLANS: {{ include "ferristrace.plans" . | quote }}
+  {{- end }}
+  {{- with $c.defaultPlan }}
+  FERRISTRACE_DEFAULT_PLAN: {{ . | quote }}
+  {{- end }}
+  {{- if $c.stripe.enabled }}
+  {{- $_ := required "config.defaultPlan is required when config.stripe.enabled" $c.defaultPlan }}
+  FERRISTRACE_STRIPE__METER_EVENT_NAME: {{ required "config.stripe.meterEventName is required when config.stripe.enabled" $c.stripe.meterEventName | quote }}
+  {{- end }}

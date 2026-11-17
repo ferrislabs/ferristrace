@@ -63,3 +63,17 @@ helm.sh/chart: {{ include "ferristrace.chart" .root }}
 app.kubernetes.io/version: {{ .root.Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{- end }}
+
+{{- /* config.plans as the inline TOML array FERRISTRACE_PLANS reads. */ -}}
+{{- define "ferristrace.plans" -}}
+{{- $plans := list -}}
+{{- range . -}}
+{{- $fields := list (printf "slug=%s" (toJson .slug)) (printf "name=%s" (toJson .name)) -}}
+{{- if .ingestGb }}{{ $fields = append $fields (printf "ingest_gb=%d" (int .ingestGb)) }}{{ end -}}
+{{- if .retentionDays }}{{ $fields = append $fields (printf "retention_days=%d" (int .retentionDays)) }}{{ end -}}
+{{- if .overage }}{{ $fields = append $fields "overage=true" }}{{ end -}}
+{{- if .price }}{{ $fields = append $fields (printf "price=%s" (toJson .price)) }}{{ end -}}
+{{- $plans = append $plans (printf "{%s}" (join "," $fields)) -}}
+{{- end -}}
+{{- printf "[%s]" (join "," $plans) -}}
+{{- end }}

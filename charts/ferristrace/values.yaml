@@ -54,11 +54,7 @@ tolerations: []
 affinity: {}
 topologySpreadConstraints: []
 
-# -- Extra container env entries, raw Kubernetes syntax. Plans and payments
-# are set here (deploy/README.md, "Plans and payments"), the Stripe keys as
-# secret references, e.g.
-#   - name: FERRISTRACE_STRIPE__SECRET_KEY
-#     valueFrom: {secretKeyRef: {name: ferristrace-stripe, key: secret-key}}
+# -- Extra container env entries, raw Kubernetes syntax.
 extraEnv: []
 
 service:
@@ -127,6 +123,15 @@ config:
     allowPrivateWebhooks: false
     # -- Public address of the web app, used for links in alert mail and webhooks. Empty falls back to config.mail.baseUrl.
     baseUrl: ""
+  # -- Plans written to the control plane on start (deploy/README.md, "Plans and payments"). Each entry: slug, name, and optionally ingestGb, retentionDays, overage, price (the Stripe price id, never an amount). Empty keeps every organisation on the unlimited `self-hosted` plan.
+  plans: []
+  # -- The plan a new organisation starts on, one of `plans`. Empty keeps `self-hosted`. Required with config.stripe.enabled.
+  defaultPlan: ""
+  stripe:
+    # -- Sell every plan that has a `price`. Reads secrets.stripeSecretKey and secrets.stripeWebhookSecret. Needs a plan named `free` and config.defaultPlan.
+    enabled: false
+    # -- Stripe usage meter the overage is reported to.
+    meterEventName: ingested_bytes
 
 # Existing Secrets, by name and key. This chart never creates or holds a value.
 # An empty name leaves the optional ones out.
@@ -157,6 +162,13 @@ secrets:
   objectsSecretAccessKey:
     name: ferristrace-objects
     key: secret-access-key
+  # -- Read when config.stripe.enabled.
+  stripeSecretKey:
+    name: ferristrace-stripe
+    key: secret-key
+  stripeWebhookSecret:
+    name: ferristrace-stripe
+    key: webhook-secret
 
 # The MCP server and its policy gateway (docs/mcp.md). Off by default.
 mcp:

@@ -24,6 +24,20 @@ config:
   alerts:
     allowPrivateWebhooks: false
     baseUrl: https://ferristrace.example.com
+  plans:
+    - slug: free
+      name: Free
+      ingestGb: 30
+      retentionDays: 7
+    - slug: pro
+      name: Pro
+      ingestGb: 100
+      retentionDays: 30
+      overage: true
+      price: price_example
+  defaultPlan: free
+  stripe:
+    enabled: true
 secrets:
   clickhousePassword:
     name: ferristrace-clickhouse

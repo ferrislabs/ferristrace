@@ -216,7 +216,10 @@
               "minimum": 1
             },
             "coldAfterDays": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "minimum": 1
             }
           }
@@ -290,6 +293,59 @@
               "type": "boolean"
             },
             "baseUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "name"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string",
+                "minLength": 1,
+                "not": {
+                  "const": "self-hosted"
+                }
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ingestGb": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "retentionDays": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "overage": {
+                "type": "boolean"
+              },
+              "price": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "defaultPlan": {
+          "type": "string"
+        },
+        "stripe": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "meterEventName": {
               "type": "string"
             }
           }
@@ -396,6 +452,38 @@
           }
         },
         "objectsSecretAccessKey": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "stripeSecretKey": {
+          "type": "object",
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "stripeWebhookSecret": {
           "type": "object",
           "required": [
             "name",

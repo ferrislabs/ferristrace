@@ -29,6 +29,7 @@ them under `secrets.*`. Each entry is `{name, key}`.
 | `secrets.atRestKey` | `FERRISTRACE_SECRETS__AT_REST_KEY` | when `name` is set; without it no webhook channel secret can be kept. Mint with `openssl rand -hex 32` and keep it: losing it leaves every webhook secret unreadable |
 | `secrets.smtpPassword` | `FERRISTRACE_MAIL__PASSWORD` | `config.mail.enabled` |
 | `secrets.objectsAccessKeyId`, `secrets.objectsSecretAccessKey` | `FERRISTRACE_OBJECTS__ACCESS_KEY_ID`, `..._SECRET_ACCESS_KEY` | `config.objects.enabled` |
+| `secrets.stripeSecretKey`, `secrets.stripeWebhookSecret` | `FERRISTRACE_STRIPE__SECRET_KEY`, `..._WEBHOOK_SECRET` | `config.stripe.enabled` (default Secret `ferristrace-stripe`, keys `secret-key` and `webhook-secret`) |
 
 ## Values
 
@@ -53,6 +54,9 @@ them under `secrets.*`. Each entry is `{name, key}`.
 | `config.oidc.issuer`, `config.oidc.clientId` | empty | Sign-in (`config.oidc.enabled`). `clientId` is the FerrisKey public web client: code flow with PKCE, no secret, redirect URI the app origin with a trailing slash, web origin the app origin. The server holds no client secret and verifies the bearer the web sends |
 | `config.mail.*`, `config.objects.*` | disabled | Optional integrations |
 | `config.agents.issuer`, `config.agents.audience` | empty | Issuer and required audience of the access tokens AI agents present; agents stay off without the audience (`FERRISTRACE_AGENTS__*`) |
+| `config.plans` | empty | Plans written to the control plane on start: `slug`, `name`, and optionally `ingestGb`, `retentionDays`, `overage`, `price` (the Stripe price id). Rendered as `FERRISTRACE_PLANS`. Empty keeps every organisation on the unlimited `self-hosted` plan |
+| `config.defaultPlan` | empty | The plan a new organisation starts on, one of `config.plans`; empty keeps `self-hosted`. Required with `config.stripe.enabled` |
+| `config.stripe.enabled`, `config.stripe.meterEventName` | `false`, `ingested_bytes` | Sell the plans that have a `price`; needs a plan named `free`, `config.defaultPlan` and the two Stripe secrets |
 | `secrets.*` | see above | Existing Secrets, by name and key |
 | `mcp.enabled` | `false` | Deploy the MCP server and its policy gateway (see below) |
 | `mcp.server.*` | image `ghcr.io/ferrislabs/ferristrace-mcp`, 1 replica, port 8081 | The MCP server; `apiUrl` defaults to this release's Service |

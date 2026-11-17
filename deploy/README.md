@@ -1035,8 +1035,11 @@ meter_event_name = "ingested_bytes"
 ```
 
 Keep the two secrets out of the file: `FERRISTRACE_STRIPE__SECRET_KEY` and
-`FERRISTRACE_STRIPE__WEBHOOK_SECRET`, from a Kubernetes secret through the
-chart's `extraEnv`. The server refuses to start with `[stripe]` and no
+`FERRISTRACE_STRIPE__WEBHOOK_SECRET`. On Kubernetes the chart takes plans,
+the default plan and Stripe as values (`config.plans`, `config.defaultPlan`,
+`config.stripe.enabled`) and reads both keys from an existing Secret
+(`secrets.stripeSecretKey`, `secrets.stripeWebhookSecret`); see
+`charts/ferristrace/README.md`. The server refuses to start with `[stripe]` and no
 `database_url`, no plan named `free`, no plan with a `price`, or no
 `default_plan` (a hosted service would otherwise hand every new
 organisation the unlimited `self-hosted` plan).

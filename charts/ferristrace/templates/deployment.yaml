@@ -70,6 +70,10 @@ spec:
             {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OBJECTS__ACCESS_KEY_ID" "ref" $s.objectsAccessKeyId) | nindent 12 }}
             {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_OBJECTS__SECRET_ACCESS_KEY" "ref" $s.objectsSecretAccessKey) | nindent 12 }}
             {{- end }}
+            {{- if .Values.config.stripe.enabled }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_STRIPE__SECRET_KEY" "ref" $s.stripeSecretKey) | nindent 12 }}
+            {{- include "ferristrace.secretEnv" (dict "env" "FERRISTRACE_STRIPE__WEBHOOK_SECRET" "ref" $s.stripeWebhookSecret) | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
