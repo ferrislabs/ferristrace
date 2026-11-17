@@ -1,6 +1,6 @@
 # 0004. Entitlements are read once at startup, not once per payload
 
-Status: accepted
+Status: superseded by 0039
 Date: 2026-10-24
 
 ## Context
